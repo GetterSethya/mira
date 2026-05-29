@@ -580,7 +580,7 @@ function runServerMode(): void {
     ),
     ThumbnailServicePhotonLive,
     NodeCryptoLayer,
-    NodeAuthServiceLayer,
+    NodeAuthServiceLayer
   )
   const infra = Layer.mergeAll(RepositoryLive, MigratorLive).pipe(Layer.provideMerge(foundation))
   const infraMigrated = Layer.effectDiscard(startupEffect).pipe(Layer.provideMerge(infra))

@@ -620,3 +620,61 @@ describe("retryOptions", () => {
     expect(callsMade()).toBe(2)
   })
 })
+
+describe("literalText field — filter builder", () => {
+  const LiteralCollection: AnyCollectionDef = {
+    name: "roles",
+    fields: {
+      role: Field.literalText({ literal: ["admin", "agent", "readonly"] })
+    },
+    schema: {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: {
+        role: { type: "string", "x-kind": "literalText", "x-literal": ["admin", "agent", "readonly"] }
+      }
+    }
+  }
+
+  function makeClient(execute: ExecuteFn) {
+    return makeCollectionClient({
+      collectionName: "roles",
+      schema: LiteralCollection.schema,
+      fields: LiteralCollection.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: false,
+    })
+  }
+
+  it("filter builder eq on literalText compiles correctly", async () => {
+    const captured: Array<{ url: string }> = []
+    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+      captured.push({ url: req.url })
+      return Effect.succeed({ items: [], nextCursor: null } as T)
+    }
+
+    await makeClient(execute).getList({
+      filter: (f) => f.field("role").eq("admin")
+    }).raw()
+
+    expect(captured[0].url).toContain("filter=")
+  })
+
+  it("filter builder in on literalText compiles correctly", async () => {
+    const captured: Array<{ url: string }> = []
+    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+      captured.push({ url: req.url })
+      return Effect.succeed({ items: [], nextCursor: null } as T)
+    }
+
+    await makeClient(execute).getList({
+      filter: (f) => f.field("role").in(["admin", "agent"])
+    }).raw()
+
+    expect(captured[0].url).toContain("filter=")
+  })
+})

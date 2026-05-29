@@ -170,6 +170,45 @@ describe("serialize", () => {
     expect(schema.properties.tags).not.toHaveProperty("type")
   })
 
+  it("literalText field serializes x-kind and x-literal", () => {
+    const schema = toJSONSchema(
+      "base",
+      "users",
+      {
+        role: Field.literalText({ literal: ["admin", "agent"] })
+      },
+      {}
+    )
+
+    expect(schema.properties.role).toEqual({
+      type: "string",
+      "x-kind": "literalText",
+      "x-literal": ["admin", "agent"]
+    })
+  })
+
+  it("literalText field with .view() adds x-view-only", () => {
+    const schema = toJSONSchema("view", "v", {
+      id: Field.text().view(),
+      seqId: Field.integer().view(),
+      role: Field.literalText({ literal: ["a", "b"] }).view()
+    }, { viewQuery: "SELECT id, seqId, role FROM users" })
+
+    expect(schema.properties.role["x-view-only"]).toBe(true)
+    expect(schema.properties.role["x-kind"]).toBe("literalText")
+    expect(schema.properties.role["x-literal"]).toEqual(["a", "b"])
+  })
+
+  it("round-trip through toJSONSchema preserves x-literal", () => {
+    const schema = toJSONSchema("base", "t", {
+      status: Field.literalText({ literal: ["draft", "published", "archived"] })
+    }, {})
+
+    expect(schema.properties.status["x-literal"]).toEqual(["draft", "published", "archived"])
+    expect(schema.properties.status["x-kind"]).toBe("literalText")
+    expect(schema.properties.status.type).toBe("string")
+  })
+
   it("date field produces x-kind date", () => {
     const schema = toJSONSchema(
       "base",

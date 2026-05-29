@@ -22,6 +22,24 @@ function filterAnnotations(
 function propertyToSchema(prop: JsonSchemaProperty, fieldDef: FieldDef | undefined): Schema.Schema<any, any, never> {
   const errorFn = fieldDef?.error
 
+  if (prop["x-kind"] === "literalText") {
+    const typeMsg = errorFn?.("type")
+    const base: Schema.Schema<any, any, never> = typeMsg !== undefined
+      ? Schema.String.annotations({ message: () => typeMsg })
+      : Schema.String
+    const literalValues = prop["x-literal"]
+    if (literalValues && literalValues.length > 0) {
+      const literalSet = new Set(literalValues)
+      return base.pipe(
+        Schema.filter(
+          (a): a is string => literalSet.has(a),
+          filterAnnotations("literal", errorFn)
+        )
+      )
+    }
+    return base
+  }
+
   if (prop["x-kind"] === "json") return Schema.Unknown
   if (
     prop["x-kind"] === "date" ||

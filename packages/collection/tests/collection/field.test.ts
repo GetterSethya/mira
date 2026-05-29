@@ -78,6 +78,32 @@ describe("Field.json", () => {
   })
 })
 
+describe("Field.literalText", () => {
+  it("stores literal values and kind", () => {
+    const f = Field.literalText({ literal: ["a", "b"] })
+    expect(f).toMatchObject({ _tag: "FieldDef", kind: "literalText", literal: ["a", "b"], _literal: ["a", "b"] })
+  })
+  it("returns ViewableFieldDef (has .view())", () => {
+    const f = Field.literalText({ literal: ["x"] })
+    expect(typeof f.view).toBe("function")
+    const viewed = f.view()
+    expect(viewed.viewOnly).toBe(true)
+  })
+  it("preserves required: false", () => {
+    const f = Field.literalText({ literal: ["a", "b"], required: false })
+    expect(f.required).toBe(false)
+  })
+  it("error callback is preserved", () => {
+    const f = Field.literalText({
+      literal: ["a", "b"],
+      error: (k) => k === "literal" ? "invalid role" : undefined
+    })
+    expect(typeof f.error).toBe("function")
+    expect(f.error!("literal")).toBe("invalid role")
+    expect(f.error!("type")).toBeUndefined()
+  })
+})
+
 describe("Field.file", () => {
   it("defaults", () => {
     const f = Field.file()

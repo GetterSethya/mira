@@ -174,6 +174,17 @@ const Scored = BaseCollection.define("scored", {
   delete: R.public()
 }))
 
+// Collection with a literalText field
+const Roles = BaseCollection.define("roles", {
+  role: Field.literalText({ literal: ["admin", "agent", "readonly"] })
+}).rules((R) => ({
+  create: R.public(),
+  update: R.public(),
+  list:   R.public(),
+  view:   R.public(),
+  delete: R.public()
+}))
+
 // ScoredServiceLayer wires Scored into the collection service
 const scoredServiceWithDeps = makeCollectionServiceLayer([Scored]).pipe(
   Layer.provide(RepositoryLive),
@@ -182,6 +193,15 @@ const scoredServiceWithDeps = makeCollectionServiceLayer([Scored]).pipe(
   Layer.provide(NodeCryptoLayer)
 )
 const scoredTestLayer = Layer.mergeAll(scoredServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
+
+// RolesServiceLayer wires Roles into the collection service
+const rolesServiceWithDeps = makeCollectionServiceLayer([Roles]).pipe(
+  Layer.provide(RepositoryLive),
+  Layer.provide(sqliteLayer),
+  Layer.provide(FileStorageTest),
+  Layer.provide(NodeCryptoLayer)
+)
+const rolesTestLayer = Layer.mergeAll(rolesServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -940,4 +960,68 @@ describe("error callback — integration", () => {
       expect(result["name"]).toBe("ok")
       expect(result["score"]).toBe(50)
     }).pipe(Effect.provide(scoredTestLayer)))
+})
+
+// ---------------------------------------------------------------------------
+// literalText integration tests
+// ---------------------------------------------------------------------------
+
+const setupRolesTable = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "roles" (
+      "seqId"   INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"      TEXT NOT NULL UNIQUE,
+      "role"    TEXT NOT NULL,
+      "created" TEXT NOT NULL,
+      "updated" TEXT NOT NULL
+    )
+  `)
+  yield* sql.unsafe(`DELETE FROM "roles"`)
+})
+
+describe("literalText integration", () => {
+  it.effect("create with valid literal value succeeds", () =>
+    Effect.gen(function* () {
+      yield* setupRolesTable
+      const svc = yield* CollectionService
+      const result = yield* svc.create(Roles, { role: "admin" }, noCtx)
+      expect(result["role"]).toBe("admin")
+    }).pipe(Effect.provide(rolesTestLayer)))
+
+  it.effect("create with invalid literal value fails with ValidationError", () =>
+    Effect.gen(function* () {
+      yield* setupRolesTable
+      const svc = yield* CollectionService
+      const result = yield* svc.create(Roles, { role: "superadmin" }, noCtx).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("ValidationError")
+      }
+    }).pipe(Effect.provide(rolesTestLayer)))
+
+  it.effect("update with invalid literal value fails with ValidationError", () =>
+    Effect.gen(function* () {
+      yield* setupRolesTable
+      const svc = yield* CollectionService
+      const created = yield* svc.create(Roles, { role: "admin" }, noCtx)
+      const id = created["id"]
+      if (typeof id !== "string") throw new Error("expected string id")
+      const result = yield* svc.update(Roles, id, { role: "superadmin" }, noCtx).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("ValidationError")
+      }
+    }).pipe(Effect.provide(rolesTestLayer)))
+
+  it.effect("update with valid literal value succeeds", () =>
+    Effect.gen(function* () {
+      yield* setupRolesTable
+      const svc = yield* CollectionService
+      const created = yield* svc.create(Roles, { role: "admin" }, noCtx)
+      const id = created["id"]
+      if (typeof id !== "string") throw new Error("expected string id")
+      const updated = yield* svc.update(Roles, id, { role: "agent" }, noCtx)
+      expect(updated["role"]).toBe("agent")
+    }).pipe(Effect.provide(rolesTestLayer)))
 })

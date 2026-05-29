@@ -170,6 +170,52 @@ describe("propertyToSchema — type mapping", () => {
       expect(Either.isRight(result)).toBe(true)
     })
   )
+
+  it.effect("Field.literalText() — valid literal value succeeds", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { role: Field.literalText({ literal: ["admin", "agent"] }) })
+      const result = yield* createDecode(col, { role: "admin" }).pipe(Effect.either)
+      expect(Either.isRight(result)).toBe(true)
+    })
+  )
+
+  it.effect("Field.literalText() — invalid literal value fails", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { role: Field.literalText({ literal: ["admin", "agent"] }) })
+      const result = yield* createDecode(col, { role: "superadmin" }).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+    })
+  )
+
+  it.effect("Field.literalText() optional — undefined succeeds", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { role: Field.literalText({ literal: ["admin", "agent"], required: false }) })
+      const result = yield* createDecode(col, {}).pipe(Effect.either)
+      expect(Either.isRight(result)).toBe(true)
+    })
+  )
+
+  it.effect("Field.literalText() optional — invalid string fails", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { role: Field.literalText({ literal: ["admin", "agent"], required: false }) })
+      const result = yield* createDecode(col, { role: "nope" }).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+    })
+  )
+
+  it.effect("Field.literalText() — custom error on literal constraint", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", {
+        role: Field.literalText({ literal: ["a", "b"], error: (k) => k === "literal" ? "bad value" : undefined })
+      })
+      const result = yield* createDecode(col, { role: "c" }).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        const ve = parseErrToValidationError("t")(result.left)
+        expect(ve.issues.some((i) => i.includes("bad value"))).toBe(true)
+      }
+    })
+  )
 })
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import type {
   FieldDef,
   FieldKind,
   IntegerConstraintKind,
+  LiteralTextConstraintKind,
   NumberConstraintKind,
   SimpleConstraintKind,
   TextConstraintKind,
@@ -76,6 +77,35 @@ export const Field = {
   text: <O extends BaseFieldOptions & { minLength?: number; maxLength?: number }>(
     opts?: O & { error?: (kind: TextConstraintKind) => string | undefined }
   ) => makeField("text", opts),
+
+  /**
+   * A text field restricted to a fixed set of literal string values.
+   * Stored as `TEXT` in SQLite. The server rejects values not in the
+   * `literal` array on create and update operations.
+   *
+   * The TypeScript type narrows to the literal union for type-safe
+   * filter expressions and client SDK usage.
+   *
+   * @param opts.literal - Required: the allowed string values (automatically narrowed via `const` type parameter)
+   * @param opts.error - Callback for custom validation error messages
+   *
+   * @example
+   * Field.literalText({ literal: ["admin", "agent", "readonly"] })
+   * Field.literalText({ literal: ["draft", "published"], default: "draft" })
+   */
+  literalText: <const L extends readonly string[], O extends Omit<BaseFieldOptions, "default"> & { default?: L[number] }>(
+    opts: { literal: L } & O & { error?: (kind: LiteralTextConstraintKind) => string | undefined }
+  ) => {
+    const { literal, ...rest } = opts as { literal: L } & O
+    const def = {
+      _tag: "FieldDef" as "FieldDef",
+      kind: "literalText" as "literalText",
+      literal,
+      _literal: literal,
+      ...rest
+    } as FieldDef & { kind: "literalText"; literal: L; _literal: L } & O
+    return withView(def)
+  },
 
   /**
    * A floating-point number field with optional min/max constraints.

@@ -12,6 +12,7 @@ export type ConstraintKind =
   | "minimum"    // number/integer below minimum
   | "maximum"    // number/integer above maximum
   | "int"        // number is not an integer
+  | "literal"    // value not in the allowed set
 
 /** Constraint kinds that can fire on a `Field.text()` field. */
 export type TextConstraintKind = "type" | "required" | "minLength" | "maxLength"
@@ -25,12 +26,16 @@ export type NumberConstraintKind = "type" | "required" | "minimum" | "maximum"
 /** Constraint kinds that can fire on a `Field.integer()` field. */
 export type IntegerConstraintKind = "type" | "required" | "int" | "minimum" | "maximum"
 
+/** Constraint kinds that can fire on a `Field.literalText()` field. */
+export type LiteralTextConstraintKind = "type" | "required" | "literal"
+
 /** Constraint kinds that can fire on simple fields (boolean, date, json, file, relation). */
 export type SimpleConstraintKind = "type" | "required"
 
 /** Supported field kinds that define the data type of a collection field. */
 export type FieldKind =
   | "text"
+  | "literalText"
   | "number"
   | "integer"
   | "boolean"
@@ -67,6 +72,8 @@ export type FieldDef = {
   mimeTypes?: Array<string>
   viewOnly?: boolean
   protected?: boolean
+  literal?: readonly string[]
+  _literal?: readonly string[]
   _target?: AnyCollectionDef
   error?(kind: ConstraintKind): string | undefined
 }
@@ -103,7 +110,7 @@ export type JsonSchemaProperty = {
   maximum?: number
   minLength?: number
   maxLength?: number
-  "x-kind"?: "date" | "json" | "relation" | "file" | "seqId"
+  "x-kind"?: "date" | "json" | "relation" | "file" | "seqId" | "literalText"
   "x-collection"?: string
   "x-field"?: string
   "x-maxSize"?: number
@@ -112,6 +119,7 @@ export type JsonSchemaProperty = {
   "x-system"?: boolean
   "x-hidden"?: boolean
   "x-view-only"?: boolean
+  "x-literal"?: ReadonlyArray<string>
 }
 
 /**
@@ -136,6 +144,7 @@ export type AnyCollectionDef = {
 /** Maps each FieldKind to its corresponding TypeScript scalar type. */
 export type FieldKindToType = {
   text:     string
+  literalText: string
   number:   number
   integer:  number
   boolean:  boolean
@@ -148,4 +157,7 @@ export type FieldKindToType = {
 }
 
 /** Infers the TypeScript value type for a given FieldDef. */
-export type InferFieldValue<T extends FieldDef> = FieldKindToType[T["kind"]]
+export type InferFieldValue<T extends FieldDef> =
+  T["kind"] extends "literalText"
+    ? T extends { _literal: readonly (infer V)[] } ? V : string
+    : FieldKindToType[T["kind"]]

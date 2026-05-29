@@ -108,6 +108,12 @@ function fieldToProperty(field: FieldDef): JsonSchemaProperty {
         ...(field.minLength !== undefined ? { minLength: field.minLength } : {}),
         ...(field.maxLength !== undefined ? { maxLength: field.maxLength } : {})
       }
+    case "literalText":
+      return {
+        type: "string",
+        "x-kind": "literalText",
+        ...(field.literal !== undefined ? { "x-literal": field.literal } : {})
+      }
     case "number":
       return {
         type: "number",

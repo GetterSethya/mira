@@ -1,9 +1,12 @@
-import type { AnyCollectionDef, FieldKindToType, FieldsMap } from "@gettersethya/mira-collection"
+import type { AnyCollectionDef, FieldDef, FieldKindToType, FieldsMap, InferFieldValue } from "@gettersethya/mira-collection"
 import type { ProtectedFileFieldClient, PublicFileFieldClient } from "./file.js"
 
 type FieldKindToInputType = Omit<FieldKindToType, "file"> & {
   file: File | Blob
 }
+
+/** Resolves the mutation value type for a field: File | Blob for file fields, InferFieldValue for everything else. */
+type MutationFieldValue<F extends FieldDef> = F["kind"] extends "file" ? File | Blob : InferFieldValue<F>
 
 /**
  * The input type for creating/updating records when file uploads are involved.
@@ -22,10 +25,10 @@ type FieldKindToInputType = Omit<FieldKindToType, "file"> & {
  */
 export type InferMutationInput<F extends FieldsMap> = {
   [K in keyof F as F[K]["kind"] extends "seqId" ? never : F[K]["viewOnly"] extends true ? never : F[K]["required"] extends false ? K : never]?:
-    FieldKindToInputType[F[K]["kind"]] | null
+    MutationFieldValue<F[K]> | null
 } & {
   [K in keyof F as F[K]["kind"] extends "seqId" ? never : F[K]["viewOnly"] extends true ? never : F[K]["required"] extends false ? never : K]:
-    FieldKindToInputType[F[K]["kind"]]
+    MutationFieldValue<F[K]>
 }
 
 /**
@@ -51,8 +54,8 @@ export type InferRecord<F extends FieldsMap> =
   {
     [K in keyof F as F[K]["kind"] extends "seqId" ? never : K]:
       F[K]["required"] extends false
-        ? FieldKindToType[F[K]["kind"]] | null
-        : FieldKindToType[F[K]["kind"]]
+        ? InferFieldValue<F[K]> | null
+        : InferFieldValue<F[K]>
   }
 
 /**
@@ -70,10 +73,10 @@ export type InferRecord<F extends FieldsMap> =
  */
 export type InferCreateInput<F extends FieldsMap> = {
   [K in keyof F as F[K]["kind"] extends "seqId" ? never : F[K]["viewOnly"] extends true ? never : F[K]["required"] extends false ? K : never]?:
-    FieldKindToType[F[K]["kind"]] | null
+    InferFieldValue<F[K]> | null
 } & {
   [K in keyof F as F[K]["kind"] extends "seqId" ? never : F[K]["viewOnly"] extends true ? never : F[K]["required"] extends false ? never : K]:
-    FieldKindToType[F[K]["kind"]]
+    InferFieldValue<F[K]>
 }
 
 /**
