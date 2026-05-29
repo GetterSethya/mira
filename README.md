@@ -15,6 +15,41 @@ A self-hosted backend in TypeScript. Define collections, get a full REST API wit
 
 ---
 
+## Installation
+
+All packages require `effect >= 3.21` as a peer dependency.
+
+**Server**
+
+```bash
+npm install @gettersethya/mira @gettersethya/mira-collection effect
+# or
+pnpm add @gettersethya/mira @gettersethya/mira-collection effect
+```
+
+**Client (browser / server-to-server)**
+
+```bash
+npm install @gettersethya/mira-client @gettersethya/mira-collection effect
+# or
+pnpm add @gettersethya/mira-client @gettersethya/mira-collection effect
+```
+
+**TanStack adapter** — install alongside your framework's TanStack Query package:
+
+```bash
+# React
+npm install @gettersethya/mira-tanstack-adapter @tanstack/react-query
+
+# Svelte
+npm install @gettersethya/mira-tanstack-adapter @tanstack/svelte-query
+
+# Solid
+npm install @gettersethya/mira-tanstack-adapter @tanstack/solid-query
+```
+
+---
+
 ## Scaffolding the server
 
 ```typescript
