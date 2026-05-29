@@ -2,10 +2,11 @@
   "name": "mira-workspace",
   "private": true,
   "scripts": {
-    "build":     "pnpm --filter @gettersethya/mira-collection build && pnpm --filter @gettersethya/mira-client build && pnpm --filter @gettersethya/mira build && pnpm --filter @gettersethya/mira-tanstack-adapter build",
-    "typecheck": "pnpm -r typecheck",
-    "test":      "pnpm -r test",
-    "lint":      "pnpm -r lint"
+    "build":          "pnpm --filter @gettersethya/mira-collection build && pnpm --filter @gettersethya/mira-client build && pnpm --filter @gettersethya/mira build && pnpm --filter @gettersethya/mira-tanstack-adapter build",
+    "typecheck":      "pnpm -r typecheck",
+    "test":           "pnpm -r test",
+    "lint":           "pnpm -r lint",
+    "publish:alpha":  "node scripts/bump-alpha.mjs && pnpm build && pnpm -r publish --tag alpha"
   },
   "devDependencies": {
     "typescript": "^6.0.3"
