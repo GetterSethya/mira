@@ -1,0 +1,34 @@
+{
+  "name": "@gettersethya/mira-collection",
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "description": "Collection definitions, filter DSL, and rule builder for Mira",
+  "author": "Getter Sethya",
+  "license": "MIT",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types":   "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build":     "tsc && tsc-alias",
+    "typecheck": "tsc --noEmit",
+    "test":      "vitest run",
+    "lint":      "eslint \"src/**/*.ts\" \"tests/**/*.ts\""
+  },
+  "peerDependencies": {
+    "effect": ">=3.21"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.29.0",
+    "@types/node":    "^25.7.0",
+    "tsc-alias":      "^1.8.17",
+    "typescript":     "^6.0.3",
+    "vitest":         "^4.1.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "@gettersethya/mira",
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "description": "Self-hosted backend in TypeScript using Effect",
+  "author": "Getter Sethya",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc && tsc-alias",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\""
+  },
+  "dependencies": {
+    "@cf-wasm/photon": "^0.3.5",
+    "@effect/platform": "^0.96.1",
+    "@effect/platform-node": "^0.106.0",
+    "@effect/sql": "^0.51.1",
+    "@effect/sql-sqlite-node": "^0.52.0",
+    "@gettersethya/mira-client": "workspace:*",
+    "jose": "^6.2.3",
+    "mime": "^4.0.0"
+  },
+  "peerDependencies": {
+    "effect": ">=3.21"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.29.0",
+    "@types/node": "^25.7.0",
+    "tsc-alias": "^1.8.17",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@gettersethya/mira-tanstack-adapter",
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "description": "TanStack Query adapters for @gettersethya/mira client SDK",
+  "author": "Getter Sethya",
+  "license": "MIT",
+  "files": ["dist"],
+  "exports": {
+    "./react":  { "types": "./dist/react.d.ts",  "default": "./dist/react.js"  },
+    "./svelte": { "types": "./dist/svelte.d.ts", "default": "./dist/svelte.js" },
+    "./solid":  { "types": "./dist/solid.d.ts",  "default": "./dist/solid.js"  }
+  },
+  "scripts": {
+    "build":     "tsc",
+    "typecheck": "tsc --noEmit",
+    "test":      "vitest run"
+  },
+  "peerDependencies": {
+    "@gettersethya/mira-client":       "*",
+    "@tanstack/react-query":     ">=5.0.0",
+    "@tanstack/svelte-query":    ">=5.0.0",
+    "@tanstack/solid-query":     ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-query":  { "optional": true },
+    "@tanstack/svelte-query": { "optional": true },
+    "@tanstack/solid-query":  { "optional": true }
+  },
+  "devDependencies": {
+    "@gettersethya/mira-client":   "workspace:*",
+    "@tanstack/react-query": "^5.0.0",
+    "typescript":            "^6.0.3",
+    "vitest":                "^4.1.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
