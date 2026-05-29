@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { AnyCollectionDef } from "@/collection/types.js"
+import type { AnyCollectionDef, FieldsMap } from "@/collection/types.js"
 import { Rule } from "@/rule/builder.js"
 
 const Users: AnyCollectionDef = {
@@ -69,6 +69,67 @@ describe("Rule.subquery", () => {
         op: "eq",
         left: { kind: "field", field: "userId" },
         right: { kind: "authId", collection: "users" }
+      }
+    })
+  })
+
+  it("produces subquery operand with typed callback", () => {
+    const Members: AnyCollectionDef & { fields: FieldsMap } = {
+      name: "members",
+      fields: { userId: { _tag: "FieldDef", kind: "text" }, role: { _tag: "FieldDef", kind: "text" } },
+      schema: {
+        "x-collection-kind": "base",
+        type: "object",
+        properties: {}
+      }
+    }
+    const expr = Rule.subquery(Members, "teamId").where(
+      (Q) => Q.field("userId").eq(Rule.authId(Users))
+    )
+    expect(expr).toEqual({
+      kind: "subquery",
+      collection: "members",
+      field: "teamId",
+      where: {
+        op: "eq",
+        left: { kind: "field", field: "userId" },
+        right: { kind: "authId", collection: "users" }
+      }
+    })
+  })
+
+  it("produces subquery operand with typed callback using nested boolean", () => {
+    const Members: AnyCollectionDef & { fields: FieldsMap } = {
+      name: "members",
+      fields: { userId: { _tag: "FieldDef", kind: "text" }, role: { _tag: "FieldDef", kind: "text" } },
+      schema: {
+        "x-collection-kind": "base",
+        type: "object",
+        properties: {}
+      }
+    }
+    const expr = Rule.subquery(Members, "teamId").where(
+      (Q) => Rule.and(
+        Q.field("userId").eq(Rule.authId(Users)),
+        Q.field("role").in(Rule.literal(["admin", "owner"]))
+      )
+    )
+    expect(expr).toEqual({
+      kind: "subquery",
+      collection: "members",
+      field: "teamId",
+      where: {
+        op: "and",
+        left: {
+          op: "eq",
+          left: { kind: "field", field: "userId" },
+          right: { kind: "authId", collection: "users" }
+        },
+        right: {
+          op: "in",
+          left: { kind: "field", field: "role" },
+          right: { kind: "literal", value: ["admin", "owner"] }
+        }
       }
     })
   })

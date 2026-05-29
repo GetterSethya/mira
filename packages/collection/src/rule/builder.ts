@@ -16,13 +16,32 @@ type FieldOperandMethods<K extends string, V = unknown> = {
 /** An operand node with fluent comparison methods attached. */
 export type FieldOperand<K extends string, V = unknown> = OperandNode<K, V> & FieldOperandMethods<K, V>
 
+/** Base rule methods shared by Rule and RuleBuilder (excludes field and subquery). */
+type RuleBase = {
+  request: (source: "header" | "query" | "body", key: string) => FieldOperand<string, string>
+  auth: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(_collection: C, field: K) => FieldOperand<string, string>
+  authId: <C extends AnyCollectionDef>(_collection: C) => OperandNode<any, string>
+  literal: <V>(value: V) => OperandNode<any, V>
+  now: () => OperandNode<any, string>
+  dateAdd: (operand: OperandNode<any>, amount: number, unit: "day" | "hour" | "minute") => OperandNode<any, string>
+  dateDiff: (left: OperandNode<any>, right: OperandNode<any>, unit: "day" | "hour" | "minute") => OperandNode<any, number>
+  and: <K extends string = string>(...exprs: Array<ExprNode<K>>) => ExprNode<K>
+  or: <K extends string = string>(...exprs: Array<ExprNode<K>>) => ExprNode<K>
+  not: <K extends string = string>(expr: ExprNode<K>) => ExprNode<K>
+  public: <K extends string = string>() => ExprNode<K>
+}
+
 /**
  * A narrowed version of the Rule builder where `field()` is constrained to field
  * names defined in `F` and comparison operands are typed to match each field's value type.
  * Used as the argument type for the `rules` callback in collection definers.
  */
-export type RuleBuilder<F extends FieldsMap> = Omit<typeof Rule, "field"> & {
+export type RuleBuilder<F extends FieldsMap> = RuleBase & {
   field<K extends keyof F & string>(name: K): FieldOperand<K, InferFieldValue<F[K]>>
+  subquery: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(
+    _collection: C,
+    field: K
+  ) => { where: (expr: ExprNode<any> | ((R: RuleBuilder<C["fields"]>) => ExprNode<any>)) => OperandNode<any, string> }
 }
 
 function toChainable<K extends string, V>(operand: OperandNode<K, V>): FieldOperand<K, V> {
@@ -65,10 +84,23 @@ function toChainable<K extends string, V>(operand: OperandNode<K, V>): FieldOper
  * )
  * Rule.field("teamId").in(memberTeams)
  *
+ * // Subquery with typed callback
+ * Rule.field("id").in(
+ *   Rule.subquery(Members, "teamId").where(
+ *     (Q) => Q.field("userId").eq(Rule.authId(Users))
+ *   )
+ * )
+ *
  * // Always allow
  * Rule.public()
  */
-export const Rule = {
+export const Rule: RuleBase & {
+  field: <const K extends string>(name: K) => FieldOperand<K, unknown>
+  subquery: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(
+    _collection: C,
+    field: K
+  ) => { where: (expr: ExprNode<any> | ((R: RuleBuilder<C["fields"]>) => ExprNode<any>)) => OperandNode<any, string> }
+} = {
   /** Reference a record field by name. Returns a chainable operand. Value type is unknown; use via RuleBuilder for typed comparisons. */
   field: <const K extends string>(name: K): FieldOperand<K, unknown> =>
     toChainable<K, unknown>({ kind: "field", field: name }),
@@ -100,19 +132,25 @@ export const Rule = {
    * Call `.where()` on the result to finish the subquery.
    *
    * @example
+   * // Bare expression (backward compatible)
    * Rule.subquery(Members, "teamId").where(
    *   Rule.field("userId").eq(Rule.authId(Users))
+   * )
+   *
+   * // Typed callback — Q.field() is scoped to the subquery collection
+   * Rule.subquery(Members, "teamId").where(
+   *   (Q) => Q.field("userId").eq(Rule.authId(Users))
    * )
    */
   subquery: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(
     _collection: C,
     field: K
-  ): { where: (expr: ExprNode<any>) => OperandNode<any, string> } => ({
+  ): { where: (expr: ExprNode<any> | ((R: RuleBuilder<C["fields"]>) => ExprNode<any>)) => OperandNode<any, string> } => ({
     where: (expr) => ({
       kind: "subquery",
       collection: _collection.name,
       field,
-      where: expr
+      where: typeof expr === "function" ? expr(makeRuleBuilder<C["fields"]>()) : expr
     })
   }),
 
@@ -159,7 +197,7 @@ export const Rule = {
 /**
  * Creates a typed `RuleBuilder<F>` that constrains `field()` to names in `F`
  * and types each comparison operand to the field's value type.
- * Used internally by collection definers.
+ * Used internally by collection definers and subquery typed callbacks.
  */
 export function makeRuleBuilder<F extends FieldsMap>(): RuleBuilder<F> {
   function field<K extends keyof F & string>(name: K): FieldOperand<K, InferFieldValue<F[K]>> {
