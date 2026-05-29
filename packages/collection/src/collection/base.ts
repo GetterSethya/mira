@@ -53,16 +53,21 @@ function makeBaseBuilder<F extends FieldsMap>(
   rulesCb?: RuleCb<F>
 ): BaseCollectionBuilder<F> {
   type AF = (keyof F & string) | BaseSystemField
-  const indexes = indexesCb?.(Index as IndexBuilder<AF>)
-  const rules = rulesCb?.(makeRuleBuilder<F & BaseSystemFieldDefs>())
-  const schema = toJSONSchema("base", name, fields, {
-    ...(indexes !== undefined ? { indexes } : {}),
-    ...(rules !== undefined ? { rules } : {})
-  })
+  let _schema: CollectionSchema | undefined
   return {
     name,
     fields,
-    schema,
+    get schema(): CollectionSchema {
+      if (_schema === undefined) {
+        const indexes = indexesCb?.(Index as IndexBuilder<AF>)
+        const rules = rulesCb?.(makeRuleBuilder<F & BaseSystemFieldDefs>())
+        _schema = toJSONSchema("base", name, fields, {
+          ...(indexes !== undefined ? { indexes } : {}),
+          ...(rules !== undefined ? { rules } : {})
+        })
+      }
+      return _schema!
+    },
     indexes: (cb) => makeBaseBuilder(name, fields, cb, rulesCb),
     rules: (cb) => makeBaseBuilder(name, fields, indexesCb, cb)
   }

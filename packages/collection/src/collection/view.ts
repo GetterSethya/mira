@@ -44,15 +44,20 @@ function makeViewBuilder<F extends ViewFields & FieldsMap>(
   fields: F,
   rulesCb?: RuleCb<F>
 ): ViewCollectionBuilder<F> {
-  const rules = rulesCb?.(makeRuleBuilder<F>())
-  const schema = toJSONSchema("view", name, fields, {
-    viewQuery: query,
-    ...(rules !== undefined ? { rules } : {})
-  })
+  let _schema: CollectionSchema | undefined
   return {
     name,
     fields,
-    schema,
+    get schema(): CollectionSchema {
+      if (_schema === undefined) {
+        const rules = rulesCb?.(makeRuleBuilder<F>())
+        _schema = toJSONSchema("view", name, fields, {
+          viewQuery: query,
+          ...(rules !== undefined ? { rules } : {})
+        })
+      }
+      return _schema!
+    },
     rules: (cb) => makeViewBuilder(name, query, fields, cb)
   }
 }

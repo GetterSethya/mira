@@ -72,21 +72,26 @@ function makeAuthBuilder<F extends FieldsMap>(
   rulesCb?: RuleCb<F>
 ): AuthCollectionBuilder<F> {
   type AF = (keyof F & string) | AuthRuleField
-  const indexes = indexesCb?.(Index as IndexBuilder<AF>)
-  const authRuleBuilder: AuthRuleBuilder<F & AuthSystemFieldDefs> = {
-    ...makeRuleBuilder<F & AuthSystemFieldDefs>(),
-    selfId(): OperandNode<any, string> { return { kind: "authId", collection: name } }
-  }
-  const rules = rulesCb?.(authRuleBuilder)
-  const schema = toJSONSchema("auth", name, extraFields, {
-    indexes: [...AUTH_SYSTEM_INDEXES, ...(indexes ?? [])],
-    systemFields: AUTH_SYSTEM_PROPERTIES,
-    ...(rules !== undefined ? { rules } : {})
-  })
+  let _schema: (CollectionSchema & { "x-collection-kind": "auth" }) | undefined
   return {
     name,
     fields: extraFields,
-    schema,
+    get schema(): CollectionSchema & { "x-collection-kind": "auth" } {
+      if (_schema === undefined) {
+        const indexes = indexesCb?.(Index as IndexBuilder<AF>)
+        const authRuleBuilder: AuthRuleBuilder<F & AuthSystemFieldDefs> = {
+          ...makeRuleBuilder<F & AuthSystemFieldDefs>(),
+          selfId(): OperandNode<any, string> { return { kind: "authId", collection: name } }
+        }
+        const rules = rulesCb?.(authRuleBuilder)
+        _schema = toJSONSchema("auth", name, extraFields, {
+          indexes: [...AUTH_SYSTEM_INDEXES, ...(indexes ?? [])],
+          systemFields: AUTH_SYSTEM_PROPERTIES,
+          ...(rules !== undefined ? { rules } : {})
+        }) as CollectionSchema & { "x-collection-kind": "auth" }
+      }
+      return _schema!
+    },
     indexes: (cb) => makeAuthBuilder(name, extraFields, cb, rulesCb),
     rules: (cb) => makeAuthBuilder(name, extraFields, indexesCb, cb)
   }
