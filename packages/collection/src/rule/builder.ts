@@ -20,7 +20,7 @@ export type FieldOperand<K extends string, V = unknown> = OperandNode<K, V> & Fi
 type RuleBase = {
   request: (source: "header" | "query" | "body", key: string) => FieldOperand<string, string>
   auth: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(_collection: C, field: K) => FieldOperand<string, string>
-  authId: <C extends AnyCollectionDef>(_collection: C) => OperandNode<any, string>
+  authId: <C extends AnyCollectionDef>(_collection: C) => FieldOperand<any, string>
   literal: <V>(value: V) => OperandNode<any, V>
   now: () => OperandNode<any, string>
   dateAdd: (operand: OperandNode<any>, amount: number, unit: "day" | "hour" | "minute") => OperandNode<any, string>
@@ -116,10 +116,8 @@ export const Rule: RuleBase & {
   ): FieldOperand<string, string> => toChainable<string, string>({ kind: "auth", collection: _collection.name, field }),
 
   /** Reference the ID of the currently authenticated user. */
-  authId: <C extends AnyCollectionDef>(_collection: C): OperandNode<any, string> => ({
-    kind: "authId",
-    collection: _collection.name
-  }),
+  authId: <C extends AnyCollectionDef>(_collection: C): FieldOperand<any, string> =>
+    toChainable<any, string>({ kind: "authId", collection: _collection.name }),
 
   /** A literal value for comparison. The value type `V` is inferred from the argument. */
   literal: <V>(value: V): OperandNode<any, V> => ({
