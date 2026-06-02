@@ -1,7 +1,5 @@
 import { AuthCollection } from "@gettersethya/mira-client"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import { CryptoService, AppConfig, Repository } from "@gettersethya/mira"
-import { Effect, Layer } from "effect"
 
 export const SuperAdminCollection: AnyCollectionDef = AuthCollection.define("_superadmin", {}).rules((R) => ({
   list: R.field("email").eq(R.literal("")),
@@ -13,21 +11,16 @@ export const SuperAdminCollection: AnyCollectionDef = AuthCollection.define("_su
 
 let _registerToken = ""
 
-export const RegisterTokenLive = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const repo = yield* Repository
-    const rows = yield* repo.list("_superadmin", 1).pipe(
-      Effect.map((r) => r.items),
-      Effect.orElseSucceed(() => [])
-    )
-    if (rows.length > 0) return
-    const crypto = yield* CryptoService
-    const config = yield* AppConfig
-    const bytes = yield* crypto.randomBytes(32)
-    const token = Buffer.from(bytes).toString("hex")
-    _registerToken = token
-    yield* Effect.log(`[dashboard] No superadmin? Register at ${config.applicationUrl}/_dashboard/register?token=${token}`)
-  })
-)
+export function getRegisterToken(): string {
+  return _registerToken
+}
 
-export const getRegisterToken = () => _registerToken
+export function setRegisterToken(token: string): void {
+  _registerToken = token
+}
+
+export function generateRegisterToken(): string {
+  const arr = new Uint8Array(32)
+  globalThis.crypto.getRandomValues(arr)
+  return Buffer.from(arr).toString("hex")
+}

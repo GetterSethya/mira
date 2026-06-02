@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteSet } from "svelte/reactivity"
   import type { SpanRow } from "$lib/client.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
 
@@ -24,7 +25,7 @@
     const roots: SpanNode[] = []
     for (const node of byId.values()) {
       if (node.parentSpanId && byId.has(node.parentSpanId)) {
-        byId.get(node.parentSpanId)!.children.push(node)
+        byId.get(node.parentSpanId)?.children.push(node)
       } else {
         roots.push(node)
       }
@@ -46,16 +47,21 @@
   }
 
   const traceGroups = $derived(buildTraceGroups(spans))
-  const expanded = $state<Set<string>>(new Set())
+  const expanded = new SvelteSet<string>()
   function toggleTrace(id: string) {
     if (expanded.has(id)) expanded.delete(id)
     else expanded.add(id)
+  }
+
+  const expandedSpans = new SvelteSet<string>()
+  function toggleSpan(spanId: string) {
+    if (expandedSpans.has(spanId)) expandedSpans.delete(spanId)
+    else expandedSpans.add(spanId)
   }
 </script>
 
 <div class="flex flex-col gap-4">
   {#each traceGroups as [traceId, traceSpans] (traceId)}
-    {@const sorted = [...traceSpans].sort((a, b) => a.timestamp.localeCompare(b.timestamp))}
     {@const roots = buildTree(traceSpans)}
     {@const flatNodes = flatten(roots)}
     {@const rootDuration = roots[0]?.durationMs ?? 1}
@@ -80,6 +86,12 @@
                 class="flex items-center gap-2 px-4 py-1.5 text-xs"
                 style="padding-left: {1 + node.depth * 1.25}rem"
               >
+                {#if Object.keys(node.attributes).length > 0}
+                  <button
+                    class="shrink-0 text-muted-foreground hover:text-foreground"
+                    onclick={() => toggleSpan(node.spanId)}
+                  >{expandedSpans.has(node.spanId) ? "▼" : "▶"}</button>
+                {/if}
                 <span class="font-medium truncate max-w-[200px]">{node.name}</span>
                 <Badge variant="outline" class="text-[10px] px-1 py-0">{node.kind}</Badge>
                 {#if node.status === "error"}
@@ -95,6 +107,13 @@
                   ></div>
                 </div>
               </div>
+              {#if expandedSpans.has(node.spanId) && Object.keys(node.attributes).length > 0}
+                <div class="flex flex-wrap gap-x-3 gap-y-0.5 px-4 pb-1.5 text-[11px] font-mono text-muted-foreground" style="padding-left: {1 + node.depth * 1.25}rem">
+                  {#each Object.entries(node.attributes) as [k, v]}
+                    <span><span class="text-foreground">{k}</span>=<span>{String(v)}</span></span>
+                  {/each}
+                </div>
+              {/if}
               {#if node.error}
                 <div class="px-4 pb-1.5 text-xs text-destructive font-mono" style="padding-left: {1 + node.depth * 1.25}rem">
                   {node.error}

@@ -5,6 +5,7 @@ import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { Repository } from "@/repository/index.js"
 import type { AppConfig } from "@/config/index.js"
 import type { AuthService } from "@/http/auth.js"
+import type { CollectionService } from "@/collection-service/collection-service.js"
 import type { PlatformServices } from "./types.js"
 import type {
   RecordHookContext, RecordResultContext,
@@ -73,14 +74,15 @@ export interface MiraPlugin {
   readonly onRecordViewSuccess?: ListSuccessHook<ViewResultContext>
   readonly onRecordViewError?: ListSuccessHook<HookErrorContext>
 
-  readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository>
+  readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository | CollectionService>
   readonly routes?: HttpRouter.HttpRouter<never,
     | FileSystem.FileSystem
     | Path.Path
     | Repository
     | AppConfig
     | AuthService
-    | SqlClient.SqlClient>
+    | SqlClient.SqlClient
+    | CollectionService>
   readonly collections?: ReadonlyArray<AnyCollectionDef>
 }
 

@@ -1,18 +1,14 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
 import { FileSystem, Path } from "@effect/platform"
-import type { SqlClient } from "@effect/sql"
 import { Cause, Effect, Option } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import type { Repository, AuthService, AppConfig } from "@gettersethya/mira"
+import type { Repository, AuthService, AppConfig, CollectionService } from "@gettersethya/mira"
+import { catchCollectionErrors } from "@gettersethya/mira"
 import { bootstrapStatusRoute } from "./api/bootstrap-status.js"
 import { registerRoute } from "./api/register.js"
 import { createSuperadminRoute, listSuperadminsRoute, deleteSuperadminRoute } from "./api/superadmin.js"
-import { makeSchemaRoute } from "./api/schema.js"
-import { logsRoute, telemetryStatusRoute } from "./api/logs.js"
 import { configRoute } from "./api/config.js"
-import { makeRecordsProxyRoute } from "./api/records.js"
 import { loginRoute } from "./api/login.js"
-import { spansRoute } from "./api/spans.js"
 import { DashboardUnauthorizedError } from "./api/auth.js"
 
 function makeContentType(ext: string): string {
@@ -91,18 +87,11 @@ type DashboardRouterServices =
   | Repository
   | AuthService
   | AppConfig
-  | SqlClient.SqlClient
+  | CollectionService
 
 export function makeDashboardRouter(
   collections: ReadonlyArray<AnyCollectionDef>
 ): HttpRouter.HttpRouter<never, DashboardRouterServices> {
-  const schemaRoute = makeSchemaRoute(collections)
-  const recordsListRoute = makeRecordsProxyRoute(collections, "list")
-  const recordsCreateRoute = makeRecordsProxyRoute(collections, "create")
-  const recordsViewRoute = makeRecordsProxyRoute(collections, "view")
-  const recordsUpdateRoute = makeRecordsProxyRoute(collections, "update")
-  const recordsDeleteRoute = makeRecordsProxyRoute(collections, "delete")
-
   return HttpRouter.empty.pipe(
     HttpRouter.get("/_dashboard/api/bootstrap-status", wrapRoute(bootstrapStatusRoute)),
     HttpRouter.post("/_dashboard/api/register", wrapRoute(registerRoute)),
@@ -110,16 +99,7 @@ export function makeDashboardRouter(
     HttpRouter.post("/_dashboard/api/superadmin/create", wrapRoute(createSuperadminRoute)),
     HttpRouter.get("/_dashboard/api/superadmin", wrapRoute(listSuperadminsRoute)),
     HttpRouter.del("/_dashboard/api/superadmin/:id", wrapRoute(deleteSuperadminRoute)),
-    HttpRouter.get("/_dashboard/api/schema", wrapRoute(schemaRoute)),
-    HttpRouter.get("/_dashboard/api/logs", wrapRoute(logsRoute)),
-    HttpRouter.get("/_dashboard/api/logs/telemetry-status", wrapRoute(telemetryStatusRoute)),
     HttpRouter.get("/_dashboard/api/config", wrapRoute(configRoute)),
-    HttpRouter.get("/_dashboard/api/spans", wrapRoute(spansRoute)),
-    HttpRouter.get("/_dashboard/api/collections/:name/records", wrapRoute(recordsListRoute)),
-    HttpRouter.post("/_dashboard/api/collections/:name/records", wrapRoute(recordsCreateRoute)),
-    HttpRouter.get("/_dashboard/api/collections/:name/records/:id", wrapRoute(recordsViewRoute)),
-    HttpRouter.patch("/_dashboard/api/collections/:name/records/:id", wrapRoute(recordsUpdateRoute)),
-    HttpRouter.del("/_dashboard/api/collections/:name/records/:id", wrapRoute(recordsDeleteRoute)),
     HttpRouter.concat(makeDashboardSpaRoute()),
   )
 }

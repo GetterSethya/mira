@@ -12,6 +12,7 @@ import { AppConfig, AppConfigLive } from "@/config/index.js"
 import type { AuthService } from "@/http/auth.js"
 import { HttpServerFactory } from "@/http/server-factory.js"
 import type { Repository } from "@/repository/index.js"
+import type { CollectionService } from "@/collection-service/collection-service.js"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { MiraAppConfig } from "./builder.js"
 import type { MiraPlugin } from "./plugin.js"
@@ -172,7 +173,7 @@ export class MiraApp {
     // Plugin routes
     let pluginRouter: HttpRouter.HttpRouter<
       never,
-      FileSystem.FileSystem | Path.Path | Repository | AppConfig | AuthService | SqlClient.SqlClient
+      FileSystem.FileSystem | Path.Path | Repository | AppConfig | AuthService | SqlClient.SqlClient | CollectionService
     > = HttpRouter.empty
     for (const plugin of this.#extras) {
       if (plugin.routes !== undefined) {

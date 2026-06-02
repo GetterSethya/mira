@@ -4,6 +4,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import type { CompletedSpan } from "./tracer.js"
 import { makeConsoleTracer } from "./tracer.js"
 import { CryptoService, NodeCryptoLayer } from "@/crypto/index.js"
+import { TelemetrySqlClient } from "./telemetry-sql-client.js"
 
 export interface SqliteLoggerConfig {
   /** Path to the SQLite log database. Defaults to `"mira-logs.db"`. */
@@ -220,9 +221,23 @@ export function makeSqliteTelemetryLayer(
   config: SqliteLoggerConfig = {}
 ): Layer.Layer<never, never, never> {
   const ownSqlLayer = SqliteClient.layer({ filename: config.dbPath ?? "mira-logs.db" })
+  const logConsole = config.logConsole ?? false
 
-  return makeSqliteTelemetryLayerForClient({ logConsole: config.logConsole ?? false }).pipe(
-    Layer.provide(Layer.merge(ownSqlLayer, NodeCryptoLayer)),
+  // The logger/tracer layer requires SqlClient.SqlClient and CryptoService.
+  const loggerLayer = makeSqliteTelemetryLayerForClient({ logConsole })
+
+  // TelemetrySqlClient provides the same dedicated SqlClient to API routes.
+  const telemetryClientLayer = Layer.effect(
+    TelemetrySqlClient,
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      return sql
+    })
+  )
+
+  return Layer.merge(loggerLayer, telemetryClientLayer).pipe(
+    Layer.provide(ownSqlLayer),
+    Layer.provide(NodeCryptoLayer),
     Layer.orDie
   )
 }

@@ -1,7 +1,9 @@
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Repository, hashPassword } from "@gettersethya/mira"
+import { CollectionService, hashPassword } from "@gettersethya/mira"
+import { Filter } from "@gettersethya/mira-client"
 import { getRegisterToken } from "../superadmin.js"
+import { SuperAdminCollection } from "../superadmin.js"
 
 const RegisterBodySchema = Schema.Struct({
   email: Schema.String,
@@ -9,28 +11,30 @@ const RegisterBodySchema = Schema.Struct({
   token: Schema.String
 })
 
+const adminCtx = { headers: {}, query: {}, admin: true as const }
+
 export const registerRoute = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest
   const body = yield* req.json.pipe(Effect.flatMap(Schema.decodeUnknown(RegisterBodySchema)))
-  const repo = yield* Repository
+  const svc = yield* CollectionService
 
   if (body.token !== getRegisterToken()) {
     return HttpServerResponse.unsafeJson({ error: "invalid_token" }, { status: 403 })
   }
 
-  const existing = yield* repo
-    .viewFilter("_superadmin", { where: { sql: "email = ?", params: [body.email] } })
-    .pipe(Effect.orElseSucceed(() => []))
+  const existing = yield* svc
+    .list(SuperAdminCollection, null, 1, adminCtx, Filter.field("email").eq(body.email))
+    .pipe(Effect.orElseSucceed(() => ({ items: [] as ReadonlyArray<Record<string, unknown>> })))
 
-  if (existing.length > 0) {
+  if (existing.items.length > 0) {
     return HttpServerResponse.unsafeJson({ error: "email_taken" }, { status: 409 })
   }
 
   const hashedPassword = yield* hashPassword(body.password)
-  const record = yield* repo.create("_superadmin", {
+  const record = yield* svc.create(SuperAdminCollection, {
     email: body.email,
     password: hashedPassword
-  })
+  }, adminCtx)
 
   return HttpServerResponse.unsafeJson({ id: record["id"], email: record["email"] }, { status: 201 })
 })

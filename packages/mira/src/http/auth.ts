@@ -79,3 +79,14 @@ export function verifyJwt(token: string, secret: string) {
     catch: (e) => new AuthError({ reason: String(e) })
   })
 }
+
+export function verifyAnyJwt(token: string, secret: string) {
+  return Effect.tryPromise({
+    try: async () => {
+      const encoder = new TextEncoder()
+      const result = await jose.jwtVerify(token, encoder.encode(secret))
+      return result
+    },
+    catch: (e) => new AuthError({ reason: String(e) })
+  })
+}

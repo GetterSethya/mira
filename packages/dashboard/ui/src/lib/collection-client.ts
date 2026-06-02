@@ -1,6 +1,6 @@
 import { getToken } from "$lib/auth.js"
 
-const BASE = "/_dashboard/api"
+const API_BASE = "/api"
 
 function authHeaders(): Record<string, string> {
   const token = getToken()
@@ -20,7 +20,7 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export function makeCollectionApi(collectionName: string) {
-  const base = `${BASE}/collections/${collectionName}/records`
+  const base = `${API_BASE}/collections/${collectionName}`
 
   return {
     listOptions: (params?: { limit?: number; after?: string | number }) => {

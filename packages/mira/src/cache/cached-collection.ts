@@ -144,7 +144,8 @@ export function makeCachedCollectionServiceLayer(
 
         create: (collection, data, ctx) =>
           svc.create(collection, data, ctx).pipe(
-            Effect.tap(() => cache.nukeListsFor(collection.name))
+            Effect.tap(() => cache.nukeListsFor(collection.name)),
+            Effect.withSpan("cache.create", { kind: "internal", attributes: { collection: collection.name } })
           ),
 
         update: (collection, id, data, ctx) =>
@@ -154,7 +155,8 @@ export function makeCachedCollectionServiceLayer(
                 [cache.invalidateRecord(collection.name, id), cache.nukeListsFor(collection.name)],
                 { concurrency: "unbounded" }
               )
-            )
+            ),
+            Effect.withSpan("cache.update", { kind: "internal", attributes: { collection: collection.name } })
           ),
 
         delete: (collection, id, ctx) =>
@@ -164,7 +166,8 @@ export function makeCachedCollectionServiceLayer(
                 [cache.invalidateRecord(collection.name, id), cache.nukeListsFor(collection.name)],
                 { concurrency: "unbounded" }
               )
-            )
+            ),
+            Effect.withSpan("cache.delete", { kind: "internal", attributes: { collection: collection.name } })
           ),
       })
     })

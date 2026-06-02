@@ -34,7 +34,8 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
               hooks.runRecordListError({ collection, action: "list", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
-            )
+            ),
+            Effect.withSpan("hook.list", { kind: "internal", attributes: { collection: collection.name } })
           ),
 
         view: (collection: AnyCollectionDef, id: string, ctx: RequestCtx, select?: ReadonlyArray<string> | null, expand?: ReadonlyArray<string> | null) =>
@@ -47,7 +48,8 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
               hooks.runRecordViewError({ collection, action: "view", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
-            )
+            ),
+            Effect.withSpan("hook.view", { kind: "internal", attributes: { collection: collection.name } })
           ),
 
         create: (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
@@ -61,7 +63,8 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
               hooks.runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
-            )
+            ),
+            Effect.withSpan("hook.create", { kind: "internal", attributes: { collection: collection.name } })
           ),
 
         update: (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
@@ -76,7 +79,8 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
               hooks.runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
-            )
+            ),
+            Effect.withSpan("hook.update", { kind: "internal", attributes: { collection: collection.name } })
           ),
 
         delete: (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
@@ -90,7 +94,8 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
               hooks.runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
-            )
+            ),
+            Effect.withSpan("hook.delete", { kind: "internal", attributes: { collection: collection.name } })
           ),
       })
     })

@@ -1,6 +1,7 @@
 import { getToken, isLoggedIn } from "$lib/auth.js"
 
 const BASE = "/_dashboard/api"
+const API_BASE = "/api"
 
 type RequestInit2 = {
   method?: string
@@ -17,7 +18,7 @@ async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
     headers["Content-Type"] = "application/json"
   }
 
-  const res = await fetch(`${BASE}${path}`, { method: init.method ?? "GET", headers, body: init.body })
+  const res = await fetch(path, { method: init.method ?? "GET", headers, body: init.body })
   if (!res.ok) {
     const body: unknown = await res.json().catch(() => ({}))
     throw Object.assign(new Error("Request failed"), { status: res.status, body })
@@ -57,28 +58,28 @@ export type SpansResponse = {
 export type SuperadminRow = { id: string; email: string; created: string }
 
 export const client = {
-  bootstrapStatus: () => request<{ bootstrapped: boolean }>("/bootstrap-status"),
+  bootstrapStatus: () => request<{ bootstrapped: boolean }>(`${BASE}/bootstrap-status`),
 
   login: (email: string, password: string) =>
-    request<{ token: string; expiresAt: string }>("/login", {
+    request<{ token: string; expiresAt: string }>(`${BASE}/login`, {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
 
   register: (email: string, password: string, token: string) =>
-    request<{ id: string; email: string }>("/register", {
+    request<{ id: string; email: string }>(`${BASE}/register`, {
       method: "POST",
       body: JSON.stringify({ email, password, token }),
     }),
 
-  schema: () => request<CollectionSchema[]>("/schema"),
+  schema: () => request<CollectionSchema[]>(`${API_BASE}/_schema`),
 
   logs: (params: { limit?: number; offset?: number; level?: string }) => {
     const q = new URLSearchParams()
     if (params.limit !== undefined) q.set("limit", String(params.limit))
     if (params.offset !== undefined) q.set("offset", String(params.offset))
     if (params.level) q.set("level", params.level)
-    return request<LogsResponse>(`/logs?${q}`)
+    return request<LogsResponse>(`${API_BASE}/_telemetry/logs?${q}`)
   },
 
   spans: (params: { limit?: number; offset?: number; traceId?: string }) => {
@@ -86,19 +87,19 @@ export const client = {
     if (params.limit !== undefined) q.set("limit", String(params.limit))
     if (params.offset !== undefined) q.set("offset", String(params.offset))
     if (params.traceId) q.set("traceId", params.traceId)
-    return request<SpansResponse>(`/spans?${q}`)
+    return request<SpansResponse>(`${API_BASE}/_telemetry/spans?${q}`)
   },
 
-  config: () => request<{ config: Record<string, unknown>; keys: string[] }>("/config"),
+  config: () => request<{ config: Record<string, unknown>; keys: string[] }>(`${BASE}/config`),
 
   superadmins: {
-    list: () => request<{ items: SuperadminRow[] }>("/superadmin"),
+    list: () => request<{ items: SuperadminRow[] }>(`${BASE}/superadmin`),
     create: (email: string, password: string) =>
-      request<{ id: string; email: string }>("/superadmin/create", {
+      request<{ id: string; email: string }>(`${BASE}/superadmin/create`, {
         method: "POST",
         body: JSON.stringify({ email, password }),
       }),
-    delete: (id: string) => request<void>(`/superadmin/${id}`, { method: "DELETE" }),
+    delete: (id: string) => request<void>(`${BASE}/superadmin/${id}`, { method: "DELETE" }),
   },
 }
 

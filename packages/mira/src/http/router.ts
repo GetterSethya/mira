@@ -1,5 +1,5 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Cause, Effect, Option, Redacted, Schema } from "effect"
+import { Cause, Effect, Option, Redacted, Schema, Tracer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
@@ -10,7 +10,7 @@ import { FileStorage } from "@/storage/storage.js"
 import { ThumbnailService } from "@/thumbnail/types.js"
 import { AppConfig } from "@/config/index.js"
 import { CryptoService } from "@/crypto/index.js"
-import { AuthService, signJwt, verifyJwt, verifyPassword } from "./auth.js"
+import { AuthService, signJwt, verifyAnyJwt, verifyJwt, verifyPassword } from "./auth.js"
 import { makeRowDecoder } from "@/collection-service/decode.js"
 import { catchCollectionErrors } from "./errors.js"
 import { parseExpandParam, parseFilterParam, parsePaginationParam, parseSelectParam, parseSortParam } from "./params.js"
@@ -18,6 +18,7 @@ import { processMultipartUpload } from "./files.js"
 import { makeFileServeRoute } from "./file-serve.js"
 import { makeFileTokenRoute } from "./file-token.js"
 import { makeSchemaRoute } from "./schema.js"
+import { telemetryLogsRoute, telemetrySpansRoute } from "./telemetry-routes.js"
 
 type Ms = CollectionService | Repository | FileStorage | ThumbnailService | AppConfig | AuthService | CryptoService
 
@@ -66,7 +67,9 @@ function extractBearerToken(req: HttpServerRequest.HttpServerRequest) {
 function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollectionDef) {
   const ct = req.headers["content-type"] ?? ""
   if (ct.includes("multipart/form-data")) {
-    return processMultipartUpload(req, collection.schema, collection.name)
+    return processMultipartUpload(req, collection.schema, collection.name).pipe(
+      Effect.withSpan("http.body.parse", { kind: "internal", attributes: { content_type: "multipart" } })
+    )
   }
   return Effect.gen(function* () {
     const parsed = yield* req.json.pipe(
@@ -85,7 +88,9 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
       }
     }
     return result
-  })
+  }).pipe(
+    Effect.withSpan("http.body.parse", { kind: "internal", attributes: { content_type: "json" } })
+  )
 }
 
 export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef>) {
@@ -93,6 +98,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
   const decoderMap = new Map(collections.map((c) => [c.name, makeRowDecoder(c.schema)]))
 
   function collectionRoute(
+    operation: string,
     body: (
       col: AnyCollectionDef,
       ctx: RequestCtx,
@@ -121,16 +127,28 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
         )
       }
       return Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
-        Effect.flatMap(resolveAuth(req), (auth) => {
-          const ctx = buildRequestCtx(auth ? auth : undefined, req)
-          return Effect.catchAllCause(body(col, ctx, req, routeCtx), (cause) => {
+        Effect.gen(function* () {
+          const auth = yield* resolveAuth(req)
+          const ctx = buildRequestCtx(auth ?? undefined, req)
+          yield* Effect.currentSpan.pipe(
+            Effect.tap((span: Tracer.Span) =>
+              Effect.sync(() => span.attribute("auth.result", auth !== undefined ? "authenticated" : "anonymous"))
+            ),
+            Effect.ignore
+          )
+          return yield* Effect.catchAllCause(body(col, ctx, req, routeCtx), (cause) => {
             const failure = Cause.failureOption(cause)
             if (Option.isSome(failure)) {
               return Effect.succeed(failure.value)
             }
             return Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))
           })
-        })
+        }).pipe(
+          Effect.withSpan("http.handler", {
+            kind: "server",
+            attributes: { collection: col.name, operation }
+          })
+        )
       )
     })
   }
@@ -139,25 +157,45 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     const token = extractBearerToken(req)
 
     return Effect.gen(function* () {
-      if (token === null) return yield* Effect.void
+      const annotate = (key: string, value: string | boolean) =>
+        Effect.currentSpan.pipe(
+          Effect.tap((span: Tracer.Span) => Effect.sync(() => span.attribute(key, value))),
+          Effect.ignore
+        )
+
+      if (token === null) {
+        yield* annotate("auth.result", "anonymous")
+        return yield* Effect.void
+      }
       const config = yield* AppConfig
       const jwtSecret = Redacted.value(config.jwtSecret)
       const payload = yield* verifyJwt(token, jwtSecret).pipe(Effect.orElseSucceed(() => undefined))
-      if (payload === undefined) return undefined
+      if (payload === undefined) {
+        yield* annotate("auth.result", "invalid_token")
+        return undefined
+      }
       const targetCol = collectionMap.get(payload.col)
       if (targetCol === undefined || targetCol.schema["x-collection-kind"] !== "auth") {
+        yield* annotate("auth.result", "invalid_token")
         return undefined
       }
       const repo = yield* Repository
       const rows = yield* repo
         .viewFilter(payload.col, { where: { sql: "t.id = ?", params: [payload.sub] } })
         .pipe(Effect.orElseSucceed(() => []))
-      if (rows.length === 0) return undefined
+      if (rows.length === 0) {
+        yield* annotate("auth.result", "invalid_token")
+        return undefined
+      }
+      yield* annotate("auth.result", "authenticated")
+      yield* annotate("auth.collection", payload.col)
       return { collection: payload.col, record: rows[0] }
-    })
+    }).pipe(
+      Effect.withSpan("http.auth", { kind: "internal" })
+    )
   }
 
-  const listRoute = collectionRoute((col, ctx) =>
+  const listRoute = collectionRoute("list", (col, ctx) =>
     Effect.gen(function* () {
       const svc = yield* CollectionService
       const filter = yield* parseFilterParam(ctx.query, col.schema, col.name).pipe(catchCollectionErrors)
@@ -172,7 +210,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     })
   )
 
-  const createRoute = collectionRoute((col, ctx, req) =>
+  const createRoute = collectionRoute("create", (col, ctx, req) =>
     Effect.gen(function* () {
       const body = yield* getBody(req, col).pipe(catchCollectionErrors)
       const svc = yield* CollectionService
@@ -181,7 +219,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     })
   )
 
-  const viewRoute = collectionRoute((col, ctx, _req, routeCtx) => {
+  const viewRoute = collectionRoute("view", (col, ctx, _req, routeCtx) => {
     const id = routeCtx.params["id"]
     if (id === undefined) {
       return Effect.succeed(
@@ -197,7 +235,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     })
   })
 
-  const updateRoute = collectionRoute((col, ctx, req, routeCtx) => {
+  const updateRoute = collectionRoute("update", (col, ctx, req, routeCtx) => {
     const id = routeCtx.params["id"]
     if (id === undefined) {
       return Effect.succeed(
@@ -212,7 +250,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     })
   })
 
-  const deleteRoute = collectionRoute((col, ctx, _req, routeCtx) => {
+  const deleteRoute = collectionRoute("delete", (col, ctx, _req, routeCtx) => {
     const id = routeCtx.params["id"]
     if (id === undefined) {
       return Effect.succeed(
@@ -226,7 +264,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     })
   })
 
-  const authRoute = collectionRoute((col, _ctx, req) =>
+  const authRoute = collectionRoute("auth", (col, _ctx, req) =>
     Effect.gen(function* () {
       if (col.schema["x-collection-kind"] !== "auth") {
         return HttpServerResponse.unsafeJson({ error: "read_only" }, { status: 405 })
@@ -281,6 +319,48 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
   const fileTokenRoute = makeFileTokenRoute(collections)
   const schemaRoute = makeSchemaRoute(collections)
 
+  function requireApiAuth<E, R>(
+    operation: string,
+    effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>
+  ): Effect.Effect<HttpServerResponse.HttpServerResponse, never, R | AppConfig | HttpServerRequest.HttpServerRequest> {
+    return Effect.gen(function* () {
+      const req = yield* HttpServerRequest.HttpServerRequest
+      const token = extractBearerToken(req)
+
+      const annotate = (key: string, value: string) =>
+        Effect.currentSpan.pipe(
+          Effect.tap((span: Tracer.Span) => Effect.sync(() => span.attribute(key, value))),
+          Effect.ignore
+        )
+
+      const authed = yield* Effect.gen(function* () {
+        if (token === null) {
+          yield* annotate("auth.result", "anonymous")
+          return false
+        }
+        const config = yield* AppConfig
+        const jwtSecret = Redacted.value(config.jwtSecret)
+        const result = yield* verifyAnyJwt(token, jwtSecret).pipe(Effect.orElseSucceed(() => undefined))
+        if (result === undefined) {
+          yield* annotate("auth.result", "invalid_token")
+          return false
+        }
+        yield* annotate("auth.result", "authenticated")
+        return true
+      }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))
+
+      if (!authed) {
+        return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
+      }
+      return yield* effect.pipe(Effect.catchAll(() => Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))))
+    }).pipe(
+      Effect.withSpan("http.handler", { kind: "server", attributes: { operation } })
+    )
+  }
+
+  const telemetryLogs = requireApiAuth("telemetry_logs", telemetryLogsRoute)
+  const telemetrySpans = requireApiAuth("telemetry_spans", telemetrySpansRoute)
+
   return HttpRouter.empty.pipe(
     HttpRouter.get("/api/collections/:name", listRoute),
     HttpRouter.post("/api/collections/:name", createRoute),
@@ -290,6 +370,8 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     HttpRouter.post("/api/collections/:name/auth-with-password", authRoute),
     HttpRouter.get("/api/files/:collection/:id/:filename", fileServeRoute),
     HttpRouter.post("/api/files/token", fileTokenRoute),
-    HttpRouter.get("/api/_schema", schemaRoute)
+    HttpRouter.get("/api/_schema", schemaRoute),
+    HttpRouter.get("/api/_telemetry/logs", telemetryLogs),
+    HttpRouter.get("/api/_telemetry/spans", telemetrySpans)
   )
 }

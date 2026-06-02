@@ -11,6 +11,8 @@ import { MiraError } from "./errors.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler as makeHandler } from "./handler.js"
 import type { InferRecord } from "./types.js"
+import type { TelemetryClient } from "./telemetry.js"
+import { makeTelemetryClient } from "./telemetry.js"
 
 type CollectionAdapter = <F extends FieldsMap>(
   client: CollectionClient<F>,
@@ -20,6 +22,7 @@ type CollectionAdapter = <F extends FieldsMap>(
 type BaseClient<A extends BrowserAuth | ServerAuth = BrowserAuth | ServerAuth> = {
   collection<C extends AnyCollectionDef>(def: C): CollectionClient<C["fields"]>
   auth: A
+  telemetry: TelemetryClient
   withCollections<M extends Record<string, AnyCollectionDef>>(
     map: M,
     opts?: { adapter?: CollectionAdapter }
@@ -137,6 +140,7 @@ function createMiraClientInternal(
     return {
       collection: <C extends AnyCollectionDef>(def: C) => buildCollectionClient(def),
       auth: makeAuth(),
+      telemetry: makeTelemetryClient(execute),
       withCollections
     }
   }

@@ -6,7 +6,7 @@ import { filterNodeToWhereClause } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
 import { enforcerForAction } from "@/rule/enforcer.js"
 import { Repository } from "@/repository/repository.js"
-import type { ExpandDef, RepoRecord, SortOrder } from "@/repository/types.js"
+import type { ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
 import { FileStorage } from "@/storage/storage.js"
 import type { RowDecoder } from "./decode.js"
 import { makeRowDecoder } from "./decode.js"
@@ -74,16 +74,16 @@ export class CollectionService extends Context.Tag("CollectionService")<
   }
 >() {}
 
-function resolveFields(schema: CollectionSchema, userSelect: ReadonlyArray<string> | null): ReadonlyArray<string> {
+function resolveFields(schema: CollectionSchema, userSelect: ReadonlyArray<string> | null, admin = false): ReadonlyArray<string> {
   const nonHidden = Object.entries(schema.properties)
-    .filter(([, p]) => !p["x-hidden"])
+    .filter(([, p]) => admin || !p["x-hidden"])
     .map(([k]) => k)
 
   if (userSelect === null) return nonHidden
 
-  // Intersect with non-hidden fields
+  // Intersect with non-hidden fields (admin bypasses hidden filter)
   const nonHiddenSet = new Set(nonHidden)
-  const selected = userSelect.filter((f) => nonHiddenSet.has(f))
+  const selected = userSelect.filter((f) => admin || nonHiddenSet.has(f))
 
   // Always include core system fields needed for the response
   const always = new Set<string>(["id", "created", "updated"])
@@ -216,25 +216,31 @@ export function makeCollectionServiceLayer(
         expand?: ReadonlyArray<string> | null
       ) =>
         Effect.gen(function* () {
-          const ruleWhere = yield* compileRule(collection, "list", ctx)
+          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "list", ctx)
           const userFilter =
             filter !== undefined ? yield* filterNodeToWhereClause(filter, collection.schema, collection.name) : null
-          const where = userFilter !== null ? andWhere(ruleWhere, userFilter) : ruleWhere
-          const combined = cursor !== null ? andWhere(where, cursorClause(cursor)) : where
+          const where: WhereClause | null =
+            ruleWhere !== null && userFilter !== null ? andWhere(ruleWhere, userFilter) : (userFilter ?? ruleWhere)
+          const combined = cursor !== null && where !== null ? andWhere(where, cursorClause(cursor)) : where
 
-          const fields = resolveFields(collection.schema, select ?? null)
+          const fields = resolveFields(collection.schema, select ?? null, ctx.admin)
           const expandDefs = resolveExpand(collection.schema, expand ?? null, allCollections)
           const fieldsWithExpand = [...new Set([...fields, ...expandDefs.map((e) => e.localField)])]
 
           // seqId is x-hidden but must be fetched for cursor-based pagination
           const fieldsForQuery = fieldsWithExpand.includes("seqId") ? fieldsWithExpand : [...fieldsWithExpand, "seqId"]
 
-          const rows = yield* repo.list(collection.name, perPage, {
-            where: combined,
-            sort: sort ?? { field: "seqId", direction: "asc" },
+          const listOpts = {
+            sort: sort ?? { field: "seqId", direction: "asc" as const },
             fields: fieldsForQuery,
             expand: expandDefs
-          })
+          } as const
+
+          const rows = yield* repo.list(
+            collection.name,
+            perPage,
+            combined !== null ? { ...listOpts, where: combined } : listOpts
+          )
 
           const lastRow = rows.items.at(-1)
           const rawSeqId = lastRow?.["seqId"]
@@ -266,10 +272,10 @@ export function makeCollectionServiceLayer(
         expand?: ReadonlyArray<string> | null
       ) =>
         Effect.gen(function* () {
-          const ruleWhere = yield* compileRule(collection, "view", ctx)
-          const combined = andWhere(ruleWhere, idClause(id))
+          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "view", ctx)
+          const combined = ruleWhere !== null ? andWhere(ruleWhere, idClause(id)) : idClause(id)
 
-          const fields = resolveFields(collection.schema, select ?? null)
+          const fields = resolveFields(collection.schema, select ?? null, ctx.admin)
           const expandDefs = resolveExpand(collection.schema, expand ?? null, allCollections)
           const fieldsWithExpand = [...new Set([...fields, ...expandDefs.map((e) => e.localField)])]
 
@@ -301,15 +307,18 @@ export function makeCollectionServiceLayer(
           const cleaned = yield* Schema.decodeUnknown(schemas.create)(data).pipe(
             Effect.mapError(parseErrToValidationError(collection.name))
           )
-          const ruleWhere = yield* compileRule(collection, "create", ctx)
 
-          // Pre-check: evaluate the create rule against the payload (no table needed).
-          const payloadBound = resolveFieldRefs(ruleWhere, cleaned)
-          const where = unsafeFragment(payloadBound.sql, payloadBound.params)
-          const check = yield* sql<{ ok: number }>`SELECT 1 AS ok WHERE ${where}`
+          if (!ctx.admin) {
+            const ruleWhere = yield* compileRule(collection, "create", ctx)
 
-          if (check.length === 0) {
-            return yield* new ForbiddenError({ collection: collection.name, action: "create" })
+            // Pre-check: evaluate the create rule against the payload (no table needed).
+            const payloadBound = resolveFieldRefs(ruleWhere, cleaned)
+            const where = unsafeFragment(payloadBound.sql, payloadBound.params)
+            const check = yield* sql<{ ok: number }>`SELECT 1 AS ok WHERE ${where}`
+
+            if (check.length === 0) {
+              return yield* new ForbiddenError({ collection: collection.name, action: "create" })
+            }
           }
 
           const row = yield* repo.create(collection.name, cleaned)
@@ -332,19 +341,29 @@ export function makeCollectionServiceLayer(
           const cleaned = yield* Schema.decodeUnknown(schemas.update)(data).pipe(
             Effect.mapError(parseErrToValidationError(collection.name))
           )
-          const ruleWhere = yield* compileRule(collection, "update", ctx)
 
-          // Existence check first — distinguish NotFound from Forbidden
+          // If the collection has no rules at all, deny immediately (don't leak existence)
+          if (!ctx.admin) {
+            const enforcerResult = enforcerForAction(collection.schema, "update")
+            if (enforcerResult === null) {
+              return yield* new ForbiddenError({ collection: collection.name, action: "update" })
+            }
+          }
+
           const existing = yield* repo.view(collection.name, id)
           if (Option.isNone(existing)) {
             return yield* new NotFoundError({ collection: collection.name, id })
           }
 
-          // Rule check against this specific row
-          const combined = andWhere(ruleWhere, idClause(id))
-          const allowed = yield* repo.viewFilter(collection.name, { where: combined })
-          if (allowed.length === 0) {
-            return yield* new ForbiddenError({ collection: collection.name, action: "update" })
+          if (!ctx.admin) {
+            const ruleWhere = yield* compileRule(collection, "update", ctx)
+
+            // Rule check against this specific row
+            const combined = andWhere(ruleWhere, idClause(id))
+            const allowed = yield* repo.viewFilter(collection.name, { where: combined })
+            if (allowed.length === 0) {
+              return yield* new ForbiddenError({ collection: collection.name, action: "update" })
+            }
           }
 
           const updated = yield* repo.update(collection.name, id, cleaned)
@@ -383,17 +402,26 @@ export function makeCollectionServiceLayer(
             return yield* new ReadOnlyError({ collection: collection.name })
           }
 
-          const ruleWhere = yield* compileRule(collection, "delete", ctx)
+          // If the collection has no rules at all, deny immediately (don't leak existence)
+          if (!ctx.admin) {
+            const enforcerResult = enforcerForAction(collection.schema, "delete")
+            if (enforcerResult === null) {
+              return yield* new ForbiddenError({ collection: collection.name, action: "delete" })
+            }
+          }
 
           const existing = yield* repo.view(collection.name, id)
           if (Option.isNone(existing)) {
             return yield* new NotFoundError({ collection: collection.name, id })
           }
 
-          const combined = andWhere(ruleWhere, idClause(id))
-          const allowed = yield* repo.viewFilter(collection.name, { where: combined })
-          if (allowed.length === 0) {
-            return yield* new ForbiddenError({ collection: collection.name, action: "delete" })
+          if (!ctx.admin) {
+            const ruleWhere = yield* compileRule(collection, "delete", ctx)
+            const combined = andWhere(ruleWhere, idClause(id))
+            const allowed = yield* repo.viewFilter(collection.name, { where: combined })
+            if (allowed.length === 0) {
+              return yield* new ForbiddenError({ collection: collection.name, action: "delete" })
+            }
           }
 
           yield* repo.delete(collection.name, id)

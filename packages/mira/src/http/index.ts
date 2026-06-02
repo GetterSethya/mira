@@ -15,3 +15,4 @@ export {
 } from "./auth.js"
 export type { JwtPayload, FileTokenPayload } from "./auth.js"
 export { HttpServerFactory } from "./server-factory.js"
+export { telemetryLogsRoute, telemetrySpansRoute } from "./telemetry-routes.js"

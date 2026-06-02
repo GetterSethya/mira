@@ -8,20 +8,24 @@
   import { Input } from "$lib/components/ui/input/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
 
+  const LIMIT = 50
+
   const initial = $page.url.searchParams.get("traceId") ?? ""
   let traceIdFilter = $state(initial)
   let committed = $state(initial)
+  let offset = $state(0)
 
   const spansQuery = createQuery(() => ({
-    queryKey: ["spans", committed],
+    queryKey: ["spans", committed, offset],
     queryFn: () =>
       committed
         ? client.spans({ traceId: committed })
-        : client.spans({ limit: 100 }),
+        : client.spans({ limit: LIMIT, offset }),
   }))
 
   function apply() {
     committed = traceIdFilter
+    offset = 0
     if (committed) goto(`${base}/spans?traceId=${committed}`, { replaceState: true })
     else goto(`${base}/spans`, { replaceState: true })
   }
@@ -29,6 +33,7 @@
   function clear() {
     traceIdFilter = ""
     committed = ""
+    offset = 0
     goto(`${base}/spans`, { replaceState: true })
   }
 </script>
@@ -56,6 +61,20 @@
     <p class="text-muted-foreground">Loading…</p>
   {:else if spansQuery.data}
     <SpanWaterfall spans={spansQuery.data.spans} />
-    <p class="text-xs text-muted-foreground">{spansQuery.data.total} total spans</p>
+    {@const data = spansQuery.data}
+    {@const totalTraces = data.total}
+    {@const pageStart = offset + 1}
+    {@const pageEnd = Math.min(offset + LIMIT, totalTraces)}
+    <div class="flex items-center justify-between text-xs text-muted-foreground">
+      {#if committed}
+        <span>{data.spans.length} spans in trace</span>
+      {:else}
+        <span>Traces {pageStart}–{pageEnd} of {totalTraces}</span>
+        <div class="flex gap-2">
+          <Button variant="outline" size="sm" disabled={offset === 0} onclick={() => (offset = Math.max(0, offset - LIMIT))}>Previous</Button>
+          <Button variant="outline" size="sm" disabled={pageEnd >= totalTraces} onclick={() => (offset = offset + LIMIT)}>Next</Button>
+        </div>
+      {/if}
+    </div>
   {/if}
 </div>

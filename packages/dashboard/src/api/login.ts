@@ -1,27 +1,31 @@
 import { Effect, Redacted, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { AppConfig, Repository, verifyPassword } from "@gettersethya/mira"
+import { AppConfig, CollectionService, verifyPassword } from "@gettersethya/mira"
+import { Filter } from "@gettersethya/mira-client"
 import { signDashboardJwt } from "./auth.js"
+import { SuperAdminCollection } from "../superadmin.js"
 
 const LoginBodySchema = Schema.Struct({
   email: Schema.String,
   password: Schema.String,
 })
 
+const adminCtx = { headers: {}, query: {}, admin: true as const }
+
 export const loginRoute = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest
   const body = yield* req.json.pipe(Effect.flatMap(Schema.decodeUnknown(LoginBodySchema)))
-  const repo = yield* Repository
+  const svc = yield* CollectionService
 
-  const records = yield* repo
-    .viewFilter("_superadmin", { where: { sql: "email = ?", params: [body.email] } })
-    .pipe(Effect.orElseSucceed(() => []))
+  const result = yield* svc
+    .list(SuperAdminCollection, null, 1, adminCtx, Filter.field("email").eq(body.email))
+    .pipe(Effect.orElseSucceed(() => ({ items: [] as ReadonlyArray<Record<string, unknown>> })))
 
-  if (records.length === 0) {
+  if (result.items.length === 0) {
     return HttpServerResponse.unsafeJson({ error: "invalid_credentials" }, { status: 401 })
   }
 
-  const record = records[0]
+  const record = result.items[0]
   const passwordHash = String(record["password"] ?? "")
   const valid = yield* verifyPassword(body.password, passwordHash)
 

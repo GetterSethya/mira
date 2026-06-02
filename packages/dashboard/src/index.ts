@@ -1,6 +1,6 @@
-import { Effect, Layer } from "effect"
+import { Effect } from "effect"
 import type { MiraPlugin } from "@gettersethya/mira"
-import { SuperAdminCollection, RegisterTokenLive } from "./superadmin.js"
+import { SuperAdminCollection, getRegisterToken, setRegisterToken, generateRegisterToken } from "./superadmin.js"
 import { makeDashboardRouter } from "./router.js"
 
 export const MiraDashboard: MiraPlugin = {
@@ -8,11 +8,13 @@ export const MiraDashboard: MiraPlugin = {
 
   collections: [SuperAdminCollection],
 
-  layer: RegisterTokenLive,
-
   routes: makeDashboardRouter([SuperAdminCollection]),
 
-  onBootstrap: () => Effect.log("[dashboard] Dashboard plugin loaded"),
+  onBootstrap: () =>
+    Effect.sync(() => {
+      const token = generateRegisterToken()
+      setRegisterToken(token)
+    }).pipe(Effect.tap(() => Effect.log("[dashboard] Dashboard plugin loaded"))),
 
   onServe: () => Effect.log("[dashboard] Available at /_dashboard/"),
 
@@ -33,6 +35,6 @@ export const MiraDashboard: MiraPlugin = {
 }
 
 export { SuperAdminCollection } from "./superadmin.js"
-export { RegisterTokenLive, getRegisterToken } from "./superadmin.js"
+export { getRegisterToken, setRegisterToken, generateRegisterToken } from "./superadmin.js"
 export { makeDashboardRouter } from "./router.js"
 export type { MiraPlugin } from "@gettersethya/mira"

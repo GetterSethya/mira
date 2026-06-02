@@ -5,6 +5,8 @@ export type RequestCtx = {
   auth?: { collection: string; record: RepoRecord }
   headers: Record<string, string>
   query: Record<string, string | ReadonlyArray<string>>
+  /** When true, skip all rule enforcement (validation still applies). Used by admin/dashboard routes. */
+  admin?: boolean
 }
 
 /** Paginated result — cursor-based via seqId. Used for all collection kinds. */
