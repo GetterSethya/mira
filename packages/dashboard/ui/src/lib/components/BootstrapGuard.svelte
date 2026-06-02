@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query"
   import { goto } from "$app/navigation"
-  import { page } from "$app/stores"
+  import { page } from "$app/state"
   import { base } from "$app/paths"
   import { isLoggedIn } from "$lib/auth.js"
   import { client } from "$lib/client.js"
@@ -10,7 +10,7 @@
   const { children }: { children: Snippet } = $props()
 
   const publicPaths = [`${base}/login`, `${base}/register`]
-  const isPublic = $derived(publicPaths.some((p) => $page.url.pathname === p || $page.url.pathname.startsWith(p + "?")))
+  const isPublic = $derived(publicPaths.some((p) => page.url.pathname === p || page.url.pathname.startsWith(p + "?")))
   const getIsPublic = () => isPublic
 
   const bootstrapQuery = createQuery(() => ({
@@ -21,8 +21,8 @@
 
   $effect(() => {
     const data = bootstrapQuery.data
-    if (data) {
-      goto(data.bootstrapped ? `${base}/login` : `${base}/register`)
+    if (!data && bootstrapQuery.isSuccess) {
+      goto(data.bootstrapped ? `${base}/login` : `${base}/register?${page.url.searchParams.toString()}`)
     }
   })
 </script>

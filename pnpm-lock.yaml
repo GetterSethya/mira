@@ -117,6 +117,9 @@ importers:
       '@tanstack/svelte-query':
         specifier: ^6.0.0
         version: 6.1.33(svelte@5.55.10)
+      effect:
+        specifier: '>=3.21'
+        version: 3.21.2
     devDependencies:
       '@fontsource-variable/oxanium':
         specifier: ^5.2.8

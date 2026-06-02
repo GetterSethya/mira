@@ -1,30 +1,47 @@
 <script lang="ts">
-  import { page } from "$app/stores"
+  import * as Field from "$lib/components/ui/field"
+  import { Schema } from "effect"
+  import { page } from "$app/state"
   import { goto } from "$app/navigation"
   import { base } from "$app/paths"
   import { client } from "$lib/client.js"
   import { createAppForm } from "$lib/form.js"
+  import { RegisterSchema, formatFieldErrors } from "$lib/validators.js"
   import * as Card from "$lib/components/ui/card/index.js"
-  import * as Field from "$lib/components/ui/field/index.js"
   import { Input } from "$lib/components/ui/input/index.js"
   import { toast } from "svelte-sonner"
+  import { createMutation } from "@tanstack/svelte-query"
+  import { Button } from "$lib/components/ui/button"
+  import { Spinner } from "$lib/components/ui/spinner"
 
-  const token = $derived($page.url.searchParams.get("token") ?? "")
+  const token = $derived(page.url.searchParams.get("token") ?? "")
   let error = $state("")
 
-  const form = createAppForm(() => ({
-    defaultValues: { email: "", password: "", token },
-    onSubmit: async ({ value }: { value: { email: string; password: string; token: string } }) => {
-      error = ""
-      try {
-        await client.register(value.email, value.password, value.token)
-        toast.success("Account created! Please sign in.")
-        goto(`${base}/login`)
-      } catch {
-        error = "Registration failed. Check your token."
-        toast.error("Registration failed")
-      }
+  type RegisterMutationArgs = {
+    email: string
+    password: string
+    token: string
+  }
+
+  const registerMutation = createMutation(() => ({
+    mutationFn: async (args: RegisterMutationArgs) => {
+      return await client.register(args.email, args.password, args.token)
     },
+    onSuccess: () => {
+      toast.success("Account created! Please sign in.")
+      goto(`${base}/login`)
+    },
+    onError: () => {
+      toast.error("Registration failed")
+    }
+  }))
+
+  const form = createAppForm(() => ({
+    defaultValues: { email: "", password: "" },
+    validators: { onChange: Schema.standardSchemaV1(RegisterSchema) },
+    onSubmit: async ({ value }) => {
+      return await registerMutation.mutateAsync({ ...value, token })
+    }
   }))
 </script>
 
@@ -35,58 +52,57 @@
       <Card.Description>First-time setup — register the initial superadmin account</Card.Description>
     </Card.Header>
     <Card.Content>
-      <form.AppForm>
-        {#snippet children()}
-          <div class="flex flex-col gap-4">
-            <form.AppField name="email">
-              {#snippet children(field)}
-                <Field.Field>
-                  <Field.Label>Email</Field.Label>
-                  <Input
-                    type="email"
-                    value={field.state.value}
-                    oninput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
-                  />
-                </Field.Field>
-              {/snippet}
-            </form.AppField>
+      <form
+        onsubmit={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          form.handleSubmit(e)
+        }}
+        class="flex flex-col gap-4"
+      >
+        <form.Field name="email">
+          {#snippet children(field)}
+            <Field.Field>
+              <Field.Label>Email</Field.Label>
+              <Input
+                type="email"
+                value={field.state.value}
+                oninput={(e) => field.handleChange(e.currentTarget.value)}
+              />
+              {#if field.state.meta.errors.length > 0}
+                <Field.Error>{formatFieldErrors(field.state.meta.errors)}</Field.Error>
+              {/if}
+            </Field.Field>
+          {/snippet}
+        </form.Field>
 
-            <form.AppField name="password">
-              {#snippet children(field)}
-                <Field.Field>
-                  <Field.Label>Password</Field.Label>
-                  <Input
-                    type="password"
-                    value={field.state.value}
-                    oninput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
-                  />
-                </Field.Field>
-              {/snippet}
-            </form.AppField>
+        <form.Field name="password">
+          {#snippet children(field)}
+            <Field.Field>
+              <Field.Label>Password</Field.Label>
+              <Input
+                type="password"
+                value={field.state.value}
+                oninput={(e) => field.handleChange(e.currentTarget.value)}
+              />
+              {#if field.state.meta.errors.length > 0}
+                <Field.Error>{formatFieldErrors(field.state.meta.errors)}</Field.Error>
+              {/if}
+            </Field.Field>
+          {/snippet}
+        </form.Field>
 
-            {#if !token}
-              <form.AppField name="token">
-                {#snippet children(field)}
-                  <Field.Field>
-                    <Field.Label>Registration token</Field.Label>
-                    <Input
-                      value={field.state.value}
-                      oninput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
-                      placeholder="Paste token from server logs"
-                    />
-                  </Field.Field>
-                {/snippet}
-              </form.AppField>
-            {/if}
+        {#if error}
+          <p class="text-sm text-destructive">{error}</p>
+        {/if}
 
-            {#if error}
-              <p class="text-sm text-destructive">{error}</p>
-            {/if}
-
-            <form.SubmitButton label="Create account" />
-          </div>
-        {/snippet}
-      </form.AppForm>
+        <Button type="submit" disabled={form.state.isSubmitting}>
+          {#if form.state.isSubmitting}
+            <Spinner />
+          {/if}
+          Create account</Button
+        >
+      </form>
     </Card.Content>
   </Card.Root>
 </div>

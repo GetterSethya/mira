@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@tanstack/svelte-form": "^1.0.0",
-    "@tanstack/svelte-query": "^6.0.0"
+    "@tanstack/svelte-query": "^6.0.0",
+    "effect": ">=3.21"
   },
   "devDependencies": {
     "@fontsource-variable/oxanium": "^5.2.8",

@@ -14,5 +14,5 @@
   <BootstrapGuard>
     {@render children()}
   </BootstrapGuard>
-  <Toaster />
+  <Toaster richColors />
 </QueryClientProvider>
