@@ -27,6 +27,8 @@ export const Mira = {
   builder: () => new MiraBuilder(),
 }
 
-export type { MiraPlatform, MiraDatabase, MiraStorage } from "./types.js"
+export type { MiraPlatform, MiraDatabase, MiraStorage, PlatformServices } from "./types.js"
 export type { MiraApp } from "./app.js"
 export { MiraBuilder } from "./builder.js"
+export type { MiraPlugin, RecordHook, RecordSuccessHook, ListHook, ListSuccessHook } from "./plugin.js"
+export { fromLayer, isMiraPlugin, onCollection, onCollectionSuccess } from "./plugin.js"

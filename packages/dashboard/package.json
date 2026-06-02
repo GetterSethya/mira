@@ -1,0 +1,42 @@
+{
+  "name": "@gettersethya/mira-dashboard",
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "description": "Admin dashboard plugin for Mira",
+  "author": "Getter Sethya",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "build:ui": "cd ui && pnpm build",
+    "dev:ui": "cd ui && pnpm dev"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.96.1",
+    "@gettersethya/mira": "workspace:*",
+    "@gettersethya/mira-client": "workspace:*",
+    "jose": "^6.2.3"
+  },
+  "peerDependencies": {
+    "effect": ">=3.21"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.29.0",
+    "@types/node": "^25.7.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

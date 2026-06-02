@@ -2,7 +2,7 @@
   "name": "mira-workspace",
   "private": true,
   "scripts": {
-    "build":          "pnpm --filter @gettersethya/mira-collection build && pnpm --filter @gettersethya/mira-client build && pnpm --filter @gettersethya/mira build && pnpm --filter @gettersethya/mira-tanstack-adapter build",
+    "build":          "pnpm --filter @gettersethya/mira-collection build && pnpm --filter @gettersethya/mira-client build && pnpm --filter @gettersethya/mira build && pnpm --filter @gettersethya/mira-tanstack-adapter build && pnpm --filter @gettersethya/mira-dashboard build",
     "typecheck":      "pnpm -r typecheck",
     "test":           "pnpm -r test",
     "lint":           "pnpm -r lint",

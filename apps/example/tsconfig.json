@@ -9,11 +9,7 @@
     "exactOptionalPropertyTypes": true,
     "ignoreDeprecations":  "6.0",
     "skipLibCheck":        true,
-    "types":               ["node"],
-    "paths": {
-      "@gettersethya/mira":        ["../../packages/mira/dist/src/index.d.ts"],
-      "@gettersethya/mira-client": ["../../packages/client/dist/src/index.d.ts"]
-    }
+    "types":               ["node"]
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]

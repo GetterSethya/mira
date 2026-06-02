@@ -56,7 +56,7 @@ function toChainable<K extends string, V>(operand: OperandNode<K, V>): FieldOper
     startsWith(right) { return { op: "startsWith", left: operand, right } },
     contains(right) { return { op: "contains", left: operand, right } }
   }
-  return Object.assign({}, operand, methods)
+  return Object.assign(Object.create(methods) as FieldOperand<K, V>, operand)
 }
 
 /**

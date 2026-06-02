@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@gettersethya/mira": "workspace:*",
+    "@gettersethya/mira-dashboard": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {

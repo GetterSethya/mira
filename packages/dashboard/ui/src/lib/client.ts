@@ -1,0 +1,124 @@
+import { getToken, isLoggedIn } from "$lib/auth.js"
+
+const BASE = "/_dashboard/api"
+
+type RequestInit2 = {
+  method?: string
+  body?: BodyInit
+  headers?: Record<string, string>
+}
+
+async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
+  const headers: Record<string, string> = { ...init.headers }
+  if (isLoggedIn()) {
+    headers["Authorization"] = `Bearer ${getToken()}`
+  }
+  if (init.body && typeof init.body === "string") {
+    headers["Content-Type"] = "application/json"
+  }
+
+  const res = await fetch(`${BASE}${path}`, { method: init.method ?? "GET", headers, body: init.body })
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => ({}))
+    throw Object.assign(new Error("Request failed"), { status: res.status, body })
+  }
+  if (res.status === 204) return undefined as unknown as T
+  return res.json() as Promise<T>
+}
+
+export type LogsResponse = {
+  logs: { id: number; level: string; message: string; timestamp: string; traceId: string | null; spanId: string | null }[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type SpanRow = {
+  id: number
+  name: string
+  traceId: string
+  spanId: string
+  parentSpanId: string | null
+  kind: string
+  durationMs: number
+  status: "ok" | "error"
+  error: string | null
+  attributes: Record<string, string | number | boolean>
+  timestamp: string
+}
+
+export type SpansResponse = {
+  spans: SpanRow[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type SuperadminRow = { id: string; email: string; created: string }
+
+export const client = {
+  bootstrapStatus: () => request<{ bootstrapped: boolean }>("/bootstrap-status"),
+
+  login: (email: string, password: string) =>
+    request<{ token: string; expiresAt: string }>("/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+
+  register: (email: string, password: string, token: string) =>
+    request<{ id: string; email: string }>("/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password, token }),
+    }),
+
+  schema: () => request<CollectionSchema[]>("/schema"),
+
+  logs: (params: { limit?: number; offset?: number; level?: string }) => {
+    const q = new URLSearchParams()
+    if (params.limit !== undefined) q.set("limit", String(params.limit))
+    if (params.offset !== undefined) q.set("offset", String(params.offset))
+    if (params.level) q.set("level", params.level)
+    return request<LogsResponse>(`/logs?${q}`)
+  },
+
+  spans: (params: { limit?: number; offset?: number; traceId?: string }) => {
+    const q = new URLSearchParams()
+    if (params.limit !== undefined) q.set("limit", String(params.limit))
+    if (params.offset !== undefined) q.set("offset", String(params.offset))
+    if (params.traceId) q.set("traceId", params.traceId)
+    return request<SpansResponse>(`/spans?${q}`)
+  },
+
+  config: () => request<{ config: Record<string, unknown>; keys: string[] }>("/config"),
+
+  superadmins: {
+    list: () => request<{ items: SuperadminRow[] }>("/superadmin"),
+    create: (email: string, password: string) =>
+      request<{ id: string; email: string }>("/superadmin/create", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      }),
+    delete: (id: string) => request<void>(`/superadmin/${id}`, { method: "DELETE" }),
+  },
+}
+
+export type CollectionSchema = {
+  name: string
+  kind: "base" | "auth" | "view"
+  fields: Record<string, FieldSchema>
+  required?: string[]
+  indexes?: unknown[]
+  rules?: unknown
+  viewQuery?: string
+}
+
+export type FieldSchema = {
+  type?: string
+  format?: string
+  "x-kind"?: string
+  "x-system"?: boolean
+  "x-hidden"?: boolean
+  "x-required"?: boolean
+  "x-relation"?: string
+  "x-protected"?: boolean
+}

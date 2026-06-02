@@ -1,4 +1,5 @@
-import { HttpServer } from "@effect/platform"
+import { FileSystem, HttpRouter, HttpServer, Path } from "@effect/platform"
+import type { SqlClient } from "@effect/sql"
 import { Effect, Layer } from "effect"
 import { RepositoryLive } from "@/repository/repository.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
@@ -8,9 +9,15 @@ import { makeCollectionRouter } from "@/http/router.js"
 import { ThumbnailServicePhotonLive } from "@/thumbnail/index.js"
 import { ipAnnotationMiddleware } from "@/http/ip-middleware.js"
 import { AppConfig, AppConfigLive } from "@/config/index.js"
+import type { AuthService } from "@/http/auth.js"
 import { HttpServerFactory } from "@/http/server-factory.js"
+import type { Repository } from "@/repository/index.js"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { MiraAppConfig } from "./builder.js"
+import type { MiraPlugin } from "./plugin.js"
+import { makeHookServiceLayer } from "@/hooks/hook-service.js"
+import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
+import { HookService } from "@/hooks/hook-service.js"
 
 /**
  * The assembled Mira application, ready to serve.
@@ -20,7 +27,7 @@ import type { MiraAppConfig } from "./builder.js"
  *
  * `MiraApp` wires all layers (database, storage, collection service, HTTP server,
  * telemetry, auto-migration) and provides `serve()` to start the server.
- * Use `extend()` to add custom layers before serving.
+ * Use `extend()` to add plugins before serving.
  *
  * @example
  * const app = Mira.builder()
@@ -33,15 +40,15 @@ import type { MiraAppConfig } from "./builder.js"
  * app.serve()
  *
  * @example
- * // With custom layer
- * app.extend(MyCustomLayer).serve({ port: 8080 })
+ * // With plugin
+ * app.extend(MiraDashboard).serve({ port: 8080 })
  *
  * @see MiraBuilder — builds MiraApp
  * @see Mira — entry point: Mira.builder()
  */
 export class MiraApp {
   readonly #config: MiraAppConfig
-  readonly #extras: Array<Layer.Layer<never, never, never>>
+  readonly #extras: Array<MiraPlugin>
 
   constructor(config: MiraAppConfig) {
     this.#config = config
@@ -54,24 +61,35 @@ export class MiraApp {
   }
 
   /** @internal for tests only */
-  _getExtras(): ReadonlyArray<Layer.Layer<never, never, never>> {
+  _getExtras(): ReadonlyArray<MiraPlugin> {
     return this.#extras
   }
 
   /**
-   * Add an arbitrary Effect Layer to the application's layer composition.
-   * Useful for providing custom services (e.g., custom telemetry, custom auth).
-   * Layers are merged in order of calls to `extend()`.
+   * Add a plugin to the application. Plugins can register lifecycle hooks,
+   * record-lifecycle hooks, custom routes, service layers, and additional
+   * collection definitions.
    *
-   * @param layer - Any Layer<never, never, never>
+   * @param plugin - A MiraPlugin (use `fromLayer()` to wrap a plain Layer)
    * @returns this (for chaining)
    *
    * @example
-   * app.extend(Layer.succeed(MyTag, myImpl))
+   * app.extend(MiraDashboard).serve()
    */
-  extend(layer: Layer.Layer<never, never, never>): this {
-    this.#extras.push(layer)
+  extend(plugin: MiraPlugin): this {
+    this.#extras.push(plugin)
     return this
+  }
+
+  #getAllCollections(): ReadonlyArray<AnyCollectionDef> {
+    return [
+      ...(this.#config.collections as ReadonlyArray<AnyCollectionDef>),
+      ...this.#extras.flatMap((p) => p.collections ?? [])
+    ]
+  }
+
+  #getAllPlugins(): ReadonlyArray<MiraPlugin> {
+    return this.#extras
   }
 
   /**
@@ -80,7 +98,7 @@ export class MiraApp {
    * starting a network server.
    *
    * Includes: database, storage, telemetry, repository, migrator, app config,
-   * collection service (with cache), and auto-migration.
+   * collection service (with cache + hooks), and auto-migration.
    *
    * @returns A Layer providing all services
    *
@@ -91,41 +109,51 @@ export class MiraApp {
    * )
    */
   buildServiceLayer() {
-    const { platform, database, storage, collections, telemetry } = this.#config
-    const collectionList = collections as ReadonlyArray<AnyCollectionDef>
+    const { platform, database, storage, telemetry } = this.#config
+    const allCollections = this.#getAllCollections()
+    const allPlugins = this.#getAllPlugins()
 
-    const extrasLayer =
-      this.#extras.length > 0
-        ? this.#extras.reduce((acc, l) => Layer.merge(acc, l))
-        : Layer.empty
+    const pluginLayers = allPlugins.filter((p) => p.layer !== undefined).map((p) => p.layer!)
 
-    // Foundation: database + storage + thumbnail + telemetry + extras, wired on platform
+    const extrasLayer = pluginLayers.length > 0 ? pluginLayers.reduce((acc, l) => Layer.merge(acc, l)) : Layer.empty
+
+    // Foundation: database + storage + thumbnail + telemetry, wired on platform
     const foundation = Layer.mergeAll(
       database.layer,
       storage.layer,
       ThumbnailServicePhotonLive,
       telemetry,
-      extrasLayer,
     ).pipe(Layer.provideMerge(platform.layer))
 
     // Mid: Repository + Migrator + AppConfig, wired on foundation
-    const mid = Layer.mergeAll(RepositoryLive, MigratorLive, AppConfigLive).pipe(
-      Layer.provideMerge(foundation),
-    )
+    const mid = Layer.mergeAll(RepositoryLive, MigratorLive, AppConfigLive).pipe(Layer.provideMerge(foundation))
+
+    // Extras: plugin layers run after mid so they can depend on AppConfig + platform services
+    const extrasProvided = extrasLayer.pipe(Layer.provide(mid))
+    const fullMid = Layer.merge(mid, extrasProvided)
 
     // Auto-migrate on boot: runs during layer initialization before requests are served
-    const schemas: NamedSchema[] = collectionList.map((c) => ({ name: c.name, schema: c.schema }))
+    const schemas: NamedSchema[] = allCollections.map((c) => ({ name: c.name, schema: c.schema }))
     const autoMigrateLayer = Layer.effectDiscard(
       Effect.gen(function* () {
         const migrator = yield* Migrator
         yield* migrator.migrate(schemas)
-      }).pipe(Effect.orDie),
-    ).pipe(Layer.provide(mid))
+      }).pipe(Effect.orDie)
+    ).pipe(Layer.provide(fullMid))
 
-    // Top: CollectionService + all mid services + auto-migration side effect
-    return makeCachedCollectionServiceLayer(collectionList).pipe(
-      Layer.provideMerge(Layer.merge(mid, autoMigrateLayer)),
+    // Core collection service (cached)
+    const cachedCollectionLayer = makeCachedCollectionServiceLayer(allCollections)
+
+    // Hook service layer (collects all plugin hooks)
+    const hookServiceLayer = makeHookServiceLayer(allPlugins)
+
+    // Hook collection service decorator: wraps cached collection service with hooks
+    const hookCollectionLayer = makeHookCollectionServiceLayer().pipe(
+      Layer.provide(Layer.mergeAll(cachedCollectionLayer, hookServiceLayer))
     )
+
+    // Top: hook-wrapped collection service + all mid services + auto-migration side effect
+    return hookCollectionLayer.pipe(Layer.provideMerge(Layer.merge(fullMid, autoMigrateLayer)))
   }
 
   /**
@@ -138,9 +166,21 @@ export class MiraApp {
    * @internal Called by serve() — most users should use serve() directly.
    */
   buildLayer(options?: { port?: number }) {
-    const { collections } = this.#config
-    const collectionList = collections as ReadonlyArray<AnyCollectionDef>
-    const router = makeCollectionRouter(collectionList)
+    const allCollections = this.#getAllCollections()
+    const collectionRouter = makeCollectionRouter(allCollections)
+
+    // Plugin routes
+    let pluginRouter: HttpRouter.HttpRouter<
+      never,
+      FileSystem.FileSystem | Path.Path | Repository | AppConfig | AuthService | SqlClient.SqlClient
+    > = HttpRouter.empty
+    for (const plugin of this.#extras) {
+      if (plugin.routes !== undefined) {
+        pluginRouter = HttpRouter.concat(pluginRouter, plugin.routes)
+      }
+    }
+
+    const router = HttpRouter.concat(collectionRouter, pluginRouter)
     const serviceLayer = this.buildServiceLayer()
 
     const serverLayer = Layer.unwrapEffect(
@@ -148,18 +188,19 @@ export class MiraApp {
         const cfg = yield* AppConfig
         const factory = yield* HttpServerFactory
         return factory.makeLayer(options?.port ?? cfg.port)
-      }),
+      })
     )
 
     return HttpServer.serve(ipAnnotationMiddleware(router)).pipe(
       Layer.provideMerge(serverLayer),
-      Layer.provideMerge(serviceLayer),
+      Layer.provideMerge(serviceLayer)
     )
   }
 
   /**
    * Start the Mira HTTP server.
-   * Sets up all services, runs auto-migration, and listens for incoming requests.
+   * Sets up all services, runs auto-migration, runs plugin lifecycle hooks,
+   * and listens for incoming requests.
    * Blocks the main thread until the server is shut down.
    *
    * @param options.port - Optional port override (default: from AppConfig, typically 8080)
@@ -169,8 +210,17 @@ export class MiraApp {
    * app.serve({ port: 8080 }) // port override
    */
   serve(options?: { port?: number }): void {
+    const allPlugins = this.#getAllPlugins()
+    const hookServiceLayer = makeHookServiceLayer(allPlugins)
+    const fullLayer = this.buildLayer(options)
+
     this.#config.platform.runMain(
-      Layer.launch(this.buildLayer(options)).pipe(Effect.orDie),
+      Effect.gen(this, function* () {
+        const hookService = yield* HookService.pipe(Effect.provide(hookServiceLayer))
+        yield* hookService.runBootstrap()
+        yield* Layer.launch(fullLayer)
+        yield* hookService.runServe()
+      }) as Effect.Effect<never, never, never>
     )
   }
 }

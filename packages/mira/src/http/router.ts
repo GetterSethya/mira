@@ -17,6 +17,7 @@ import { parseExpandParam, parseFilterParam, parsePaginationParam, parseSelectPa
 import { processMultipartUpload } from "./files.js"
 import { makeFileServeRoute } from "./file-serve.js"
 import { makeFileTokenRoute } from "./file-token.js"
+import { makeSchemaRoute } from "./schema.js"
 
 type Ms = CollectionService | Repository | FileStorage | ThumbnailService | AppConfig | AuthService | CryptoService
 
@@ -278,6 +279,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
 
   const fileServeRoute = makeFileServeRoute(collections)
   const fileTokenRoute = makeFileTokenRoute(collections)
+  const schemaRoute = makeSchemaRoute(collections)
 
   return HttpRouter.empty.pipe(
     HttpRouter.get("/api/collections/:name", listRoute),
@@ -287,6 +289,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     HttpRouter.del("/api/collections/:name/:id", deleteRoute),
     HttpRouter.post("/api/collections/:name/auth-with-password", authRoute),
     HttpRouter.get("/api/files/:collection/:id/:filename", fileServeRoute),
-    HttpRouter.post("/api/files/token", fileTokenRoute)
+    HttpRouter.post("/api/files/token", fileTokenRoute),
+    HttpRouter.get("/api/_schema", schemaRoute)
   )
 }
