@@ -25,6 +25,8 @@
     "@effect/platform": "^0.96.1",
     "@gettersethya/mira": "workspace:*",
     "@gettersethya/mira-client": "workspace:*",
+    "@tanstack/svelte-table": "^8.21.3",
+    "@tanstack/table-core": "^8.21.3",
     "jose": "^6.2.3"
   },
   "peerDependencies": {

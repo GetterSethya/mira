@@ -1,93 +1,59 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query"
-  import { client } from "$lib/client.js"
-  import * as Table from "$lib/components/ui/table/index.js"
+  import { client, type LogsResponse } from "$lib/client.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
   import * as Select from "$lib/components/ui/select/index.js"
   import { goto } from "$app/navigation"
-  import { base } from "$app/paths"
+  import { page } from "$app/state"
+  import AppDataTable from "$lib/components/ui/app-data-table/app-data-table.svelte"
+  import type { ColumnDef } from "@tanstack/svelte-table"
+  import { renderSnippet } from "$lib/components/ui/data-table"
 
   const LIMIT = 50
-  let level = $state("")
-  let offset = $state(0)
+  let level = $derived(page.url.searchParams.get("level") ?? "")
+  let offset = $derived(Number(page.url.searchParams.get("offset") ?? 0))
 
   const logsQuery = createQuery(() => ({
     queryKey: ["logs", level, offset],
     queryFn: () => client.logs({ limit: LIMIT, offset, level: level || undefined })
   }))
 
-  const levelVariant = (l: string) => (l === "ERROR" ? "destructive" : l === "WARNING" ? "secondary" : "outline")
-
   const totalPages = $derived(logsQuery.data ? Math.ceil(logsQuery.data.total / LIMIT) : 0)
   const currentPage = $derived(Math.floor(offset / LIMIT) + 1)
+
+  const levelVariant = (l: string) => (l === "ERROR" ? "destructive" : l === "WARNING" ? "secondary" : "outline")
+
+  const columns: ColumnDef<LogsResponse["logs"][number]>[] = [
+    {
+      accessorKey: "level",
+      size: 1,
+      cell: ({ row }) => renderSnippet(LevelCellSnippet, { level: row.original.level })
+    },
+    {
+      accessorKey: "timestamp",
+      cell: ({ row }) => new Date(row.original.timestamp).toLocaleString()
+    },
+    {
+      accessorKey: "message"
+    },
+    {
+      accessorKey: "traceId",
+      cell: ({ row }) => row.original.spanId ?? "-"
+    }
+  ]
 </script>
 
-<div class="space-y-4">
+<div class="space-y-4 py-4">
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-bold">Logs</h1>
-    <Select.Root
-      type="single"
-      value={level}
-      onValueChange={(v) => {
-        level = v
-        offset = 0
-      }}
-    >
-      <Select.Trigger class="w-36">
-        {level || "All levels"}
-      </Select.Trigger>
-      <Select.Content>
-        <Select.Item value="">All levels</Select.Item>
-        <Select.Item value="INFO">INFO</Select.Item>
-        <Select.Item value="WARNING">WARNING</Select.Item>
-        <Select.Item value="ERROR">ERROR</Select.Item>
-        <Select.Item value="DEBUG">DEBUG</Select.Item>
-      </Select.Content>
-    </Select.Root>
+    {@render LogSelectSnippet()}
   </div>
 
   {#if logsQuery.isLoading}
     <p class="text-muted-foreground">Loading…</p>
   {:else if logsQuery.data}
-    <div class="rounded-md border overflow-x-auto">
-      <Table.Root>
-        <Table.Header>
-          <Table.Row>
-            <Table.Head class="w-20">Level</Table.Head>
-            <Table.Head class="w-44">Timestamp</Table.Head>
-            <Table.Head>Message</Table.Head>
-            <Table.Head class="w-36">TraceId</Table.Head>
-          </Table.Row>
-        </Table.Header>
-        <Table.Body>
-          {#each logsQuery.data.logs as log (log.id)}
-            <Table.Row>
-              <Table.Cell>
-                <Badge variant={levelVariant(log.level)} class="text-xs">{log.level}</Badge>
-              </Table.Cell>
-              <Table.Cell class="text-xs text-muted-foreground font-mono">
-                {new Date(log.timestamp).toLocaleString()}
-              </Table.Cell>
-              <Table.Cell class="text-sm max-w-xl truncate">{log.message}</Table.Cell>
-              <Table.Cell class="text-xs font-mono">
-                {#if log.traceId}
-                  <button
-                    class="text-primary hover:underline truncate max-w-[120px] block"
-                    onclick={() => goto(`${base}/spans?traceId=${log.traceId}`)}
-                    title={log.traceId}
-                  >
-                    {log.traceId.slice(0, 12)}…
-                  </button>
-                {:else}
-                  <span class="text-muted-foreground">—</span>
-                {/if}
-              </Table.Cell>
-            </Table.Row>
-          {/each}
-        </Table.Body>
-      </Table.Root>
-    </div>
+    <AppDataTable {columns} data={logsQuery.data.logs} />
 
     <div class="flex items-center justify-between text-sm text-muted-foreground">
       <span>{logsQuery.data.total} total</span>
@@ -96,7 +62,11 @@
           variant="outline"
           size="sm"
           disabled={offset === 0}
-          onclick={() => (offset = Math.max(0, offset - LIMIT))}
+          onclick={() => {
+            const searchParams = page.url.searchParams
+            searchParams.set("offset", Math.max(0, offset - LIMIT).toString())
+            return goto(`${page.url.pathname}?${searchParams.toString()}`)
+          }}
         >
           Prev
         </Button>
@@ -105,7 +75,12 @@
           variant="outline"
           size="sm"
           disabled={offset + LIMIT >= logsQuery.data.total}
-          onclick={() => (offset += LIMIT)}
+          onclick={() => {
+            const newOffset = (offset += LIMIT)
+            const searchParams = page.url.searchParams
+            searchParams.set("offset", newOffset.toString())
+            return goto(`${page.url.pathname}?${searchParams.toString()}`)
+          }}
         >
           Next
         </Button>
@@ -113,3 +88,31 @@
     </div>
   {/if}
 </div>
+
+{#snippet LogSelectSnippet()}
+  <Select.Root
+    type="single"
+    value={level}
+    onValueChange={(v) => {
+      const searchParams = page.url.searchParams
+      searchParams.set("level", v)
+      searchParams.set("offset", "0")
+      return goto(`${page.url.pathname}?${searchParams.toString()}`)
+    }}
+  >
+    <Select.Trigger class="w-36">
+      {level || "All levels"}
+    </Select.Trigger>
+    <Select.Content>
+      <Select.Item value="">All levels</Select.Item>
+      <Select.Item value="INFO">INFO</Select.Item>
+      <Select.Item value="WARNING">WARNING</Select.Item>
+      <Select.Item value="ERROR">ERROR</Select.Item>
+      <Select.Item value="DEBUG">DEBUG</Select.Item>
+    </Select.Content>
+  </Select.Root>
+{/snippet}
+
+{#snippet LevelCellSnippet({ level }: { level: string })}
+  <Badge variant={levelVariant(level)} class="text-xs">{level}</Badge>
+{/snippet}

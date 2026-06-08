@@ -1,42 +1,54 @@
 <script lang="ts">
   import { goto } from "$app/navigation"
-  import { base } from "$app/paths"
+  import { resolve } from "$app/paths"
   import { isLoggedIn, clearToken } from "$lib/auth.js"
-  import NavItem from "$lib/components/NavItem.svelte"
+  import AppSidebar from "$lib/components/app-sidebar.svelte"
   import ThemeToggle from "$lib/components/ThemeToggle.svelte"
-  import { Button } from "$lib/components/ui/button/index.js"
+  import * as Breadcrumb from "$lib/components/ui/breadcrumb/index.js"
+  import * as Sidebar from "$lib/components/ui/sidebar/index.js"
+  import { breadcrumbStore } from "$lib/stores/breadcrumb.svelte"
   import type { Snippet } from "svelte"
 
   const { children }: { children: Snippet } = $props()
 
   $effect(() => {
-    if (!isLoggedIn()) goto(`${base}/login`)
+    if (!isLoggedIn()) goto(resolve(`/login`))
   })
 
-  function logout() {
-    clearToken()
-    goto(`${base}/login`)
-  }
+  // function logout() {
+  //   clearToken()
+  //   goto(resolve(`/login`))
+  // }
 </script>
 
-<div class="flex h-screen overflow-hidden bg-background">
-  <aside class="w-56 shrink-0 border-r flex flex-col bg-sidebar text-sidebar-foreground">
-    <div class="px-4 py-3 border-b font-semibold text-sm tracking-wide">Mira Dashboard</div>
-    <nav class="flex flex-col gap-1 p-2 flex-1 overflow-y-auto">
-      <NavItem href="/" label="Overview" icon="▦" />
-      <NavItem href="/collections" label="Collections" icon="⊞" />
-      <NavItem href="/logs" label="Logs" icon="≡" />
-      <NavItem href="/spans" label="Spans" icon="⏳" />
-      <NavItem href="/config" label="Config" icon="⚙" />
-      <NavItem href="/settings" label="Settings" icon="◈" />
-    </nav>
-    <div class="p-2 border-t flex items-center gap-2">
-      <ThemeToggle />
-      <Button variant="ghost" size="sm" onclick={logout} class="flex-1 text-xs">Sign out</Button>
+<Sidebar.Provider>
+  <AppSidebar />
+  <Sidebar.Inset>
+    <header class="bg-background sticky z-40 top-0 flex h-16 shrink-0 items-center gap-2 border-b px-4">
+      <Sidebar.Trigger class="-ms-1" />
+      <Breadcrumb.Root>
+        <Breadcrumb.List>
+          {#each breadcrumbStore.current as bc, i (`${bc.type}-${bc.label}`)}
+            {#if i % 2 === 0}
+              <Breadcrumb.Separator class="hidden md:block" />
+            {/if}
+            {#if bc.type === "link"}
+              <Breadcrumb.Item class="hidden md:block">
+                <Breadcrumb.Link href={bc.href}>{bc.label}</Breadcrumb.Link>
+              </Breadcrumb.Item>
+            {/if}
+            {#if bc.type === "leaf"}
+              <Breadcrumb.Item>
+                <Breadcrumb.Page>{bc.label}</Breadcrumb.Page>
+              </Breadcrumb.Item>
+            {/if}
+          {/each}
+        </Breadcrumb.List>
+      </Breadcrumb.Root>
+      <ThemeToggle class="ml-auto" />
+    </header>
+    <div class="flex flex-1 flex-col gap-4 p-4">
+      {@render children()}
     </div>
-  </aside>
-
-  <main class="flex-1 overflow-y-auto p-6">
-    {@render children()}
-  </main>
-</div>
+  </Sidebar.Inset>
+</Sidebar.Provider>
