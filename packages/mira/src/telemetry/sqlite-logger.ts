@@ -5,6 +5,8 @@ import type { CompletedSpan } from "./tracer.js"
 import { makeConsoleTracer } from "./tracer.js"
 import { CryptoService, NodeCryptoLayer } from "@/crypto/index.js"
 import { TelemetrySqlClient } from "./telemetry-sql-client.js"
+import { Migrator, MigratorLive, Dialect, sqliteDialect } from "@/migrator/index.js"
+import { LogsCollection, SpansCollection } from "./collections.js"
 
 export interface SqliteLoggerConfig {
   /** Path to the SQLite log database. Defaults to `"mira-logs.db"`. */
@@ -15,7 +17,7 @@ export interface SqliteLoggerConfig {
 const LogLineSchema = Schema.Struct({
   level: Schema.String,
   message: Schema.String,
-  timestamp: Schema.String,
+  created: Schema.String,
   traceId: Schema.optionalWith(Schema.String, { exact: true }),
   spanId: Schema.optionalWith(Schema.String, { exact: true }),
 })
@@ -46,7 +48,8 @@ const encodeAttributes = Schema.encode(
 
 function makeSqliteLogger(
   sql: SqlClient.SqlClient,
-  logConsole: boolean
+  logConsole: boolean,
+  randomBytesSync: (size: number) => Uint8Array
 ): Logger.Logger<unknown, void> {
   const sqlLayer = Layer.succeed(SqlClient.SqlClient, sql)
 
@@ -54,31 +57,51 @@ function makeSqliteLogger(
     const ctx = FiberRefs.getOrDefault(context, FiberRef.currentContext)
     const spanOption = Context.getOption(ctx, Tracer.ParentSpan)
 
-    const line: {
+    const id = Buffer.from(randomBytesSync(16)).toString("base64url")
+    const created = date.toISOString()
+
+    const dbRow: {
+      id: string
       level: string
       message: string
-      timestamp: string
+      created: string
+      updated: string
       traceId?: string
       spanId?: string
     } = {
+      id,
       level: logLevel.label,
       message: String(Array.isArray(message) ? message.join(" ") : message),
-      timestamp: date.toISOString(),
+      created,
+      updated: created,
     }
     if (Option.isSome(spanOption)) {
-      line.traceId = spanOption.value.traceId
-      line.spanId = spanOption.value.spanId
+      dbRow.traceId = spanOption.value.traceId
+      dbRow.spanId = spanOption.value.spanId
     }
 
     Effect.runPromise(
-      sql`INSERT INTO ${sql("logs")} ${sql.insert(line)}`.pipe(
+      sql`INSERT INTO ${sql("logs")} ${sql.insert(dbRow)}`.pipe(
         Effect.provide(sqlLayer),
         Effect.orDie
       )
     ).catch(() => {})
 
     if (logConsole) {
-      console.log(encodeLogLine(line))
+      const consoleLine: {
+        level: string
+        message: string
+        created: string
+        traceId?: string
+        spanId?: string
+      } = {
+        level: dbRow.level,
+        message: dbRow.message,
+        created: dbRow.created,
+      }
+      if (dbRow.traceId !== undefined) consoleLine.traceId = dbRow.traceId
+      if (dbRow.spanId !== undefined) consoleLine.spanId = dbRow.spanId
+      console.log(encodeLogLine(consoleLine))
     }
   })
 }
@@ -86,14 +109,18 @@ function makeSqliteLogger(
 function writeSpanToDb(
   sql: SqlClient.SqlClient,
   span: CompletedSpan,
-  logConsole: boolean
+  logConsole: boolean,
+  randomBytesSync: (size: number) => Uint8Array
 ): Effect.Effect<void> {
   const sqlLayer = Layer.succeed(SqlClient.SqlClient, sql)
 
   return Effect.gen(function* () {
     const attributesJson = yield* encodeAttributes(span.attributes).pipe(Effect.orDie)
 
+    const id = Buffer.from(randomBytesSync(16)).toString("base64url")
+    const created = new Date().toISOString()
     const row = {
+      id,
       name: span.name,
       traceId: span.traceId,
       spanId: span.spanId,
@@ -103,7 +130,8 @@ function writeSpanToDb(
       status: span.status,
       error: span.error ?? null,
       attributes: attributesJson,
-      timestamp: new Date().toISOString(),
+      created,
+      updated: created,
     }
 
     yield* sql`INSERT INTO ${sql("spans")} ${sql.insert(row)}`.pipe(
@@ -156,38 +184,27 @@ export function makeSqliteTelemetryLayerForClient(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const cryptoSvc = yield* CryptoService
+      const randomBytesSync = (size: number) => cryptoSvc.randomBytesSync(size)
 
-      yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS logs (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        level     TEXT NOT NULL,
-        message   TEXT NOT NULL,
-        timestamp TEXT NOT NULL,
-        traceId   TEXT,
-        spanId    TEXT
-      )`).pipe(Effect.orDie)
+      yield* Effect.gen(function* () {
+        const migrator = yield* Migrator
+        yield* migrator.migrate([
+          { name: "logs",  schema: LogsCollection.schema },
+          { name: "spans", schema: SpansCollection.schema },
+        ])
+      }).pipe(
+        Effect.provide(MigratorLive.pipe(Layer.provide(Layer.succeed(Dialect, sqliteDialect)))),
+        Effect.provide(Layer.succeed(SqlClient.SqlClient, sql)),
+        Effect.orDie
+      )
 
-      yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS spans (
-        id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        name         TEXT NOT NULL,
-        traceId      TEXT NOT NULL,
-        spanId       TEXT NOT NULL,
-        parentSpanId TEXT,
-        kind         TEXT NOT NULL,
-        durationMs   REAL NOT NULL,
-        status       TEXT NOT NULL,
-        error        TEXT,
-        attributes   TEXT NOT NULL,
-        timestamp    TEXT NOT NULL
-      )`).pipe(Effect.orDie)
-
-      const logger = makeSqliteLogger(sql, logConsole)
-
+      const logger = makeSqliteLogger(sql, logConsole, randomBytesSync)
       const queue = yield* Queue.unbounded<CompletedSpan>()
 
       // Registered first → runs last (LIFO): drain items still in queue at shutdown.
       yield* Effect.addFinalizer(() =>
         Queue.takeAll(queue).pipe(
-          Effect.flatMap(Effect.forEach((span) => writeSpanToDb(sql, span, logConsole))),
+          Effect.flatMap(Effect.forEach((span) => writeSpanToDb(sql, span, logConsole, randomBytesSync))),
           Effect.asVoid
         )
       )
@@ -195,11 +212,11 @@ export function makeSqliteTelemetryLayerForClient(
       // Registered second → runs first (LIFO): stop the consumer fiber.
       yield* Effect.forkScoped(
         Effect.forever(
-          Queue.take(queue).pipe(Effect.flatMap((span) => writeSpanToDb(sql, span, logConsole)))
+          Queue.take(queue).pipe(Effect.flatMap((span) => writeSpanToDb(sql, span, logConsole, randomBytesSync)))
         )
       )
 
-      const tracer = makeConsoleTracer(queue, (size) => cryptoSvc.randomBytesSync(size))
+      const tracer = makeConsoleTracer(queue, randomBytesSync)
 
       return Layer.merge(
         Logger.replace(Logger.defaultLogger, logger),

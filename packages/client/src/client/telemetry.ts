@@ -1,4 +1,5 @@
 import { HttpClientRequest as HCR } from "@effect/platform"
+import type { FilterNode } from "@gettersethya/mira-collection"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler } from "./handler.js"
 
@@ -43,7 +44,7 @@ export type TelemetryClient = {
   getLogs(opts?: {
     limit?: number
     offset?: number
-    level?: string
+    filter?: FilterNode
   }): ClientHandler<LogsResponse>
 
   getSpans(opts?: {
@@ -68,7 +69,7 @@ export function makeTelemetryClient(execute: ExecuteFn): TelemetryClient {
       const qs = buildQueryParams({
         limit: opts?.limit !== undefined ? String(opts.limit) : undefined,
         offset: opts?.offset !== undefined ? String(opts.offset) : undefined,
-        level: opts?.level,
+        filter: opts?.filter !== undefined ? JSON.stringify(opts.filter) : undefined,
       })
       return makeClientHandler(execute<LogsResponse>(HCR.get(`/api/_telemetry/logs${qs}`)))
     },

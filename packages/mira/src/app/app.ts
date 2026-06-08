@@ -218,8 +218,8 @@ export class MiraApp {
     this.#config.platform.runMain(
       Effect.gen(this, function* () {
         const hookService = yield* HookService.pipe(Effect.provide(hookServiceLayer))
-        yield* hookService.runBootstrap()
-        yield* Layer.launch(fullLayer)
+        const bootstrapLayer = Layer.effectDiscard(hookService.runBootstrap())
+        yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))
         yield* hookService.runServe()
       }) as Effect.Effect<never, never, never>
     )

@@ -1,3 +1,4 @@
+import type { FilterNode } from "@gettersethya/mira-collection"
 import { getToken, isLoggedIn } from "$lib/auth.js"
 
 const BASE = "/_dashboard/api"
@@ -28,14 +29,14 @@ async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
 }
 
 export type LogsResponse = {
-  logs: { id: number; level: string; message: string; timestamp: string; traceId: string | null; spanId: string | null }[]
+  logs: { id: string; level: string; message: string; created: string; traceId: string | null; spanId: string | null }[]
   total: number
   limit: number
   offset: number
 }
 
 export type SpanRow = {
-  id: number
+  id: string
   name: string
   traceId: string
   spanId: string
@@ -45,7 +46,7 @@ export type SpanRow = {
   status: "ok" | "error"
   error: string | null
   attributes: Record<string, string | number | boolean>
-  timestamp: string
+  created: string
 }
 
 export type SpansResponse = {
@@ -74,11 +75,11 @@ export const client = {
 
   schema: () => request<CollectionSchema[]>(`${API_BASE}/_schema`),
 
-  logs: (params: { limit?: number; offset?: number; level?: string }) => {
+  logs: (params: { limit?: number; offset?: number; filter?: FilterNode }) => {
     const q = new URLSearchParams()
     if (params.limit !== undefined) q.set("limit", String(params.limit))
     if (params.offset !== undefined) q.set("offset", String(params.offset))
-    if (params.level) q.set("level", params.level)
+    if (params.filter !== undefined) q.set("filter", JSON.stringify(params.filter))
     return request<LogsResponse>(`${API_BASE}/_telemetry/logs?${q}`)
   },
 

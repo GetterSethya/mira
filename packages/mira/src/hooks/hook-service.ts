@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from "effect"
 import type { MiraPlugin } from "@/app/plugin.js"
+import type { AppConfig } from "@/config/index.js"
 import type {
   RecordHookContext, RecordResultContext,
   ListHookContext, ListResultContext,
@@ -31,7 +32,7 @@ export class HookService extends Context.Tag("HookService")<HookService, {
   runRecordViewSuccess(ctx: ViewResultContext): Effect.Effect<void, never, never>
   runRecordViewError(ctx: HookErrorContext): Effect.Effect<void, never, never>
 
-  runBootstrap(): Effect.Effect<void, never, never>
+  runBootstrap(): Effect.Effect<void, never, AppConfig>
   runServe(): Effect.Effect<void, never, never>
   runTerminate(): Effect.Effect<void, never, never>
 }>() {}
@@ -227,7 +228,7 @@ export function makeHookServiceLayer(
       ).pipe(Effect.asVoid),
 
     runBootstrap: () =>
-      Effect.forEach(plugins, (p) => p.onBootstrap ? p.onBootstrap() : Effect.void) as Effect.Effect<void, never, never>,
+      Effect.forEach(plugins, (p) => p.onBootstrap ? p.onBootstrap() : Effect.void),
 
     runServe: () =>
       Effect.forEach(plugins, (p) => p.onServe ? p.onServe() : Effect.void) as Effect.Effect<void, never, never>,

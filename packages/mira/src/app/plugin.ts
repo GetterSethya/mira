@@ -47,7 +47,7 @@ export const onCollectionSuccess = <T>(
 export interface MiraPlugin {
   readonly _tag: "MiraPlugin"
 
-  readonly onBootstrap?: () => Effect.Effect<void, never, never>
+  readonly onBootstrap?: () => Effect.Effect<void, never, AppConfig>
   readonly onServe?: () => Effect.Effect<void, never, never>
   readonly onTerminate?: () => Effect.Effect<void, never, never>
 

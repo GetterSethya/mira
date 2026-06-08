@@ -3,7 +3,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Either, Layer, Match } from "effect"
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
-import { BaseCollection } from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
 import { Rule } from "@gettersethya/mira-client"
@@ -1024,4 +1024,91 @@ describe("literalText integration", () => {
       const updated = yield* svc.update(Roles, id, { role: "agent" }, noCtx)
       expect(updated["role"]).toBe("agent")
     }).pipe(Effect.provide(rolesTestLayer)))
+})
+
+// ---------------------------------------------------------------------------
+// AuthCollection create — regression: email/password were blocked by x-system
+// ---------------------------------------------------------------------------
+
+const SuperAdmin = AuthCollection.define("_superadmin", {}).rules((R) => ({
+  list: R.field("email").eq(R.literal("")),
+  view: R.field("email").eq(R.literal("")),
+  create: R.public(),
+  update: R.field("email").eq(R.literal("")),
+  delete: R.field("email").eq(R.literal(""))
+}))
+
+const setupSuperAdminTable = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "_superadmin" (
+      "seqId"         INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"            TEXT NOT NULL UNIQUE,
+      "email"         TEXT NOT NULL UNIQUE,
+      "password"      TEXT NOT NULL,
+      "emailVerified" INTEGER NOT NULL DEFAULT 0,
+      "created"       TEXT NOT NULL,
+      "updated"       TEXT NOT NULL
+    )
+  `)
+  yield* sql.unsafe(`DELETE FROM "_superadmin"`)
+})
+
+const superAdminTestLayer = Layer.mergeAll(
+  makeCollectionServiceLayer([SuperAdmin]).pipe(
+    Layer.provide(RepositoryLive),
+    Layer.provide(sqliteLayer),
+    Layer.provide(FileStorageTest),
+    Layer.provide(NodeCryptoLayer)
+  ),
+  sqliteLayer,
+  FileStorageTest,
+  NodeCryptoLayer
+)
+
+const adminCtx: RequestCtx = { headers: {}, query: {}, admin: true }
+
+describe("AuthCollection create", () => {
+  it.effect("succeeds with email and password (regression: was blocked by x-system check)", () =>
+    Effect.gen(function* () {
+      yield* setupSuperAdminTable
+      const svc = yield* CollectionService
+      const record = yield* svc.create(SuperAdmin, { email: "admin@example.com", password: "hashed-pw" }, adminCtx)
+      expect(record["email"]).toBe("admin@example.com")
+      expect(typeof record["id"]).toBe("string")
+      expect(record["id"]).not.toBe("")
+    }).pipe(Effect.provide(superAdminTestLayer)))
+
+  it.effect("rejects attempt to set generated field id", () =>
+    Effect.gen(function* () {
+      yield* setupSuperAdminTable
+      const svc = yield* CollectionService
+      const result = yield* svc.create(SuperAdmin, { email: "a@b.com", password: "pw", id: "custom-id" }, adminCtx).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("ValidationError")
+      }
+    }).pipe(Effect.provide(superAdminTestLayer)))
+
+  it.effect("fails validation when email is missing", () =>
+    Effect.gen(function* () {
+      yield* setupSuperAdminTable
+      const svc = yield* CollectionService
+      const result = yield* svc.create(SuperAdmin, { password: "pw" }, adminCtx).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("ValidationError")
+      }
+    }).pipe(Effect.provide(superAdminTestLayer)))
+
+  it.effect("fails validation when email format is invalid", () =>
+    Effect.gen(function* () {
+      yield* setupSuperAdminTable
+      const svc = yield* CollectionService
+      const result = yield* svc.create(SuperAdmin, { email: "notanemail", password: "pw" }, adminCtx).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+      if (Either.isLeft(result)) {
+        expect(result.left._tag).toBe("ValidationError")
+      }
+    }).pipe(Effect.provide(superAdminTestLayer)))
 })

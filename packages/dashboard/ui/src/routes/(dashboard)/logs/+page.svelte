@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query"
+  import { Filter } from "@gettersethya/mira-collection"
   import { client, type LogsResponse } from "$lib/client.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
@@ -16,7 +17,7 @@
 
   const logsQuery = createQuery(() => ({
     queryKey: ["logs", level, offset],
-    queryFn: () => client.logs({ limit: LIMIT, offset, level: level || undefined })
+    queryFn: () => client.logs({ limit: LIMIT, offset })
   }))
 
   const totalPages = $derived(logsQuery.data ? Math.ceil(logsQuery.data.total / LIMIT) : 0)
@@ -31,8 +32,8 @@
       cell: ({ row }) => renderSnippet(LevelCellSnippet, { level: row.original.level })
     },
     {
-      accessorKey: "timestamp",
-      cell: ({ row }) => new Date(row.original.timestamp).toLocaleString()
+      accessorKey: "created",
+      cell: ({ row }) => new Date(row.original.created).toLocaleString()
     },
     {
       accessorKey: "message"

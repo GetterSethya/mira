@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option, Redacted } from "effect"
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
@@ -6,6 +6,16 @@ import { HookService, makeHookServiceLayer } from "@/hooks/hook-service.js"
 import type { MiraPlugin } from "@/app/plugin.js"
 import { fromLayer } from "@/app/plugin.js"
 import type { RecordHookContext, ListHookContext, ViewHookContext } from "@/hooks/types.js"
+import { AppConfig } from "@/config/index.js"
+
+const TestAppConfig = Layer.succeed(AppConfig, {
+  appName: "test",
+  port: 8080,
+  applicationUrl: "http://localhost:8080",
+  jwtSecret: Redacted.make("test-secret"),
+  useS3: false,
+  s3Config: Option.none(),
+})
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text(),
@@ -120,12 +130,15 @@ describe("HookService", () => {
       yield* hooks.runBootstrap()
       yield* hooks.runServe()
       yield* hooks.runTerminate()
-    }).pipe(Effect.provide(makeHookServiceLayer([{
-      _tag: "MiraPlugin",
-      onBootstrap: () => Effect.void,
-      onServe: () => Effect.void,
-      onTerminate: () => Effect.void,
-    }])))
+    }).pipe(Effect.provide(Layer.merge(
+      makeHookServiceLayer([{
+        _tag: "MiraPlugin",
+        onBootstrap: () => Effect.void,
+        onServe: () => Effect.void,
+        onTerminate: () => Effect.void,
+      }]),
+      TestAppConfig
+    )))
   )
 
   it.effect("runs onRecordUpdate hook", () =>

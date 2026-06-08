@@ -3,12 +3,11 @@
   import { client } from "$lib/client.js"
   import * as Table from "$lib/components/ui/table/index.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
-  import { base } from "$app/paths"
+  import { resolve } from "$app/paths"
 
   const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => client.schema() }))
 
-  const kindVariant = (kind: string) =>
-    kind === "auth" ? "secondary" : kind === "view" ? "outline" : "default"
+  const kindVariant = (kind: string) => (kind === "auth" ? "secondary" : kind === "view" ? "outline" : "default")
 </script>
 
 <div class="space-y-4">
@@ -38,7 +37,7 @@
                 {Object.keys(col.fields).length} fields
               </Table.Cell>
               <Table.Cell>
-                <a href="{base}/collections/{col.name}" class="text-sm text-primary hover:underline">
+                <a href={resolve(`/collections/${col.name}`)} class="text-sm text-primary hover:underline">
                   View records →
                 </a>
               </Table.Cell>

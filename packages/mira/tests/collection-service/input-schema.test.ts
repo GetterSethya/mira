@@ -1,7 +1,7 @@
 import { Effect, Either, Match, Schema } from "effect"
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
-import { BaseCollection } from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { buildInputSchemas, parseErrToValidationError } from "@/collection-service/input-schema.js"
@@ -406,6 +406,58 @@ describe("error callback", () => {
       })
       const result = yield* updateDecode(col, {}).pipe(Effect.either)
       expect(Either.isRight(result)).toBe(true)
+    })
+  )
+})
+
+// ---------------------------------------------------------------------------
+// AuthCollection input schema — regression for email/password being blocked
+// ---------------------------------------------------------------------------
+
+describe("AuthCollection input schema", () => {
+  it.effect("email and password are required in create schema", () =>
+    Effect.gen(function* () {
+      const col = AuthCollection.define("users", {})
+      const missingPw = yield* createDecode(col, { email: "a@b.com" }).pipe(Effect.either)
+      expect(Either.isLeft(missingPw)).toBe(true)
+      const missingEmail = yield* createDecode(col, { password: "pw" }).pipe(Effect.either)
+      expect(Either.isLeft(missingEmail)).toBe(true)
+    })
+  )
+
+  it.effect("valid email and password pass create schema", () =>
+    Effect.gen(function* () {
+      const col = AuthCollection.define("users", {})
+      const result = yield* createDecode(col, { email: "a@b.com", password: "secret" }).pipe(Effect.either)
+      expect(Either.isRight(result)).toBe(true)
+    })
+  )
+
+  it.effect("emailVerified is optional — create succeeds without it", () =>
+    Effect.gen(function* () {
+      const col = AuthCollection.define("users", {})
+      const result = yield* createDecode(col, { email: "a@b.com", password: "pw" }).pipe(Effect.either)
+      expect(Either.isRight(result)).toBe(true)
+    })
+  )
+
+  it.effect("invalid email format fails create schema", () =>
+    Effect.gen(function* () {
+      const col = AuthCollection.define("users", {})
+      const result = yield* createDecode(col, { email: "notanemail", password: "pw" }).pipe(Effect.either)
+      expect(Either.isLeft(result)).toBe(true)
+    })
+  )
+
+  it.effect("generated fields (id, created, updated) are stripped by create schema", () =>
+    Effect.gen(function* () {
+      const col = AuthCollection.define("users", {})
+      const result = yield* createDecode(col, { email: "a@b.com", password: "pw", id: "hack", created: "2024" }).pipe(Effect.either)
+      expect(Either.isRight(result)).toBe(true)
+      if (Either.isRight(result)) {
+        expect("id" in result.right).toBe(false)
+        expect("created" in result.right).toBe(false)
+      }
     })
   )
 })

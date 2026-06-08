@@ -44,7 +44,7 @@ describe("makeSqliteTelemetryLayerForClient", () => {
       yield* Effect.promise(drainMicrotasks)
 
       const sql = yield* SqlClient.SqlClient
-      const rows = yield* sql<{ level: string; message: string }>`SELECT level, message FROM logs ORDER BY id`
+      const rows = yield* sql<{ level: string; message: string }>`SELECT level, message FROM logs ORDER BY seqId`
 
       const levels = rows.map((r) => r.level)
       expect(levels).toContain("INFO")
@@ -88,19 +88,19 @@ describe("makeSqliteTelemetryLayerForClient", () => {
     expect(sqliteCall).toBeUndefined()
   })
 
-  it.effect("timestamp is a valid ISO string", () =>
+  it.effect("created is a valid ISO string", () =>
     Effect.gen(function* () {
       yield* Effect.logInfo("ts-test")
       yield* Effect.promise(drainMicrotasks)
 
       const sql = yield* SqlClient.SqlClient
-      const rows = yield* sql<{ timestamp: string }>`SELECT timestamp FROM logs WHERE message = 'ts-test'`
+      const rows = yield* sql<{ created: string }>`SELECT created FROM logs WHERE message = 'ts-test'`
 
       expect(rows.length).toBeGreaterThan(0)
       const firstRow = rows[0]
       expect(firstRow).toBeDefined()
       if (firstRow === undefined) return
-      expect(new Date(firstRow.timestamp).getTime()).not.toBeNaN()
+      expect(new Date(firstRow.created).getTime()).not.toBeNaN()
     }).pipe(Effect.provide(makeLayer()))
   )
 
@@ -192,6 +192,88 @@ describe("makeSqliteTelemetryLayerForClient", () => {
       expect(row).toBeDefined()
       expect(row?.traceId).not.toBeNull()
       expect(row?.spanId).not.toBeNull()
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("log rows have id (TEXT) and seqId (INTEGER)", () =>
+    Effect.gen(function* () {
+      yield* Effect.logInfo("id-test")
+      yield* Effect.promise(drainMicrotasks)
+
+      const sql = yield* SqlClient.SqlClient
+      const rows = yield* sql<{ id: string; seqId: number }>`SELECT id, seqId FROM logs WHERE message = 'id-test'`
+
+      expect(rows.length).toBeGreaterThan(0)
+      const row = rows[0]
+      expect(row).toBeDefined()
+      if (row === undefined) return
+      expect(typeof row.id).toBe("string")
+      expect(row.id.length).toBeGreaterThan(0)
+      expect(typeof row.seqId).toBe("number")
+      expect(row.seqId).toBeGreaterThan(0)
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("log rows have created and updated fields equal to each other", () =>
+    Effect.gen(function* () {
+      yield* Effect.logInfo("created-updated-test")
+      yield* Effect.promise(drainMicrotasks)
+
+      const sql = yield* SqlClient.SqlClient
+      const rows = yield* sql<{ created: string; updated: string }>`SELECT created, updated FROM logs WHERE message = 'created-updated-test'`
+
+      expect(rows.length).toBeGreaterThan(0)
+      const row = rows[0]
+      expect(row).toBeDefined()
+      if (row === undefined) return
+      expect(new Date(row.created).getTime()).not.toBeNaN()
+      expect(new Date(row.updated).getTime()).not.toBeNaN()
+      expect(row.created).toBe(row.updated)
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("span rows have id (TEXT) and seqId (INTEGER)", () =>
+    Effect.gen(function* () {
+      yield* Effect.void.pipe(Effect.withSpan("span-id-test"))
+      yield* Effect.promise(drainMicrotasks)
+
+      const sql = yield* SqlClient.SqlClient
+      const rows = yield* sql<{ id: string; seqId: number }>`SELECT id, seqId FROM spans WHERE name = 'span-id-test'`
+
+      expect(rows.length).toBeGreaterThan(0)
+      const row = rows[0]
+      expect(row).toBeDefined()
+      if (row === undefined) return
+      expect(typeof row.id).toBe("string")
+      expect(row.id.length).toBeGreaterThan(0)
+      expect(typeof row.seqId).toBe("number")
+      expect(row.seqId).toBeGreaterThan(0)
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("span rows have created field as valid ISO string", () =>
+    Effect.gen(function* () {
+      yield* Effect.void.pipe(Effect.withSpan("span-created-test"))
+      yield* Effect.promise(drainMicrotasks)
+
+      const sql = yield* SqlClient.SqlClient
+      const rows = yield* sql<{ created: string }>`SELECT created FROM spans WHERE name = 'span-created-test'`
+
+      expect(rows.length).toBeGreaterThan(0)
+      const row = rows[0]
+      expect(row).toBeDefined()
+      if (row === undefined) return
+      expect(new Date(row.created).getTime()).not.toBeNaN()
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("migrator creates _collections and _migrations tables", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const rows = yield* sql<{ name: string }>`SELECT name FROM _collections ORDER BY name`
+      const names = rows.map((r) => r.name)
+      expect(names).toContain("logs")
+      expect(names).toContain("spans")
     }).pipe(Effect.provide(makeLayer()))
   )
 })

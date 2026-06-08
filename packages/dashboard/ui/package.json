@@ -9,6 +9,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
+    "@gettersethya/mira-collection": "workspace:*",
     "@tanstack/svelte-form": "^1.0.0",
     "@tanstack/svelte-query": "^6.0.0",
     "effect": ">=3.21"

@@ -3,7 +3,6 @@ import { FileSystem, Path } from "@effect/platform"
 import { Cause, Effect, Option } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { Repository, AuthService, AppConfig, CollectionService } from "@gettersethya/mira"
-import { catchCollectionErrors } from "@gettersethya/mira"
 import { bootstrapStatusRoute } from "./api/bootstrap-status.js"
 import { registerRoute } from "./api/register.js"
 import { createSuperadminRoute, listSuperadminsRoute, deleteSuperadminRoute } from "./api/superadmin.js"
@@ -22,7 +21,7 @@ function makeContentType(ext: string): string {
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
     ".woff": "font/woff",
-    ".woff2": "font/woff2",
+    ".woff2": "font/woff2"
   }
   return types[ext] ?? "application/octet-stream"
 }
@@ -70,15 +69,12 @@ function makeDashboardSpaRoute(): HttpRouter.HttpRouter<never, FileSystem.FileSy
       const contentType = makeContentType(ext)
 
       return HttpServerResponse.raw(content, {
-        headers: { "content-type": contentType },
+        headers: { "content-type": contentType }
       })
     })
   )
 
-  return HttpRouter.empty.pipe(
-    HttpRouter.get("/_dashboard", spaHandler),
-    HttpRouter.get("/_dashboard/*", spaHandler),
-  )
+  return HttpRouter.empty.pipe(HttpRouter.get("/_dashboard", spaHandler), HttpRouter.get("/_dashboard/*", spaHandler))
 }
 
 type DashboardRouterServices =
@@ -90,7 +86,7 @@ type DashboardRouterServices =
   | CollectionService
 
 export function makeDashboardRouter(
-  collections: ReadonlyArray<AnyCollectionDef>
+  _collections: ReadonlyArray<AnyCollectionDef>
 ): HttpRouter.HttpRouter<never, DashboardRouterServices> {
   return HttpRouter.empty.pipe(
     HttpRouter.get("/_dashboard/api/bootstrap-status", wrapRoute(bootstrapStatusRoute)),
@@ -100,6 +96,6 @@ export function makeDashboardRouter(
     HttpRouter.get("/_dashboard/api/superadmin", wrapRoute(listSuperadminsRoute)),
     HttpRouter.del("/_dashboard/api/superadmin/:id", wrapRoute(deleteSuperadminRoute)),
     HttpRouter.get("/_dashboard/api/config", wrapRoute(configRoute)),
-    HttpRouter.concat(makeDashboardSpaRoute()),
+    HttpRouter.concat(makeDashboardSpaRoute())
   )
 }

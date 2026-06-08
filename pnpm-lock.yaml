@@ -117,6 +117,9 @@ importers:
 
   packages/dashboard/ui:
     dependencies:
+      '@gettersethya/mira-collection':
+        specifier: workspace:*
+        version: link:../../collection
       '@tanstack/svelte-form':
         specifier: ^1.0.0
         version: 1.33.0(svelte@5.55.10)

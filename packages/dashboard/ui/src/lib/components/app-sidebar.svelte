@@ -1,145 +1,4 @@
 <script lang="ts" module>
-  // sample data
-  const data = {
-    versions: ["1.0.1", "1.1.0-alpha", "2.0.0-beta1"],
-    navMain: [
-      {
-        title: "Getting Started",
-        url: "#",
-        items: [
-          {
-            title: "Installation",
-            url: "#"
-          },
-          {
-            title: "Project Structure",
-            url: "#"
-          }
-        ]
-      },
-      {
-        title: "Build Your Application",
-        url: "#",
-        items: [
-          {
-            title: "Routing",
-            url: "#"
-          },
-          {
-            title: "Data Fetching",
-            url: "#",
-            isActive: true
-          },
-          {
-            title: "Rendering",
-            url: "#"
-          },
-          {
-            title: "Caching",
-            url: "#"
-          },
-          {
-            title: "Styling",
-            url: "#"
-          },
-          {
-            title: "Optimizing",
-            url: "#"
-          },
-          {
-            title: "Configuring",
-            url: "#"
-          },
-          {
-            title: "Testing",
-            url: "#"
-          },
-          {
-            title: "Authentication",
-            url: "#"
-          },
-          {
-            title: "Deploying",
-            url: "#"
-          },
-          {
-            title: "Upgrading",
-            url: "#"
-          },
-          {
-            title: "Examples",
-            url: "#"
-          }
-        ]
-      },
-      {
-        title: "API Reference",
-        url: "#",
-        items: [
-          {
-            title: "Components",
-            url: "#"
-          },
-          {
-            title: "File Conventions",
-            url: "#"
-          },
-          {
-            title: "Functions",
-            url: "#"
-          },
-          {
-            title: "next.config.js Options",
-            url: "#"
-          },
-          {
-            title: "CLI",
-            url: "#"
-          },
-          {
-            title: "Edge Runtime",
-            url: "#"
-          }
-        ]
-      },
-      {
-        title: "Architecture",
-        url: "#",
-        items: [
-          {
-            title: "Accessibility",
-            url: "#"
-          },
-          {
-            title: "Fast Refresh",
-            url: "#"
-          },
-          {
-            title: "Next.js Compiler",
-            url: "#"
-          },
-          {
-            title: "Supported Browsers",
-            url: "#"
-          },
-          {
-            title: "Turbopack",
-            url: "#"
-          }
-        ]
-      },
-      {
-        title: "Community",
-        url: "#",
-        items: [
-          {
-            title: "Contribution Guide",
-            url: "#"
-          }
-        ]
-      }
-    ]
-  }
 </script>
 
 <script lang="ts">
@@ -149,8 +8,63 @@
   import type { ComponentProps } from "svelte"
   import Layout from "@tabler/icons-svelte/icons/layout"
   import { resolve } from "$app/paths"
+  import { createQuery } from "@tanstack/svelte-query"
+  import { client } from "$lib/client"
+  import { page } from "$app/state"
+  import { IconServer, IconStack2 } from "@tabler/icons-svelte"
 
   let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props()
+
+  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => client.schema() }))
+
+  const collections = $derived(
+    schemaQuery.isSuccess
+      ? schemaQuery.data
+          .filter((schema) => !schema.name.startsWith("_"))
+          .map((schema) => ({
+            title: schema.name,
+            url: resolve(`/collections/${schema.name}`)
+          }))
+      : []
+  )
+
+  const systemCollections = $derived(
+    schemaQuery.isSuccess
+      ? schemaQuery.data
+          .filter((schema) => schema.name.startsWith("_"))
+          .map((schema) => ({
+            title: schema.name,
+            url: resolve(`/collections/${schema.name}`)
+          }))
+      : []
+  )
+
+  const data = $derived({
+    navItem: [
+      {
+        title: "Collections",
+        url: "/collections",
+        items: collections,
+        icon: IconStack2
+      },
+      {
+        title: "System",
+        url: "/collections",
+        items: [
+          ...systemCollections,
+          {
+            title: "logs",
+            url: resolve("/logs")
+          },
+          {
+            title: "spans",
+            url: resolve("/spans")
+          }
+        ],
+        icon: IconServer
+      }
+    ]
+  })
 </script>
 
 <Sidebar.Root bind:ref {...restProps}>
@@ -170,7 +84,8 @@
   </Sidebar.Header>
   <Sidebar.Content class="gap-0">
     <!-- We create a collapsible SidebarGroup for each parent. -->
-    {#each data.navMain as item (item.title)}
+    {#each data.navItem as item (item.title)}
+      {@const Icon = item.icon}
       <Collapsible.Root title={item.title} open class="group/collapsible">
         <Sidebar.Group>
           <Sidebar.GroupLabel
@@ -178,6 +93,7 @@
           >
             {#snippet child({ props })}
               <Collapsible.Trigger {...props}>
+                <Icon class="me-2" />
                 {item.title}
                 <ChevronRight class="ms-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
               </Collapsible.Trigger>
@@ -188,7 +104,7 @@
               <Sidebar.Menu>
                 {#each item.items as subItem (subItem.title)}
                   <Sidebar.MenuItem>
-                    <Sidebar.MenuButton isActive={subItem.isActive}>
+                    <Sidebar.MenuButton isActive={page.url.pathname === subItem.url}>
                       {#snippet child({ props })}
                         <a href={subItem.url} {...props}>{subItem.title}</a>
                       {/snippet}

@@ -6,7 +6,7 @@ export const SuperAdminCollection: AnyCollectionDef = AuthCollection.define("_su
   view: R.field("email").eq(R.literal("")),
   create: R.public(),
   update: R.field("email").eq(R.literal("")),
-  delete: R.field("email").eq(R.literal("")),
+  delete: R.field("email").eq(R.literal(""))
 }))
 
 let _registerToken = ""

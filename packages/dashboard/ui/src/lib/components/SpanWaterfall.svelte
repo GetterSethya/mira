@@ -32,7 +32,7 @@
     }
     function setDepth(node: SpanNode, depth: number) {
       node.depth = depth
-      node.children.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      node.children.sort((a, b) => a.created.localeCompare(b.created))
       for (const c of node.children) setDepth(c, depth + 1)
     }
     for (const r of roots) setDepth(r, 0)

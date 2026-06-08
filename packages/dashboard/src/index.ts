@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import type { MiraPlugin } from "@gettersethya/mira"
-import { SuperAdminCollection, getRegisterToken, setRegisterToken, generateRegisterToken } from "./superadmin.js"
+import { AppConfig } from "@gettersethya/mira"
+import { SuperAdminCollection, setRegisterToken, generateRegisterToken } from "./superadmin.js"
 import { makeDashboardRouter } from "./router.js"
 
 export const MiraDashboard: MiraPlugin = {
@@ -11,27 +12,27 @@ export const MiraDashboard: MiraPlugin = {
   routes: makeDashboardRouter([SuperAdminCollection]),
 
   onBootstrap: () =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const token = generateRegisterToken()
       setRegisterToken(token)
-    }).pipe(Effect.tap(() => Effect.log("[dashboard] Dashboard plugin loaded"))),
+      const cfg = yield* AppConfig
+      yield* Effect.log("[dashboard] Dashboard plugin loaded")
+      yield* Effect.log(`[dashboard] Register at: ${cfg.applicationUrl}/_dashboard/register?token=${token}`)
+    }),
 
   onServe: () => Effect.log("[dashboard] Available at /_dashboard/"),
 
   onRecordCreateSuccess: {
-    handler: (ctx) =>
-      Effect.log(`[dashboard] audit: created ${String(ctx.result["id"])} in ${ctx.collection.name}`),
+    handler: (ctx) => Effect.log(`[dashboard] audit: created ${String(ctx.result["id"])} in ${ctx.collection.name}`)
   },
 
   onRecordUpdateSuccess: {
-    handler: (ctx) =>
-      Effect.log(`[dashboard] audit: updated ${String(ctx.result["id"])} in ${ctx.collection.name}`),
+    handler: (ctx) => Effect.log(`[dashboard] audit: updated ${String(ctx.result["id"])} in ${ctx.collection.name}`)
   },
 
   onRecordDeleteSuccess: {
-    handler: (ctx) =>
-      Effect.log(`[dashboard] audit: deleted ${String(ctx.result["id"])} in ${ctx.collection.name}`),
-  },
+    handler: (ctx) => Effect.log(`[dashboard] audit: deleted ${String(ctx.result["id"])} in ${ctx.collection.name}`)
+  }
 }
 
 export { SuperAdminCollection } from "./superadmin.js"

@@ -1,6 +1,20 @@
-import { Effect, Option, Schema } from "effect"
+import { Data, Effect, Option, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform"
+import { unsafeFragment } from "@effect/sql/Statement"
+import type { FilterNode } from "@gettersethya/mira-client"
+import { FilterNodeSchema, filterNodeToWhereClause } from "@gettersethya/mira-client"
 import { TelemetrySqlClient } from "@/telemetry/telemetry-sql-client.js"
+import { LogsCollection, SpansCollection } from "@/telemetry/collections.js"
+
+// ---------------------------------------------------------------------------
+// Tagged error for JSON / schema parse failures in the filter param
+// ---------------------------------------------------------------------------
+
+class FilterParseError extends Data.TaggedError("FilterParseError")<{ message: string }> {}
+
+// ---------------------------------------------------------------------------
+// Span row parsing
+// ---------------------------------------------------------------------------
 
 const SpanAttributeValueSchema = Schema.Union(Schema.String, Schema.Number, Schema.Boolean)
 const SpanAttributesSchema = Schema.parseJson(
@@ -9,7 +23,7 @@ const SpanAttributesSchema = Schema.parseJson(
 const parseAttributes = Schema.decodeUnknown(SpanAttributesSchema)
 
 type RawSpanRow = {
-  id: number
+  id: string
   name: string
   traceId: string
   spanId: string
@@ -19,7 +33,7 @@ type RawSpanRow = {
   status: "ok" | "error"
   error: string | null
   attributes: string
-  timestamp: string
+  created: string
 }
 
 const parseSpanRow = (raw: RawSpanRow) =>
@@ -36,9 +50,31 @@ const parseSpanRow = (raw: RawSpanRow) =>
       status: raw.status,
       error: raw.error,
       attributes,
-      timestamp: raw.timestamp,
+      created: raw.created,
     }))
   )
+
+// ---------------------------------------------------------------------------
+// Helper: parse ?filter= query param → FilterNode option
+// ---------------------------------------------------------------------------
+
+const FilterNodeFromJson = Schema.parseJson(FilterNodeSchema)
+
+function parseFilterParam(
+  url: URL
+): Effect.Effect<Option.Option<FilterNode>, FilterParseError> {
+  const raw = url.searchParams.get("filter")
+  if (raw === null) return Effect.succeed(Option.none())
+
+  return Schema.decodeUnknown(FilterNodeFromJson)(raw).pipe(
+    Effect.mapError((e) => new FilterParseError({ message: `filter: ${e.message}` })),
+    Effect.map(Option.some)
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 
 function notConfiguredResponse() {
   return HttpServerResponse.unsafeJson({
@@ -62,46 +98,42 @@ export const telemetryLogsRoute = Effect.gen(function* () {
 
   const limit = Math.min(Number(url.searchParams.get("limit") ?? "100"), 1000)
   const offset = Number(url.searchParams.get("offset") ?? "0")
-  const level = url.searchParams.get("level")
 
-  const tableCheck = yield* sql<{ cnt: number }>`
-    SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='logs'
-  `.pipe(Effect.catchAll(() => Effect.succeed([{ cnt: 0 }])))
+  // Parse ?filter= and compile against the logs schema.
+  // FilterParseError and ValidationError both propagate to the outer pipe.
+  const filterNodeOpt = yield* parseFilterParam(url)
 
-  if (tableCheck[0].cnt === 0) {
-    return notConfiguredResponse()
+  let compiledWhere: { sql: string; params: ReadonlyArray<unknown> } | null = null
+  if (Option.isSome(filterNodeOpt)) {
+    compiledWhere = yield* filterNodeToWhereClause(filterNodeOpt.value, LogsCollection.schema, "logs")
   }
 
-  const logs = yield* level
-    ? sql<{
-        id: number
-        level: string
-        message: string
-        timestamp: string
-        traceId: string | null
-        spanId: string | null
-      }>`
-        SELECT * FROM ${sql("logs")}
-        WHERE level = ${level}
-        ORDER BY id DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `
-    : sql<{
-        id: number
-        level: string
-        message: string
-        timestamp: string
-        traceId: string | null
-        spanId: string | null
-      }>`
-        SELECT * FROM ${sql("logs")}
-        ORDER BY id DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `
+  type LogRow = {
+    id: string
+    seqId: number
+    level: string
+    message: string
+    created: string
+    traceId: string | null
+    spanId: string | null
+  }
 
-  const total = yield* level
-    ? sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")} WHERE level = ${level}`
-    : sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")}`
+  const logs = yield* (compiledWhere !== null
+    ? sql<LogRow>`
+        SELECT * FROM ${sql("logs")} t
+        WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
+        ORDER BY t.seqId DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `
+    : sql<LogRow>`
+        SELECT * FROM ${sql("logs")} t
+        ORDER BY t.seqId DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `)
+
+  const total = yield* (compiledWhere !== null
+    ? sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")} t WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}`
+    : sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")} t`)
 
   return HttpServerResponse.unsafeJson({
     logs,
@@ -109,7 +141,14 @@ export const telemetryLogsRoute = Effect.gen(function* () {
     limit,
     offset,
   })
-})
+}).pipe(
+  Effect.catchTag("FilterParseError", (e) =>
+    Effect.succeed(HttpServerResponse.unsafeJson({ error: e.message }, { status: 400 }))
+  ),
+  Effect.catchTag("ValidationError", (e) =>
+    Effect.succeed(HttpServerResponse.unsafeJson({ error: e.issues.join(", ") }, { status: 400 }))
+  )
+)
 
 export const telemetrySpansRoute = Effect.gen(function* () {
   const sqlOpt = yield* Effect.serviceOption(TelemetrySqlClient)
@@ -126,37 +165,55 @@ export const telemetrySpansRoute = Effect.gen(function* () {
   const offset = Number(url.searchParams.get("offset") ?? "0")
   const traceId = url.searchParams.get("traceId")
 
-  const tableCheck = yield* sql<{ cnt: number }>`
-    SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='spans'
-  `.pipe(Effect.catchAll(() => Effect.succeed([{ cnt: 0 }])))
-
-  if (tableCheck[0].cnt === 0) {
-    return HttpServerResponse.unsafeJson({ spans: [], total: 0, limit, offset })
-  }
-
+  // traceId fast path: return all spans for the given trace, ordered chronologically.
   if (traceId !== null) {
     const rawSpans = yield* sql<RawSpanRow>`
-      SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, timestamp
+      SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
       FROM ${sql("spans")}
       WHERE traceId = ${traceId}
-      ORDER BY timestamp ASC
+      ORDER BY created ASC
     `
     const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
     return HttpServerResponse.unsafeJson({ spans, total: spans.length, limit, offset })
   }
 
+  // Parse ?filter= and compile against the spans schema.
+  const filterNodeOpt = yield* parseFilterParam(url)
+
+  let compiledWhere: { sql: string; params: ReadonlyArray<unknown> } | null = null
+  if (Option.isSome(filterNodeOpt)) {
+    compiledWhere = yield* filterNodeToWhereClause(filterNodeOpt.value, SpansCollection.schema, "spans")
+  }
+
+  if (compiledWhere !== null) {
+    // Filtered path: simple SELECT with WHERE clause and pagination.
+    const rawSpans = yield* sql<RawSpanRow>`
+      SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
+      FROM ${sql("spans")} t
+      WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
+      ORDER BY created ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `
+    const total = yield* sql<{ cnt: number }>`
+      SELECT COUNT(*) as cnt FROM ${sql("spans")} t
+      WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
+    `
+    const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
+    return HttpServerResponse.unsafeJson({ spans, total: total[0].cnt, limit, offset })
+  }
+
   // Paginate by trace (root spans), then return all child spans for those traces.
   // This guarantees complete traces are returned rather than partial span slices.
   const rawSpans = yield* sql<RawSpanRow>`
-    SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, timestamp
+    SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
     FROM ${sql("spans")}
     WHERE traceId IN (
       SELECT traceId FROM ${sql("spans")}
       WHERE parentSpanId IS NULL
-      ORDER BY timestamp DESC
+      ORDER BY created DESC
       LIMIT ${limit} OFFSET ${offset}
     )
-    ORDER BY timestamp ASC
+    ORDER BY created ASC
   `
   const total = yield* sql<{ cnt: number }>`
     SELECT COUNT(*) as cnt FROM ${sql("spans")} WHERE parentSpanId IS NULL
@@ -164,4 +221,11 @@ export const telemetrySpansRoute = Effect.gen(function* () {
   const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
 
   return HttpServerResponse.unsafeJson({ spans, total: total[0].cnt, limit, offset })
-})
+}).pipe(
+  Effect.catchTag("FilterParseError", (e) =>
+    Effect.succeed(HttpServerResponse.unsafeJson({ error: e.message }, { status: 400 }))
+  ),
+  Effect.catchTag("ValidationError", (e) =>
+    Effect.succeed(HttpServerResponse.unsafeJson({ error: e.issues.join(", ") }, { status: 400 }))
+  )
+)
