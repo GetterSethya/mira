@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect"
 import type { AnyCollectionDef, FilterNode } from "@gettersethya/mira-client"
 import { CollectionService } from "@/collection-service/collection-service.js"
-import type { RequestCtx, CursorPage } from "@/collection-service/context.js"
+import type { RequestCtx } from "@/collection-service/context.js"
 import type { CollectionError } from "@/collection-service/errors.js"
 import type { RepoRecord, SortOrder } from "@/repository/types.js"
 import { HookService } from "./hook-service.js"
@@ -13,7 +13,9 @@ function toAuth(auth: { collection: string; record: RepoRecord } | undefined): A
 }
 
 export function makeHookCollectionServiceLayer(): Layer.Layer<
-  CollectionService, never, CollectionService | HookService
+  CollectionService,
+  never,
+  CollectionService | HookService
 > {
   return Layer.effect(
     CollectionService,
@@ -22,23 +24,58 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
       const hooks = yield* HookService
 
       return CollectionService.of({
-        list: (collection: AnyCollectionDef, cursor: number | null, perPage: number, ctx: RequestCtx, filter?: FilterNode, sort?: SortOrder, select?: ReadonlyArray<string> | null, expand?: ReadonlyArray<string> | null) =>
+        list: (
+          collection: AnyCollectionDef,
+          cursor: number | null,
+          perPage: number,
+          ctx: RequestCtx,
+          filter?: FilterNode,
+          sort?: SortOrder,
+          select?: ReadonlyArray<string> | null,
+          expand?: ReadonlyArray<string> | null
+        ) =>
           Effect.gen(function* () {
             const auth = toAuth(ctx.auth)
             const hookCtx = yield* hooks.runRecordList({
-              collection, filter, sort, select, expand, cursor, limit: perPage, auth,
+              collection,
+              filter,
+              sort,
+              select,
+              expand,
+              cursor,
+              limit: perPage,
+              auth
             })
-            const result = yield* inner.list(collection, cursor, hookCtx.limit, ctx, hookCtx.filter, hookCtx.sort, hookCtx.select, hookCtx.expand)
-            yield* hooks.runRecordListSuccess({ ...hookCtx, items: result.items, nextCursor: result.nextCursor }).pipe(Effect.orElse(() => Effect.void))
+            const result = yield* inner.list(
+              collection,
+              cursor,
+              hookCtx.limit,
+              ctx,
+              hookCtx.filter,
+              hookCtx.sort,
+              hookCtx.select,
+              hookCtx.expand
+            )
+            yield* hooks
+              .runRecordListSuccess({ ...hookCtx, items: result.items, nextCursor: result.nextCursor })
+              .pipe(Effect.orElse(() => Effect.void))
             return result
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
-              hooks.runRecordListError({ collection, action: "list", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
+              hooks
+                .runRecordListError({ collection, action: "list", error, auth: toAuth(ctx.auth) })
+                .pipe(Effect.zipRight(Effect.fail(error)))
             ),
             Effect.withSpan("hook.list", { kind: "internal", attributes: { collection: collection.name } })
           ),
 
-        view: (collection: AnyCollectionDef, id: string, ctx: RequestCtx, select?: ReadonlyArray<string> | null, expand?: ReadonlyArray<string> | null) =>
+        view: (
+          collection: AnyCollectionDef,
+          id: string,
+          ctx: RequestCtx,
+          select?: ReadonlyArray<string> | null,
+          expand?: ReadonlyArray<string> | null
+        ) =>
           Effect.gen(function* () {
             const auth = toAuth(ctx.auth)
             const hookCtx = yield* hooks.runRecordView({ collection, id, select, expand, auth })
@@ -47,7 +84,9 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             return result
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
-              hooks.runRecordViewError({ collection, action: "view", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
+              hooks
+                .runRecordViewError({ collection, action: "view", error, auth: toAuth(ctx.auth) })
+                .pipe(Effect.zipRight(Effect.fail(error)))
             ),
             Effect.withSpan("hook.view", { kind: "internal", attributes: { collection: collection.name } })
           ),
@@ -62,7 +101,9 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             return result
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
-              hooks.runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
+              hooks
+                .runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) })
+                .pipe(Effect.zipRight(Effect.fail(error)))
             ),
             Effect.withSpan("hook.create", { kind: "internal", attributes: { collection: collection.name } })
           ),
@@ -78,7 +119,9 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             return result
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
-              hooks.runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
+              hooks
+                .runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) })
+                .pipe(Effect.zipRight(Effect.fail(error)))
             ),
             Effect.withSpan("hook.update", { kind: "internal", attributes: { collection: collection.name } })
           ),
@@ -93,10 +136,12 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             yield* hooks.runRecordDeleteSuccess({ ...execCtx, result: existing }).pipe(Effect.orElse(() => Effect.void))
           }).pipe(
             Effect.catchAll((error: CollectionError) =>
-              hooks.runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) }).pipe(Effect.zipRight(Effect.fail(error)))
+              hooks
+                .runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) })
+                .pipe(Effect.zipRight(Effect.fail(error)))
             ),
             Effect.withSpan("hook.delete", { kind: "internal", attributes: { collection: collection.name } })
-          ),
+          )
       })
     })
   )

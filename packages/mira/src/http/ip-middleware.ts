@@ -15,11 +15,16 @@ export const ipAnnotationMiddleware = <E, R>(app: HttpApp.Default<E, R>) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const ip = extractClientIp(request.headers)
-    if (ip !== undefined) {
-      yield* Effect.currentSpan.pipe(
-        Effect.tap((span) => Effect.sync(() => span.attribute("http.client_ip", ip))),
-        Effect.ignore
-      )
-    }
+    yield* Effect.currentSpan.pipe(
+      Effect.tap((span) =>
+        Effect.sync(() => {
+          span.attribute("auth.collection", "")
+          if (ip !== undefined) {
+            span.attribute("http.client_ip", ip ?? "")
+          }
+        })
+      ),
+      Effect.ignore
+    )
     return yield* app
   })

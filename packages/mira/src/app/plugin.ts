@@ -8,10 +8,13 @@ import type { AuthService } from "@/http/auth.js"
 import type { CollectionService } from "@/collection-service/collection-service.js"
 import type { PlatformServices } from "./types.js"
 import type {
-  RecordHookContext, RecordResultContext,
-  ListHookContext, ListResultContext,
-  ViewHookContext, ViewResultContext,
-  HookErrorContext,
+  RecordHookContext,
+  RecordResultContext,
+  ListHookContext,
+  ListResultContext,
+  ViewHookContext,
+  ViewResultContext,
+  HookErrorContext
 } from "@/hooks/types.js"
 
 export interface RecordHook<T> {
@@ -36,18 +39,18 @@ export interface ListSuccessHook<T> {
 
 export const onCollection = <T>(
   collections: ReadonlyArray<string>,
-  handler: (ctx: T) => Effect.Effect<T, never, never>,
+  handler: (ctx: T) => Effect.Effect<T, never, never>
 ): RecordHook<T> => ({ collections, handler })
 
 export const onCollectionSuccess = <T>(
   collections: ReadonlyArray<string>,
-  handler: (ctx: T) => Effect.Effect<void, never, never>,
+  handler: (ctx: T) => Effect.Effect<void, never, never>
 ): RecordSuccessHook<T> => ({ collections, handler })
 
 export interface MiraPlugin {
   readonly _tag: "MiraPlugin"
 
-  readonly onBootstrap?: () => Effect.Effect<void, never, AppConfig>
+  readonly onBootstrap?: () => Effect.Effect<void, never, AppConfig | CollectionService>
   readonly onServe?: () => Effect.Effect<void, never, never>
   readonly onTerminate?: () => Effect.Effect<void, never, never>
 
@@ -75,20 +78,16 @@ export interface MiraPlugin {
   readonly onRecordViewError?: ListSuccessHook<HookErrorContext>
 
   readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository | CollectionService>
-  readonly routes?: HttpRouter.HttpRouter<never,
-    | FileSystem.FileSystem
-    | Path.Path
-    | Repository
-    | AppConfig
-    | AuthService
-    | SqlClient.SqlClient
-    | CollectionService>
+  readonly routes?: HttpRouter.HttpRouter<
+    never,
+    FileSystem.FileSystem | Path.Path | Repository | AppConfig | AuthService | SqlClient.SqlClient | CollectionService
+  >
   readonly collections?: ReadonlyArray<AnyCollectionDef>
 }
 
 export const fromLayer = (layer: Layer.Layer<never, never, never>): MiraPlugin => ({
   _tag: "MiraPlugin",
-  layer,
+  layer
 })
 
 export const isMiraPlugin = (ext: unknown): ext is MiraPlugin =>

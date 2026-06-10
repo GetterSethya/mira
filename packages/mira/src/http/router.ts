@@ -88,9 +88,7 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
       }
     }
     return result
-  }).pipe(
-    Effect.withSpan("http.body.parse", { kind: "internal", attributes: { content_type: "json" } })
-  )
+  }).pipe(Effect.withSpan("http.body.parse", { kind: "internal", attributes: { content_type: "json" } }))
 }
 
 export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef>) {
@@ -105,11 +103,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       req: HttpServerRequest.HttpServerRequest,
       routeCtx: HttpRouter.RouteContext
     ) => Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerResponse.HttpServerResponse, Ms>
-  ): Effect.Effect<
-    HttpServerResponse.HttpServerResponse,
-    never,
-    Ms | HttpServerRequest.HttpServerRequest | HttpRouter.RouteContext
-  > {
+  ) {
     return Effect.flatMap(HttpRouter.RouteContext, (routeCtx) => {
       const name = routeCtx.params["name"]
       if (name === undefined) {
@@ -132,7 +126,14 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
           const ctx = buildRequestCtx(auth ?? undefined, req)
           yield* Effect.currentSpan.pipe(
             Effect.tap((span: Tracer.Span) =>
-              Effect.sync(() => span.attribute("auth.result", auth !== undefined ? "authenticated" : "anonymous"))
+              Effect.sync(() => {
+                span.attribute("auth.result", auth !== undefined ? "authenticated" : "anonymous")
+                span.attribute("auth.collection", auth?.collection ?? "")
+                const parent = span.parent
+                if (Option.isSome(parent) && parent.value._tag === "Span") {
+                  parent.value.attribute("auth.collection", auth?.collection ?? "")
+                }
+              })
             ),
             Effect.ignore
           )
@@ -190,9 +191,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       yield* annotate("auth.result", "authenticated")
       yield* annotate("auth.collection", payload.col)
       return { collection: payload.col, record: rows[0] }
-    }).pipe(
-      Effect.withSpan("http.auth", { kind: "internal" })
-    )
+    }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))
   }
 
   const listRoute = collectionRoute("list", (col, ctx) =>
@@ -317,12 +316,9 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
 
   const fileServeRoute = makeFileServeRoute(collections)
   const fileTokenRoute = makeFileTokenRoute(collections)
-  const schemaRoute = makeSchemaRoute(collections)
+  const schemaRoute = requireApiAuth("schema", makeSchemaRoute(collections))
 
-  function requireApiAuth<E, R>(
-    operation: string,
-    effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>
-  ): Effect.Effect<HttpServerResponse.HttpServerResponse, never, R | AppConfig | HttpServerRequest.HttpServerRequest> {
+  function requireApiAuth<E, R>(operation: string, effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) {
     return Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest
       const token = extractBearerToken(req)
@@ -333,29 +329,53 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
           Effect.ignore
         )
 
-      const authed = yield* Effect.gen(function* () {
+      const authCol = yield* Effect.gen(function* () {
         if (token === null) {
           yield* annotate("auth.result", "anonymous")
-          return false
+          return null
         }
+
         const config = yield* AppConfig
         const jwtSecret = Redacted.value(config.jwtSecret)
         const result = yield* verifyAnyJwt(token, jwtSecret).pipe(Effect.orElseSucceed(() => undefined))
+
         if (result === undefined) {
           yield* annotate("auth.result", "invalid_token")
-          return false
+          return null
         }
+
         yield* annotate("auth.result", "authenticated")
-        return true
+
+        const col = result.payload["col"]
+        if (typeof col === "string") {
+          yield* annotate("auth.collection", col)
+        }
+
+        return typeof col === "string" ? col : ""
       }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))
 
-      if (!authed) {
+      if (authCol !== null) {
+        yield* Effect.currentSpan.pipe(
+          Effect.tap((span) =>
+            Effect.sync(() => {
+              span.attribute("auth.collection", authCol)
+              const parent = span.parent
+              if (Option.isSome(parent) && parent.value._tag === "Span") {
+                parent.value.attribute("auth.collection", authCol)
+              }
+            })
+          ),
+          Effect.ignore
+        )
+      }
+
+      if (authCol === null) {
         return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
       }
-      return yield* effect.pipe(Effect.catchAll(() => Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))))
-    }).pipe(
-      Effect.withSpan("http.handler", { kind: "server", attributes: { operation } })
-    )
+      return yield* effect.pipe(
+        Effect.catchAll(() => Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 })))
+      )
+    }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation } }))
   }
 
   const telemetryLogs = requireApiAuth("telemetry_logs", telemetryLogsRoute)

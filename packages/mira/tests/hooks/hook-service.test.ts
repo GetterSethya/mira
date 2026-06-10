@@ -3,10 +3,21 @@ import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { HookService, makeHookServiceLayer } from "@/hooks/hook-service.js"
-import type { MiraPlugin } from "@/app/plugin.js"
 import { fromLayer } from "@/app/plugin.js"
 import type { RecordHookContext, ListHookContext, ViewHookContext } from "@/hooks/types.js"
 import { AppConfig } from "@/config/index.js"
+import { CollectionService } from "@/collection-service/collection-service.js"
+
+const TestCollectionService = Layer.succeed(
+  CollectionService,
+  CollectionService.of({
+    create: () => Effect.die("stub"),
+    view: () => Effect.die("stub"),
+    update: () => Effect.die("stub"),
+    delete: () => Effect.die("stub"),
+    list: () => Effect.die("stub")
+  })
+)
 
 const TestAppConfig = Layer.succeed(AppConfig, {
   appName: "test",
@@ -14,17 +25,17 @@ const TestAppConfig = Layer.succeed(AppConfig, {
   applicationUrl: "http://localhost:8080",
   jwtSecret: Redacted.make("test-secret"),
   useS3: false,
-  s3Config: Option.none(),
+  s3Config: Option.none()
 })
 
 const Posts = BaseCollection.define("posts", {
-  title: Field.text(),
+  title: Field.text()
 }).rules((R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
-  delete: R.public(),
+  delete: R.public()
 }))
 
 describe("HookService", () => {
@@ -35,7 +46,7 @@ describe("HookService", () => {
         collection: Posts,
         data: { title: "test" },
         record: undefined,
-        auth: undefined,
+        auth: undefined
       }
       const result = yield* hooks.runRecordCreate(ctx)
       expect(result.data).toEqual({ title: "test" })
@@ -49,20 +60,26 @@ describe("HookService", () => {
         collection: Posts,
         data: { title: "original" },
         record: undefined,
-        auth: undefined,
+        auth: undefined
       }
       const result = yield* hooks.runRecordCreate(ctx)
       expect(result.data.title).toBe("modified")
-    }).pipe(Effect.provide(makeHookServiceLayer([{
-      _tag: "MiraPlugin",
-      onRecordCreate: {
-        handler: (ctx) =>
-          Effect.succeed({
-            ...ctx,
-            data: { ...ctx.data, title: "modified" },
-          }),
-      },
-    }])))
+    }).pipe(
+      Effect.provide(
+        makeHookServiceLayer([
+          {
+            _tag: "MiraPlugin",
+            onRecordCreate: {
+              handler: (ctx) =>
+                Effect.succeed({
+                  ...ctx,
+                  data: { ...ctx.data, title: "modified" }
+                })
+            }
+          }
+        ])
+      )
+    )
   )
 
   it.effect("runs multiple create hooks in registration order", () =>
@@ -72,32 +89,36 @@ describe("HookService", () => {
         collection: Posts,
         data: { title: "start" },
         record: undefined,
-        auth: undefined,
+        auth: undefined
       }
       const result = yield* hooks.runRecordCreate(ctx)
       expect(result.data.title).toBe("start-first-second")
-    }).pipe(Effect.provide(makeHookServiceLayer([
-      {
-        _tag: "MiraPlugin",
-        onRecordCreate: {
-          handler: (ctx) =>
-            Effect.succeed({
-              ...ctx,
-              data: { ...ctx.data, title: `${ctx.data.title}-first` },
-            }),
-        },
-      },
-      {
-        _tag: "MiraPlugin",
-        onRecordCreate: {
-          handler: (ctx) =>
-            Effect.succeed({
-              ...ctx,
-              data: { ...ctx.data, title: `${ctx.data.title}-second` },
-            }),
-        },
-      },
-    ])))
+    }).pipe(
+      Effect.provide(
+        makeHookServiceLayer([
+          {
+            _tag: "MiraPlugin",
+            onRecordCreate: {
+              handler: (ctx) =>
+                Effect.succeed({
+                  ...ctx,
+                  data: { ...ctx.data, title: `${ctx.data.title}-first` }
+                })
+            }
+          },
+          {
+            _tag: "MiraPlugin",
+            onRecordCreate: {
+              handler: (ctx) =>
+                Effect.succeed({
+                  ...ctx,
+                  data: { ...ctx.data, title: `${ctx.data.title}-second` }
+                })
+            }
+          }
+        ])
+      )
+    )
   )
 
   it.effect("filters hooks by collection name", () =>
@@ -107,21 +128,27 @@ describe("HookService", () => {
         collection: Posts,
         data: { title: "original" },
         record: undefined,
-        auth: undefined,
+        auth: undefined
       }
       const result = yield* hooks.runRecordCreate(ctx)
       expect(result.data.title).toBe("original")
-    }).pipe(Effect.provide(makeHookServiceLayer([{
-      _tag: "MiraPlugin",
-      onRecordCreate: {
-        collections: ["other"],
-        handler: (ctx) =>
-          Effect.succeed({
-            ...ctx,
-            data: { ...ctx.data, title: "modified" },
-          }),
-      },
-    }])))
+    }).pipe(
+      Effect.provide(
+        makeHookServiceLayer([
+          {
+            _tag: "MiraPlugin",
+            onRecordCreate: {
+              collections: ["other"],
+              handler: (ctx) =>
+                Effect.succeed({
+                  ...ctx,
+                  data: { ...ctx.data, title: "modified" }
+                })
+            }
+          }
+        ])
+      )
+    )
   )
 
   it.effect("runs lifecycle hooks", () =>
@@ -130,15 +157,22 @@ describe("HookService", () => {
       yield* hooks.runBootstrap()
       yield* hooks.runServe()
       yield* hooks.runTerminate()
-    }).pipe(Effect.provide(Layer.merge(
-      makeHookServiceLayer([{
-        _tag: "MiraPlugin",
-        onBootstrap: () => Effect.void,
-        onServe: () => Effect.void,
-        onTerminate: () => Effect.void,
-      }]),
-      TestAppConfig
-    )))
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          makeHookServiceLayer([
+            {
+              _tag: "MiraPlugin",
+              onBootstrap: () => Effect.void,
+              onServe: () => Effect.void,
+              onTerminate: () => Effect.void
+            }
+          ]),
+          TestAppConfig,
+          TestCollectionService
+        )
+      )
+    )
   )
 
   it.effect("runs onRecordUpdate hook", () =>
@@ -148,20 +182,26 @@ describe("HookService", () => {
         collection: Posts,
         data: { title: "old" },
         record: { id: "1", title: "old" },
-        auth: undefined,
+        auth: undefined
       }
       const result = yield* hooks.runRecordUpdate(ctx)
       expect(result.data.title).toBe("updated")
-    }).pipe(Effect.provide(makeHookServiceLayer([{
-      _tag: "MiraPlugin",
-      onRecordUpdate: {
-        handler: (ctx) =>
-          Effect.succeed({
-            ...ctx,
-            data: { ...ctx.data, title: "updated" },
-          }),
-      },
-    }])))
+    }).pipe(
+      Effect.provide(
+        makeHookServiceLayer([
+          {
+            _tag: "MiraPlugin",
+            onRecordUpdate: {
+              handler: (ctx) =>
+                Effect.succeed({
+                  ...ctx,
+                  data: { ...ctx.data, title: "updated" }
+                })
+            }
+          }
+        ])
+      )
+    )
   )
 
   it.effect("runs onRecordDelete hook", () =>
@@ -171,15 +211,21 @@ describe("HookService", () => {
         collection: Posts,
         data: { id: "1", title: "to-delete" },
         record: { id: "1", title: "to-delete" },
-        auth: undefined,
+        auth: undefined
       }
       yield* hooks.runRecordDelete(ctx)
-    }).pipe(Effect.provide(makeHookServiceLayer([{
-      _tag: "MiraPlugin",
-      onRecordDelete: {
-        handler: (ctx) => Effect.succeed(ctx),
-      },
-    }])))
+    }).pipe(
+      Effect.provide(
+        makeHookServiceLayer([
+          {
+            _tag: "MiraPlugin",
+            onRecordDelete: {
+              handler: (ctx) => Effect.succeed(ctx)
+            }
+          }
+        ])
+      )
+    )
   )
 
   it.effect("runs onRecordList hook and can modify limit", () =>
@@ -193,20 +239,26 @@ describe("HookService", () => {
         sort: undefined,
         select: undefined,
         expand: undefined,
-        auth: undefined,
+        auth: undefined
       }
       const result = yield* hooks.runRecordList(ctx)
       expect(result.limit).toBe(50)
-    }).pipe(Effect.provide(makeHookServiceLayer([{
-      _tag: "MiraPlugin",
-      onRecordList: {
-        handler: (ctx) =>
-          Effect.succeed({
-            ...ctx,
-            limit: 50,
-          }),
-      },
-    }])))
+    }).pipe(
+      Effect.provide(
+        makeHookServiceLayer([
+          {
+            _tag: "MiraPlugin",
+            onRecordList: {
+              handler: (ctx) =>
+                Effect.succeed({
+                  ...ctx,
+                  limit: 50
+                })
+            }
+          }
+        ])
+      )
+    )
   )
 
   it.effect("runs onRecordView hook and can modify select", () =>
@@ -217,20 +269,26 @@ describe("HookService", () => {
         id: "1",
         select: undefined,
         expand: undefined,
-        auth: undefined,
+        auth: undefined
       }
       const result = yield* hooks.runRecordView(ctx)
       expect(result.select).toEqual(["title"])
-    }).pipe(Effect.provide(makeHookServiceLayer([{
-      _tag: "MiraPlugin",
-      onRecordView: {
-        handler: (ctx) =>
-          Effect.succeed({
-            ...ctx,
-            select: ["title"],
-          }),
-      },
-    }])))
+    }).pipe(
+      Effect.provide(
+        makeHookServiceLayer([
+          {
+            _tag: "MiraPlugin",
+            onRecordView: {
+              handler: (ctx) =>
+                Effect.succeed({
+                  ...ctx,
+                  select: ["title"]
+                })
+            }
+          }
+        ])
+      )
+    )
   )
 })
 

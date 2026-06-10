@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { MiraPlugin } from "@gettersethya/mira"
-import { AppConfig } from "@gettersethya/mira"
+import { AppConfig, CollectionService } from "@gettersethya/mira"
 import { SuperAdminCollection, setRegisterToken, generateRegisterToken } from "./superadmin.js"
 import { makeDashboardRouter } from "./router.js"
 
@@ -14,10 +14,20 @@ export const MiraDashboard: MiraPlugin = {
   onBootstrap: () =>
     Effect.gen(function* () {
       const token = generateRegisterToken()
-      setRegisterToken(token)
       const cfg = yield* AppConfig
+      const svc = yield* CollectionService
+      const results = yield* svc
+        .list(SuperAdminCollection, null, 1, { headers: {}, query: {}, admin: true })
+        .pipe(Effect.orDie)
+
       yield* Effect.log("[dashboard] Dashboard plugin loaded")
-      yield* Effect.log(`[dashboard] Register at: ${cfg.applicationUrl}/_dashboard/register?token=${token}`)
+
+      if (results.items.length === 0) {
+        setRegisterToken(token)
+        yield* Effect.log(`[dashboard] Register at: ${cfg.applicationUrl}/_dashboard/register?token=${token}`)
+      } else {
+        yield* Effect.log(`[dashboard] run at: ${cfg.applicationUrl}/_dashboard/`)
+      }
     }),
 
   onServe: () => Effect.log("[dashboard] Available at /_dashboard/"),

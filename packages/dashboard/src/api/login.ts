@@ -7,7 +7,7 @@ import { SuperAdminCollection } from "../superadmin.js"
 
 const LoginBodySchema = Schema.Struct({
   email: Schema.String,
-  password: Schema.String,
+  password: Schema.String
 })
 
 const adminCtx = { headers: {}, query: {}, admin: true as const }
@@ -36,7 +36,7 @@ export const loginRoute = Effect.gen(function* () {
   const config = yield* AppConfig
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
   const token = yield* signDashboardJwt(
-    { sub: String(record["id"]), email: body.email, role: "superadmin" },
+    { sub: String(record["id"]), email: body.email, role: "superadmin", col: "_superadmin" },
     Redacted.value(config.jwtSecret)
   )
 

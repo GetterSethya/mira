@@ -1,7 +1,6 @@
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform"
 import { CollectionService, hashPassword } from "@gettersethya/mira"
-import { Filter } from "@gettersethya/mira-client"
 import { getRegisterToken } from "../superadmin.js"
 import { SuperAdminCollection } from "../superadmin.js"
 
@@ -22,19 +21,23 @@ export const registerRoute = Effect.gen(function* () {
     return HttpServerResponse.unsafeJson({ error: "invalid_token" }, { status: 403 })
   }
 
-  const existing = yield* svc
-    .list(SuperAdminCollection, null, 1, adminCtx, Filter.field("email").eq(body.email))
+  const bootstrapped = yield* svc
+    .list(SuperAdminCollection, null, 1, adminCtx)
     .pipe(Effect.orElseSucceed(() => ({ items: [] as ReadonlyArray<Record<string, unknown>> })))
 
-  if (existing.items.length > 0) {
-    return HttpServerResponse.unsafeJson({ error: "email_taken" }, { status: 409 })
+  if (bootstrapped.items.length > 0) {
+    return HttpServerResponse.unsafeJson({ error: "already_bootstrapped" }, { status: 403 })
   }
 
   const hashedPassword = yield* hashPassword(body.password)
-  const record = yield* svc.create(SuperAdminCollection, {
-    email: body.email,
-    password: hashedPassword
-  }, adminCtx)
+  const record = yield* svc.create(
+    SuperAdminCollection,
+    {
+      email: body.email,
+      password: hashedPassword
+    },
+    adminCtx
+  )
 
   return HttpServerResponse.unsafeJson({ id: record["id"], email: record["email"] }, { status: 201 })
 })

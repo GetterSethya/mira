@@ -1,40 +1,37 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query"
-  import { page } from "$app/stores"
+  import { page } from "$app/state"
   import { goto } from "$app/navigation"
-  import { base } from "$app/paths"
   import { client } from "$lib/client.js"
   import SpanWaterfall from "$lib/components/SpanWaterfall.svelte"
   import { Input } from "$lib/components/ui/input/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
+  import { resolve } from "$app/paths"
 
-  const LIMIT = 50
+  const LIMIT = 200
 
-  const initial = $page.url.searchParams.get("traceId") ?? ""
-  let traceIdFilter = $state(initial)
-  let committed = $state(initial)
+  const initial = $derived(page.url.searchParams.get("traceId") ?? "")
+  let traceIdFilter = $derived(initial)
+  let committed = $derived(initial)
   let offset = $state(0)
 
   const spansQuery = createQuery(() => ({
     queryKey: ["spans", committed, offset],
-    queryFn: () =>
-      committed
-        ? client.spans({ traceId: committed })
-        : client.spans({ limit: LIMIT, offset }),
+    queryFn: () => (committed ? client.spans({ traceId: committed }) : client.spans({ limit: LIMIT, offset }))
   }))
 
   function apply() {
     committed = traceIdFilter
     offset = 0
-    if (committed) goto(`${base}/spans?traceId=${committed}`, { replaceState: true })
-    else goto(`${base}/spans`, { replaceState: true })
+    if (committed) goto(resolve(`/spans?traceId=${committed}`), { replaceState: true })
+    else goto(resolve(`/spans`), { replaceState: true })
   }
 
   function clear() {
     traceIdFilter = ""
     committed = ""
     offset = 0
-    goto(`${base}/spans`, { replaceState: true })
+    goto(resolve(`/spans`), { replaceState: true })
   }
 </script>
 
@@ -48,7 +45,9 @@
       placeholder="Filter by traceId…"
       value={traceIdFilter}
       oninput={(e) => (traceIdFilter = (e.target as HTMLInputElement).value)}
-      onkeydown={(e) => { if (e.key === "Enter") apply() }}
+      onkeydown={(e) => {
+        if (e.key === "Enter") apply()
+      }}
       class="max-w-sm font-mono text-sm"
     />
     <Button variant="outline" onclick={apply}>Filter</Button>
@@ -71,8 +70,18 @@
       {:else}
         <span>Traces {pageStart}–{pageEnd} of {totalTraces}</span>
         <div class="flex gap-2">
-          <Button variant="outline" size="sm" disabled={offset === 0} onclick={() => (offset = Math.max(0, offset - LIMIT))}>Previous</Button>
-          <Button variant="outline" size="sm" disabled={pageEnd >= totalTraces} onclick={() => (offset = offset + LIMIT)}>Next</Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={offset === 0}
+            onclick={() => (offset = Math.max(0, offset - LIMIT))}>Previous</Button
+          >
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pageEnd >= totalTraces}
+            onclick={() => (offset = offset + LIMIT)}>Next</Button
+          >
         </div>
       {/if}
     </div>

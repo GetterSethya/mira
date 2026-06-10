@@ -22,6 +22,7 @@
     "dev:ui": "cd ui && pnpm dev"
   },
   "dependencies": {
+    "@effect/language-service": "^0.86.2",
     "@effect/platform": "^0.96.1",
     "@gettersethya/mira": "workspace:*",
     "@gettersethya/mira-client": "workspace:*",

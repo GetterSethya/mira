@@ -26,9 +26,7 @@ function makeContentType(ext: string): string {
   return types[ext] ?? "application/octet-stream"
 }
 
-function wrapRoute<E, R>(
-  effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>
-): Effect.Effect<HttpServerResponse.HttpServerResponse, never, R> {
+function wrapRoute<E, R>(effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) {
   return Effect.catchAllCause(effect, (cause) => {
     const failure = Cause.failureOption(cause)
     if (Option.isSome(failure)) {
@@ -41,7 +39,7 @@ function wrapRoute<E, R>(
   })
 }
 
-function makeDashboardSpaRoute(): HttpRouter.HttpRouter<never, FileSystem.FileSystem | Path.Path> {
+function makeDashboardSpaRoute() {
   const spaHandler = wrapRoute(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -77,17 +75,7 @@ function makeDashboardSpaRoute(): HttpRouter.HttpRouter<never, FileSystem.FileSy
   return HttpRouter.empty.pipe(HttpRouter.get("/_dashboard", spaHandler), HttpRouter.get("/_dashboard/*", spaHandler))
 }
 
-type DashboardRouterServices =
-  | FileSystem.FileSystem
-  | Path.Path
-  | Repository
-  | AuthService
-  | AppConfig
-  | CollectionService
-
-export function makeDashboardRouter(
-  _collections: ReadonlyArray<AnyCollectionDef>
-): HttpRouter.HttpRouter<never, DashboardRouterServices> {
+export function makeDashboardRouter(_collections: ReadonlyArray<AnyCollectionDef>) {
   return HttpRouter.empty.pipe(
     HttpRouter.get("/_dashboard/api/bootstrap-status", wrapRoute(bootstrapStatusRoute)),
     HttpRouter.post("/_dashboard/api/register", wrapRoute(registerRoute)),

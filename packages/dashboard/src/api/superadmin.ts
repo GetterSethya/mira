@@ -7,7 +7,7 @@ import { SuperAdminCollection } from "../superadmin.js"
 
 const CreateSuperadminSchema = Schema.Struct({
   email: Schema.String,
-  password: Schema.String,
+  password: Schema.String
 })
 
 const adminCtx = { headers: {}, query: {}, admin: true as const }
@@ -28,10 +28,14 @@ export const createSuperadminRoute = Effect.gen(function* () {
   }
 
   const hashedPassword = yield* hashPassword(body.password)
-  const record = yield* svc.create(SuperAdminCollection, {
-    email: body.email,
-    password: hashedPassword,
-  }, adminCtx)
+  const record = yield* svc.create(
+    SuperAdminCollection,
+    {
+      email: body.email,
+      password: hashedPassword
+    },
+    adminCtx
+  )
 
   return HttpServerResponse.unsafeJson({ id: record["id"], email: record["email"] }, { status: 201 })
 })
@@ -45,7 +49,7 @@ export const listSuperadminsRoute = Effect.gen(function* () {
   const items = result.items.map((r) => ({
     id: String(r["id"]),
     email: String(r["email"]),
-    created: String(r["created"]),
+    created: String(r["created"])
   }))
 
   return HttpServerResponse.unsafeJson({ items }, { status: 200 })
@@ -62,9 +66,10 @@ export const deleteSuperadminRoute = Effect.flatMap(HttpRouter.RouteContext, (ro
 
     const svc = yield* CollectionService
 
-    const total = yield* svc
-      .list(SuperAdminCollection, null, 2, adminCtx)
-      .pipe(Effect.map((r) => r.items.length), Effect.orElseSucceed(() => 0))
+    const total = yield* svc.list(SuperAdminCollection, null, 2, adminCtx).pipe(
+      Effect.map((r) => r.items.length),
+      Effect.orElseSucceed(() => 0)
+    )
 
     if (total <= 1) {
       return HttpServerResponse.unsafeJson({ error: "last_superadmin" }, { status: 409 })

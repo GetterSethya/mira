@@ -13,11 +13,11 @@ export const configRoute = Effect.gen(function* () {
     port: config.port,
     applicationUrl: config.applicationUrl,
     jwtSecret: `${Redacted.value(config.jwtSecret).slice(0, 4)}***`,
-    useS3: config.useS3,
+    useS3: config.useS3
   }
 
   return HttpServerResponse.unsafeJson({
     config: allConfig,
-    keys: Object.keys(allConfig),
+    keys: Object.keys(allConfig)
   })
 })

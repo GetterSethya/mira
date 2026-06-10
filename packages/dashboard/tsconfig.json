@@ -12,6 +12,11 @@
       "@gettersethya/mira": ["../mira/dist/src/index.d.ts"],
       "@gettersethya/mira-client": ["../client/dist/src/index.d.ts"]
     },
+    "plugins":[
+        {
+            "name": "@effect/language-service",
+        }
+    ],
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "ignoreDeprecations": "6.0",
