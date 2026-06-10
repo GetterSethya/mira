@@ -1023,7 +1023,7 @@ import { Posts, Users } from "./collections.js"
 const mira = createMiraClient("/").withCollections({ posts: Posts, users: Users })
 ```
 
-The client automatically stores the JWT token in memory and sends it as a `Bearer` token on every subsequent request.
+For browser clients, the server sets an HttpOnly `mira_token` cookie on successful login. The browser sends it automatically on every same-origin request — the client never reads or writes the token directly. Call `mira.auth.refresh()` once on app startup to restore login state after a page reload.
 
 ### Queries
 
@@ -1086,7 +1086,7 @@ await mira.posts.delete().raw("post-id")
 
 ```typescript
 // Login — server sets an HttpOnly cookie; browser sends it on every subsequent request
-const { token, record } = await mira.users.authWithPassword().raw({
+const { record } = await mira.users.authWithPassword().raw({
   email:    "user@example.com",
   password: "password123",
 })
