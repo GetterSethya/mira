@@ -52,6 +52,8 @@ export function resolveCtxPlaceholders(result: EnforceResult, ctx: RequestCtx, c
 
       if (match === "?") {
         resolved.push(params[pIdx++])
+      } else if (authField === "collection") {
+        resolved.push(ctx.auth?.collection ?? null)
       } else if (authField !== undefined) {
         resolved.push(ctx.auth?.record[authField] ?? null)
       } else if (reqSource !== undefined && reqKey !== undefined) {

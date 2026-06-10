@@ -110,6 +110,8 @@ export function compileOperand(node: OperandNode, ctx: CompileCtx): string {
       return `@auth_${node.field}`
     case "authId":
       return `@auth_id`
+    case "authCollection":
+      return `@auth_collection`
     case "request":
       return `@request_${node.source}_${node.key}`
     case "now":

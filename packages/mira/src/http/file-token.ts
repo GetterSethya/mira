@@ -10,13 +10,15 @@ const TokenRequestSchema = Schema.Struct({
   collection: Schema.String
 })
 
-function extractBearerToken(
+function extractToken(
   req: HttpServerRequest.HttpServerRequest
 ): string | null {
   const auth = req.headers["authorization"]
-  if (typeof auth !== "string") return null
-  const m = auth.match(/^Bearer\s+(.+)$/i)
-  return m === null ? null : m[1]
+  if (typeof auth === "string") {
+    const m = auth.match(/^Bearer\s+(.+)$/i)
+    if (m !== null) return m[1]
+  }
+  return req.cookies["mira_token"] ?? null
 }
 
 export function makeFileTokenRoute(
@@ -45,8 +47,8 @@ function issueToken(
     const config = yield* AppConfig
     const jwtSecret = Redacted.value(config.jwtSecret)
 
-    // Require Bearer auth token
-    const rawToken = extractBearerToken(req)
+    // Require auth token from Bearer header or mira_token cookie
+    const rawToken = extractToken(req)
     if (rawToken === null) {
       return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
     }

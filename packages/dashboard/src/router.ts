@@ -7,7 +7,6 @@ import { bootstrapStatusRoute } from "./api/bootstrap-status.js"
 import { registerRoute } from "./api/register.js"
 import { createSuperadminRoute, listSuperadminsRoute, deleteSuperadminRoute } from "./api/superadmin.js"
 import { configRoute } from "./api/config.js"
-import { loginRoute } from "./api/login.js"
 import { DashboardUnauthorizedError } from "./api/auth.js"
 
 function makeContentType(ext: string): string {
@@ -79,7 +78,6 @@ export function makeDashboardRouter(_collections: ReadonlyArray<AnyCollectionDef
   return HttpRouter.empty.pipe(
     HttpRouter.get("/_dashboard/api/bootstrap-status", wrapRoute(bootstrapStatusRoute)),
     HttpRouter.post("/_dashboard/api/register", wrapRoute(registerRoute)),
-    HttpRouter.post("/_dashboard/api/login", wrapRoute(loginRoute)),
     HttpRouter.post("/_dashboard/api/superadmin/create", wrapRoute(createSuperadminRoute)),
     HttpRouter.get("/_dashboard/api/superadmin", wrapRoute(listSuperadminsRoute)),
     HttpRouter.del("/_dashboard/api/superadmin/:id", wrapRoute(deleteSuperadminRoute)),

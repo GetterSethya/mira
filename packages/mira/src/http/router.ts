@@ -1,5 +1,5 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Cause, Effect, Option, Redacted, Schema, Tracer } from "effect"
+import { Cause, Duration, Effect, Option, Redacted, Schema, Tracer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
@@ -56,12 +56,13 @@ function buildRequestCtx(
   return auth ? { auth, headers, query } : { headers, query }
 }
 
-function extractBearerToken(req: HttpServerRequest.HttpServerRequest) {
+function extractToken(req: HttpServerRequest.HttpServerRequest) {
   const auth = req.headers["authorization"]
-  if (typeof auth !== "string") return null
-  const m = auth.match(/^Bearer\s+(.+)$/i)
-  if (m === null) return null
-  return m[1]
+  if (typeof auth === "string") {
+    const m = auth.match(/^Bearer\s+(.+)$/i)
+    if (m !== null) return m[1]
+  }
+  return req.cookies["mira_token"] ?? null
 }
 
 function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollectionDef) {
@@ -155,7 +156,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
   }
 
   function resolveAuth(req: HttpServerRequest.HttpServerRequest) {
-    const token = extractBearerToken(req)
+    const token = extractToken(req)
 
     return Effect.gen(function* () {
       const annotate = (key: string, value: string | boolean) =>
@@ -310,7 +311,38 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
           return prop !== undefined && !prop["x-hidden"] && k !== "password"
         })
       )
-      return HttpServerResponse.unsafeJson({ token, record: publicRow }, { status: 200 })
+      return HttpServerResponse.unsafeJson({ token, record: publicRow }, { status: 200 }).pipe(
+        HttpServerResponse.unsafeSetCookie("mira_token", token, {
+          httpOnly: true,
+          sameSite: "strict",
+          path: "/",
+          maxAge: Duration.hours(72),
+        })
+      )
+    })
+  )
+
+  const logoutRoute = Effect.succeed(
+    HttpServerResponse.empty({ status: 204 }).pipe(
+      HttpServerResponse.unsafeSetCookie("mira_token", "", {
+        httpOnly: true,
+        sameSite: "strict",
+        path: "/",
+        maxAge: Duration.zero,
+      })
+    )
+  )
+
+  const meRoute = Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
+    Effect.gen(function* () {
+      const auth = yield* resolveAuth(req)
+      if (!auth) {
+        return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
+      }
+      return HttpServerResponse.unsafeJson(
+        { collection: auth.collection, record: auth.record },
+        { status: 200 }
+      )
     })
   )
 
@@ -321,7 +353,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
   function requireApiAuth<E, R>(operation: string, effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) {
     return Effect.gen(function* () {
       const req = yield* HttpServerRequest.HttpServerRequest
-      const token = extractBearerToken(req)
+      const token = extractToken(req)
 
       const annotate = (key: string, value: string) =>
         Effect.currentSpan.pipe(
@@ -388,6 +420,8 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     HttpRouter.patch("/api/collections/:name/:id", updateRoute),
     HttpRouter.del("/api/collections/:name/:id", deleteRoute),
     HttpRouter.post("/api/collections/:name/auth-with-password", authRoute),
+    HttpRouter.post("/api/auth/logout", logoutRoute),
+    HttpRouter.get("/api/auth/me", meRoute),
     HttpRouter.get("/api/files/:collection/:id/:filename", fileServeRoute),
     HttpRouter.post("/api/files/token", fileTokenRoute),
     HttpRouter.get("/api/_schema", schemaRoute),

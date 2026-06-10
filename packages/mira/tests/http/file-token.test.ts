@@ -1,4 +1,4 @@
-import { HttpClient, HttpClientError, HttpClientRequest, HttpServer } from "@effect/platform"
+import { Cookies, HttpClient, HttpClientError, HttpClientRequest, HttpServer } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
 import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
@@ -223,6 +223,28 @@ describe("POST /api/files/token", () => {
       )(body).pipe(Effect.orDie)
       assert.ok(parsed.token.length > 0)
       assert.ok(parsed.expiresAt > Date.now())
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("returns 200 with valid mira_token cookie and no Bearer header", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* seedUser("cookiefile@example.com", "pass101")
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const loginRes = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+          HttpClientRequest.bodyUnsafeJson({ email: "cookiefile@example.com", password: "pass101" })
+        )
+      )
+      assert.strictEqual(loginRes.status, 200)
+      const cookieToken = Option.getOrThrow(Cookies.getValue(loginRes.cookies, "mira_token"))
+      const res = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/files/token").pipe(
+          HttpClientRequest.setHeader("Cookie", `mira_token=${cookieToken}`),
+          HttpClientRequest.bodyUnsafeJson({ collection: "docs" })
+        )
+      )
+      assert.strictEqual(res.status, 200)
     }).pipe(Effect.provide(testLayer))
   )
 })

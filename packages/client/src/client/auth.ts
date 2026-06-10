@@ -5,26 +5,33 @@ import type { MiraError } from "./errors.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 
 /**
- * Browser-side authentication helper. Uses a `loggedInRef` to track whether
- * the client has authenticated.
+ * Browser-side authentication helper.
  *
- * In browser mode, the JWT token is handled via cookies — the client only
- * tracks `isLoggedIn()` state. `clear()` sends a POST to `/api/auth/logout`
- * and resets the ref.
+ * The server sets an HttpOnly cookie (`mira_token`) on successful login. The
+ * browser sends it automatically on every same-origin request — the client
+ * never reads or writes it directly.
  *
- * @example
- * import { createMiraClient } from "@gettersethya/mira-client"
+ * Because the cookie is HttpOnly, the client cannot tell on page load whether
+ * a session exists. Call `refresh()` once on app startup to re-validate the
+ * cookie against the server and restore `isLoggedIn()` state.
  *
- * const mira = createMiraClient("/")  // browser mode by default
- * if (mira.auth.isLoggedIn()) {
- *   // user is authenticated
- * }
- * mira.auth.clear()  // sends POST /api/auth/logout
+ * `clear()` calls `POST /api/auth/logout` to clear the cookie server-side,
+ * then resets the in-memory login flag.
  *
  * @see ServerAuth — server-side alternative for SSR environments
  */
 export type BrowserAuth = {
+  /** True if the user logged in during this page session or `refresh()` confirmed a valid cookie. */
   isLoggedIn(): boolean
+  /**
+   * Calls `GET /api/auth/me` to check whether a valid `mira_token` cookie exists.
+   * Sets the in-memory login flag to match the server's answer.
+   * Call this once on app startup to restore login state after a page reload.
+   *
+   * @returns true if a valid session exists, false otherwise
+   */
+  refresh(): Promise<boolean>
+  /** Calls `POST /api/auth/logout` to clear the server cookie, then resets the login flag. */
   clear(): void
 }
 
@@ -65,6 +72,21 @@ export function makeBrowserAuth(
 ): BrowserAuth {
   return {
     isLoggedIn: () => MutableRef.get(loggedInRef),
+
+    refresh: async () => {
+      try {
+        const effect = execute<{ collection: string; record: Record<string, unknown> }>(
+          HCR.get("/api/auth/me")
+        )
+        await makeClientHandler(effect).raw()
+        MutableRef.set(loggedInRef, true)
+        return true
+      } catch {
+        MutableRef.set(loggedInRef, false)
+        return false
+      }
+    },
+
     clear: () => {
       const effect = Effect.gen(function* () {
         yield* execute<void>(HCR.post("/api/auth/logout"))

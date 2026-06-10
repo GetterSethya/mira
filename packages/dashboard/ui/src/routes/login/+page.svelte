@@ -4,7 +4,7 @@
   import { createAppForm } from "$lib/form.js"
   import { LoginSchema, formatFieldErrors } from "$lib/validators.js"
   import { client } from "$lib/client.js"
-  import { setToken } from "$lib/auth.js"
+  import { setLoggedIn } from "$lib/auth.js"
   import { goto } from "$app/navigation"
   import { base } from "$app/paths"
   import * as Card from "$lib/components/ui/card/index.js"
@@ -23,8 +23,8 @@
 
   const loginMutation = createMutation(() => ({
     mutationFn: async (args: LoginMutationArgs) => {
-      const res = await client.login(args.email, args.password)
-      setToken(res.token)
+      await client.login(args.email, args.password)
+      setLoggedIn()
     },
 
     onSuccess: () => {

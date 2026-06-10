@@ -1,17 +1,13 @@
-const TOKEN_KEY = "mira_dashboard_token"
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token)
-}
-
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
-}
+const LOGGED_IN_KEY = "mira_dashboard_loggedin"
 
 export function isLoggedIn(): boolean {
-  return getToken() !== null
+  return localStorage.getItem(LOGGED_IN_KEY) === "1"
+}
+
+export function setLoggedIn(): void {
+  localStorage.setItem(LOGGED_IN_KEY, "1")
+}
+
+export function clearLoggedIn(): void {
+  localStorage.removeItem(LOGGED_IN_KEY)
 }

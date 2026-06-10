@@ -1,5 +1,4 @@
 import type { FilterNode } from "@gettersethya/mira-collection"
-import { getToken, isLoggedIn } from "$lib/auth.js"
 
 const BASE = "/_dashboard/api"
 const API_BASE = "/api"
@@ -12,9 +11,6 @@ type RequestInit2 = {
 
 async function request<T>(path: string, init: RequestInit2 = {}): Promise<T> {
   const headers: Record<string, string> = { ...init.headers }
-  if (isLoggedIn()) {
-    headers["Authorization"] = `Bearer ${getToken()}`
-  }
   if (init.body && typeof init.body === "string") {
     headers["Content-Type"] = "application/json"
   }
@@ -62,10 +58,16 @@ export const client = {
   bootstrapStatus: () => request<{ bootstrapped: boolean }>(`${BASE}/bootstrap-status`),
 
   login: (email: string, password: string) =>
-    request<{ token: string; expiresAt: string }>(`${BASE}/login`, {
+    request<{ token: string; record: Record<string, unknown> }>(`${API_BASE}/collections/_superadmin/auth-with-password`, {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+
+  logout: () =>
+    request<void>(`${API_BASE}/auth/logout`, { method: "POST" }),
+
+  me: () =>
+    request<{ collection: string; record: Record<string, unknown> }>(`${API_BASE}/auth/me`),
 
   register: (email: string, password: string, token: string) =>
     request<{ id: string; email: string }>(`${BASE}/register`, {

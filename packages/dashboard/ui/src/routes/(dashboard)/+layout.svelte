@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation"
   import { resolve } from "$app/paths"
-  import { isLoggedIn, clearToken } from "$lib/auth.js"
+  import { isLoggedIn, clearLoggedIn } from "$lib/auth.js"
   import AppSidebar from "$lib/components/app-sidebar.svelte"
   import ThemeToggle from "$lib/components/ThemeToggle.svelte"
   import * as Breadcrumb from "$lib/components/ui/breadcrumb/index.js"

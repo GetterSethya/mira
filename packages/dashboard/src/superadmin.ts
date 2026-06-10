@@ -2,11 +2,11 @@ import { AuthCollection } from "@gettersethya/mira-client"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 
 export const SuperAdminCollection: AnyCollectionDef = AuthCollection.define("_superadmin", {}).rules((R) => ({
-  list: R.field("email").eq(R.literal("")),
-  view: R.field("email").eq(R.literal("")),
+  list: R.authCollection().eq(R.literal("_superadmin")),
+  view: R.authCollection().eq(R.literal("_superadmin")),
   create: R.public(),
-  update: R.field("email").eq(R.literal("")),
-  delete: R.field("email").eq(R.literal(""))
+  update: R.authCollection().eq(R.literal("_superadmin")),
+  delete: R.authCollection().eq(R.literal("_superadmin"))
 }))
 
 let _registerToken = ""

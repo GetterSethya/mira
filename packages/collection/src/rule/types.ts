@@ -10,12 +10,14 @@
  * - `now` — current timestamp (e.g., `Rule.now()`)
  * - `dateAdd` — date arithmetic (e.g., `Rule.dateAdd(Rule.now(), 7, "day")`)
  * - `dateDiff` — difference between two dates (e.g., `Rule.dateDiff(Rule.field("created"), Rule.now(), "day")`)
+ * - `authCollection` — the collection name of the authenticated user (e.g., `Rule.authCollection()`)
  */
 export type OperandNode<K extends string = string, V = unknown> =
   | { kind: "field"; collection?: string; field: K }
   | { kind: "literal"; value: V }
   | { kind: "auth"; collection: string; field: string }
   | { kind: "authId"; collection: string }
+  | { kind: "authCollection" }
   | { kind: "subquery"; collection: string; field: string; where: ExprNode<any> }
   | { kind: "request"; source: "header" | "query" | "body"; key: string }
   | { kind: "now" }

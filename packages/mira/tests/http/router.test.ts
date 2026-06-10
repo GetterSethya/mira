@@ -1,4 +1,4 @@
-import { HttpClient, HttpClientRequest, HttpServer } from "@effect/platform"
+import { Cookies, HttpClient, HttpClientRequest, HttpServer } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
 import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
@@ -367,6 +367,96 @@ describe("makeCollectionRouter", () => {
         headers: { Authorization: `Bearer ${token}` }
       })
       assert.strictEqual(authedRes.status, 200)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("POST auth-with-password — response sets HttpOnly mira_token cookie", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* seedUser("cookieuser@example.com", "secret")
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const res = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+          HttpClientRequest.bodyUnsafeJson({ email: "cookieuser@example.com", password: "secret" })
+        )
+      )
+      assert.strictEqual(res.status, 200)
+      const cookieOpt = Cookies.get(res.cookies, "mira_token")
+      assert.ok(Option.isSome(cookieOpt))
+      assert.strictEqual(cookieOpt.value.options?.httpOnly, true)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("GET /api/collections/:name — cookie auth returns 200 without Bearer header", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* seedUser("cookieauth@example.com", "secret")
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const loginRes = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+          HttpClientRequest.bodyUnsafeJson({ email: "cookieauth@example.com", password: "secret" })
+        )
+      )
+      assert.strictEqual(loginRes.status, 200)
+      const cookieToken = Option.getOrThrow(Cookies.getValue(loginRes.cookies, "mira_token"))
+      const res = yield* HttpClient.get("/api/collections/posts", {
+        headers: { Cookie: `mira_token=${cookieToken}` }
+      })
+      assert.strictEqual(res.status, 200)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("GET /api/collections/:name — invalid cookie is treated as anonymous, returns 200 for public route", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const res = yield* HttpClient.get("/api/collections/posts", {
+        headers: { Cookie: "mira_token=not-a-valid-jwt" }
+      })
+      assert.strictEqual(res.status, 200)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("POST /api/auth/logout — response clears mira_token cookie with Max-Age=0", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const res = yield* HttpClient.execute(HttpClientRequest.post("/api/auth/logout"))
+      assert.strictEqual(res.status, 204)
+      const cookieOpt = Cookies.get(res.cookies, "mira_token")
+      assert.ok(Option.isSome(cookieOpt))
+      assert.ok(cookieOpt.value.options?.maxAge !== undefined)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("GET /api/auth/me — valid cookie returns 200 with collection and record", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* seedUser("meuser@example.com", "secret")
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const loginRes = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+          HttpClientRequest.bodyUnsafeJson({ email: "meuser@example.com", password: "secret" })
+        )
+      )
+      assert.strictEqual(loginRes.status, 200)
+      const cookieToken = Option.getOrThrow(Cookies.getValue(loginRes.cookies, "mira_token"))
+      const res = yield* HttpClient.get("/api/auth/me", {
+        headers: { Cookie: `mira_token=${cookieToken}` }
+      })
+      assert.strictEqual(res.status, 200)
+      const body = (yield* res.json) as Record<string, unknown>
+      assert.strictEqual(body["collection"], "users")
+      assert.ok(typeof body["record"] === "object" && body["record"] !== null)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("GET /api/auth/me — no token returns 401", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const res = yield* HttpClient.get("/api/auth/me")
+      assert.strictEqual(res.status, 401)
     }).pipe(Effect.provide(testLayer))
   )
 })

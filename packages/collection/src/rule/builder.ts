@@ -21,6 +21,8 @@ type RuleBase = {
   request: (source: "header" | "query" | "body", key: string) => FieldOperand<string, string>
   auth: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(_collection: C, field: K) => FieldOperand<string, string>
   authId: <C extends AnyCollectionDef>(_collection: C) => FieldOperand<any, string>
+  /** The collection name of the authenticated user. Use to restrict access to a specific auth collection. */
+  authCollection: () => FieldOperand<any, string>
   literal: <V>(value: V) => OperandNode<any, V>
   now: () => OperandNode<any, string>
   dateAdd: (operand: OperandNode<any>, amount: number, unit: "day" | "hour" | "minute") => OperandNode<any, string>
@@ -118,6 +120,10 @@ export const Rule: RuleBase & {
   /** Reference the ID of the currently authenticated user. */
   authId: <C extends AnyCollectionDef>(_collection: C): FieldOperand<any, string> =>
     toChainable<any, string>({ kind: "authId", collection: _collection.name }),
+
+  /** Reference the collection name of the currently authenticated user. */
+  authCollection: (): FieldOperand<any, string> =>
+    toChainable<any, string>({ kind: "authCollection" }),
 
   /** A literal value for comparison. The value type `V` is inferred from the argument. */
   literal: <V>(value: V): OperandNode<any, V> => ({

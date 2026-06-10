@@ -1,19 +1,9 @@
-import { getToken } from "$lib/auth.js"
-
 const API_BASE = "/api"
-
-function authHeaders(): Record<string, string> {
-  const token = getToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
 
 export type ListResult<T> = { items: T[] }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { ...authHeaders(), ...(init.headers as Record<string, string> ?? {}) },
-  })
+  const res = await fetch(path, { ...init })
   if (!res.ok) throw new Error(`${res.status}`)
   if (res.status === 204) return undefined as unknown as T
   return res.json() as Promise<T>
