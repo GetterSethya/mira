@@ -1,12 +1,9 @@
 import { Effect } from "effect"
-import type { MiraPlugin } from "@gettersethya/mira"
-import { AppConfig, CollectionService } from "@gettersethya/mira"
+import { MiraPlugin, AppConfig, CollectionService } from "@gettersethya/mira"
 import { SuperAdminCollection, setRegisterToken, generateRegisterToken } from "./superadmin.js"
 import { makeDashboardRouter } from "./router.js"
 
-export const MiraDashboard: MiraPlugin = {
-  _tag: "MiraPlugin",
-
+export const MiraDashboard = MiraPlugin.define({
   collections: [SuperAdminCollection],
 
   routes: makeDashboardRouter([SuperAdminCollection]),
@@ -43,7 +40,7 @@ export const MiraDashboard: MiraPlugin = {
   onRecordDeleteSuccess: {
     handler: (ctx) => Effect.log(`[dashboard] audit: deleted ${String(ctx.result["id"])} in ${ctx.collection.name}`)
   }
-}
+})
 
 export { SuperAdminCollection } from "./superadmin.js"
 export { getRegisterToken, setRegisterToken, generateRegisterToken } from "./superadmin.js"

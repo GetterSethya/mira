@@ -3,7 +3,7 @@ import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { HookService, makeHookServiceLayer } from "@/hooks/hook-service.js"
-import { fromLayer } from "@/app/plugin.js"
+import { MiraPlugin } from "@/app/plugin.js"
 import type { RecordHookContext, ListHookContext, ViewHookContext } from "@/hooks/types.js"
 import { AppConfig } from "@/config/index.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
@@ -67,8 +67,7 @@ describe("HookService", () => {
     }).pipe(
       Effect.provide(
         makeHookServiceLayer([
-          {
-            _tag: "MiraPlugin",
+          MiraPlugin.define({
             onRecordCreate: {
               handler: (ctx) =>
                 Effect.succeed({
@@ -76,7 +75,7 @@ describe("HookService", () => {
                   data: { ...ctx.data, title: "modified" }
                 })
             }
-          }
+          })
         ])
       )
     )
@@ -96,8 +95,7 @@ describe("HookService", () => {
     }).pipe(
       Effect.provide(
         makeHookServiceLayer([
-          {
-            _tag: "MiraPlugin",
+          MiraPlugin.define({
             onRecordCreate: {
               handler: (ctx) =>
                 Effect.succeed({
@@ -105,9 +103,8 @@ describe("HookService", () => {
                   data: { ...ctx.data, title: `${ctx.data.title}-first` }
                 })
             }
-          },
-          {
-            _tag: "MiraPlugin",
+          }),
+          MiraPlugin.define({
             onRecordCreate: {
               handler: (ctx) =>
                 Effect.succeed({
@@ -115,7 +112,7 @@ describe("HookService", () => {
                   data: { ...ctx.data, title: `${ctx.data.title}-second` }
                 })
             }
-          }
+          })
         ])
       )
     )
@@ -135,8 +132,7 @@ describe("HookService", () => {
     }).pipe(
       Effect.provide(
         makeHookServiceLayer([
-          {
-            _tag: "MiraPlugin",
+          MiraPlugin.define({
             onRecordCreate: {
               collections: ["other"],
               handler: (ctx) =>
@@ -145,7 +141,7 @@ describe("HookService", () => {
                   data: { ...ctx.data, title: "modified" }
                 })
             }
-          }
+          })
         ])
       )
     )
@@ -161,12 +157,11 @@ describe("HookService", () => {
       Effect.provide(
         Layer.mergeAll(
           makeHookServiceLayer([
-            {
-              _tag: "MiraPlugin",
+            MiraPlugin.define({
               onBootstrap: () => Effect.void,
               onServe: () => Effect.void,
               onTerminate: () => Effect.void
-            }
+            })
           ]),
           TestAppConfig,
           TestCollectionService
@@ -189,8 +184,7 @@ describe("HookService", () => {
     }).pipe(
       Effect.provide(
         makeHookServiceLayer([
-          {
-            _tag: "MiraPlugin",
+          MiraPlugin.define({
             onRecordUpdate: {
               handler: (ctx) =>
                 Effect.succeed({
@@ -198,7 +192,7 @@ describe("HookService", () => {
                   data: { ...ctx.data, title: "updated" }
                 })
             }
-          }
+          })
         ])
       )
     )
@@ -217,12 +211,11 @@ describe("HookService", () => {
     }).pipe(
       Effect.provide(
         makeHookServiceLayer([
-          {
-            _tag: "MiraPlugin",
+          MiraPlugin.define({
             onRecordDelete: {
               handler: (ctx) => Effect.succeed(ctx)
             }
-          }
+          })
         ])
       )
     )
@@ -246,8 +239,7 @@ describe("HookService", () => {
     }).pipe(
       Effect.provide(
         makeHookServiceLayer([
-          {
-            _tag: "MiraPlugin",
+          MiraPlugin.define({
             onRecordList: {
               handler: (ctx) =>
                 Effect.succeed({
@@ -255,7 +247,7 @@ describe("HookService", () => {
                   limit: 50
                 })
             }
-          }
+          })
         ])
       )
     )
@@ -276,8 +268,7 @@ describe("HookService", () => {
     }).pipe(
       Effect.provide(
         makeHookServiceLayer([
-          {
-            _tag: "MiraPlugin",
+          MiraPlugin.define({
             onRecordView: {
               handler: (ctx) =>
                 Effect.succeed({
@@ -285,18 +276,18 @@ describe("HookService", () => {
                   select: ["title"]
                 })
             }
-          }
+          })
         ])
       )
     )
   )
 })
 
-describe("fromLayer()", () => {
+describe("MiraPlugin.fromLayer()", () => {
   it("creates a MiraPlugin from a Layer", () => {
     const layer = Layer.empty
-    const plugin = fromLayer(layer)
-    expect(plugin._tag).toBe("MiraPlugin")
+    const plugin = MiraPlugin.fromLayer(layer)
+    expect(MiraPlugin.isMiraPlugin(plugin)).toBe(true)
     expect(plugin.layer).toBe(layer)
   })
 })

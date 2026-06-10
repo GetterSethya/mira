@@ -6,7 +6,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js"
   import { IconChevronDown, IconChevronRight, IconCopy } from "@tabler/icons-svelte"
   import { IconSize } from "$lib/constants"
-  import { Button, buttonVariants } from "./ui/button"
+  import { Button } from "./ui/button"
   import { toast } from "svelte-sonner"
 
   const { spans }: { spans: SpanRow[] } = $props()
@@ -91,16 +91,15 @@
     {@const authCollection = roots[0]?.attributes?.["auth.collection"]}
 
     <div class="rounded-md border">
-      <button
-        class="flex flex-col w-full gap-3 px-4 py-2 text-left hover:bg-muted/50 font-mono text-xs"
-        onclick={() => toggleTrace(traceId)}
-      >
+      <div class="flex flex-col w-full gap-3 px-4 py-2 text-left hover:bg-muted/50 font-mono text-xs">
         <div class="flex flex-1 items-center gap-3">
-          {#if isOpen}
-            <IconChevronDown size={IconSize} />
-          {:else}
-            <IconChevronRight size={IconSize} />
-          {/if}
+          <Button variant="ghost" onclick={() => toggleTrace(traceId)}>
+            {#if isOpen}
+              <IconChevronDown size={IconSize} />
+            {:else}
+              <IconChevronRight size={IconSize} />
+            {/if}
+          </Button>
           <span class="truncate text-muted-foreground" title={traceId}>{traceId.slice(0, 16)}…</span>
           <div>
             <span class="font-medium">{roots[0]?.name ?? "trace"}</span>
@@ -124,7 +123,7 @@
             <Badge variant="outline">{`Auth: ${authCollection || "public"}`}</Badge>
           {/if}
         </div>
-      </button>
+      </div>
 
       {#if isOpen}
         <div class="border-t">

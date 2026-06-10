@@ -48,8 +48,6 @@ export const onCollectionSuccess = <T>(
 ): RecordSuccessHook<T> => ({ collections, handler })
 
 export interface MiraPlugin {
-  readonly _tag: "MiraPlugin"
-
   readonly onBootstrap?: () => Effect.Effect<void, never, AppConfig | CollectionService>
   readonly onServe?: () => Effect.Effect<void, never, never>
   readonly onTerminate?: () => Effect.Effect<void, never, never>
@@ -85,10 +83,24 @@ export interface MiraPlugin {
   readonly collections?: ReadonlyArray<AnyCollectionDef>
 }
 
-export const fromLayer = (layer: Layer.Layer<never, never, never>): MiraPlugin => ({
-  _tag: "MiraPlugin",
-  layer
-})
+interface MiraPluginInstance extends MiraPlugin {
+  readonly _tag: "MiraPlugin"
+}
 
-export const isMiraPlugin = (ext: unknown): ext is MiraPlugin =>
-  typeof ext === "object" && ext !== null && "_tag" in ext && (ext as { _tag: unknown })._tag === "MiraPlugin"
+export const MiraPlugin = {
+  define: (opts: MiraPlugin): MiraPlugin => {
+    const instance: MiraPluginInstance = { _tag: "MiraPlugin", ...opts }
+    return instance
+  },
+
+  fromLayer: (layer: Layer.Layer<never, never, never>): MiraPlugin => {
+    const instance: MiraPluginInstance = { _tag: "MiraPlugin", layer }
+    return instance
+  },
+
+  isMiraPlugin: (ext: unknown): ext is MiraPlugin => {
+    if (typeof ext !== "object" || ext === null) return false
+    if (!("_tag" in ext)) return false
+    return ext._tag === "MiraPlugin"
+  }
+}

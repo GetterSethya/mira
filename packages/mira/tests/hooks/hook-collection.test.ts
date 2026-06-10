@@ -11,7 +11,7 @@ import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
-import type { MiraPlugin } from "@/app/plugin.js"
+import { MiraPlugin } from "@/app/plugin.js"
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text(),
@@ -86,16 +86,17 @@ describe("HookCollectionService", () => {
       const svc = yield* CollectionService
       const record = yield* svc.create(Posts, { title: "Test" }, noCtx)
       expect(record["title"]).toBe("Hooked: Test")
-    }).pipe(Effect.provide(makeTestLayer([{
-      _tag: "MiraPlugin",
-      onRecordCreate: {
-        handler: (ctx) =>
-          Effect.succeed({
-            ...ctx,
-            data: { ...ctx.data, title: "Hooked: " + ctx.data["title"] },
-          }),
-      },
-    }])))
+    }).pipe(Effect.provide(makeTestLayer([
+      MiraPlugin.define({
+        onRecordCreate: {
+          handler: (ctx) =>
+            Effect.succeed({
+              ...ctx,
+              data: { ...ctx.data, title: "Hooked: " + ctx.data["title"] },
+            }),
+        },
+      })
+    ])))
   )
 
   it.effect("intercepts list and modifies params via hook", () =>
@@ -104,16 +105,17 @@ describe("HookCollectionService", () => {
       const svc = yield* CollectionService
       const page = yield* svc.list(Posts, null, 10, noCtx)
       expect(page.items.length).toBe(1)
-    }).pipe(Effect.provide(makeTestLayer([{
-      _tag: "MiraPlugin",
-      onRecordList: {
-        handler: (ctx) =>
-          Effect.succeed({
-            ...ctx,
-            limit: 1,
-          }),
-      },
-    }])))
+    }).pipe(Effect.provide(makeTestLayer([
+      MiraPlugin.define({
+        onRecordList: {
+          handler: (ctx) =>
+            Effect.succeed({
+              ...ctx,
+              limit: 1,
+            }),
+        },
+      })
+    ])))
   )
 
   it.effect("intercepts view and modifies select via hook", () =>
@@ -122,15 +124,16 @@ describe("HookCollectionService", () => {
       const svc = yield* CollectionService
       const record = yield* svc.view(Posts, "1", noCtx)
       expect(record["title"]).toBe("Hello")
-    }).pipe(Effect.provide(makeTestLayer([{
-      _tag: "MiraPlugin",
-      onRecordView: {
-        handler: (ctx) =>
-          Effect.succeed({
-            ...ctx,
-            select: ["title"],
-          }),
-      },
-    }])))
+    }).pipe(Effect.provide(makeTestLayer([
+      MiraPlugin.define({
+        onRecordView: {
+          handler: (ctx) =>
+            Effect.succeed({
+              ...ctx,
+              select: ["title"],
+            }),
+        },
+      })
+    ])))
   )
 })
