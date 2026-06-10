@@ -1,6 +1,6 @@
 {
   "name": "@gettersethya/mira-tanstack-adapter",
-  "version": "0.1.0-alpha.7",
+  "version": "0.1.0-alpha.8",
   "type": "module",
   "description": "TanStack Query adapters for @gettersethya/mira client SDK",
   "author": "Getter Sethya",
