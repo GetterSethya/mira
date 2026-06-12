@@ -10,14 +10,11 @@ import { makeCollectionClient } from "./collection.js"
 import { MiraError } from "./errors.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler as makeHandler } from "./handler.js"
-import type { InferRecord } from "./types.js"
+import type { AnyAuthCollectionDef, InferRecord } from "./types.js"
 import type { TelemetryClient } from "./telemetry.js"
 import { makeTelemetryClient } from "./telemetry.js"
 
-type CollectionAdapter = <F extends FieldsMap>(
-  client: CollectionClient<F>,
-  name: string
-) => CollectionClient<F>
+type CollectionAdapter = <F extends FieldsMap>(client: CollectionClient<F>, name: string) => CollectionClient<F>
 
 type BaseClient<A extends BrowserAuth | ServerAuth = BrowserAuth | ServerAuth> = {
   collection<C extends AnyCollectionDef>(def: C): CollectionClient<C["fields"]>
@@ -27,6 +24,21 @@ type BaseClient<A extends BrowserAuth | ServerAuth = BrowserAuth | ServerAuth> =
     map: M,
     opts?: { adapter?: CollectionAdapter }
   ): BaseClient<A> & CollectionAccessors<M>
+  /**
+   * Fetches the currently authenticated user from `GET /api/auth/me`.
+   *
+   * Pass an auth collection definition to get a typed response:
+   * @example
+   * const result = await mira.me(MyAuthCollection).raw()
+   * // result.record is typed as InferRecord<MyAuthCollection["fields"]>
+   *
+   * Or call with no args for an untyped response (backward compat):
+   * @example
+   * const result = await mira.me().raw()
+   * // result.record is Record<string, unknown>
+   */
+  me<C extends AnyAuthCollectionDef>(def: C): ClientHandler<{ collection: string; record: InferRecord<C["fields"]> }>
+  me(): ClientHandler<{ collection: string; record: Record<string, unknown> }>
 }
 
 type CollectionAccessors<M extends Record<string, AnyCollectionDef>> = {
@@ -66,13 +78,16 @@ function createExecute(baseUrl: string, authTokenRef: MutableRef.MutableRef<stri
       const finalReq = HCR.prependUrl(baseUrl)(token ? HCR.setHeader(req, "Authorization", `Bearer ${token}`) : req)
 
       const res = yield* http.execute(finalReq)
+
       if (res.status >= 400) {
         const body = yield* res.json
         return yield* new MiraError({ status: res.status, body })
       }
+
       if (res.status === 204) {
         return undefined as T
       }
+
       return (yield* res.json) as T
     })
     return catchAllErrors(raw)
@@ -121,17 +136,12 @@ function createMiraClientInternal(
     return makeBrowserAuth(execute, makeClientHandler, MutableRef.make(false))
   }
 
-  function withCollections<M extends Record<string, AnyCollectionDef>>(
-    map: M,
-    opts?: { adapter?: CollectionAdapter }
-  ) {
+  function withCollections<M extends Record<string, AnyCollectionDef>>(map: M, opts?: { adapter?: CollectionAdapter }) {
     const baseClient = buildBaseClient()
     const collections = {} as CollectionAccessors<M>
     for (const key of Object.keys(map) as Array<keyof M>) {
       const raw = buildCollectionClient(map[key])
-      collections[key] = (
-        opts?.adapter ? opts.adapter(raw, String(key)) : raw
-      ) as CollectionAccessors<M>[keyof M]
+      collections[key] = (opts?.adapter ? opts.adapter(raw, String(key)) : raw) as CollectionAccessors<M>[keyof M]
     }
     return Object.assign(baseClient, collections)
   }
@@ -141,7 +151,15 @@ function createMiraClientInternal(
       collection: <C extends AnyCollectionDef>(def: C) => buildCollectionClient(def),
       auth: makeAuth(),
       telemetry: makeTelemetryClient(execute),
-      withCollections
+      withCollections,
+      me: (<C extends AnyAuthCollectionDef>(def?: C) => {
+        return makeClientHandler(
+          execute<{
+            collection: string
+            record: C extends AnyAuthCollectionDef ? InferRecord<C["fields"]> : Record<string, unknown>
+          }>(HCR.get("/api/auth/me"))
+        )
+      }) as BaseClient["me"]
     }
   }
 
@@ -222,7 +240,7 @@ export function createMiraClient(
 export function createMiraClient(
   baseUrl = "/",
   opts: { type?: "browser" | "server"; defaultRetryOptions?: RetryOptions } = {}
-): BrowserMiraClient | ServerMiraClient {
+) {
   const { type = "browser", defaultRetryOptions } = opts
   return createMiraClientInternal(baseUrl, type, defaultRetryOptions) as BrowserMiraClient | ServerMiraClient
 }

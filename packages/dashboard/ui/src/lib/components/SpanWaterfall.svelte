@@ -2,7 +2,7 @@
   import * as Tooltip from "$lib/components/ui/tooltip"
   import * as Table from "$lib/components/ui/table"
   import { SvelteSet } from "svelte/reactivity"
-  import type { SpanRow } from "$lib/client.js"
+  import type { SpanRow } from "$lib/dashboard-api.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
   import { IconChevronDown, IconChevronRight, IconCopy } from "@tabler/icons-svelte"
   import { IconSize } from "$lib/constants"

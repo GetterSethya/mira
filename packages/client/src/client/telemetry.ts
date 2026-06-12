@@ -3,17 +3,38 @@ import type { FilterNode } from "@gettersethya/mira-collection"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler } from "./handler.js"
 
+export type ApiFieldSchema = {
+  type?: string
+  format?: string
+  "x-kind"?: string
+  "x-system"?: boolean
+  "x-hidden"?: boolean
+  "x-required"?: boolean
+  "x-relation"?: string
+  "x-protected"?: boolean
+}
+
+export type ApiCollectionSchema = {
+  name: string
+  kind: "base" | "auth" | "view"
+  fields: Record<string, ApiFieldSchema>
+  required?: string[]
+  indexes?: unknown[]
+  rules?: unknown
+  viewQuery?: string
+}
+
 type LogEntry = {
-  id: number
+  id: string
   level: string
   message: string
-  timestamp: string
+  created: string
   traceId: string | null
   spanId: string | null
 }
 
-type SpanEntry = {
-  id: number
+export type SpanRow = {
+  id: string
   name: string
   traceId: string
   spanId: string
@@ -23,18 +44,18 @@ type SpanEntry = {
   status: "ok" | "error"
   error: string | null
   attributes: Record<string, string | number | boolean>
-  timestamp: string
+  created: string
 }
 
-type LogsResponse = {
+export type LogsResponse = {
   logs: Array<LogEntry>
   total: number
   limit: number
   offset: number
 }
 
-type SpansResponse = {
-  spans: Array<SpanEntry>
+export type SpansResponse = {
+  spans: Array<SpanRow>
   total: number
   limit: number
   offset: number
@@ -52,6 +73,13 @@ export type TelemetryClient = {
     offset?: number
     traceId?: string
   }): ClientHandler<SpansResponse>
+
+  /**
+   * Fetches all registered collection schemas from `GET /api/_schema`.
+   * Returns an array of `CollectionSchema` objects describing each collection's
+   * fields, kind, indexes, rules, and (for view collections) the SQL view query.
+   */
+  getSchema(): ClientHandler<ApiCollectionSchema[]>
 }
 
 function buildQueryParams(params: Record<string, string | undefined>): string {
@@ -82,5 +110,7 @@ export function makeTelemetryClient(execute: ExecuteFn): TelemetryClient {
       })
       return makeClientHandler(execute<SpansResponse>(HCR.get(`/api/_telemetry/spans${qs}`)))
     },
+
+    getSchema: () => makeClientHandler(execute<ApiCollectionSchema[]>(HCR.get("/api/_schema"))),
   }
 }

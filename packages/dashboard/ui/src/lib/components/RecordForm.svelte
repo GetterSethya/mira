@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createAppForm } from "$lib/form.js"
   import { buildDefaultValues, hasFileField, toFormData, fieldEntries } from "$lib/schema.js"
-  import type { CollectionSchema } from "$lib/client.js"
+  import type { CollectionSchema } from "$lib/dashboard-api.js"
   import RecordFields from "./RecordFields.svelte"
 
   const {

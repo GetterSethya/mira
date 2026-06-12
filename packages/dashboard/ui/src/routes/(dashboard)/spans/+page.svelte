@@ -2,7 +2,7 @@
   import { createQuery } from "@tanstack/svelte-query"
   import { page } from "$app/state"
   import { goto } from "$app/navigation"
-  import { client } from "$lib/client.js"
+  import { mira } from "$lib/mira.js"
   import SpanWaterfall from "$lib/components/SpanWaterfall.svelte"
   import { Input } from "$lib/components/ui/input/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
@@ -17,7 +17,7 @@
 
   const spansQuery = createQuery(() => ({
     queryKey: ["spans", committed, offset],
-    queryFn: () => (committed ? client.spans({ traceId: committed }) : client.spans({ limit: LIMIT, offset }))
+    queryFn: () => (committed ? mira.telemetry.getSpans({ traceId: committed }).raw() : mira.telemetry.getSpans({ limit: LIMIT, offset }).raw())
   }))
 
   function apply() {

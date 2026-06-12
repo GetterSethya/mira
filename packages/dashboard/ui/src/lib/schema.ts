@@ -1,4 +1,4 @@
-import type { CollectionSchema, FieldSchema } from "$lib/client.js"
+import type { CollectionSchema, FieldSchema } from "$lib/dashboard-api.js"
 
 const SYSTEM_FIELDS = new Set(["id", "seqId", "created", "updated", "password"])
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query"
   import { page } from "$app/stores"
-  import { client } from "$lib/client.js"
+  import { mira } from "$lib/mira.js"
   import { makeCollectionApi } from "$lib/collection-client.js"
   import RecordTable from "$lib/components/RecordTable.svelte"
   import RecordForm from "$lib/components/RecordForm.svelte"
@@ -10,7 +10,7 @@
   import { toast } from "svelte-sonner"
 
   const name = $derived($page.params["name"] ?? "")
-  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => client.schema() }))
+  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
   const schema = $derived(schemaQuery.data?.find((s) => s.name === name) ?? null)
 
   const api = $derived(makeCollectionApi(name))

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query"
-  import { client } from "$lib/client.js"
+  import { run, dashboardApi } from "$lib/dashboard-api.js"
   import * as Table from "$lib/components/ui/table/index.js"
 
-  const configQuery = createQuery(() => ({ queryKey: ["config"], queryFn: () => client.config() }))
+  const configQuery = createQuery(() => ({ queryKey: ["config"], queryFn: () => run(dashboardApi.config()) }))
 </script>
 
 <div class="space-y-4">

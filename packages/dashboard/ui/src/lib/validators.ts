@@ -17,7 +17,7 @@ const token = Schema.String.pipe(
 
 export const LoginSchema = Schema.Struct({ email, password })
 
-export const RegisterSchema = Schema.Struct({ email, password: strongPassword })
+export const RegisterSchema = Schema.Struct({ name: Schema.String, email, password: strongPassword })
 
 export function formatFieldErrors(errors: any[]): string {
   return errors.map((e) => e.message).join(", ")

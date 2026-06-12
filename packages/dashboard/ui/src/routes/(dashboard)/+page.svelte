@@ -1,18 +1,21 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query"
-  import { client } from "$lib/client.js"
+  import { mira } from "$lib/mira.js"
   import * as Card from "$lib/components/ui/card/index.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
   import { resolve } from "$app/paths"
 
-  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => client.schema() }))
+  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
 
   const logsQuery = createQuery(() => ({
     queryKey: ["logs", "recent"],
-    queryFn: () => client.logs({ limit: 5, offset: 0 })
+    queryFn: () => mira.telemetry.getLogs({ limit: 5, offset: 0 }).raw()
   }))
 
-  const spansQuery = createQuery(() => ({ queryKey: ["spans", "recent"], queryFn: () => client.spans({ limit: 1 }) }))
+  const spansQuery = createQuery(() => ({
+    queryKey: ["spans", "recent"],
+    queryFn: () => mira.telemetry.getSpans({ limit: 1 }).raw()
+  }))
 
   const levelVariant = (level: string) =>
     level === "ERROR" ? "destructive" : level === "WARNING" ? "secondary" : "outline"

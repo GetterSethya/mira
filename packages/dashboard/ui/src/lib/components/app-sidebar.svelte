@@ -9,13 +9,14 @@
   import Layout from "@tabler/icons-svelte/icons/layout"
   import { resolve } from "$app/paths"
   import { createQuery } from "@tanstack/svelte-query"
-  import { client } from "$lib/client"
+  import { mira } from "$lib/mira.js"
+  import NavUser from "$lib/components/nav-user.svelte"
   import { page } from "$app/state"
   import { IconServer, IconStack2 } from "@tabler/icons-svelte"
 
   let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props()
 
-  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => client.schema() }))
+  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
 
   const collections = $derived(
     schemaQuery.isSuccess
@@ -118,5 +119,8 @@
       </Collapsible.Root>
     {/each}
   </Sidebar.Content>
+  <Sidebar.Footer class="p-2">
+    <NavUser />
+  </Sidebar.Footer>
   <Sidebar.Rail />
 </Sidebar.Root>

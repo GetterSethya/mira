@@ -19,6 +19,12 @@ type AuthSystemFieldDefs = {
   seqId:         FieldDef & { kind: "seqId" }
 }
 
+/** Only the auth-specific fields not already provided by InferRecord's base type. */
+type AuthPublicFieldDefs = {
+  email:         FieldDef & { kind: "email" }
+  emailVerified: FieldDef & { kind: "boolean" }
+}
+
 /** Rule builder for auth collections — extends RuleBuilder with `selfId()`. */
 type AuthRuleBuilder<F extends FieldsMap> = RuleBuilder<F> & {
   /** authId operand for this collection. Use instead of `Rule.authId(ThisCollection)` to avoid circular references. */
@@ -41,7 +47,7 @@ type RuleCb<F extends FieldsMap> = (
  */
 export type AuthCollectionBuilder<F extends FieldsMap> = {
   name: string
-  fields: F
+  fields: F & AuthPublicFieldDefs
   schema: CollectionSchema & { "x-collection-kind": "auth" }
   /**
    * Add collection-level indexes (in addition to the system email unique index
@@ -63,6 +69,11 @@ const AUTH_SYSTEM_PROPERTIES: Record<string, JsonSchemaProperty> = {
   emailVerified: { type: "boolean", "x-system": true, default: false }
 }
 
+const AUTH_SYSTEM_FIELD_DEFS: AuthPublicFieldDefs = {
+  email:         { _tag: "FieldDef", kind: "email" },
+  emailVerified: { _tag: "FieldDef", kind: "boolean" },
+}
+
 const AUTH_SYSTEM_INDEXES: Array<IndexDef> = [{ fields: ["email"], unique: true }]
 
 function makeAuthBuilder<F extends FieldsMap>(
@@ -75,7 +86,7 @@ function makeAuthBuilder<F extends FieldsMap>(
   let _schema: (CollectionSchema & { "x-collection-kind": "auth" }) | undefined
   return {
     name,
-    fields: extraFields,
+    fields: Object.assign({}, AUTH_SYSTEM_FIELD_DEFS, extraFields),
     get schema(): CollectionSchema & { "x-collection-kind": "auth" } {
       if (_schema === undefined) {
         const indexes = indexesCb?.(Index as IndexBuilder<AF>)

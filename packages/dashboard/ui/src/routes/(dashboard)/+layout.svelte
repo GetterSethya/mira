@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation"
   import { resolve } from "$app/paths"
-  import { isLoggedIn, clearLoggedIn } from "$lib/auth.js"
+  import { isLoggedIn } from "$lib/auth.js"
   import AppSidebar from "$lib/components/app-sidebar.svelte"
   import ThemeToggle from "$lib/components/ThemeToggle.svelte"
   import * as Breadcrumb from "$lib/components/ui/breadcrumb/index.js"
@@ -14,11 +14,6 @@
   $effect(() => {
     if (!isLoggedIn()) goto(resolve(`/login`))
   })
-
-  // function logout() {
-  //   clearToken()
-  //   goto(resolve(`/login`))
-  // }
 </script>
 
 <Sidebar.Provider>

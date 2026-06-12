@@ -7,6 +7,7 @@ import { SuperAdminCollection } from "../superadmin.js"
 const RegisterBodySchema = Schema.Struct({
   email: Schema.String,
   password: Schema.String,
+  name: Schema.String,
   token: Schema.String
 })
 
@@ -34,7 +35,8 @@ export const registerRoute = Effect.gen(function* () {
     SuperAdminCollection,
     {
       email: body.email,
-      password: hashedPassword
+      password: hashedPassword,
+      name: body.name
     },
     adminCtx
   )

@@ -60,7 +60,13 @@ export const sqliteDialect: DialectType = {
         const c = step.column
         const parts = [sqliteDialect.quoteIdentifier(c.name), sqliteDialect.nativeType(c)]
         if (!c.nullable) parts.push("NOT NULL")
-        if (c.default !== undefined) parts.push(`DEFAULT ${sqliteDialect.quoteLiteral(c.default)}`)
+        if (c.default !== undefined) {
+          parts.push(`DEFAULT ${sqliteDialect.quoteLiteral(c.default)}`)
+        } else if (!c.nullable) {
+          // SQLite rejects ADD COLUMN NOT NULL without a DEFAULT when rows exist.
+          const fallback: string | number = c.type === "text" ? "" : 0
+          parts.push(`DEFAULT ${sqliteDialect.quoteLiteral(fallback)}`)
+        }
         return [`ALTER TABLE ${sqliteDialect.quoteIdentifier(step.table)} ADD COLUMN ${parts.join(" ")}`]
       }
 

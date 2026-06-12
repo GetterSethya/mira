@@ -3,8 +3,8 @@
   import { Schema } from "effect"
   import { page } from "$app/state"
   import { goto } from "$app/navigation"
-  import { base } from "$app/paths"
-  import { client } from "$lib/client.js"
+  import { resolve } from "$app/paths"
+  import { run, dashboardApi } from "$lib/dashboard-api.js"
   import { createAppForm } from "$lib/form.js"
   import { RegisterSchema, formatFieldErrors } from "$lib/validators.js"
   import * as Card from "$lib/components/ui/card/index.js"
@@ -18,6 +18,7 @@
   let error = $state("")
 
   type RegisterMutationArgs = {
+    name: string
     email: string
     password: string
     token: string
@@ -25,11 +26,11 @@
 
   const registerMutation = createMutation(() => ({
     mutationFn: async (args: RegisterMutationArgs) => {
-      return await client.register(args.email, args.password, args.token)
+      return await run(dashboardApi.register(args.email, args.password, args.name, args.token))
     },
     onSuccess: () => {
       toast.success("Account created! Please sign in.")
-      goto(`${base}/login`)
+      goto(resolve(`/login`))
     },
     onError: () => {
       toast.error("Registration failed")
@@ -37,7 +38,7 @@
   }))
 
   const form = createAppForm(() => ({
-    defaultValues: { email: "", password: "" },
+    defaultValues: { name: "", email: "", password: "" },
     validators: { onChange: Schema.standardSchemaV1(RegisterSchema) },
     onSubmit: async ({ value }) => {
       return await registerMutation.mutateAsync({ ...value, token })
@@ -60,6 +61,18 @@
         }}
         class="flex flex-col gap-4"
       >
+        <form.Field name="name">
+          {#snippet children(field)}
+            <Field.Field>
+              <Field.Label>Name</Field.Label>
+              <Input type="text" value={field.state.value} oninput={(e) => field.handleChange(e.currentTarget.value)} />
+              {#if field.state.meta.errors.length > 0}
+                <Field.Error>{formatFieldErrors(field.state.meta.errors)}</Field.Error>
+              {/if}
+            </Field.Field>
+          {/snippet}
+        </form.Field>
+
         <form.Field name="email">
           {#snippet children(field)}
             <Field.Field>

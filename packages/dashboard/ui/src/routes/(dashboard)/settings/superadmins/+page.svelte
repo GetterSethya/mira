@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query"
-  import { client } from "$lib/client.js"
+  import { mira } from "$lib/mira.js"
   import * as Table from "$lib/components/ui/table/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js"
@@ -12,7 +12,7 @@
   import { base } from "$app/paths"
 
   const queryClient = useQueryClient()
-  const adminsQuery = createQuery(() => ({ queryKey: ["superadmins"], queryFn: () => client.superadmins.list() }))
+  const adminsQuery = createQuery(() => ({ queryKey: ["superadmins"], queryFn: () => mira.superadmin.getList().raw() }))
 
   const isLast = $derived((adminsQuery.data?.items.length ?? 0) <= 1)
 
@@ -23,13 +23,11 @@
     if (!deleteId) return
     deleting = true
     try {
-      await client.superadmins.delete(deleteId)
+      await mira.superadmin.delete().raw(deleteId)
       await queryClient.invalidateQueries({ queryKey: ["superadmins"] })
       toast.success("Superadmin deleted")
-    } catch (e: unknown) {
-      const err = e as { status?: number }
-      if (err.status === 409) toast.error("Cannot delete the last superadmin")
-      else toast.error("Delete failed")
+    } catch {
+      toast.error("Delete failed")
     } finally {
       deleting = false
       deleteId = null
@@ -37,17 +35,15 @@
   }
 
   let email = $state("")
-  let password = $state("")
   let adding = $state(false)
 
   async function handleAdd() {
-    if (!email || !password) return
+    if (!email) return
     adding = true
     try {
-      await client.superadmins.create(email, password)
+      await mira.superadmin.create().raw({ email, emailVerified: false, name: "" })
       await queryClient.invalidateQueries({ queryKey: ["superadmins"] })
       email = ""
-      password = ""
       toast.success("Superadmin added")
     } catch {
       toast.error("Failed to add superadmin")
@@ -112,11 +108,7 @@
           <Field.Label>Email</Field.Label>
           <Input type="email" bind:value={email} placeholder="admin@example.com" />
         </Field.Field>
-        <Field.Field>
-          <Field.Label>Password</Field.Label>
-          <Input type="password" bind:value={password} />
-        </Field.Field>
-        <Button onclick={handleAdd} disabled={adding || !email || !password}>
+        <Button onclick={handleAdd} disabled={adding || !email}>
           {adding ? "Adding…" : "Add superadmin"}
         </Button>
       </div>

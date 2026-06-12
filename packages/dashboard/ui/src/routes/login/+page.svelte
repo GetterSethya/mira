@@ -3,16 +3,16 @@
   import { Schema } from "effect"
   import { createAppForm } from "$lib/form.js"
   import { LoginSchema, formatFieldErrors } from "$lib/validators.js"
-  import { client } from "$lib/client.js"
+  import { mira } from "$lib/mira.js"
   import { setLoggedIn } from "$lib/auth.js"
   import { goto } from "$app/navigation"
-  import { base } from "$app/paths"
   import * as Card from "$lib/components/ui/card/index.js"
   import { Input } from "$lib/components/ui/input/index.js"
   import { toast } from "svelte-sonner"
   import { createMutation } from "@tanstack/svelte-query"
   import { Button } from "$lib/components/ui/button"
   import { Spinner } from "$lib/components/ui/spinner"
+  import { resolve } from "$app/paths"
 
   let error = $state("")
 
@@ -23,13 +23,13 @@
 
   const loginMutation = createMutation(() => ({
     mutationFn: async (args: LoginMutationArgs) => {
-      await client.login(args.email, args.password)
+      await mira.superadmin.authWithPassword().raw({ email: args.email, password: args.password })
       setLoggedIn()
     },
 
     onSuccess: () => {
       toast.success("Login success")
-      goto(`${base}/`)
+      goto(resolve(`/`))
     },
 
     onError: () => {
@@ -41,7 +41,6 @@
     defaultValues: { email: "", password: "" },
     validators: { onChange: Schema.standardSchemaV1(LoginSchema) },
     onSubmit: async ({ value }) => {
-      console.log("onsubmit")
       return await loginMutation.mutateAsync(value)
     }
   }))

@@ -1,11 +1,11 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query"
-  import { client } from "$lib/client.js"
+  import { mira } from "$lib/mira.js"
   import * as Table from "$lib/components/ui/table/index.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
   import { resolve } from "$app/paths"
 
-  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => client.schema() }))
+  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
 
   const kindVariant = (kind: string) => (kind === "auth" ? "secondary" : kind === "view" ? "outline" : "default")
 </script>

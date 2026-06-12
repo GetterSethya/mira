@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getFormType } from "$lib/form.js"
   import { fieldEntries } from "$lib/schema.js"
-  import type { CollectionSchema } from "$lib/client.js"
+  import type { CollectionSchema } from "$lib/dashboard-api.js"
 
   const formType = getFormType({ defaultValues: {} as Record<string, unknown> })
   const { form, schema, record }: { form: typeof formType; schema: CollectionSchema; record: Record<string, unknown> | null } = $props()

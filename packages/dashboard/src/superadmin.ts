@@ -1,7 +1,8 @@
-import { AuthCollection } from "@gettersethya/mira-client"
-import type { AnyCollectionDef } from "@gettersethya/mira-client"
+import { AuthCollection, Field } from "@gettersethya/mira-client"
 
-export const SuperAdminCollection: AnyCollectionDef = AuthCollection.define("_superadmin", {}).rules((R) => ({
+export const SuperAdminCollection = AuthCollection.define("_superadmin", {
+  name: Field.text({ default: "" })
+}).rules((R) => ({
   list: R.authCollection().eq(R.literal("_superadmin")),
   view: R.authCollection().eq(R.literal("_superadmin")),
   create: R.public(),

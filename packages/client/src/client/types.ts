@@ -1,6 +1,20 @@
 import type { AnyCollectionDef, FieldDef, FieldKindToType, FieldsMap, InferFieldValue } from "@gettersethya/mira-collection"
 import type { ProtectedFileFieldClient, PublicFileFieldClient } from "./file.js"
 
+/**
+ * Narrows `AnyCollectionDef` to auth collections only.
+ * Used to constrain the typed `me()` overload on the Mira client so that only
+ * auth collection definitions are accepted at compile time.
+ *
+ * @example
+ * // Only auth collections satisfy this constraint:
+ * const mira = createMiraClient("/")
+ * const result = await mira.me(MyAuthCollection).raw()
+ */
+export type AnyAuthCollectionDef = AnyCollectionDef & {
+  schema: { "x-collection-kind": "auth" }
+}
+
 type FieldKindToInputType = Omit<FieldKindToType, "file"> & {
   file: File | Blob
 }

@@ -2,7 +2,7 @@
   import * as Table from "$lib/components/ui/table/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js"
-  import type { CollectionSchema } from "$lib/client.js"
+  import type { CollectionSchema } from "$lib/dashboard-api.js"
   import { isSystemField } from "$lib/schema.js"
   import { base } from "$app/paths"
 

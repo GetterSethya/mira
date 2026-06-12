@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query"
-  import { Filter } from "@gettersethya/mira-collection"
-  import { client, type LogsResponse } from "$lib/client.js"
+  import { mira } from "$lib/mira.js"
+  import type { LogsResponse } from "$lib/dashboard-api.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
   import * as Select from "$lib/components/ui/select/index.js"
@@ -17,7 +17,7 @@
 
   const logsQuery = createQuery(() => ({
     queryKey: ["logs", level, offset],
-    queryFn: () => client.logs({ limit: LIMIT, offset })
+    queryFn: () => mira.telemetry.getLogs({ limit: LIMIT, offset }).raw()
   }))
 
   const totalPages = $derived(logsQuery.data ? Math.ceil(logsQuery.data.total / LIMIT) : 0)
@@ -40,7 +40,7 @@
     },
     {
       accessorKey: "traceId",
-      cell: ({ row }) => row.original.spanId ?? "-"
+      cell: ({ row }) => row.original.traceId ?? "-"
     }
   ]
 </script>

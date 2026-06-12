@@ -3,7 +3,7 @@
   import { page } from "$app/stores"
   import { goto } from "$app/navigation"
   import { base } from "$app/paths"
-  import { client } from "$lib/client.js"
+  import { mira } from "$lib/mira.js"
   import { makeCollectionApi } from "$lib/collection-client.js"
   import RecordForm from "$lib/components/RecordForm.svelte"
   import { Button } from "$lib/components/ui/button/index.js"
@@ -13,7 +13,7 @@
   const name = $derived($page.params["name"] ?? "")
   const id = $derived($page.params["id"] ?? "")
 
-  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => client.schema() }))
+  const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
   const schema = $derived(schemaQuery.data?.find((s) => s.name === name) ?? null)
   const api = $derived(makeCollectionApi(name))
   const recordQuery = createQuery(() => api.getOneOptions(id))
