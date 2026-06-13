@@ -19,6 +19,19 @@ import type { MiraPlugin } from "./plugin.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
 import { HookService } from "@/hooks/hook-service.js"
+import { makeCronServiceLayer } from "@/cron/cron-service.js"
+import { CronService } from "@/cron/cron-service.js"
+import type { CronDef } from "@/cron/types.js"
+
+function assertUniqueCronNames(defs: ReadonlyArray<CronDef>) {
+  const seen = new Set<string>()
+  for (const def of defs) {
+    if (seen.has(def.name)) {
+      throw new Error(`Duplicate cron name: "${def.name}". Cron names must be globally unique.`)
+    }
+    seen.add(def.name)
+  }
+}
 
 /**
  * The assembled Mira application, ready to serve.
@@ -77,7 +90,7 @@ export class MiraApp {
    * @example
    * app.extend(MiraDashboard).serve()
    */
-  extend(plugin: MiraPlugin): this {
+  extend(plugin: MiraPlugin) {
     this.#extras.push(plugin)
     return this
   }
@@ -91,6 +104,10 @@ export class MiraApp {
 
   #getAllPlugins(): ReadonlyArray<MiraPlugin> {
     return this.#extras
+  }
+
+  #getAllCrons(): ReadonlyArray<CronDef> {
+    return [...this.#config.crons, ...this.#extras.flatMap((p) => p.crons ?? [])]
   }
 
   /**
@@ -113,18 +130,17 @@ export class MiraApp {
     const { platform, database, storage, telemetry } = this.#config
     const allCollections = this.#getAllCollections()
     const allPlugins = this.#getAllPlugins()
+    const allCronDefs = this.#getAllCrons()
+    assertUniqueCronNames(allCronDefs)
 
     const pluginLayers = allPlugins.filter((p) => p.layer !== undefined).map((p) => p.layer!)
 
     const extrasLayer = pluginLayers.length > 0 ? pluginLayers.reduce((acc, l) => Layer.merge(acc, l)) : Layer.empty
 
     // Foundation: database + storage + thumbnail + telemetry, wired on platform
-    const foundation = Layer.mergeAll(
-      database.layer,
-      storage.layer,
-      ThumbnailServicePhotonLive,
-      telemetry,
-    ).pipe(Layer.provideMerge(platform.layer))
+    const foundation = Layer.mergeAll(database.layer, storage.layer, ThumbnailServicePhotonLive, telemetry).pipe(
+      Layer.provideMerge(platform.layer)
+    )
 
     // Mid: Repository + Migrator + AppConfig, wired on foundation
     const mid = Layer.mergeAll(RepositoryLive, MigratorLive, AppConfigLive).pipe(Layer.provideMerge(foundation))
@@ -153,8 +169,15 @@ export class MiraApp {
       Layer.provide(Layer.mergeAll(cachedCollectionLayer, hookServiceLayer))
     )
 
-    // Top: hook-wrapped collection service + all mid services + auto-migration side effect
-    return hookCollectionLayer.pipe(Layer.provideMerge(Layer.merge(fullMid, autoMigrateLayer)))
+    // Full top layer: hook-wrapped collection service + all mid services + auto-migration side effect
+    const topLayer = hookCollectionLayer.pipe(Layer.provideMerge(Layer.merge(fullMid, autoMigrateLayer)))
+
+    // Cron service: scoped fibers die when server stops; provided with full service stack + hook service
+    const cronServiceLayer = makeCronServiceLayer(allCronDefs).pipe(
+      Layer.provide(Layer.mergeAll(topLayer, hookServiceLayer))
+    )
+
+    return Layer.merge(topLayer, cronServiceLayer)
   }
 
   /**
@@ -173,7 +196,14 @@ export class MiraApp {
     // Plugin routes
     let pluginRouter: HttpRouter.HttpRouter<
       never,
-      FileSystem.FileSystem | Path.Path | Repository | AppConfig | AuthService | SqlClient.SqlClient | CollectionService
+      | FileSystem.FileSystem
+      | Path.Path
+      | Repository
+      | AppConfig
+      | AuthService
+      | SqlClient.SqlClient
+      | CollectionService
+      | CronService
     > = HttpRouter.empty
     for (const plugin of this.#extras) {
       if (plugin.routes !== undefined) {

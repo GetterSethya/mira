@@ -2,11 +2,11 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platf
 import { FileSystem, Path } from "@effect/platform"
 import { Cause, Effect, Option } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import type { Repository, AuthService, AppConfig, CollectionService } from "@gettersethya/mira"
 import { bootstrapStatusRoute } from "./api/bootstrap-status.js"
 import { registerRoute } from "./api/register.js"
 import { createSuperadminRoute, listSuperadminsRoute, deleteSuperadminRoute } from "./api/superadmin.js"
 import { configRoute } from "./api/config.js"
+import { cronsRoute, cronRunNowRoute } from "./api/crons.js"
 import { DashboardUnauthorizedError } from "./api/auth.js"
 
 function makeContentType(ext: string): string {
@@ -82,6 +82,8 @@ export function makeDashboardRouter(_collections: ReadonlyArray<AnyCollectionDef
     HttpRouter.get("/_dashboard/api/superadmin", wrapRoute(listSuperadminsRoute)),
     HttpRouter.del("/_dashboard/api/superadmin/:id", wrapRoute(deleteSuperadminRoute)),
     HttpRouter.get("/_dashboard/api/config", wrapRoute(configRoute)),
+    HttpRouter.get("/_dashboard/api/crons", wrapRoute(cronsRoute)),
+    HttpRouter.post("/_dashboard/api/crons/:name/run", wrapRoute(cronRunNowRoute)),
     HttpRouter.concat(makeDashboardSpaRoute())
   )
 }

@@ -40,8 +40,9 @@ On first boot, Mira auto-generates a `jwt_secret`, runs schema migrations, and c
 | `.database(d)` | Yes | Database backend |
 | `.storage(s)` | Yes | File storage backend |
 | `.collections(c)` | Yes | Collection definitions |
+| `.crons(c)` | No | Array of `CronDef` — scheduled tasks using Effect `Schedule` |
 | `.telemetry(layer)` | No | Custom Effect telemetry layer |
-| `.extend(layer)` | No | Inject additional layers before serving |
+| `.extend(plugin)` | No | Register a `MiraPlugin` (lifecycle hooks, routes, crons, layers) |
 
 ## Platforms
 
@@ -83,6 +84,34 @@ Each collection gets a full set of REST endpoints:
 | `POST` | `/api/auth/logout` | Logout |
 | `POST` | `/api/files/token` | Request protected file token |
 | `GET` | `/api/files/:collection/:id/:filename` | Serve file |
+
+## Cron jobs
+
+Register scheduled tasks via the `.crons()` builder step. Each cron uses an Effect `Schedule` to define its recurrence.
+
+```typescript
+import { Schedule } from "effect"
+import { CronService } from "@gettersethya/mira"
+
+const app = Mira.builder()
+  .platform(NodePlatform)
+  .database(SqliteDatabase({ filename: "mira.db" }))
+  .storage(LocalFileStorage({ directory: "./uploads" }))
+  .collections([Users, Posts])
+  .crons([
+    {
+      name: "cleanup",
+      schedule: Schedule.fixed("1 hour"),
+      handler: () => Effect.log("[cron] cleaning up..."),
+    },
+  ])
+  .build()
+  .serve()
+```
+
+Cron names must be globally unique. Use `CronService.getAll()` to inspect state and `CronService.runNow(name)` to trigger immediate execution. Plugins can declare crons via `crons` and hook into `onCronStart`/`onCronExecute`/`onCronSuccess`/`onCronError`/`onCronFinished`.
+
+See the [Mira root README](https://github.com/gettersethya/mira#cron-jobs) for full cron documentation.
 
 ## Testing with the service layer
 

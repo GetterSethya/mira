@@ -6,6 +6,8 @@ import type { Repository } from "@/repository/index.js"
 import type { AppConfig } from "@/config/index.js"
 import type { AuthService } from "@/http/auth.js"
 import type { CollectionService } from "@/collection-service/collection-service.js"
+import type { CronService } from "@/cron/cron-service.js"
+import type { CronDef } from "@/cron/types.js"
 import type { PlatformServices } from "./types.js"
 import type {
   RecordHookContext,
@@ -14,7 +16,11 @@ import type {
   ListResultContext,
   ViewHookContext,
   ViewResultContext,
-  HookErrorContext
+  HookErrorContext,
+  CronContext,
+  CronResultContext,
+  CronErrorContext,
+  CronFinishedContext
 } from "@/hooks/types.js"
 
 export interface RecordHook<T> {
@@ -34,6 +40,16 @@ export interface ListHook<T> {
 
 export interface ListSuccessHook<T> {
   readonly collections?: ReadonlyArray<string>
+  readonly handler: (ctx: T) => Effect.Effect<void, never, never>
+}
+
+export interface CronHook<T> {
+  readonly crons?: ReadonlyArray<string>
+  readonly handler: (ctx: T) => Effect.Effect<T, never, never>
+}
+
+export interface CronObserverHook<T> {
+  readonly crons?: ReadonlyArray<string>
   readonly handler: (ctx: T) => Effect.Effect<void, never, never>
 }
 
@@ -75,10 +91,24 @@ export interface MiraPlugin {
   readonly onRecordViewSuccess?: ListSuccessHook<ViewResultContext>
   readonly onRecordViewError?: ListSuccessHook<HookErrorContext>
 
+  readonly crons?: ReadonlyArray<CronDef>
+  readonly onCronStart?: CronHook<CronContext>
+  readonly onCronExecute?: CronHook<CronContext>
+  readonly onCronFinished?: CronObserverHook<CronFinishedContext>
+  readonly onCronSuccess?: CronObserverHook<CronResultContext>
+  readonly onCronError?: CronObserverHook<CronErrorContext>
+
   readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository | CollectionService>
   readonly routes?: HttpRouter.HttpRouter<
     never,
-    FileSystem.FileSystem | Path.Path | Repository | AppConfig | AuthService | SqlClient.SqlClient | CollectionService
+    | FileSystem.FileSystem
+    | Path.Path
+    | Repository
+    | AppConfig
+    | AuthService
+    | SqlClient.SqlClient
+    | CollectionService
+    | CronService
   >
   readonly collections?: ReadonlyArray<AnyCollectionDef>
 }

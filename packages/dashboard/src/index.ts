@@ -39,6 +39,14 @@ export const MiraDashboard = MiraPlugin.define({
 
   onRecordDeleteSuccess: {
     handler: (ctx) => Effect.log(`[dashboard] audit: deleted ${String(ctx.result["id"])} in ${ctx.collection.name}`)
+  },
+
+  onCronSuccess: {
+    handler: (ctx) => Effect.log(`[dashboard] audit: cron "${ctx.name}" succeeded in ${ctx.durationMs}ms`)
+  },
+
+  onCronError: {
+    handler: (ctx) => Effect.log(`[dashboard] audit: cron "${ctx.name}" failed after ${ctx.durationMs}ms`)
   }
 })
 

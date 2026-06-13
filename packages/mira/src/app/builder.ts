@@ -1,6 +1,7 @@
 import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
 import type { Layer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
+import type { CronDef } from "@/cron/types.js"
 import type { MiraPlatform, MiraDatabase, MiraStorage } from "./types.js"
 import { MiraApp } from "./app.js"
 
@@ -16,6 +17,7 @@ export interface MiraAppConfig {
   database: MiraDatabase
   storage: MiraStorage
   collections: ReadonlyArray<AnyCollectionDef>
+  crons: ReadonlyArray<CronDef>
   telemetry: Layer.Layer<never, never, never>
 }
 
@@ -114,6 +116,17 @@ export class MiraBuilder<Has extends string = never> {
   }
 
   /**
+   * Set cron job definitions (optional).
+   * Crons are started as scoped fibers on boot and run on their schedule until the server stops.
+   *
+   * @param c - Array of CronDef objects with name, schedule, and handler
+   * @returns A new builder (same phantom type — crons is optional)
+   */
+  crons(c: ReadonlyArray<CronDef>): MiraBuilder<Has> {
+    return new MiraBuilder({ ...this.#config, crons: c })
+  }
+
+  /**
    * Set a custom telemetry layer (optional).
    * Defaults to `ConsoleTelemetryLayer` (prints JSON trace lines to stdout).
    *
@@ -145,6 +158,7 @@ export class MiraBuilder<Has extends string = never> {
       database: config.database,
       storage: config.storage,
       collections: config.collections,
+      crons: config.crons ?? [],
       telemetry: config.telemetry ?? ConsoleTelemetryLayer
     })
   }

@@ -58,3 +58,29 @@ export interface HookErrorContext {
   readonly error: unknown
   readonly auth: AuthContext | undefined
 }
+
+export interface CronContext {
+  readonly name: string
+  readonly scheduledAt: Date
+}
+
+export interface CronResultContext {
+  readonly name: string
+  readonly scheduledAt: Date
+  readonly durationMs: number
+}
+
+export interface CronErrorContext {
+  readonly name: string
+  readonly scheduledAt: Date
+  readonly durationMs: number
+  readonly error: unknown
+}
+
+export interface CronFinishedContext {
+  readonly name: string
+  readonly scheduledAt: Date
+  readonly durationMs: number
+  readonly status: "success" | "error"
+  readonly error: unknown | undefined
+}

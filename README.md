@@ -131,6 +131,7 @@ Mira.builder()
   .database(SqliteDatabase({ filename: "mira.db" }))                // required — SQLite backend
   .storage(LocalFileStorage({ directory: "./uploads" }))            // required — local disk storage
   .collections([Users, Posts])                                      // required — your collections
+  .crons([/* CronDef definitions */])                               // optional — cron jobs
   .telemetry(makeSqliteTelemetryLayer({ dbPath: "logs.db" }))       // optional — SQLite telemetry
   .build()                                                          // produces MiraApp
   .extend(MiraDashboard)                                            // optional — register plugins
@@ -143,6 +144,7 @@ Mira.builder()
 | `.database(d)` | yes | SQL backend. Currently `SqliteDatabase({ filename })`. |
 | `.storage(s)` | yes | File storage. Currently `LocalFileStorage({ directory })`. |
 | `.collections(c)` | yes | Array of collection definitions. |
+| `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
 | `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). |
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
 | `.extend(plugin)` | — | Called on `MiraApp` after `.build()`. Registers a `MiraPlugin`. |
@@ -925,6 +927,93 @@ MiraPlugin.define({
 
 ---
 
+## Cron jobs
+
+Mira includes a built-in cron subsystem for scheduling recurring tasks. Crons are defined as `CronDef` objects with an Effect `Schedule` and a `handler` Effect, and are registered via the builder's `.crons()` method.
+
+```typescript
+import { Effect, Schedule } from "effect"
+import { CronService } from "@gettersethya/mira"
+
+const app = Mira.builder()
+  .platform(NodePlatform)
+  .database(SqliteDatabase({ filename: "mira.db" }))
+  .storage(LocalFileStorage({ directory: "./uploads" }))
+  .collections([Users, Posts])
+  .crons([
+    {
+      name: "cleanup-expired-tokens",
+      schedule: Schedule.fixed("1 hour"),
+      handler: () => Effect.log("[cron] cleaning expired tokens..."),
+    },
+    {
+      name: "sync-external-service",
+      schedule: Schedule.cron("0 */6 * * *"),  // every 6 hours
+      handler: () => Effect.log("[cron] syncing..."),
+    },
+  ])
+  .build()
+  .serve()
+```
+
+Cron names must be globally unique across all crons (including those registered by plugins). Duplicate names cause the server to fail at layer construction.
+
+### CronDef
+
+| Property | Type | Description |
+|---|---|---|
+| `name` | `string` | Unique cron identifier |
+| `schedule` | `Schedule.Schedule<unknown, unknown, never>` | Effect Schedule — use `Schedule.fixed`, `Schedule.cron`, `Schedule.spaced`, etc. |
+| `handler` | `() => Effect.Effect<void, unknown, R>` | The task to run. Default context includes `PlatformServices`, `AppConfig`, `Repository`, and `CollectionService`. |
+
+### CronService
+
+The `CronService` tag exposes methods for runtime interaction:
+
+| Method | Returns | Description |
+|---|---|---|
+| `getAll()` | `Effect<CronState[]>` | Returns the current state of every registered cron |
+| `runNow(name)` | `Effect<void, CronNotFoundError>` | Manually trigger a cron run outside its schedule |
+
+`CronState` includes `name`, `status` (`"standby"` / `"running"`), `lastRunAt`, `lastStatus`, `lastDurationMs`, and `lastError`.
+
+### Cron hooks in plugins
+
+Plugins can declare crons and hook into cron lifecycle events via the `MiraPlugin` interface:
+
+| Hook | Signature | Description |
+|---|---|---|
+| `crons` | `CronDef[]` | Additional cron definitions merged with the app's own |
+| `onCronStart` | `CronHook<CronContext>` | Before a cron tick begins — blocking, can modify context |
+| `onCronExecute` | `CronHook<CronContext>` | After start hooks run, before the handler — blocking |
+| `onCronSuccess` | `CronObserverHook<CronResultContext>` | After a successful run — fire-and-forget |
+| `onCronError` | `CronObserverHook<CronErrorContext>` | After a failed run — fire-and-forget |
+| `onCronFinished` | `CronObserverHook<CronFinishedContext>` | After any run (success or error) — fire-and-forget |
+
+```typescript
+MiraPlugin.define({
+  crons: [
+    {
+      name: "nightly-report",
+      schedule: Schedule.cron("0 2 * * *"),
+      handler: () => Effect.log("Generating nightly report..."),
+    },
+  ],
+
+  onCronSuccess: {
+    crons: ["nightly-report"],
+    handler: (ctx) => Effect.log(`Report ran in ${ctx.durationMs}ms`),
+  },
+
+  onCronError: {
+    crons: ["nightly-report"],
+    handler: (ctx) => Effect.log(`Report failed: ${String(ctx.error)}`),
+  },
+})
+```
+
+The `crons` filter on cron hooks works like `collections` on record hooks — omit it to match all crons, or pass an array of names to target specific ones. Cron hooks run serially within each slot, matching record hook semantics.
+
 ## Admin dashboard
 
 The `@gettersethya/mira-dashboard` package is a ready-made plugin that adds an admin UI at `/_dashboard/`. It includes:
@@ -933,6 +1022,7 @@ The `@gettersethya/mira-dashboard` package is a ready-made plugin that adds an a
 - Logs and span viewer (works best with `makeSqliteTelemetryLayer`)
 - App config display
 - Superadmin account management
+- Cron job listing and manual run trigger
 
 ```typescript
 import { Mira, NodePlatform, SqliteDatabase, LocalFileStorage } from "@gettersethya/mira"
@@ -958,6 +1048,13 @@ On first boot the dashboard prints a one-time registration URL to stdout:
 Open that URL to create the first superadmin account. Once an account exists, subsequent boots print the regular login URL instead.
 
 The dashboard registers a `SuperAdminCollection` (an `AuthCollection` with deny-all rules) under the name `_superadmins`. This collection is separate from your app's own user collection.
+
+The dashboard also exposes cron management endpoints:
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/_dashboard/api/crons` | List all registered cron jobs with their current state |
+| `POST` | `/_dashboard/api/crons/:name/run` | Trigger immediate execution of a cron job |
 
 ---
 

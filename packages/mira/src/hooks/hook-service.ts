@@ -8,7 +8,11 @@ import type {
   ListResultContext,
   ViewHookContext,
   ViewResultContext,
-  HookErrorContext
+  HookErrorContext,
+  CronContext,
+  CronResultContext,
+  CronErrorContext,
+  CronFinishedContext
 } from "./types.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
 
@@ -41,15 +45,26 @@ export class HookService extends Context.Tag("HookService")<
     runBootstrap(): Effect.Effect<void, never, AppConfig | CollectionService>
     runServe(): Effect.Effect<void, never, never>
     runTerminate(): Effect.Effect<void, never, never>
+
+    runCronStart(ctx: CronContext): Effect.Effect<CronContext, never, never>
+    runCronExecute(ctx: CronContext): Effect.Effect<CronContext, never, never>
+    runCronSuccess(ctx: CronResultContext): Effect.Effect<void, never, never>
+    runCronError(ctx: CronErrorContext): Effect.Effect<void, never, never>
+    runCronFinished(ctx: CronFinishedContext): Effect.Effect<void, never, never>
   }
 >() {}
 
-function matchesCollection(hook: { collections?: ReadonlyArray<string> } | undefined, collectionName: string): boolean {
+function matchesCollection(hook: { collections?: ReadonlyArray<string> } | undefined, collectionName: string) {
   if (!hook || !hook.collections) return true
   return hook.collections.includes(collectionName)
 }
 
-export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin>): Layer.Layer<HookService, never, never> {
+function matchesCron(hook: { crons?: ReadonlyArray<string> } | undefined, name: string) {
+  if (!hook || !hook.crons) return true
+  return hook.crons.includes(name)
+}
+
+export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin>) {
   return Layer.succeed(HookService, {
     runRecordCreate: (ctx: RecordHookContext) =>
       Effect.gen(function* () {
@@ -269,6 +284,64 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin>): Layer.
         void,
         never,
         never
-      >
+      >,
+
+    runCronStart: (ctx: CronContext) =>
+      Effect.gen(function* () {
+        let current = ctx
+        for (const plugin of plugins) {
+          if (plugin.onCronStart && matchesCron(plugin.onCronStart, ctx.name)) {
+            current = yield* plugin.onCronStart.handler(current)
+          }
+        }
+        return current
+      }),
+
+    runCronExecute: (ctx: CronContext) =>
+      Effect.gen(function* () {
+        let current = ctx
+        for (const plugin of plugins) {
+          if (plugin.onCronExecute && matchesCron(plugin.onCronExecute, ctx.name)) {
+            current = yield* plugin.onCronExecute.handler(current)
+          }
+        }
+        return current
+      }),
+
+    runCronSuccess: (ctx: CronResultContext) =>
+      Effect.forkDaemon(
+        Effect.forEach(
+          plugins,
+          (p) =>
+            p.onCronSuccess && matchesCron(p.onCronSuccess, ctx.name)
+              ? p.onCronSuccess.handler(ctx).pipe(Effect.orDie)
+              : Effect.void,
+          { concurrency: "unbounded" }
+        )
+      ).pipe(Effect.asVoid),
+
+    runCronError: (ctx: CronErrorContext) =>
+      Effect.forkDaemon(
+        Effect.forEach(
+          plugins,
+          (p) =>
+            p.onCronError && matchesCron(p.onCronError, ctx.name)
+              ? p.onCronError.handler(ctx).pipe(Effect.orDie)
+              : Effect.void,
+          { concurrency: "unbounded" }
+        )
+      ).pipe(Effect.asVoid),
+
+    runCronFinished: (ctx: CronFinishedContext) =>
+      Effect.forkDaemon(
+        Effect.forEach(
+          plugins,
+          (p) =>
+            p.onCronFinished && matchesCron(p.onCronFinished, ctx.name)
+              ? p.onCronFinished.handler(ctx).pipe(Effect.orDie)
+              : Effect.void,
+          { concurrency: "unbounded" }
+        )
+      ).pipe(Effect.asVoid)
   })
 }
