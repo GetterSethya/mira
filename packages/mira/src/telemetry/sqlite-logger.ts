@@ -1,4 +1,4 @@
-import { Context, Effect, FiberRef, FiberRefs, Layer, Logger, Option, Queue, Schema, Tracer } from "effect"
+import { Context, Effect, FiberRef, FiberRefs, Layer, Logger, Option, Queue, Schedule, Schema, Tracer } from "effect"
 import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import type { CompletedSpan } from "./tracer.js"
@@ -7,6 +7,8 @@ import { CryptoService, NodeCryptoLayer } from "@/crypto/index.js"
 import { TelemetrySqlClient } from "./telemetry-sql-client.js"
 import { Migrator, MigratorLive, Dialect, sqliteDialect } from "@/migrator/index.js"
 import { LogsCollection, SpansCollection } from "./collections.js"
+import { AppConfig } from "@/config/index.js"
+import type { CronDef } from "@/cron/types.js"
 
 export interface SqliteLoggerConfig {
   /** Path to the SQLite log database. Defaults to `"mira-logs.db"`. */
@@ -168,6 +170,21 @@ function writeSpanToDb(
       )
     }
   })
+}
+
+export const logCleanupCronDef: CronDef<TelemetrySqlClient | AppConfig> = {
+  name: "mira:log-cleanup",
+  description: "Delete logs and spans older than logRetentionDays days",
+  schedule: Schedule.cron("0 0 * * *"),
+  handler: () =>
+    Effect.gen(function* () {
+      const sql = yield* TelemetrySqlClient
+      const config = yield* AppConfig
+      const cutoff = new Date(Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000).toISOString()
+      yield* sql`DELETE FROM ${sql("logs")} WHERE created < ${cutoff}`
+      yield* sql`DELETE FROM ${sql("spans")} WHERE created < ${cutoff}`
+      yield* Effect.logInfo(`[mira:log-cleanup] deleted logs and spans older than ${cutoff}`)
+    })
 }
 
 /**

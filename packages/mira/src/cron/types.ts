@@ -7,6 +7,7 @@ import type { CollectionService } from "@/collection-service/collection-service.
 
 export interface CronDef<R = PlatformServices | AppConfig | Repository | CollectionService> {
   readonly name: string
+  readonly description?: string
   readonly schedule: Schedule.Schedule<unknown, unknown, never>
   readonly handler: () => Effect.Effect<void, unknown, R>
 }
@@ -39,6 +40,7 @@ export interface CronFinishedContext {
 
 export interface CronState {
   readonly name: string
+  readonly description: string | undefined
   readonly status: "standby" | "running"
   readonly lastRunAt: Date | undefined
   readonly lastStatus: "success" | "error" | undefined

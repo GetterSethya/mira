@@ -23,7 +23,7 @@ import { makeCronServiceLayer } from "@/cron/cron-service.js"
 import { CronService } from "@/cron/cron-service.js"
 import type { CronDef } from "@/cron/types.js"
 
-function assertUniqueCronNames(defs: ReadonlyArray<CronDef>) {
+function assertUniqueCronNames(defs: ReadonlyArray<CronDef<any>>) {
   const seen = new Set<string>()
   for (const def of defs) {
     if (seen.has(def.name)) {
@@ -60,9 +60,9 @@ function assertUniqueCronNames(defs: ReadonlyArray<CronDef>) {
  * @see MiraBuilder — builds MiraApp
  * @see Mira — entry point: Mira.builder()
  */
-export class MiraApp {
+export class MiraApp<R = never> {
   readonly #config: MiraAppConfig
-  readonly #extras: Array<MiraPlugin>
+  readonly #extras: Array<MiraPlugin<any>>
 
   constructor(config: MiraAppConfig) {
     this.#config = config
@@ -75,7 +75,7 @@ export class MiraApp {
   }
 
   /** @internal for tests only */
-  _getExtras(): ReadonlyArray<MiraPlugin> {
+  _getExtras(): ReadonlyArray<MiraPlugin<any>> {
     return this.#extras
   }
 
@@ -85,14 +85,14 @@ export class MiraApp {
    * collection definitions.
    *
    * @param plugin - A MiraPlugin (use `fromLayer()` to wrap a plain Layer)
-   * @returns this (for chaining)
+   * @returns this typed as MiraApp<R | R2> (for chaining)
    *
    * @example
    * app.extend(MiraDashboard).serve()
    */
-  extend(plugin: MiraPlugin) {
-    this.#extras.push(plugin)
-    return this
+  extend<R2 = never>(plugin: MiraPlugin<R2>): MiraApp<R | R2> {
+    this.#extras.push(plugin as MiraPlugin<any>)
+    return this as unknown as MiraApp<R | R2>
   }
 
   #getAllCollections(): ReadonlyArray<AnyCollectionDef> {
@@ -102,11 +102,11 @@ export class MiraApp {
     ]
   }
 
-  #getAllPlugins(): ReadonlyArray<MiraPlugin> {
+  #getAllPlugins(): ReadonlyArray<MiraPlugin<any>> {
     return this.#extras
   }
 
-  #getAllCrons(): ReadonlyArray<CronDef> {
+  #getAllCrons(): ReadonlyArray<CronDef<any>> {
     return [...this.#config.crons, ...this.#extras.flatMap((p) => p.crons ?? [])]
   }
 

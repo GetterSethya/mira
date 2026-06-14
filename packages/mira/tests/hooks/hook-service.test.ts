@@ -25,7 +25,8 @@ const TestAppConfig = Layer.succeed(AppConfig, {
   applicationUrl: "http://localhost:8080",
   jwtSecret: Redacted.make("test-secret"),
   useS3: false,
-  s3Config: Option.none()
+  s3Config: Option.none(),
+  logRetentionDays: 30
 })
 
 const Posts = BaseCollection.define("posts", {

@@ -55,6 +55,16 @@ export async function run<T>(effect: DashboardEffect<T>) {
   return Promise.reject(Option.getOrElse(Cause.failureOption(exit.cause), () => Cause.squash(exit.cause)))
 }
 
+export interface CronApiState {
+  name: string
+  description: string | null
+  status: "standby" | "running"
+  lastRunAt: string | null
+  lastStatus: "success" | "error" | null
+  lastDurationMs: number | null
+  lastError: string | null
+}
+
 export const dashboardApi = {
   bootstrapStatus: (): DashboardEffect<{ bootstrapped: boolean }> => execute(HCR.get("/bootstrap-status")),
 
@@ -66,7 +76,12 @@ export const dashboardApi = {
   ): DashboardEffect<{ id: string; email: string }> =>
     executeWithBody(HCR.bodyJson(HCR.post("/register"), { email, password, name, token })),
 
-  config: (): DashboardEffect<{ config: Record<string, unknown>; keys: string[] }> => execute(HCR.get("/config"))
+  config: (): DashboardEffect<{ config: Record<string, unknown>; keys: string[] }> => execute(HCR.get("/config")),
+
+  crons: {
+    getAll: (): DashboardEffect<CronApiState[]> => execute(HCR.get("/crons")),
+    runNow: (name: string): DashboardEffect<void> => execute(HCR.post(`/crons/${name}/run`))
+  }
 }
 
 export type CollectionSchema = ApiCollectionSchema

@@ -34,13 +34,19 @@ function executeAndTrack<R>(
     })
 
     const startedAt = Date.now()
-    const exit = yield* Effect.exit(def.handler().pipe(Effect.provide(env)))
+    const exit = yield* Effect.exit(
+      def.handler().pipe(
+        Effect.provide(env),
+        Effect.withSpan("cron.execute", { kind: "internal" })
+      )
+    )
     const durationMs = Date.now() - startedAt
 
     if (Exit.isSuccess(exit)) {
       yield* Ref.update(stateRef, (m) =>
         HashMap.set(m, def.name, {
           name: def.name,
+          description: def.description,
           status: "standby" as const,
           lastRunAt: new Date(startedAt),
           lastStatus: "success" as const,
@@ -65,6 +71,7 @@ function executeAndTrack<R>(
       yield* Ref.update(stateRef, (m) =>
         HashMap.set(m, def.name, {
           name: def.name,
+          description: def.description,
           status: "standby" as const,
           lastRunAt: new Date(startedAt),
           lastStatus: "error" as const,
@@ -83,8 +90,14 @@ function executeAndTrack<R>(
       }
       yield* Effect.forkDaemon(hookService.runCronError(errorCtx))
       yield* Effect.forkDaemon(hookService.runCronFinished(finishedCtx))
+      return yield* Effect.failCause(exit.cause)
     }
-  })
+  }).pipe(
+    Effect.withSpan(`cron.server ${def.name}`, {
+      kind: "server",
+      attributes: { "cron.name": def.name, "cron.scheduled_at": ctx.scheduledAt.toISOString() }
+    })
+  )
 }
 
 function runOneTick<R>(
@@ -98,7 +111,9 @@ function runOneTick<R>(
     let ctx: CronContext = { name: def.name, scheduledAt }
     ctx = yield* hookService.runCronStart(ctx)
     ctx = yield* hookService.runCronExecute(ctx)
-    yield* Effect.forkDaemon(executeAndTrack(def, stateRef, ctx, hookService, env))
+    yield* Effect.forkDaemon(
+      executeAndTrack(def, stateRef, ctx, hookService, env).pipe(Effect.catchAllCause(() => Effect.void))
+    )
   })
 }
 
@@ -120,6 +135,7 @@ export function makeCronServiceLayer<R>(defs: ReadonlyArray<CronDef<R>>) {
         def.name,
         {
           name: def.name,
+          description: def.description,
           status: "standby" as const,
           lastRunAt: undefined,
           lastStatus: undefined,
@@ -132,8 +148,14 @@ export function makeCronServiceLayer<R>(defs: ReadonlyArray<CronDef<R>>) {
       const env = yield* Effect.context<R>()
 
       for (const def of defs) {
-        yield* Effect.void.pipe(
-          Effect.andThen(() => runOneTick(def, stateRef, hookService, env)),
+        let skipFirst = true
+        yield* Effect.suspend(() => {
+          if (skipFirst) {
+            skipFirst = false
+            return Effect.void
+          }
+          return runOneTick(def, stateRef, hookService, env)
+        }).pipe(
           Effect.repeat(def.schedule),
           Effect.forkScoped
         )
@@ -150,7 +172,9 @@ export function makeCronServiceLayer<R>(defs: ReadonlyArray<CronDef<R>>) {
             }
             const scheduledAt = new Date()
             const ctx: CronContext = { name, scheduledAt }
-            yield* Effect.forkDaemon(executeAndTrack(def, stateRef, ctx, hookService, env))
+            yield* Effect.forkDaemon(
+              executeAndTrack(def, stateRef, ctx, hookService, env).pipe(Effect.catchAllCause(() => Effect.void))
+            )
           })
       })
     })

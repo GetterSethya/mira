@@ -2,10 +2,11 @@ import {
   BaseCollection,
   Field,
   LocalFileStorage,
+  logCleanupCronDef,
   makeSqliteTelemetryLayer,
   Mira,
   NodePlatform,
-  SqliteDatabase
+  SqliteDatabase,
 } from "@gettersethya/mira"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
 
@@ -27,6 +28,7 @@ const app = Mira.builder()
   .storage(LocalFileStorage({ directory: process.env["UPLOAD_DIR"] ?? "./uploads" }))
   .collections([Posts])
   .telemetry(makeSqliteTelemetryLayer({ dbPath: "log.db", logConsole: true }))
+  .crons([logCleanupCronDef])
   .build()
 
 app.extend(MiraDashboard).serve()

@@ -55,6 +55,7 @@ const AppConfigTest = Layer.succeed(AppConfig, AppConfig.of({
   jwtSecret: Redacted.make(JWT_SECRET),
   useS3: false,
   s3Config: Option.none(),
+  logRetentionDays: 30,
 }))
 
 // ---------------------------------------------------------------------------

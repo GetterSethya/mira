@@ -64,7 +64,7 @@ function matchesCron(hook: { crons?: ReadonlyArray<string> } | undefined, name: 
   return hook.crons.includes(name)
 }
 
-export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin>) {
+export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
   return Layer.succeed(HookService, {
     runRecordCreate: (ctx: RecordHookContext) =>
       Effect.gen(function* () {

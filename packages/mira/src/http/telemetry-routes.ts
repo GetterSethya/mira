@@ -202,21 +202,25 @@ export const telemetrySpansRoute = Effect.gen(function* () {
     return HttpServerResponse.unsafeJson({ spans, total: total[0].cnt, limit, offset })
   }
 
-  // Paginate by trace (root spans), then return all child spans for those traces.
-  // This guarantees complete traces are returned rather than partial span slices.
+  // Paginate by trace (effective root spans), then return all child spans for those traces.
+  // A span is an effective root if it has no parent, OR its parent spanId doesn't exist in
+  // our DB (i.e. the parent is a browser-side span propagated via traceparent but never recorded).
   const rawSpans = yield* sql<RawSpanRow>`
     SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
     FROM ${sql("spans")}
     WHERE traceId IN (
       SELECT traceId FROM ${sql("spans")}
       WHERE parentSpanId IS NULL
+         OR parentSpanId NOT IN (SELECT spanId FROM ${sql("spans")})
       ORDER BY created DESC
       LIMIT ${limit} OFFSET ${offset}
     )
     ORDER BY created ASC
   `
   const total = yield* sql<{ cnt: number }>`
-    SELECT COUNT(*) as cnt FROM ${sql("spans")} WHERE parentSpanId IS NULL
+    SELECT COUNT(*) as cnt FROM ${sql("spans")}
+    WHERE parentSpanId IS NULL
+       OR parentSpanId NOT IN (SELECT spanId FROM ${sql("spans")})
   `
   const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
 

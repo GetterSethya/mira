@@ -17,7 +17,7 @@ export interface MiraAppConfig {
   database: MiraDatabase
   storage: MiraStorage
   collections: ReadonlyArray<AnyCollectionDef>
-  crons: ReadonlyArray<CronDef>
+  crons: ReadonlyArray<CronDef<any>>
   telemetry: Layer.Layer<never, never, never>
 }
 
@@ -57,7 +57,7 @@ function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfi
  * @see MiraApp — the assembled application
  * @see Mira.builder — entry point
  */
-export class MiraBuilder<Has extends string = never> {
+export class MiraBuilder<Has extends string = never, R = never> {
   readonly #config: Partial<MiraAppConfig>
 
   constructor(config: Partial<MiraAppConfig> = {}) {
@@ -69,6 +69,7 @@ export class MiraBuilder<Has extends string = never> {
     return this.#config
   }
 
+
   /**
    * Set the platform (runtime environment).
    * Required step. The platform provides CryptoService, FileSystem, Path,
@@ -77,7 +78,7 @@ export class MiraBuilder<Has extends string = never> {
    * @param p - A MiraPlatform preset (e.g., NodePlatform)
    * @returns A new builder with "platform" added to the phantom type
    */
-  platform(p: MiraPlatform): MiraBuilder<Has | "platform"> {
+  platform(p: MiraPlatform): MiraBuilder<Has | "platform", R> {
     return new MiraBuilder({ ...this.#config, platform: p })
   }
 
@@ -88,7 +89,7 @@ export class MiraBuilder<Has extends string = never> {
    * @param d - A MiraDatabase preset (e.g., SqliteDatabase({ filename: "data.db" }))
    * @returns A new builder with "database" added to the phantom type
    */
-  database(d: MiraDatabase): MiraBuilder<Has | "database"> {
+  database(d: MiraDatabase): MiraBuilder<Has | "database", R> {
     return new MiraBuilder({ ...this.#config, database: d })
   }
 
@@ -99,7 +100,7 @@ export class MiraBuilder<Has extends string = never> {
    * @param s - A MiraStorage preset (e.g., LocalFileStorage({ directory: "./uploads" }))
    * @returns A new builder with "storage" added to the phantom type
    */
-  storage(s: MiraStorage): MiraBuilder<Has | "storage"> {
+  storage(s: MiraStorage): MiraBuilder<Has | "storage", R> {
     return new MiraBuilder({ ...this.#config, storage: s })
   }
 
@@ -111,7 +112,7 @@ export class MiraBuilder<Has extends string = never> {
    *            or ViewCollection.define()
    * @returns A new builder with "collections" added to the phantom type
    */
-  collections(c: ReadonlyArray<AnyCollectionDef>): MiraBuilder<Has | "collections"> {
+  collections(c: ReadonlyArray<AnyCollectionDef>): MiraBuilder<Has | "collections", R> {
     return new MiraBuilder({ ...this.#config, collections: c })
   }
 
@@ -122,7 +123,7 @@ export class MiraBuilder<Has extends string = never> {
    * @param c - Array of CronDef objects with name, schedule, and handler
    * @returns A new builder (same phantom type — crons is optional)
    */
-  crons(c: ReadonlyArray<CronDef>): MiraBuilder<Has> {
+  crons<R2>(c: ReadonlyArray<CronDef<R2>>): MiraBuilder<Has, R | R2> {
     return new MiraBuilder({ ...this.#config, crons: c })
   }
 
@@ -133,7 +134,7 @@ export class MiraBuilder<Has extends string = never> {
    * @param l - A Layer providing telemetry services
    * @returns A new builder with "telemetry" added to the phantom type
    */
-  telemetry(l: Layer.Layer<never, never, never>): MiraBuilder<Has | "telemetry"> {
+  telemetry(l: Layer.Layer<never, never, never>): MiraBuilder<Has | "telemetry", R> {
     return new MiraBuilder({ ...this.#config, telemetry: l })
   }
 
@@ -148,12 +149,12 @@ export class MiraBuilder<Has extends string = never> {
    * @throws If build() is called before all required steps are completed
    *         (caught at compile time by the phantom type)
    */
-  build(this: MiraBuilder<"platform" | "database" | "storage" | "collections">) {
+  build(this: MiraBuilder<"platform" | "database" | "storage" | "collections", R>): MiraApp<R> {
     const config = this._getPartialConfig()
     if (!isMiraAppConfig(config)) {
       throw new Error("build() called on incomplete builder")
     }
-    return new MiraApp({
+    return new MiraApp<R>({
       platform: config.platform,
       database: config.database,
       storage: config.storage,

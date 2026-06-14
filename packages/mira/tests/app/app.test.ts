@@ -44,6 +44,7 @@ const AppConfigTest = Layer.succeed(AppConfig, AppConfig.of({
   jwtSecret: Redacted.make("test-secret"),
   useS3: false,
   s3Config: Option.none(),
+  logRetentionDays: 30,
 }))
 
 const FileStorageTest = Layer.succeed(FileStorage, FileStorage.of({

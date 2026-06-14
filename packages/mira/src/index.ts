@@ -26,7 +26,7 @@ export { CryptoService } from "./crypto/index.js"
 export { catchCollectionErrors } from "./http/errors.js"
 
 // Telemetry (sqlite logger)
-export { makeSqliteTelemetryLayer } from "./telemetry/sqlite-logger.js"
+export { makeSqliteTelemetryLayer, logCleanupCronDef } from "./telemetry/sqlite-logger.js"
 export type { SqliteLoggerConfig } from "./telemetry/sqlite-logger.js"
 export { TelemetrySqlClient } from "./telemetry/telemetry-sql-client.js"
 

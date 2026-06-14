@@ -63,7 +63,7 @@ export const onCollectionSuccess = <T>(
   handler: (ctx: T) => Effect.Effect<void, never, never>
 ): RecordSuccessHook<T> => ({ collections, handler })
 
-export interface MiraPlugin {
+export interface MiraPlugin<R = never> {
   readonly onBootstrap?: () => Effect.Effect<void, never, AppConfig | CollectionService>
   readonly onServe?: () => Effect.Effect<void, never, never>
   readonly onTerminate?: () => Effect.Effect<void, never, never>
@@ -91,7 +91,7 @@ export interface MiraPlugin {
   readonly onRecordViewSuccess?: ListSuccessHook<ViewResultContext>
   readonly onRecordViewError?: ListSuccessHook<HookErrorContext>
 
-  readonly crons?: ReadonlyArray<CronDef>
+  readonly crons?: ReadonlyArray<CronDef<R>>
   readonly onCronStart?: CronHook<CronContext>
   readonly onCronExecute?: CronHook<CronContext>
   readonly onCronFinished?: CronObserverHook<CronFinishedContext>
@@ -113,22 +113,22 @@ export interface MiraPlugin {
   readonly collections?: ReadonlyArray<AnyCollectionDef>
 }
 
-interface MiraPluginInstance extends MiraPlugin {
+interface MiraPluginInstance<R> extends MiraPlugin<R> {
   readonly _tag: "MiraPlugin"
 }
 
 export const MiraPlugin = {
-  define: (opts: MiraPlugin): MiraPlugin => {
-    const instance: MiraPluginInstance = { _tag: "MiraPlugin", ...opts }
+  define: <R = never>(opts: MiraPlugin<R>): MiraPlugin<R> => {
+    const instance: MiraPluginInstance<R> = { _tag: "MiraPlugin", ...opts }
     return instance
   },
 
-  fromLayer: (layer: Layer.Layer<never, never, never>): MiraPlugin => {
-    const instance: MiraPluginInstance = { _tag: "MiraPlugin", layer }
+  fromLayer: (layer: Layer.Layer<never, never, never>): MiraPlugin<never> => {
+    const instance: MiraPluginInstance<never> = { _tag: "MiraPlugin", layer }
     return instance
   },
 
-  isMiraPlugin: (ext: unknown): ext is MiraPlugin => {
+  isMiraPlugin: (ext: unknown): ext is MiraPlugin<any> => {
     if (typeof ext !== "object" || ext === null) return false
     if (!("_tag" in ext)) return false
     return ext._tag === "MiraPlugin"

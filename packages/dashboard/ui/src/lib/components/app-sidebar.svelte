@@ -60,6 +60,10 @@
           {
             title: "spans",
             url: resolve("/spans")
+          },
+          {
+            title: "cron",
+            url: resolve("/crons")
           }
         ],
         icon: IconServer

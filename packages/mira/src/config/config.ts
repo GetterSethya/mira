@@ -104,6 +104,8 @@ export const AppConfigLive = Layer.effect(
         })
       : Option.none()
 
-    return { appName, port, applicationUrl, jwtSecret, useS3, s3Config }
+    const logRetentionDays = Number(yield* seed("log_retention_days", "30"))
+
+    return { appName, port, applicationUrl, jwtSecret, useS3, s3Config, logRetentionDays }
   })
 )

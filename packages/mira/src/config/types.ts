@@ -27,4 +27,5 @@ export interface AppConfigShape {
   readonly jwtSecret: Redacted.Redacted<string>
   readonly useS3: boolean
   readonly s3Config: Option.Option<S3Config>
+  readonly logRetentionDays: number
 }

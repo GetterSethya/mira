@@ -336,6 +336,19 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
   const meRoute = Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
     Effect.gen(function* () {
       const auth = yield* resolveAuth(req)
+      yield* Effect.currentSpan.pipe(
+        Effect.tap((span: Tracer.Span) =>
+          Effect.sync(() => {
+            span.attribute("auth.result", auth !== undefined ? "authenticated" : "anonymous")
+            span.attribute("auth.collection", auth?.collection ?? "")
+            const parent = span.parent
+            if (Option.isSome(parent) && parent.value._tag === "Span") {
+              parent.value.attribute("auth.collection", auth?.collection ?? "")
+            }
+          })
+        ),
+        Effect.ignore
+      )
       if (!auth) {
         return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
       }
@@ -343,7 +356,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
         { collection: auth.collection, record: auth.record },
         { status: 200 }
       )
-    })
+    }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation: "me" } }))
   )
 
   const fileServeRoute = makeFileServeRoute(collections)

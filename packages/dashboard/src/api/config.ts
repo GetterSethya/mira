@@ -1,11 +1,8 @@
 import { Effect, Redacted } from "effect"
 import { HttpServerResponse } from "@effect/platform"
 import { AppConfig } from "@gettersethya/mira"
-import { requireDashboardAuth } from "./auth.js"
 
 export const configRoute = Effect.gen(function* () {
-  yield* requireDashboardAuth
-
   const config = yield* AppConfig
 
   const allConfig: Record<string, unknown> = {

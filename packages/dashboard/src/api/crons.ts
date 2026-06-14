@@ -1,17 +1,15 @@
 import { Effect } from "effect"
 import { HttpRouter, HttpServerResponse } from "@effect/platform"
 import { CronService, CronNotFoundError } from "@gettersethya/mira"
-import { requireDashboardAuth } from "./auth.js"
 
 export const cronsRoute = Effect.gen(function* () {
-  yield* requireDashboardAuth
-
   const cronService = yield* CronService
   const states = yield* cronService.getAll()
 
   return HttpServerResponse.unsafeJson(
     states.map((s) => ({
       name: s.name,
+      description: s.description ?? null,
       status: s.status,
       lastRunAt: s.lastRunAt ? s.lastRunAt.toISOString() : null,
       lastStatus: s.lastStatus ?? null,
@@ -23,8 +21,6 @@ export const cronsRoute = Effect.gen(function* () {
 
 export const cronRunNowRoute = Effect.flatMap(HttpRouter.RouteContext, (routeCtx) =>
   Effect.gen(function* () {
-    yield* requireDashboardAuth
-
     const name = routeCtx.params["name"] ?? ""
 
     const cronService = yield* CronService

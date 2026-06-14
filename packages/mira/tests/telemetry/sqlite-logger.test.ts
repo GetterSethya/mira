@@ -1,10 +1,12 @@
 import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import { describe, it } from "@effect/vitest"
 import { expect, vi } from "vitest"
-import { makeSqliteTelemetryLayerForClient } from "@/telemetry/sqlite-logger.js"
+import { makeSqliteTelemetryLayerForClient, logCleanupCronDef } from "@/telemetry/sqlite-logger.js"
 import { NodeCryptoLayer } from "@/crypto/index.js"
+import { AppConfig } from "@/config/index.js"
+import { TelemetrySqlClient } from "@/telemetry/telemetry-sql-client.js"
 
 function makeLayer(logConsole = false) {
   const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
@@ -275,5 +277,86 @@ describe("makeSqliteTelemetryLayerForClient", () => {
       expect(names).toContain("logs")
       expect(names).toContain("spans")
     }).pipe(Effect.provide(makeLayer()))
+  )
+})
+
+describe("logCleanupCronDef", () => {
+  function makeCleanupLayer(logRetentionDays: number) {
+    const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
+
+    const telemetryClientLayer = Layer.effect(
+      TelemetrySqlClient,
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return sql
+      })
+    )
+
+    const appConfigLayer = Layer.succeed(AppConfig, AppConfig.of({
+      appName: "test",
+      port: 8080,
+      applicationUrl: "http://localhost:8080",
+      jwtSecret: Redacted.make("test"),
+      useS3: false,
+      s3Config: Option.none(),
+      logRetentionDays,
+    }))
+
+    return Layer.mergeAll(
+      telemetryClientLayer,
+      appConfigLayer
+    ).pipe(Layer.provideMerge(sqliteLayer))
+  }
+
+  it("has the correct name and description", () => {
+    expect(logCleanupCronDef.name).toBe("mira:log-cleanup")
+    expect(logCleanupCronDef.description).toBe("Delete logs and spans older than logRetentionDays days")
+  })
+
+  it.effect("handler deletes rows older than the retention window from both tables", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+
+      yield* sql.unsafe(`CREATE TABLE logs  (id TEXT PRIMARY KEY, created TEXT NOT NULL)`)
+      yield* sql.unsafe(`CREATE TABLE spans (id TEXT PRIMARY KEY, created TEXT NOT NULL)`)
+
+      const old    = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+      const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+
+      yield* sql`INSERT INTO ${sql("logs")}  ${sql.insert({ id: "old-log",   created: old    })}`
+      yield* sql`INSERT INTO ${sql("logs")}  ${sql.insert({ id: "new-log",   created: recent })}`
+      yield* sql`INSERT INTO ${sql("spans")} ${sql.insert({ id: "old-span",  created: old    })}`
+      yield* sql`INSERT INTO ${sql("spans")} ${sql.insert({ id: "new-span",  created: recent })}`
+
+      yield* logCleanupCronDef.handler()
+
+      const logs  = yield* sql<{ id: string }>`SELECT id FROM ${sql("logs")}`
+      const spans = yield* sql<{ id: string }>`SELECT id FROM ${sql("spans")}`
+
+      expect(logs.map((r) => r.id)).toEqual(["new-log"])
+      expect(spans.map((r) => r.id)).toEqual(["new-span"])
+    }).pipe(Effect.provide(makeCleanupLayer(7)))
+  )
+
+  it.effect("handler leaves all rows intact when none exceed the retention window", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+
+      yield* sql.unsafe(`CREATE TABLE logs  (id TEXT PRIMARY KEY, created TEXT NOT NULL)`)
+      yield* sql.unsafe(`CREATE TABLE spans (id TEXT PRIMARY KEY, created TEXT NOT NULL)`)
+
+      const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+
+      yield* sql`INSERT INTO ${sql("logs")}  ${sql.insert({ id: "log-1",  created: recent })}`
+      yield* sql`INSERT INTO ${sql("spans")} ${sql.insert({ id: "span-1", created: recent })}`
+
+      yield* logCleanupCronDef.handler()
+
+      const logs  = yield* sql<{ id: string }>`SELECT id FROM ${sql("logs")}`
+      const spans = yield* sql<{ id: string }>`SELECT id FROM ${sql("spans")}`
+
+      expect(logs).toHaveLength(1)
+      expect(spans).toHaveLength(1)
+    }).pipe(Effect.provide(makeCleanupLayer(7)))
   )
 })

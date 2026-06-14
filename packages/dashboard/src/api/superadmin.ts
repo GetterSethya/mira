@@ -2,7 +2,6 @@ import { Effect, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
 import { CollectionService, hashPassword } from "@gettersethya/mira"
 import { Filter } from "@gettersethya/mira-client"
-import { requireDashboardAuth } from "./auth.js"
 import { SuperAdminCollection } from "../superadmin.js"
 
 const CreateSuperadminSchema = Schema.Struct({
@@ -13,8 +12,6 @@ const CreateSuperadminSchema = Schema.Struct({
 const adminCtx = { headers: {}, query: {}, admin: true as const }
 
 export const createSuperadminRoute = Effect.gen(function* () {
-  yield* requireDashboardAuth
-
   const req = yield* HttpServerRequest.HttpServerRequest
   const body = yield* req.json.pipe(Effect.flatMap(Schema.decodeUnknown(CreateSuperadminSchema)))
   const svc = yield* CollectionService
@@ -41,8 +38,6 @@ export const createSuperadminRoute = Effect.gen(function* () {
 })
 
 export const listSuperadminsRoute = Effect.gen(function* () {
-  yield* requireDashboardAuth
-
   const svc = yield* CollectionService
   const result = yield* svc.list(SuperAdminCollection, null, 500, adminCtx)
 
@@ -57,8 +52,6 @@ export const listSuperadminsRoute = Effect.gen(function* () {
 
 export const deleteSuperadminRoute = Effect.flatMap(HttpRouter.RouteContext, (routeCtx) =>
   Effect.gen(function* () {
-    yield* requireDashboardAuth
-
     const id = routeCtx.params["id"]
     if (id === undefined) {
       return HttpServerResponse.unsafeJson({ error: "not_found" }, { status: 404 })
