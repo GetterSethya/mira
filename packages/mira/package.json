@@ -1,6 +1,6 @@
 {
   "name": "@gettersethya/mira",
-  "version": "0.1.0-alpha.11",
+  "version": "0.1.0-alpha.12",
   "type": "module",
   "description": "Self-hosted backend in TypeScript using Effect",
   "author": "Getter Sethya",
