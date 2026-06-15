@@ -7,6 +7,7 @@
   import { Input } from "$lib/components/ui/input/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
   import { resolve } from "$app/paths"
+  import { IconReload } from "@tabler/icons-svelte"
 
   const LIMIT = 200
 
@@ -17,7 +18,10 @@
 
   const spansQuery = createQuery(() => ({
     queryKey: ["spans", committed, offset],
-    queryFn: () => (committed ? mira.telemetry.getSpans({ traceId: committed }).raw() : mira.telemetry.getSpans({ limit: LIMIT, offset }).raw())
+    queryFn: () =>
+      committed
+        ? mira.telemetry.getSpans({ traceId: committed }).raw()
+        : mira.telemetry.getSpans({ limit: LIMIT, offset }).raw()
   }))
 
   function apply() {
@@ -36,11 +40,11 @@
 </script>
 
 <div class="space-y-4">
-  <div class="flex items-center justify-between">
+  <div class="flex gap-2 items-center justify-between">
     <h1 class="text-2xl font-bold">Spans</h1>
-  </div>
-
-  <div class="flex gap-2">
+    <Button class="ms-auto" variant="outline" onclick={spansQuery.refetch} disabled={spansQuery.isRefetching}>
+      <IconReload class={spansQuery.isRefetching && "animate-spin"} />
+    </Button>
     <Input
       placeholder="Filter by traceId…"
       value={traceIdFilter}

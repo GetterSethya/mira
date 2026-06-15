@@ -10,6 +10,7 @@
   import AppDataTable from "$lib/components/ui/app-data-table/app-data-table.svelte"
   import type { ColumnDef } from "@tanstack/svelte-table"
   import { renderSnippet } from "$lib/components/ui/data-table"
+  import { IconReload } from "@tabler/icons-svelte"
 
   const LIMIT = 50
   let level = $derived(page.url.searchParams.get("level") ?? "")
@@ -17,7 +18,9 @@
 
   const logsQuery = createQuery(() => ({
     queryKey: ["logs", level, offset],
-    queryFn: () => mira.telemetry.getLogs({ limit: LIMIT, offset }).raw()
+    queryFn: async () => {
+      return mira.telemetry.getLogs({ limit: LIMIT, offset }).raw()
+    }
   }))
 
   const totalPages = $derived(logsQuery.data ? Math.ceil(logsQuery.data.total / LIMIT) : 0)
@@ -46,8 +49,11 @@
 </script>
 
 <div class="space-y-4 py-4">
-  <div class="flex items-center justify-between">
+  <div class="flex gap-2 items-center justify-between">
     <h1 class="text-2xl font-bold">Logs</h1>
+    <Button class="ms-auto" variant="outline" onclick={logsQuery.refetch} disabled={logsQuery.isRefetching}>
+      <IconReload class={logsQuery.isRefetching && "animate-spin"} />
+    </Button>
     {@render LogSelectSnippet()}
   </div>
 

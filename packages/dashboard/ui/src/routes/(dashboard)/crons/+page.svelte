@@ -8,6 +8,7 @@
   import type { ColumnDef } from "@tanstack/svelte-table"
   import { renderSnippet } from "$lib/components/ui/data-table"
   import { toast } from "svelte-sonner"
+  import { IconReload } from "@tabler/icons-svelte"
 
   const cronsQuery = createQuery<CronApiState[]>(() => ({
     queryKey: ["crons"],
@@ -80,8 +81,12 @@
 </script>
 
 <div class="space-y-4 py-4">
-  <h1 class="text-2xl font-bold">Cron Jobs</h1>
-
+  <div class="flex gap-2 items-center justify-between">
+    <h1 class="text-2xl font-bold">Cron Jobs</h1>
+    <Button class="ms-auto" variant="outline" onclick={cronsQuery.refetch} disabled={cronsQuery.isRefetching}>
+      <IconReload class={cronsQuery.isRefetching && "animate-spin"} />
+    </Button>
+  </div>
   {#if cronsQuery.isLoading}
     <p class="text-muted-foreground">Loading…</p>
   {:else if cronsQuery.data}

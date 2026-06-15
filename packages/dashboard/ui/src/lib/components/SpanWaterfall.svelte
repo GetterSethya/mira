@@ -186,8 +186,8 @@
                     <Table.Body>
                       {#each Object.entries(node.attributes) as [k, v]}
                         <Table.Row>
-                          <Table.Cell class="font-bold">{k}</Table.Cell>
-                          <Table.Cell>{v}</Table.Cell>
+                          <Table.Cell class="font-bold w-[1px]">{k}</Table.Cell>
+                          <Table.Cell class="break-words whitespace-normal">{v}</Table.Cell>
                         </Table.Row>
                       {/each}
                     </Table.Body>
