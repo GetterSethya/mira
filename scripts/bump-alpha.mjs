@@ -11,6 +11,7 @@ const packages = [
   "packages/client/package.json",
   "packages/mira/package.json",
   "packages/tanstack-adapter/package.json",
+  "packages/dashboard/package.json",
 ];
 
 function bumpAlpha(version) {
