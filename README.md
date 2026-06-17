@@ -10,13 +10,13 @@ Your collections are TypeScript files. Your rules are composable expressions eva
 
 ## Packages
 
-| Package | Description |
-|---|---|
-| `@gettersethya/mira` | Server library (Node.js) — the main package you run on the server |
-| `@gettersethya/mira-collection` | Collection definitions, filter DSL, rule builder — isomorphic (browser + Node) |
-| `@gettersethya/mira-client` | Type-safe HTTP client SDK for browsers or server-to-server calls |
-| `@gettersethya/mira-tanstack-adapter` | TanStack Query adapters (React / Svelte / Solid) |
-| `@gettersethya/mira-dashboard` | Admin dashboard plugin — SvelteKit SPA with a record editor, log viewer, and config display |
+| Package | Description | npm |
+|---|---|---|
+| `@gettersethya/mira` | Server library (Node.js) — the main package you run on the server | [![npm](https://img.shields.io/npm/v/@gettersethya/mira)](https://www.npmjs.com/package/@gettersethya/mira) |
+| `@gettersethya/mira-collection` | Collection definitions, filter DSL, rule builder — isomorphic (browser + Node) | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-collection)](https://www.npmjs.com/package/@gettersethya/mira-collection) |
+| `@gettersethya/mira-client` | Type-safe HTTP client SDK for browsers or server-to-server calls | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-client)](https://www.npmjs.com/package/@gettersethya/mira-client) |
+| `@gettersethya/mira-tanstack-adapter` | TanStack Query adapters (React / Svelte / Solid) | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-tanstack-adapter)](https://www.npmjs.com/package/@gettersethya/mira-tanstack-adapter) |
+| `@gettersethya/mira-dashboard` | Admin dashboard plugin — SvelteKit SPA with a record editor, log viewer, and config display | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-dashboard)](https://www.npmjs.com/package/@gettersethya/mira-dashboard) |
 
 All packages require `effect >= 3.21` as a peer dependency.
 

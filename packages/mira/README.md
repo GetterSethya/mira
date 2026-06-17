@@ -1,5 +1,7 @@
 # @gettersethya/mira
 
+[![npm](https://img.shields.io/npm/v/@gettersethya/mira)](https://www.npmjs.com/package/@gettersethya/mira)
+
 > **Early pre-alpha.** Breaking changes may occur without notice.
 
 Self-hosted backend in TypeScript using [Effect](https://effect.website). Define collections, get a full REST API with auth, file storage, access rules, and schema migrations — all with zero config.

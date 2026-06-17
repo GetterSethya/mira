@@ -1,5 +1,7 @@
 # @gettersethya/mira-collection
 
+[![npm](https://img.shields.io/npm/v/@gettersethya/mira-collection)](https://www.npmjs.com/package/@gettersethya/mira-collection)
+
 > **Early pre-alpha.** Breaking changes may occur without notice.
 
 Collection definitions, filter DSL, and access rule builder for [Mira](https://github.com/gettersethya/mira). Shared between server and client — isomorphic, no runtime dependencies beyond `effect`.

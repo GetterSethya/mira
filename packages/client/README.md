@@ -1,5 +1,7 @@
 # @gettersethya/mira-client
 
+[![npm](https://img.shields.io/npm/v/@gettersethya/mira-client)](https://www.npmjs.com/package/@gettersethya/mira-client)
+
 > **Early pre-alpha.** Breaking changes may occur without notice.
 
 Type-safe client SDK for [Mira](https://github.com/gettersethya/mira). Works in the browser and Node.js (SSR). Every operation returns a handler with both a Promise interface (`.raw()`) and an Effect interface (`.toEffect()`).

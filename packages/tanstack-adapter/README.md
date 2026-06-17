@@ -1,5 +1,7 @@
 # @gettersethya/mira-tanstack-adapter
 
+[![npm](https://img.shields.io/npm/v/@gettersethya/mira-tanstack-adapter)](https://www.npmjs.com/package/@gettersethya/mira-tanstack-adapter)
+
 > **Early pre-alpha.** Breaking changes may occur without notice.
 
 TanStack Query adapters for [@gettersethya/mira-client](https://www.npmjs.com/package/@gettersethya/mira-client). Wraps collection client methods with `queryOptions` and `mutationOptions`, with structured query keys for fine-grained cache invalidation.

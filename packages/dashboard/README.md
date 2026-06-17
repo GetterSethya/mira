@@ -1,5 +1,7 @@
 # @gettersethya/mira-dashboard
 
+[![npm](https://img.shields.io/npm/v/@gettersethya/mira-dashboard)](https://www.npmjs.com/package/@gettersethya/mira-dashboard)
+
 > **Early pre-alpha.** Breaking changes may occur without notice.
 
 Admin dashboard plugin for [Mira](https://github.com/gettersethya/mira). A SvelteKit SPA at `/_dashboard/` providing collection CRUD, log/span viewer, config display, superadmin management, and cron job monitoring.
