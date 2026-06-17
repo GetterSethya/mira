@@ -1,14 +1,16 @@
 <script lang="ts">
-  import { createQuery } from "@tanstack/svelte-query"
+  import { createMutation, createQuery } from "@tanstack/svelte-query"
   import { dashboardApi, run } from "$lib/dashboard-api.js"
   import type { CronApiState } from "$lib/dashboard-api.js"
   import { Badge } from "$lib/components/ui/badge/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
   import AppDataTable from "$lib/components/ui/app-data-table/app-data-table.svelte"
+  import TableSkeleton from "$lib/components/TableSkeleton.svelte"
   import type { ColumnDef } from "@tanstack/svelte-table"
   import { renderSnippet } from "$lib/components/ui/data-table"
   import { toast } from "svelte-sonner"
-  import { IconReload } from "@tabler/icons-svelte"
+  import { IconCheck, IconReload, IconX, IconZzz } from "@tabler/icons-svelte"
+  import Spinner from "$lib/components/ui/spinner/spinner.svelte"
 
   const cronsQuery = createQuery<CronApiState[]>(() => ({
     queryKey: ["crons"],
@@ -16,19 +18,16 @@
     refetchInterval: 5000
   }))
 
-  let triggering = $state(new Set<string>())
-
-  async function runNow(name: string) {
-    triggering = new Set([...triggering, name])
-    try {
-      await run(dashboardApi.crons.runNow(name))
+  const runNowMutation = createMutation(() => ({
+    mutationFn: (name: string) => run(dashboardApi.crons.runNow(name)),
+    onSuccess: (_, name) => {
       toast.success(`Started "${name}"`)
-    } catch {
+      cronsQuery.refetch()
+    },
+    onError: (_, name) => {
       toast.error(`Failed to run "${name}"`)
-    } finally {
-      triggering = new Set([...triggering].filter((n) => n !== name))
     }
-  }
+  }))
 
   function formatDuration(ms: number | null): string {
     if (ms === null) return "-"
@@ -88,7 +87,7 @@
     </Button>
   </div>
   {#if cronsQuery.isLoading}
-    <p class="text-muted-foreground">Loading…</p>
+    <TableSkeleton columns={columns.length} rows={8} />
   {:else if cronsQuery.data}
     <AppDataTable {columns} data={cronsQuery.data} />
   {/if}
@@ -96,17 +95,29 @@
 
 {#snippet StatusBadge({ status }: { status: CronApiState["status"] })}
   {#if status === "running"}
-    <Badge variant="default">running</Badge>
+    <Badge variant="default">
+      <Spinner />
+      Running
+    </Badge>
   {:else}
-    <Badge variant="outline">standby</Badge>
+    <Badge variant="outline">
+      <IconZzz />
+      Standby
+    </Badge>
   {/if}
 {/snippet}
 
 {#snippet ResultBadge({ status }: { status: CronApiState["lastStatus"] })}
   {#if status === "success"}
-    <Badge variant="default">success</Badge>
+    <Badge variant="default">
+      <IconCheck />
+      Success
+    </Badge>
   {:else if status === "error"}
-    <Badge variant="destructive">error</Badge>
+    <Badge variant="destructive">
+      <IconX />
+      Error
+    </Badge>
   {:else}
     -
   {/if}
@@ -126,8 +137,8 @@
   <Button
     variant="outline"
     size="sm"
-    disabled={cron.status === "running" || triggering.has(cron.name)}
-    onclick={() => runNow(cron.name)}
+    disabled={cron.status === "running" || (runNowMutation.isPending && runNowMutation.variables === cron.name)}
+    onclick={() => runNowMutation.mutate(cron.name)}
   >
     Run Now
   </Button>

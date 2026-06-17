@@ -5,6 +5,7 @@
   import { makeCollectionApi } from "$lib/collection-client.js"
   import RecordTable from "$lib/components/RecordTable.svelte"
   import RecordForm from "$lib/components/RecordForm.svelte"
+  import TableSkeleton from "$lib/components/TableSkeleton.svelte"
   import { Button } from "$lib/components/ui/button/index.js"
   import * as Sheet from "$lib/components/ui/sheet/index.js"
   import { toast } from "svelte-sonner"
@@ -16,6 +17,8 @@
   const api = $derived(makeCollectionApi(name))
   let cursor = $state<number | undefined>(undefined)
   const listQuery = createQuery(() => api.listOptions({ limit: 50, after: cursor }))
+
+  const columnCount = $derived(schema ? Object.keys(schema.fields).length + 1 : 5)
 
   let records = $state<Record<string, unknown>[]>([])
   let hasMore = $state(false)
@@ -66,10 +69,12 @@
     {/if}
   </div>
 
-  {#if !schema}
+  {#if schemaQuery.isLoading}
+    <TableSkeleton columns={columnCount} rows={8} />
+  {:else if !schema}
     <p class="text-muted-foreground">Collection not found.</p>
   {:else if listQuery.isLoading && records.length === 0}
-    <p class="text-muted-foreground">Loading…</p>
+    <TableSkeleton columns={columnCount} rows={8} />
   {:else}
     <RecordTable
       {schema}

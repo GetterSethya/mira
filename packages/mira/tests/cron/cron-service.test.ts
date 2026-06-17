@@ -1,3 +1,4 @@
+import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Cause, Deferred, Effect, Exit, Layer, Option, Schedule, TestClock } from "effect"
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
@@ -6,12 +7,13 @@ import type { CronDef } from "@/cron/types.js"
 import { CronNotFoundError } from "@/cron/types.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 
-// Handlers are Effect.void stubs — R = never, so no platform/DB needed
+// Handlers are Effect.void stubs — R = never, but cron state persistence requires SqlClient
 type StubCronDef = CronDef<never>
 
 function makeUnitLayer(defs: ReadonlyArray<StubCronDef>) {
   return makeCronServiceLayer(defs).pipe(
-    Layer.provide(makeHookServiceLayer([]))
+    Layer.provide(makeHookServiceLayer([])),
+    Layer.provide(SqliteClient.layer({ filename: ":memory:" }))
   )
 }
 

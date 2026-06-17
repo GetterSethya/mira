@@ -21,7 +21,7 @@ const LogLineSchema = Schema.Struct({
   message: Schema.String,
   created: Schema.String,
   traceId: Schema.optionalWith(Schema.String, { exact: true }),
-  spanId: Schema.optionalWith(Schema.String, { exact: true }),
+  spanId: Schema.optionalWith(Schema.String, { exact: true })
 })
 
 const encodeLogLine = Schema.encodeSync(Schema.parseJson(LogLineSchema))
@@ -35,12 +35,11 @@ const SpanLineSchema = Schema.Struct({
   kind: Schema.String,
   durationMs: Schema.Number,
   status: Schema.Literal("ok", "error"),
-  attributes: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: SpanAttributeValueSchema }),
-    { exact: true }
-  ),
+  attributes: Schema.optionalWith(Schema.Record({ key: Schema.String, value: SpanAttributeValueSchema }), {
+    exact: true
+  }),
   parentSpanId: Schema.optionalWith(Schema.String, { exact: true }),
-  error: Schema.optionalWith(Schema.String, { exact: true }),
+  error: Schema.optionalWith(Schema.String, { exact: true })
 })
 
 const encodeSpanLine = Schema.encode(Schema.parseJson(SpanLineSchema))
@@ -75,7 +74,7 @@ function makeSqliteLogger(
       level: logLevel.label,
       message: String(Array.isArray(message) ? message.join(" ") : message),
       created,
-      updated: created,
+      updated: created
     }
     if (Option.isSome(spanOption)) {
       dbRow.traceId = spanOption.value.traceId
@@ -83,10 +82,7 @@ function makeSqliteLogger(
     }
 
     Effect.runPromise(
-      sql`INSERT INTO ${sql("logs")} ${sql.insert(dbRow)}`.pipe(
-        Effect.provide(sqlLayer),
-        Effect.orDie
-      )
+      sql`INSERT INTO ${sql("logs")} ${sql.insert(dbRow)}`.pipe(Effect.provide(sqlLayer), Effect.orDie)
     ).catch(() => {})
 
     if (logConsole) {
@@ -99,7 +95,7 @@ function makeSqliteLogger(
       } = {
         level: dbRow.level,
         message: dbRow.message,
-        created: dbRow.created,
+        created: dbRow.created
       }
       if (dbRow.traceId !== undefined) consoleLine.traceId = dbRow.traceId
       if (dbRow.spanId !== undefined) consoleLine.spanId = dbRow.spanId
@@ -133,13 +129,10 @@ function writeSpanToDb(
       error: span.error ?? null,
       attributes: attributesJson,
       created,
-      updated: created,
+      updated: created
     }
 
-    yield* sql`INSERT INTO ${sql("spans")} ${sql.insert(row)}`.pipe(
-      Effect.provide(sqlLayer),
-      Effect.orDie
-    )
+    yield* sql`INSERT INTO ${sql("spans")} ${sql.insert(row)}`.pipe(Effect.provide(sqlLayer), Effect.orDie)
 
     if (logConsole) {
       const line: {
@@ -158,7 +151,7 @@ function writeSpanToDb(
         spanId: span.spanId,
         kind: span.kind,
         durationMs: span.durationMs,
-        status: span.status,
+        status: span.status
       }
       if (Object.keys(span.attributes).length > 0) line.attributes = span.attributes
       if (span.parentSpanId !== undefined) line.parentSpanId = span.parentSpanId
@@ -206,12 +199,25 @@ export function makeSqliteTelemetryLayerForClient(
       yield* Effect.gen(function* () {
         const migrator = yield* Migrator
         yield* migrator.migrate([
-          { name: "logs",  schema: LogsCollection.schema },
-          { name: "spans", schema: SpansCollection.schema },
+          { name: "logs", schema: LogsCollection.schema },
+          { name: "spans", schema: SpansCollection.schema }
         ])
       }).pipe(
-        Effect.provide(MigratorLive.pipe(Layer.provide(Layer.succeed(Dialect, sqliteDialect)))),
-        Effect.provide(Layer.succeed(SqlClient.SqlClient, sql)),
+        Effect.provide(
+          Layer.mergeAll(
+            MigratorLive.pipe(
+              Layer.provide(
+                //
+                Layer.succeed(Dialect, sqliteDialect)
+              )
+            )
+          ).pipe(
+            Layer.provideMerge(
+              //
+              Layer.succeed(SqlClient.SqlClient, sql)
+            )
+          )
+        ),
         Effect.orDie
       )
 
@@ -235,10 +241,7 @@ export function makeSqliteTelemetryLayerForClient(
 
       const tracer = makeConsoleTracer(queue, randomBytesSync)
 
-      return Layer.merge(
-        Logger.replace(Logger.defaultLogger, logger),
-        Layer.setTracer(tracer)
-      )
+      return Layer.merge(Logger.replace(Logger.defaultLogger, logger), Layer.setTracer(tracer))
     })
   )
 }
@@ -251,9 +254,7 @@ export function makeSqliteTelemetryLayerForClient(
  * @param config.dbPath    Path to the log database file (default: `"mira-logs.db"`)
  * @param config.logConsole Also print each log entry and span as JSON to stdout
  */
-export function makeSqliteTelemetryLayer(
-  config: SqliteLoggerConfig = {}
-): Layer.Layer<never, never, never> {
+export function makeSqliteTelemetryLayer(config: SqliteLoggerConfig = {}): Layer.Layer<never, never, never> {
   const ownSqlLayer = SqliteClient.layer({ filename: config.dbPath ?? "mira-logs.db" })
   const logConsole = config.logConsole ?? false
 

@@ -1,3 +1,4 @@
+import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Cause, Deferred, Effect, Exit, Layer, Option, Schedule } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
@@ -8,7 +9,7 @@ import { MiraPlugin } from "@/app/plugin.js"
 
 type StubDef = CronDef<never>
 
-// Minimal self-contained test layer: handler R = never → no platform/DB required
+// Minimal self-contained test layer: handler R = never, but cron state persistence requires SqlClient
 function makeLayer(builderDefs: ReadonlyArray<StubDef>, plugins: ReadonlyArray<MiraPlugin> = []) {
   const allDefs: ReadonlyArray<StubDef> = [
     ...builderDefs,
@@ -17,7 +18,10 @@ function makeLayer(builderDefs: ReadonlyArray<StubDef>, plugins: ReadonlyArray<M
       return crons !== undefined ? (crons as ReadonlyArray<StubDef>) : []
     })
   ]
-  return makeCronServiceLayer(allDefs).pipe(Layer.provide(makeHookServiceLayer(plugins)))
+  return makeCronServiceLayer(allDefs).pipe(
+    Layer.provide(makeHookServiceLayer(plugins)),
+    Layer.provide(SqliteClient.layer({ filename: ":memory:" }))
+  )
 }
 
 describe("CronService integration", () => {

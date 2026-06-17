@@ -8,6 +8,7 @@
   import { goto } from "$app/navigation"
   import { page } from "$app/state"
   import AppDataTable from "$lib/components/ui/app-data-table/app-data-table.svelte"
+  import TableSkeleton from "$lib/components/TableSkeleton.svelte"
   import type { ColumnDef } from "@tanstack/svelte-table"
   import { renderSnippet } from "$lib/components/ui/data-table"
   import { IconReload } from "@tabler/icons-svelte"
@@ -58,7 +59,7 @@
   </div>
 
   {#if logsQuery.isLoading}
-    <p class="text-muted-foreground">Loading…</p>
+    <TableSkeleton columns={columns.length} rows={10} />
   {:else if logsQuery.data}
     <AppDataTable {columns} data={logsQuery.data.logs} />
 

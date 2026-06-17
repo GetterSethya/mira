@@ -4,6 +4,7 @@
   import { goto } from "$app/navigation"
   import { mira } from "$lib/mira.js"
   import SpanWaterfall from "$lib/components/SpanWaterfall.svelte"
+  import SpanWaterfallSkeleton from "$lib/components/SpanWaterfallSkeleton.svelte"
   import { Input } from "$lib/components/ui/input/index.js"
   import { Button } from "$lib/components/ui/button/index.js"
   import { resolve } from "$app/paths"
@@ -61,7 +62,7 @@
   </div>
 
   {#if spansQuery.isLoading}
-    <p class="text-muted-foreground">Loading…</p>
+    <SpanWaterfallSkeleton rows={5} />
   {:else if spansQuery.data}
     <SpanWaterfall spans={spansQuery.data.spans} />
     {@const data = spansQuery.data}
