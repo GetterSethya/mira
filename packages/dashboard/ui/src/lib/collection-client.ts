@@ -1,6 +1,6 @@
 const API_BASE = "/api"
 
-export type ListResult<T> = { items: T[] }
+export type ListResult<T> = { items: T[]; nextCursor: number | null }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { ...init })

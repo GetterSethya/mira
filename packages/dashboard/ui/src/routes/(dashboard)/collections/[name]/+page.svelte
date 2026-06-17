@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query"
-  import { page } from "$app/stores"
+  import { page } from "$app/state"
   import { mira } from "$lib/mira.js"
   import { makeCollectionApi } from "$lib/collection-client.js"
   import RecordTable from "$lib/components/RecordTable.svelte"
@@ -9,41 +9,42 @@
   import { Button } from "$lib/components/ui/button/index.js"
   import * as Sheet from "$lib/components/ui/sheet/index.js"
   import { toast } from "svelte-sonner"
+  import { goto } from "$app/navigation"
 
-  const name = $derived($page.params["name"] ?? "")
   const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
+
+  const name = $derived(page.params["name"] ?? "")
+
+  const cursor = $derived(Number(page.url.searchParams.get("cursor") || "0"))
+  const showSheet = $derived(page.url.searchParams.get("open"))
+  const id = $derived(page.url.searchParams.get("id"))
   const schema = $derived(schemaQuery.data?.find((s) => s.name === name) ?? null)
-
   const api = $derived(makeCollectionApi(name))
-  let cursor = $state<number | undefined>(undefined)
-  const listQuery = createQuery(() => api.listOptions({ limit: 50, after: cursor }))
-
   const columnCount = $derived(schema ? Object.keys(schema.fields).length + 1 : 5)
 
+  const listQuery = createQuery(() => api.listOptions({ limit: 50, after: cursor }))
+
   let records = $state<Record<string, unknown>[]>([])
-  let hasMore = $state(false)
+  let nextCursor = $state<number | null>(null)
 
   $effect(() => {
-    const items = listQuery.data?.items
-    if (items) {
-      if (cursor === undefined) {
-        records = items
-      } else {
-        records = [...records, ...items]
-      }
-      hasMore = items.length === 50
+    const data = listQuery.data
+    if (data) {
+      records = !cursor ? data.items : [...records, ...data.items]
+      nextCursor = data.nextCursor
     }
   })
 
-  let showCreate = $state(false)
   const queryClient = useQueryClient()
 
   async function handleCreate(data: FormData | Record<string, unknown>) {
     try {
       await api.create(data as Record<string, unknown>)
       await queryClient.invalidateQueries({ queryKey: api.invalidationKey() })
-      cursor = undefined
-      showCreate = false
+      const searchParams = page.url.searchParams
+      searchParams.delete("cursor")
+      searchParams.delete("open")
+      goto(`${page.url.pathname}?${searchParams.toString()}`)
       toast.success("Record created")
     } catch {
       toast.error("Failed to create record")
@@ -65,7 +66,16 @@
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-bold font-mono">{name}</h1>
     {#if schema}
-      <Button onclick={() => (showCreate = true)}>New record</Button>
+      <Button
+        onclick={() => {
+          const searchParams = page.url.searchParams
+          searchParams.set("open", "true")
+          searchParams.delete("id")
+          goto(`${page.url.pathname}?${searchParams.toString()}`)
+        }}
+      >
+        New record
+      </Button>
     {/if}
   </div>
 
@@ -82,15 +92,28 @@
       collectionName={name}
       onDelete={handleDelete}
       onLoadMore={() => {
-        const last = records[records.length - 1]
-        if (last) cursor = Number(last["seqId"])
+        if (nextCursor !== null) {
+          const searchParams = page.url.searchParams
+          searchParams.set("cursor", nextCursor.toString())
+          goto(`${page.url.pathname}?${searchParams.toString()}`)
+        }
       }}
-      {hasMore}
+      hasMore={nextCursor !== null}
     />
   {/if}
 </div>
 
-<Sheet.Root open={showCreate} onOpenChange={(o) => (showCreate = o)}>
+<Sheet.Root
+  open={!!showSheet}
+  onOpenChange={(value) => {
+    const searchParams = page.url.searchParams
+    if (!value) {
+      searchParams.delete("open")
+      searchParams.delete("id")
+    }
+    goto(`${page.url.pathname}?${searchParams.toString()}`)
+  }}
+>
   <Sheet.Content side="right" class="w-[480px] overflow-y-auto">
     <Sheet.Header>
       <Sheet.Title>New {name} record</Sheet.Title>

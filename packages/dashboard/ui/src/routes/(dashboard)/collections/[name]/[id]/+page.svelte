@@ -1,19 +1,20 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query"
-  import { page } from "$app/stores"
+  import { page } from "$app/state"
   import { goto } from "$app/navigation"
-  import { base } from "$app/paths"
   import { mira } from "$lib/mira.js"
   import { makeCollectionApi } from "$lib/collection-client.js"
   import RecordForm from "$lib/components/RecordForm.svelte"
   import { Button } from "$lib/components/ui/button/index.js"
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js"
   import { toast } from "svelte-sonner"
+  import { resolve } from "$app/paths"
 
-  const name = $derived($page.params["name"] ?? "")
-  const id = $derived($page.params["id"] ?? "")
+  const name = $derived(page.params["name"] ?? "")
+  const id = $derived(page.params["id"] ?? "")
 
   const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
+
   const schema = $derived(schemaQuery.data?.find((s) => s.name === name) ?? null)
   const api = $derived(makeCollectionApi(name))
   const recordQuery = createQuery(() => api.getOneOptions(id))
@@ -37,7 +38,7 @@
     try {
       await api.delete(id)
       toast.success("Record deleted")
-      goto(`${base}/collections/${name}`)
+      goto(resolve(`/collections/${name}`))
     } catch {
       toast.error("Failed to delete")
     } finally {
@@ -50,7 +51,7 @@
 <div class="space-y-6 max-w-2xl">
   <div class="flex items-center justify-between">
     <div>
-      <a href="{base}/collections/{name}" class="text-sm text-muted-foreground hover:underline">← {name}</a>
+      <a href={resolve(`/collections/${name}`)} class="text-sm text-muted-foreground hover:underline">← {name}</a>
       <h1 class="text-xl font-bold font-mono mt-1">{id}</h1>
     </div>
     <Button variant="destructive" onclick={() => (showDelete = true)}>Delete</Button>
