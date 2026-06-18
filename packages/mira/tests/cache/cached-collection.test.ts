@@ -4,6 +4,7 @@ import { Effect, Either, Layer } from "effect"
 import { performance } from "node:perf_hooks"
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
+import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
@@ -40,6 +41,51 @@ const SlowView = ViewCollection.define("slow_posts", SLOW_SQL.trim(), {
 }).rules((R) => ({ list: R.public(), view: R.public() }))
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
+const adminCtx: RequestCtx = { headers: {}, query: {}, admin: true }
+
+// Dummy collection — only its `.name` is used by Rule.authId(), never queried.
+const Users = BaseCollection.define("users", {
+  name: Field.text({ maxLength: 100 }),
+}).rules((R) => ({
+  list: R.public(),
+  view: R.public(),
+  create: R.public(),
+  update: R.public(),
+  delete: R.public(),
+}))
+
+// Owner-only rule — scoped by the authenticated identity (@auth_id).
+const Notes = BaseCollection.define("notes", {
+  ownerId: Field.text({ maxLength: 100 }),
+  body: Field.text({ maxLength: 200 }),
+}).rules((R) => ({
+  list: R.public(),
+  view: R.field("ownerId").eq(R.authId(Users)),
+  create: R.public(),
+  update: R.public(),
+  delete: R.public(),
+}))
+
+// Tenant-scoped rule — bound by an incoming request query param (@request_query_tenantId).
+const TenantDocs = BaseCollection.define("tenant_docs", {
+  tenantId: Field.text({ maxLength: 100 }),
+  body: Field.text({ maxLength: 200 }),
+}).rules((R) => ({
+  list: R.public(),
+  view: R.field("tenantId").eq(R.request("query", "tenantId")),
+  create: R.public(),
+  update: R.public(),
+  delete: R.public(),
+}))
+
+// Auth collection — `password` is x-hidden, stripped from non-admin responses only.
+const Accounts = AuthCollection.define("accounts", {}).rules((R) => ({
+  list: R.public(),
+  view: R.public(),
+  create: R.public(),
+  update: R.public(),
+  delete: R.public(),
+}))
 
 const FileStorageTest = Layer.succeed(
   FileStorage,
@@ -84,6 +130,73 @@ const perfCachedServiceWithDeps = makeCachedCollectionServiceLayer([Posts, SlowV
 )
 
 const perfTestLayer = Layer.mergeAll(perfCachedServiceWithDeps, perfSqliteLayer, FileStorageTest, NodeCryptoLayer)
+
+const securitySqliteLayer = SqliteClient.layer({ filename: ":memory:" })
+
+const securityCachedServiceWithDeps = makeCachedCollectionServiceLayer([Notes, TenantDocs, Accounts], {
+  recordTtlMs: 60_000,
+  listTtlMs: 60_000,
+  maxRecords: 100,
+  maxLists: 100,
+}).pipe(
+  Layer.provide(RepositoryLive),
+  Layer.provide(securitySqliteLayer),
+  Layer.provide(FileStorageTest),
+  Layer.provide(NodeCryptoLayer)
+)
+
+const securityTestLayer = Layer.mergeAll(
+  securityCachedServiceWithDeps,
+  securitySqliteLayer,
+  FileStorageTest,
+  NodeCryptoLayer
+)
+
+const setupNotesTable = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "notes" (
+      "seqId"   INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"      TEXT NOT NULL UNIQUE,
+      "ownerId" TEXT NOT NULL,
+      "body"    TEXT NOT NULL,
+      "created" TEXT NOT NULL,
+      "updated" TEXT NOT NULL
+    )
+  `)
+  yield* sql.unsafe(`DELETE FROM "notes"`)
+})
+
+const setupTenantDocsTable = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "tenant_docs" (
+      "seqId"    INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"       TEXT NOT NULL UNIQUE,
+      "tenantId" TEXT NOT NULL,
+      "body"     TEXT NOT NULL,
+      "created"  TEXT NOT NULL,
+      "updated"  TEXT NOT NULL
+    )
+  `)
+  yield* sql.unsafe(`DELETE FROM "tenant_docs"`)
+})
+
+const setupAccountsTable = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "accounts" (
+      "seqId"         INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"            TEXT NOT NULL UNIQUE,
+      "email"         TEXT NOT NULL UNIQUE,
+      "password"      TEXT NOT NULL,
+      "emailVerified" INTEGER NOT NULL DEFAULT 0,
+      "created"       TEXT NOT NULL,
+      "updated"       TEXT NOT NULL
+    )
+  `)
+  yield* sql.unsafe(`DELETE FROM "accounts"`)
+})
 
 const setupPostsTable = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -270,6 +383,77 @@ describe("CachedCollectionService", () => {
       expect(titles).toContain("Keep")
       expect(titles).not.toContain("Remove")
     }).pipe(Effect.provide(testLayer)))
+})
+
+describe("Cache key authorization scoping (security)", () => {
+  it.effect("auth-identity-bound rule — cache must not leak a record across different owners", () =>
+    Effect.gen(function* () {
+      yield* setupNotesTable
+      const svc = yield* CollectionService
+
+      const created = yield* svc.create(Notes, { ownerId: "userA", body: "secret" }, noCtx)
+      const id = created["id"] as string
+
+      const ctxOwner: RequestCtx = { headers: {}, query: {}, auth: { collection: "users", record: { id: "userA" } } }
+      const ctxOther: RequestCtx = { headers: {}, query: {}, auth: { collection: "users", record: { id: "userB" } } }
+
+      // Owner views their own note — populates the cache
+      const ownerView = yield* svc.view(Notes, id, ctxOwner)
+      expect(ownerView["body"]).toBe("secret")
+
+      // A different identity requests the same id/select/expand within the TTL window.
+      // The rule (ownerId == @auth_id) denies userB at the DB layer — a cache hit must
+      // not bypass that check and hand back userA's row.
+      const otherView = yield* Effect.either(svc.view(Notes, id, ctxOther))
+      expect(Either.isLeft(otherView)).toBe(true)
+      if (Either.isLeft(otherView)) {
+        expect(otherView.left instanceof NotFoundError).toBe(true)
+      }
+    }).pipe(Effect.provide(securityTestLayer)))
+
+  it.effect("request-query-bound rule — cache must not leak a record across different query values", () =>
+    Effect.gen(function* () {
+      yield* setupTenantDocsTable
+      const svc = yield* CollectionService
+
+      const created = yield* svc.create(TenantDocs, { tenantId: "tenant-1", body: "secret" }, noCtx)
+      const id = created["id"] as string
+
+      const ctxTenant1: RequestCtx = { headers: {}, query: { tenantId: "tenant-1" } }
+      const ctxTenant2: RequestCtx = { headers: {}, query: { tenantId: "tenant-2" } }
+
+      // tenant-1 views the doc — populates the cache
+      const tenant1View = yield* svc.view(TenantDocs, id, ctxTenant1)
+      expect(tenant1View["body"]).toBe("secret")
+
+      // tenant-2 requests the same id/select/expand within the TTL window.
+      // The rule (tenantId == @request_query_tenantId) denies tenant-2 at the DB layer —
+      // a cache hit must not bypass that check.
+      const tenant2View = yield* Effect.either(svc.view(TenantDocs, id, ctxTenant2))
+      expect(Either.isLeft(tenant2View)).toBe(true)
+      if (Either.isLeft(tenant2View)) {
+        expect(tenant2View.left instanceof NotFoundError).toBe(true)
+      }
+    }).pipe(Effect.provide(securityTestLayer)))
+
+  it.effect("ctx.admin-bound field visibility — cache must not leak hidden fields to non-admin requests", () =>
+    Effect.gen(function* () {
+      yield* setupAccountsTable
+      const svc = yield* CollectionService
+
+      const created = yield* svc.create(Accounts, { email: "a@b.com", password: "hashed-secret" }, adminCtx)
+      const id = created["id"] as string
+
+      // Admin views the record — password is x-hidden but admin bypasses field hiding —
+      // populates the cache with the password included.
+      const adminView = yield* svc.view(Accounts, id, adminCtx)
+      expect(adminView["password"]).toBe("hashed-secret")
+
+      // Non-admin requests the same id/select/expand within the TTL window.
+      // A cache hit must not hand back the admin's unfiltered response.
+      const nonAdminView = yield* svc.view(Accounts, id, noCtx)
+      expect(nonAdminView["password"]).toBeUndefined()
+    }).pipe(Effect.provide(securityTestLayer)))
 })
 
 describe("Performance — cache vs. DB", () => {

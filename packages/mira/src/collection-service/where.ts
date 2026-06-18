@@ -23,6 +23,9 @@ export function cursorClause(after: number): WhereClause {
   return { sql: "t.seqId > ?", params: [after] }
 }
 
+/** Shared pattern for the `@auth_<field>` / `@request_<source>_<key>` placeholders emitted by the rule compiler. */
+const CTX_PLACEHOLDER_PATTERN = String.raw`@auth_(\w+)|@request_(\w+)_(\w+)`
+
 /**
  * Resolves `@auth_<field>` and `@request_<source>_<key>` placeholders produced by the
  * rule compiler into positional `?` params bound from `RequestCtx`.
@@ -45,7 +48,7 @@ export function resolveCtxPlaceholders(result: EnforceResult, ctx: RequestCtx, c
 
     // Single-pass left-to-right replacement preserves param ordering.
     // Groups: (1) @auth field, (2) @request source, (3) @request key
-    const newSql = result.sql.replace(/\?|@auth_(\w+)|@request_(\w+)_(\w+)/g, (match, g1, g2, g3): string => {
+    const newSql = result.sql.replace(new RegExp(`\\?|${CTX_PLACEHOLDER_PATTERN}`, "g"), (match, g1, g2, g3): string => {
       const authField = typeof g1 === "string" ? g1 : undefined
       const reqSource = typeof g2 === "string" ? g2 : undefined
       const reqKey = typeof g3 === "string" ? g3 : undefined
@@ -65,6 +68,43 @@ export function resolveCtxPlaceholders(result: EnforceResult, ctx: RequestCtx, c
 
     return yield* Effect.succeed({ sql: newSql, params: resolved })
   })
+}
+
+/** The set of `RequestCtx`-derived values a compiled rule's SQL actually references. */
+export type CtxRefs = {
+  authFields: ReadonlyArray<string>
+  queryKeys: ReadonlyArray<string>
+  headerKeys: ReadonlyArray<string>
+}
+
+/**
+ * Scans compiled rule SQL for `@auth_<field>` / `@request_<source>_<key>` placeholders
+ * and returns exactly which `RequestCtx` fields they reference — used to build a cache
+ * key that captures everything a rule could depend on without serializing all of `ctx`.
+ */
+export function extractCtxRefs(sql: string): CtxRefs {
+  const authFields = new Set<string>()
+  const queryKeys = new Set<string>()
+  const headerKeys = new Set<string>()
+
+  for (const match of sql.matchAll(new RegExp(CTX_PLACEHOLDER_PATTERN, "g"))) {
+    const [, authField, reqSource, reqKey] = match
+    if (authField !== undefined) {
+      authFields.add(authField)
+    } else if (reqSource !== undefined && reqKey !== undefined) {
+      if (reqSource === "query") {
+        queryKeys.add(reqKey)
+      } else {
+        headerKeys.add(reqKey)
+      }
+    }
+  }
+
+  return {
+    authFields: [...authFields].sort(),
+    queryKeys: [...queryKeys].sort(),
+    headerKeys: [...headerKeys].sort()
+  }
 }
 
 /**

@@ -7,6 +7,7 @@ import type { SortOrder } from "@/repository/types.js"
 import { CollectionService, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { FileStorage } from "@/storage/storage.js"
 import { CollectionCache, makeCollectionCacheLayer } from "./collection-cache.js"
+import { buildCtxCacheTag } from "./ctx-key.js"
 import type { CollectionCacheConfigValues } from "./types.js"
 
 function serializeFilterNode(node: FilterNode): string {
@@ -99,7 +100,8 @@ export function makeCachedCollectionServiceLayer(
 
       return CollectionService.of({
         list: (collection, cursor, perPage, ctx, filter, sort, select, expand) => {
-          const key = `${collection.name}:${stableListKey(cursor, perPage, filter, sort, select, expand)}`
+          const ctxTag = buildCtxCacheTag(collection, "list", ctx)
+          const key = `${collection.name}:${stableListKey(cursor, perPage, filter, sort, select, expand)}::${ctxTag}`
           return Effect.gen(function* () {
             const cached = yield* cache.getList(key)
             yield* Effect.currentSpan.pipe(
@@ -121,7 +123,8 @@ export function makeCachedCollectionServiceLayer(
         },
 
         view: (collection, id, ctx, select, expand) => {
-          const key = stableViewKey(collection.name, id, select, expand)
+          const ctxTag = buildCtxCacheTag(collection, "view", ctx)
+          const key = `${stableViewKey(collection.name, id, select, expand)}::${ctxTag}`
           return Effect.gen(function* () {
             const cached = yield* cache.getRecord(key)
             yield* Effect.currentSpan.pipe(
