@@ -4,7 +4,7 @@ import type { SqlClient } from "@effect/sql"
 import type { AuthService } from "@/http/auth.js"
 import type { HttpServerFactory } from "@/http/server-factory.js"
 import type { CryptoService } from "@/crypto/crypto.js"
-import type { Dialect } from "@/migrator/dialect.js"
+import type { Dialect } from "@/dialect/dialect.js"
 import type { FileStorage } from "@/storage/storage.js"
 
 /**

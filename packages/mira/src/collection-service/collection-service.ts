@@ -8,8 +8,9 @@ import { enforcerForAction } from "@/rule/enforcer.js"
 import { Repository } from "@/repository/repository.js"
 import type { ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
 import { FileStorage } from "@/storage/storage.js"
-import type { RowDecoder } from "./decode.js"
-import { makeRowDecoder } from "./decode.js"
+import { Dialect } from "@/dialect/dialect.js"
+import type { RowDecoder, RowEncoder } from "./decode.js"
+import { makeRowDecoder, makeRowEncoder } from "./decode.js"
 import type { CursorPage, RequestCtx } from "./context.js"
 import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
@@ -195,19 +196,26 @@ function compileRule(
  */
 export function makeCollectionServiceLayer(
   allCollections: ReadonlyArray<AnyCollectionDef>
-): Layer.Layer<CollectionService, never, Repository | SqlClient.SqlClient | FileStorage> {
+): Layer.Layer<CollectionService, never, Repository | SqlClient.SqlClient | FileStorage | Dialect> {
   return Layer.effect(
     CollectionService,
     Effect.gen(function* () {
       const repo = yield* Repository
       const sql = yield* SqlClient.SqlClient
       const fileStorage = yield* FileStorage
+      const dialect = yield* Dialect
 
-      const decoderMap = new Map<string, RowDecoder>(allCollections.map((c) => [c.name, makeRowDecoder(c.schema)]))
+      const decoderMap = new Map<string, RowDecoder>(
+        allCollections.map((c) => [c.name, makeRowDecoder(c.schema, dialect.storesBooleanAsInteger)])
+      )
+      const encoderMap = new Map<string, RowEncoder>(
+        allCollections.map((c) => [c.name, makeRowEncoder(c.schema, dialect.storesBooleanAsInteger)])
+      )
       const inputSchemaMap = new Map(allCollections.map((c) => [c.name, buildInputSchemas(c)]))
       const getInputSchemas = (col: AnyCollectionDef) => inputSchemaMap.get(col.name) ?? buildInputSchemas(col)
       const decodeRow = (collection: AnyCollectionDef, record: RepoRecord): Effect.Effect<RepoRecord> =>
         (decoderMap.get(collection.name) ?? Effect.succeed)(record)
+      const getEncoder = (collection: AnyCollectionDef): RowEncoder => encoderMap.get(collection.name) ?? ((r) => r)
 
       const list = (
         collection: AnyCollectionDef,
@@ -325,7 +333,7 @@ export function makeCollectionServiceLayer(
             }
           }
 
-          const row = yield* repo.create(collection.name, cleaned)
+          const row = yield* repo.create(collection.name, getEncoder(collection)(cleaned))
           return yield* decodeRow(collection, row)
         }).pipe(
           Effect.withSpan("collection.create", {
@@ -370,7 +378,7 @@ export function makeCollectionServiceLayer(
             }
           }
 
-          const updated = yield* repo.update(collection.name, id, cleaned)
+          const updated = yield* repo.update(collection.name, id, getEncoder(collection)(cleaned))
 
           // Best-effort: delete old files and their thumbnails for any replaced file fields.
           const oldKeys = extractReplacedFileKeys(existing.value, cleaned, collection.schema)

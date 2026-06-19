@@ -6,6 +6,7 @@ import { Repository } from "@/repository/repository.js"
 import type { SortOrder } from "@/repository/types.js"
 import { CollectionService, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { FileStorage } from "@/storage/storage.js"
+import { Dialect } from "@/dialect/dialect.js"
 import { CollectionCache, makeCollectionCacheLayer } from "./collection-cache.js"
 import { buildCtxCacheTag } from "./ctx-key.js"
 import type { CollectionCacheConfigValues } from "./types.js"
@@ -91,7 +92,7 @@ const defaultConfig: CollectionCacheConfigValues = {
 export function makeCachedCollectionServiceLayer(
   allCollections: ReadonlyArray<AnyCollectionDef>,
   config: CollectionCacheConfigValues = defaultConfig
-): Layer.Layer<CollectionService, never, Repository | SqlClient.SqlClient | FileStorage> {
+): Layer.Layer<CollectionService, never, Repository | SqlClient.SqlClient | FileStorage | Dialect> {
   return Layer.effect(
     CollectionService,
     Effect.gen(function* () {

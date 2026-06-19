@@ -4,7 +4,11 @@
   import type { CollectionSchema } from "$lib/dashboard-api.js"
 
   const formType = getFormType({ defaultValues: {} as Record<string, unknown> })
-  const { form, schema, record }: { form: typeof formType; schema: CollectionSchema; record: Record<string, unknown> | null } = $props()
+  const {
+    form,
+    schema,
+    record
+  }: { form: typeof formType; schema: CollectionSchema; record: Record<string, unknown> | null } = $props()
 
   const entries = $derived(fieldEntries(schema, record !== null))
 </script>

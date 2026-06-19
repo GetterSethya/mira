@@ -16,6 +16,8 @@ import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 100 }),
@@ -101,6 +103,7 @@ const FileStorageTest = Layer.succeed(
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const perfSqliteLayer = SqliteClient.layer({ filename: ":memory:" })
+const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 const cachedServiceWithDeps = makeCachedCollectionServiceLayer([Posts], {
   recordTtlMs: 60_000,
@@ -111,7 +114,8 @@ const cachedServiceWithDeps = makeCachedCollectionServiceLayer([Posts], {
   Layer.provide(RepositoryLive),
   Layer.provide(sqliteLayer),
   Layer.provide(FileStorageTest),
-  Layer.provide(NodeCryptoLayer)
+  Layer.provide(NodeCryptoLayer),
+  Layer.provide(DialectTest)
 )
 
 // Expose CollectionService AND SqlClient so setupPostsTable can access SqlClient.SqlClient
@@ -126,7 +130,8 @@ const perfCachedServiceWithDeps = makeCachedCollectionServiceLayer([Posts, SlowV
   Layer.provide(RepositoryLive),
   Layer.provide(perfSqliteLayer),
   Layer.provide(FileStorageTest),
-  Layer.provide(NodeCryptoLayer)
+  Layer.provide(NodeCryptoLayer),
+  Layer.provide(DialectTest)
 )
 
 const perfTestLayer = Layer.mergeAll(perfCachedServiceWithDeps, perfSqliteLayer, FileStorageTest, NodeCryptoLayer)
@@ -142,7 +147,8 @@ const securityCachedServiceWithDeps = makeCachedCollectionServiceLayer([Notes, T
   Layer.provide(RepositoryLive),
   Layer.provide(securitySqliteLayer),
   Layer.provide(FileStorageTest),
-  Layer.provide(NodeCryptoLayer)
+  Layer.provide(NodeCryptoLayer),
+  Layer.provide(DialectTest)
 )
 
 const securityTestLayer = Layer.mergeAll(

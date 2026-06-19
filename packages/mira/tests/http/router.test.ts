@@ -17,6 +17,8 @@ import { makeCollectionRouter } from "@/http/router.js"
 import { AppConfig } from "@/config/index.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 // ---------------------------------------------------------------------------
 // Collection definitions
@@ -72,6 +74,7 @@ const FileStorageTest = Layer.succeed(FileStorage, FileStorage.of({
 }))
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
+const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 // Repository wired to the shared sqlite connection
 const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
@@ -80,7 +83,8 @@ const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provid
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
   Layer.provide(repoWithSql),
   Layer.provide(FileStorageTest),
-  Layer.provide(sqliteLayer)
+  Layer.provide(sqliteLayer),
+  Layer.provide(DialectTest)
 )
 
 // Merge everything needed by the router handlers + table setup into one test layer
@@ -94,6 +98,7 @@ const testLayer = Layer.mergeAll(
   AppConfigTest,
   NodeCryptoLayer,
   NodeAuthServiceLayer,
+  DialectTest,
 )
 
 // ---------------------------------------------------------------------------

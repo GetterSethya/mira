@@ -4,8 +4,8 @@ import { Effect, Layer, Schema } from "effect"
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 import type { CollectionSchema } from "@gettersethya/mira-client"
-import { sqliteDialect } from "@/migrator/dialect-sqlite.js"
-import { Dialect } from "@/migrator/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { Dialect } from "@/dialect/dialect.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })

@@ -8,8 +8,8 @@ import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
 import { schemaToColumns } from "@/migrator/schema-diff.js"
-import { sqliteDialect } from "@/migrator/dialect-sqlite.js"
-import { Dialect } from "@/migrator/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { Dialect } from "@/dialect/dialect.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 
 const Users = AuthCollection.define("users", {

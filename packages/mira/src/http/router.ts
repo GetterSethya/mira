@@ -10,6 +10,7 @@ import { FileStorage } from "@/storage/storage.js"
 import { ThumbnailService } from "@/thumbnail/types.js"
 import { AppConfig } from "@/config/index.js"
 import { CryptoService } from "@/crypto/index.js"
+import { Dialect } from "@/dialect/dialect.js"
 import { AuthService, signJwt, verifyAnyJwt, verifyJwt, verifyPassword } from "./auth.js"
 import { makeRowDecoder } from "@/collection-service/decode.js"
 import { catchCollectionErrors } from "./errors.js"
@@ -20,7 +21,15 @@ import { makeFileTokenRoute } from "./file-token.js"
 import { makeSchemaRoute } from "./schema.js"
 import { telemetryLogsRoute, telemetrySpansRoute } from "./telemetry-routes.js"
 
-type Ms = CollectionService | Repository | FileStorage | ThumbnailService | AppConfig | AuthService | CryptoService
+type Ms =
+  | CollectionService
+  | Repository
+  | FileStorage
+  | ThumbnailService
+  | AppConfig
+  | AuthService
+  | CryptoService
+  | Dialect
 
 const AuthBodySchema = Schema.Struct({
   email: Schema.String,
@@ -94,7 +103,6 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
 
 export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef>) {
   const collectionMap = new Map(collections.map((c) => [c.name, c]))
-  const decoderMap = new Map(collections.map((c) => [c.name, makeRowDecoder(c.schema)]))
 
   function collectionRoute(
     operation: string,
@@ -303,7 +311,8 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       const token = yield* signJwt({ sub: rid, col: col.name }, jwtSecret).pipe(
         Effect.mapError(() => HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))
       )
-      const decode = decoderMap.get(col.name) ?? Effect.succeed
+      const dialect = yield* Dialect
+      const decode = makeRowDecoder(col.schema, dialect.storesBooleanAsInteger)
       const decodedRow = yield* decode(fullRow)
       const publicRow = Object.fromEntries(
         Object.entries(decodedRow).filter(([k]) => {

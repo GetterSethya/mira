@@ -15,6 +15,8 @@ import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 const testCollection = BaseCollection.define("test_items", {
   title: Field.text(),
@@ -47,16 +49,19 @@ function makeTestLayer(queue: Queue.Queue<CompletedSpan>) {
   // Wire Repository to its SqlClient dependency
   const repoLayer = RepositoryLive.pipe(Layer.provide(sqliteLayer))
 
+  const dialectLayer = Layer.succeed(Dialect, sqliteDialect)
+
   // Wire service to all its dependencies (no remaining requirements)
   const service = makeCachedCollectionServiceLayer([testCollection]).pipe(
     Layer.provide(repoLayer),
     Layer.provide(sqliteLayer),
     Layer.provide(FileStorageTest),
     Layer.provide(NodeCryptoLayer),
+    Layer.provide(dialectLayer),
   )
 
   // Expose CollectionService + SqlClient + FileStorage + tracer; requires nothing
-  return Layer.mergeAll(service, sqliteLayer, FileStorageTest, tracerLayer, NodeCryptoLayer)
+  return Layer.mergeAll(service, sqliteLayer, FileStorageTest, tracerLayer, NodeCryptoLayer, dialectLayer)
 }
 
 const setupTable = Effect.gen(function* () {

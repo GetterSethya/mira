@@ -5,6 +5,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer, Option, Redacted } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { createMiraClient } from "@gettersethya/mira-client"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
@@ -17,9 +18,12 @@ import { Mira } from "@/app/index.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { SqliteDatabase } from "@/databases/sqlite.js"
 import { LocalFileStorage } from "@/storage/index.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text(),
+  published: Field.boolean({ default: false }),
 }).rules((R) => ({
   list: R.public(),
   view: R.public(),
@@ -58,10 +62,12 @@ const FileStorageTest = Layer.succeed(FileStorage, FileStorage.of({
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
   Layer.provide(repoWithSql),
   Layer.provide(FileStorageTest),
   Layer.provide(sqliteLayer),
+  Layer.provide(DialectTest),
 )
 
 const testLayer = Layer.mergeAll(
@@ -74,17 +80,19 @@ const testLayer = Layer.mergeAll(
   AppConfigTest,
   NodeCryptoLayer,
   NodeAuthServiceLayer,
+  DialectTest,
 )
 
 const setupTables = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   yield* sql.unsafe(`
     CREATE TABLE IF NOT EXISTS "posts" (
-      "seqId"   INTEGER PRIMARY KEY AUTOINCREMENT,
-      "id"      TEXT NOT NULL UNIQUE,
-      "title"   TEXT NOT NULL DEFAULT '',
-      "created" TEXT NOT NULL,
-      "updated" TEXT NOT NULL
+      "seqId"     INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"        TEXT NOT NULL UNIQUE,
+      "title"     TEXT NOT NULL DEFAULT '',
+      "published" BOOLEAN NOT NULL DEFAULT 0,
+      "created"   TEXT NOT NULL,
+      "updated"   TEXT NOT NULL
     )
   `)
   yield* sql.unsafe(`DELETE FROM "posts"`)
@@ -172,6 +180,29 @@ describe("MiraApp integration", () => {
   it.scoped("MiraApp builder can be constructed", () =>
     Effect.gen(function* () {
       assert.ok(app)
+    }).pipe(Effect.provide(testLayer)),
+  )
+
+  it.scoped("create with published: true round-trips a real JS boolean through the client", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const posts = createMiraClient("/").collection(Posts)
+      const created = yield* posts.create().toEffect({ title: "bool create", published: true })
+      assert.strictEqual(created.published, true)
+    }).pipe(Effect.provide(testLayer)),
+  )
+
+  it.scoped("update toggling published persists and round-trips through GET", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const posts = createMiraClient("/").collection(Posts)
+      const created = yield* posts.create().toEffect({ title: "bool update", published: true })
+      const updated = yield* posts.update().toEffect({ id: created.id, data: { published: false } })
+      assert.strictEqual(updated.published, false)
+      const fetched = yield* posts.getOne(created.id).toEffect()
+      assert.strictEqual(fetched.published, false)
     }).pipe(Effect.provide(testLayer)),
   )
 })

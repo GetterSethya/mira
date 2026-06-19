@@ -13,8 +13,8 @@ import { Effect, Layer, Schema } from "effect"
 import { existsSync, unlinkSync } from "node:fs"
 import { resolve } from "node:path"
 import { AuthCollection, BaseCollection, Field, ViewCollection } from "@gettersethya/mira-client"
-import { Dialect } from "@/migrator/dialect.js"
-import { sqliteDialect } from "@/migrator/dialect-sqlite.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 
 // ---------------------------------------------------------------------------

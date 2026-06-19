@@ -7,6 +7,8 @@ import type { DialectType } from "./dialect.js"
  * - `dropColumn` and `alterColumn` emit comment stubs — SQLite requires table recreation for these.
  */
 export const sqliteDialect: DialectType = {
+  storesBooleanAsInteger: true,
+
   quoteIdentifier: (name) => `"${name}"`,
 
   quoteLiteral: (value) => {

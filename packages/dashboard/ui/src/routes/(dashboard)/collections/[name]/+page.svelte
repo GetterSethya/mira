@@ -10,11 +10,12 @@
   import * as Sheet from "$lib/components/ui/sheet/index.js"
   import { toast } from "svelte-sonner"
   import { goto } from "$app/navigation"
+  import { Spinner } from "$lib/components/ui/spinner"
+  import { recordFormStore } from "$lib/stores/record-form-store.svelte"
 
   const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
 
   const name = $derived(page.params["name"] ?? "")
-
   const cursor = $derived(Number(page.url.searchParams.get("cursor") || "0"))
   const showSheet = $derived(page.url.searchParams.get("open"))
   const id = $derived(page.url.searchParams.get("id"))
@@ -86,20 +87,22 @@
   {:else if listQuery.isLoading && records.length === 0}
     <TableSkeleton columns={columnCount} rows={8} />
   {:else}
-    <RecordTable
-      {schema}
-      {records}
-      collectionName={name}
-      onDelete={handleDelete}
-      onLoadMore={() => {
-        if (nextCursor !== null) {
-          const searchParams = page.url.searchParams
-          searchParams.set("cursor", nextCursor.toString())
-          goto(`${page.url.pathname}?${searchParams.toString()}`)
-        }
-      }}
-      hasMore={nextCursor !== null}
-    />
+    {#key schema}
+      <RecordTable
+        {schema}
+        {records}
+        collectionName={name}
+        onDelete={handleDelete}
+        onLoadMore={() => {
+          if (nextCursor !== null) {
+            const searchParams = page.url.searchParams
+            searchParams.set("cursor", nextCursor.toString())
+            goto(`${page.url.pathname}?${searchParams.toString()}`)
+          }
+        }}
+        hasMore={nextCursor !== null}
+      />
+    {/key}
   {/if}
 </div>
 
@@ -114,14 +117,24 @@
     goto(`${page.url.pathname}?${searchParams.toString()}`)
   }}
 >
-  <Sheet.Content side="right" class="w-[480px] overflow-y-auto">
-    <Sheet.Header>
+  <Sheet.Content showCloseButton={false} side="right" class="min-w-full md:min-w-lg overflow-y-auto">
+    <Sheet.Header class="sticky top-0 bg-card z-30 border-b">
       <Sheet.Title>New {name} record</Sheet.Title>
     </Sheet.Header>
     {#if schema}
-      <div class="mt-4">
+      <div class="mt-4 px-5">
         <RecordForm {schema} record={null} onSubmit={handleCreate} />
       </div>
     {/if}
+
+    <Sheet.Footer class="flex flex-row sticky bottom-0 bg-card border-t z-30">
+      <Button class="flex-1" variant="destructive">Cancel</Button>
+      <Button type="submit" class="flex-1" form="record-form">
+        {#if recordFormStore.isLoading}
+          <Spinner />
+        {/if}
+        {id ? "Save" : "Submit"}</Button
+      >
+    </Sheet.Footer>
   </Sheet.Content>
 </Sheet.Root>

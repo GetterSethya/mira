@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { sqliteDialect } from "@/migrator/dialect-sqlite.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import type { MigrationStep } from "@/migrator/types.js"
 
 const dialect = sqliteDialect

@@ -13,6 +13,8 @@ import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "@/collection-service/errors.js"
 import type { CursorPage, RequestCtx } from "@/collection-service/context.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 // ---------------------------------------------------------------------------
 // Test layer
@@ -28,15 +30,7 @@ const FileStorageTest = Layer.succeed(FileStorage, FileStorage.of({
 }))
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-
-const collectionServiceWithDeps = makeCollectionServiceLayer([]).pipe(
-  Layer.provide(RepositoryLive),
-  Layer.provide(sqliteLayer),
-  Layer.provide(FileStorageTest),
-  Layer.provide(NodeCryptoLayer)
-)
-
-const testLayer = Layer.mergeAll(collectionServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
+const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
 
@@ -185,12 +179,23 @@ const Roles = BaseCollection.define("roles", {
   delete: R.public()
 }))
 
+// PostsServiceLayer wires Posts into the collection service (registers `published` for boolean encode/decode)
+const collectionServiceWithDeps = makeCollectionServiceLayer([Posts]).pipe(
+  Layer.provide(RepositoryLive),
+  Layer.provide(sqliteLayer),
+  Layer.provide(FileStorageTest),
+  Layer.provide(NodeCryptoLayer),
+  Layer.provide(DialectTest)
+)
+const testLayer = Layer.mergeAll(collectionServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
+
 // ScoredServiceLayer wires Scored into the collection service
 const scoredServiceWithDeps = makeCollectionServiceLayer([Scored]).pipe(
   Layer.provide(RepositoryLive),
   Layer.provide(sqliteLayer),
   Layer.provide(FileStorageTest),
-  Layer.provide(NodeCryptoLayer)
+  Layer.provide(NodeCryptoLayer),
+  Layer.provide(DialectTest)
 )
 const scoredTestLayer = Layer.mergeAll(scoredServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
 
@@ -199,7 +204,8 @@ const rolesServiceWithDeps = makeCollectionServiceLayer([Roles]).pipe(
   Layer.provide(RepositoryLive),
   Layer.provide(sqliteLayer),
   Layer.provide(FileStorageTest),
-  Layer.provide(NodeCryptoLayer)
+  Layer.provide(NodeCryptoLayer),
+  Layer.provide(DialectTest)
 )
 const rolesTestLayer = Layer.mergeAll(rolesServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
 
@@ -573,6 +579,22 @@ describe("create", () => {
       expect("seqId" in result).toBe(false)
     }).pipe(Effect.provide(testLayer)))
 
+  it.effect("boolean field round-trips through SQLite encode/decode (true)", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const result = yield* svc.create(Posts, { title: "Bool true", published: true }, noCtx)
+      expect(result["published"]).toBe(true)
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("boolean field round-trips through SQLite encode/decode (false)", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const result = yield* svc.create(Posts, { title: "Bool false", published: false }, noCtx)
+      expect(result["published"]).toBe(false)
+    }).pipe(Effect.provide(testLayer)))
+
   it.effect("ValidationError when required field is missing", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
@@ -701,6 +723,17 @@ describe("update", () => {
       const updated = yield* svc.update(Posts, id, { title: "New" }, noCtx)
       expect(updated["title"]).toBe("New")
       expect(updated["authorId"]).toBe("user1")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("toggling a boolean field updates and round-trips correctly", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const created = yield* svc.create(Posts, { title: "Toggle", published: false }, noCtx)
+      const id = created["id"]
+      if (typeof id !== "string") throw new Error("expected string id")
+      const updated = yield* svc.update(Posts, id, { published: true }, noCtx)
+      expect(updated["published"]).toBe(true)
     }).pipe(Effect.provide(testLayer)))
 
   it.live("updated timestamp is refreshed; created is unchanged", () =>
@@ -1059,7 +1092,8 @@ const superAdminTestLayer = Layer.mergeAll(
     Layer.provide(RepositoryLive),
     Layer.provide(sqliteLayer),
     Layer.provide(FileStorageTest),
-    Layer.provide(NodeCryptoLayer)
+    Layer.provide(NodeCryptoLayer),
+    Layer.provide(DialectTest)
   ),
   sqliteLayer,
   FileStorageTest,

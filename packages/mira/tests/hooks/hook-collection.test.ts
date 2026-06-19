@@ -12,6 +12,8 @@ import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { MiraPlugin } from "@/app/plugin.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text(),
@@ -38,6 +40,7 @@ const FileStorageTest = Layer.succeed(
 )
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
+const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 const setupPostsTable = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -58,6 +61,7 @@ function makeTestLayer(plugins: ReadonlyArray<MiraPlugin>) {
     Layer.provide(sqliteLayer),
     Layer.provide(FileStorageTest),
     Layer.provide(NodeCryptoLayer),
+    Layer.provide(DialectTest),
   )
   return Layer.mergeAll(
     makeHookCollectionServiceLayer().pipe(

@@ -1,6 +1,6 @@
 import { Context } from "effect"
 
-import type { ColumnDef, MigrationStep } from "./types.js"
+import type { ColumnDef, MigrationStep } from "@/migrator/types.js"
 
 /**
  * Interface a SQL dialect must implement to translate abstract `MigrationStep` values
@@ -17,6 +17,8 @@ export type DialectType = {
   quoteLiteral: (value: unknown) => string
   /** Produces a deterministic index name from a table name and field list. */
   indexName: (table: string, fields: string[]) => string
+  /** Whether this dialect stores boolean columns as 0/1 integers (true for SQLite; false for dialects with a native boolean type, e.g. Postgres). */
+  storesBooleanAsInteger: boolean
 }
 
 /** Effect `Context.Tag` for the active SQL dialect. Inject via `Layer.succeed(Dialect, sqliteDialect)`. */
