@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest"
 import { BaseCollection } from "@/collection/base.js"
 import { Bytes } from "@/collection/bytes.js"
 import { Field } from "@/collection/field.js"
-import type { AnyCollectionDef } from "@/collection/types.js"
-import { Rule } from "@/rule/builder.js"
 
 const ID_PROPERTY = { type: "string", "x-system": true }
 const SEQID_PROPERTY = { type: "integer", "x-kind": "seqId", "x-system": true, "x-hidden": true }
@@ -58,21 +56,5 @@ describe("BaseCollection", () => {
     expect(Col.schema).not.toHaveProperty("x-indexes")
   })
 
-  it("base collection with rules", () => {
-    const Users: AnyCollectionDef = {
-      name: "users",
-      fields: {},
-      schema: {
-        "x-collection-kind": "auth",
-        type: "object",
-        properties: {}
-      }
-    }
-    const Col = BaseCollection.define("posts", { title: Field.text(), ownerId: Field.text() })
-      .rules((R) => ({
-        create: R.field("ownerId").eq(R.authId(Users))
-      }))
-    expect(Col.schema["x-rules"]).toBeDefined()
-    expect(Col.schema["x-rules"]!.create).toBeDefined()
-  })
 })
+

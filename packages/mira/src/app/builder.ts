@@ -3,6 +3,7 @@ import type { Layer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { CronDef } from "@/cron/types.js"
 import type { MiraPlatform, MiraDatabase, MiraStorage } from "./types.js"
+import type { RuleBinding } from "./define-rule.js"
 import { MiraApp } from "./app.js"
 
 /**
@@ -17,6 +18,7 @@ export interface MiraAppConfig {
   database: MiraDatabase
   storage: MiraStorage
   collections: ReadonlyArray<AnyCollectionDef>
+  rules?: ReadonlyArray<RuleBinding>
   crons: ReadonlyArray<CronDef<any>>
   telemetry: Layer.Layer<never, never, never>
 }
@@ -106,7 +108,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
 
   /**
    * Set the collection definitions.
-   * Required step. The collections define the schema, rules, and indexes for all entities.
+   * Required step. The collections define the schema for all entities.
    *
    * @param c - Array of collection definitions from BaseCollection.define(), AuthCollection.define(),
    *            or ViewCollection.define()
@@ -114,6 +116,25 @@ export class MiraBuilder<Has extends string = never, R = never> {
    */
   collections(c: ReadonlyArray<AnyCollectionDef>): MiraBuilder<Has | "collections", R> {
     return new MiraBuilder({ ...this.#config, collections: c })
+  }
+
+  /**
+   * Set rule bindings for collections (optional).
+   * Rules are defined server-only via `Mira.defineRule()` and are merged onto
+   * collection schemas at build time. Collections without rules deny all actions.
+   *
+   * @param r - Array of RuleBinding from Mira.defineRule(collection, cb)
+   * @returns A new builder (same phantom type — rules is optional)
+   */
+  rules(r: ReadonlyArray<RuleBinding>): MiraBuilder<Has, R> {
+    const seen = new Set<string>()
+    for (const rb of r) {
+      if (seen.has(rb.collectionName)) {
+        throw new Error(`Duplicate rule binding for collection "${rb.collectionName}". Each collection may have at most one RuleBinding.`)
+      }
+      seen.add(rb.collectionName)
+    }
+    return new MiraBuilder({ ...this.#config, rules: r })
   }
 
   /**
@@ -159,6 +180,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
       database: config.database,
       storage: config.storage,
       collections: config.collections,
+      rules: config.rules ?? [],
       crons: config.crons ?? [],
       telemetry: config.telemetry ?? ConsoleTelemetryLayer
     })

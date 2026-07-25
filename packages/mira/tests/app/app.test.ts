@@ -5,6 +5,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer, Option, Redacted } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { createMiraClient } from "@gettersethya/mira-client"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
@@ -21,16 +22,18 @@ import { LocalFileStorage } from "@/storage/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text(),
   published: Field.boolean({ default: false }),
-}).rules((R) => ({
+})
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public(),
 }))
+const Posts = applyRulesToCollections([postsDef], [postsRules])[0]
 
 const ALL_COLLECTIONS = [Posts]
 
@@ -39,6 +42,7 @@ const app = Mira.builder()
   .database(SqliteDatabase({ filename: ":memory:" }))
   .storage(LocalFileStorage({ directory: "./tmp/test-app" }))
   .collections(ALL_COLLECTIONS)
+  .rules([])
   .build()
 
 const AppConfigTest = Layer.succeed(AppConfig, AppConfig.of({

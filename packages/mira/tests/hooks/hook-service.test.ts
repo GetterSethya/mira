@@ -2,6 +2,7 @@ import { Effect, Layer, Option, Redacted } from "effect"
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { HookService, makeHookServiceLayer } from "@/hooks/hook-service.js"
 import { MiraPlugin } from "@/app/plugin.js"
 import type { RecordHookContext, ListHookContext, ViewHookContext } from "@/hooks/types.js"
@@ -29,15 +30,17 @@ const TestAppConfig = Layer.succeed(AppConfig, {
   logRetentionDays: 30
 })
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text()
-}).rules((R) => ({
+})
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public()
 }))
+const Posts = applyRulesToCollections([postsDef], [postsRules])[0]
 
 describe("HookService", () => {
   it.effect("runs no-op when no plugins registered", () =>

@@ -20,6 +20,7 @@ import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer, Logger, LogLevel } from "effect"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
@@ -32,16 +33,20 @@ import type { RequestCtx } from "@/collection-service/context.js"
 // Collection definition
 // ---------------------------------------------------------------------------
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 200 }),
   published: Field.boolean({ default: false })
-}).rules((R) => ({
+})
+
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public()
 }))
+
+const [Posts] = applyRulesToCollections([postsDef], [postsRules])
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
 

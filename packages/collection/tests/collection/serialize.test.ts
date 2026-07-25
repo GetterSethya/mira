@@ -4,7 +4,6 @@ import { Field } from "@/collection/field.js"
 import { Index } from "@/collection/index-builder.js"
 import { toJSONSchema } from "@/collection/serialize.js"
 import type { AnyCollectionDef, FieldsMap } from "@/collection/types.js"
-import { Rule } from "@/rule/builder.js"
 
 const ID_PROPERTY = { type: "string", "x-system": true }
 const SEQID_PROPERTY = { type: "integer", "x-kind": "seqId", "x-system": true, "x-hidden": true }
@@ -233,28 +232,6 @@ describe("serialize", () => {
     )
 
     expect(schema.properties.author).toEqual({ type: "string", format: "email" })
-  })
-
-  it("serializes rules into x-rules", () => {
-    const schema = toJSONSchema(
-      "base",
-      "posts",
-      {
-        title: Field.text()
-      },
-      {
-        rules: {
-          list: Rule.field("title").eq(Rule.literal("hello"))
-        }
-      }
-    )
-    expect(schema["x-rules"]).toEqual({
-      list: {
-        op: "eq",
-        left: { kind: "field", field: "title" },
-        right: { kind: "literal", value: "hello" }
-      }
-    })
   })
 
   it("no x-rules key when no rules", () => {

@@ -1,4 +1,3 @@
-import type { RuleMap } from "@/rule/types.js"
 import type { IndexEntry } from "./index-builder.js"
 import type { CollectionSchema, FieldDef, FieldsMap, JsonSchemaProperty } from "./types.js"
 
@@ -42,7 +41,6 @@ export function toJSONSchema<K extends "base" | "auth" | "view">(
   fields: FieldsMap,
   options: {
     indexes?: Array<IndexEntry<string>>
-    rules?: RuleMap
     viewQuery?: string
     systemFields?: Record<string, JsonSchemaProperty>
   }
@@ -83,7 +81,6 @@ export function toJSONSchema<K extends "base" | "auth" | "view">(
   const result: CollectionSchema & { "x-collection-kind": K } = {
     "x-collection-kind": kind,
     ...(xIndexes.length > 0 ? { "x-indexes": xIndexes } : {}),
-    ...(options.rules !== undefined ? { "x-rules": options.rules } : {}),
     ...(options.viewQuery !== undefined ? { "x-view-query": options.viewQuery } : {}),
     type: "object",
     properties: {

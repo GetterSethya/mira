@@ -44,6 +44,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Data, Effect, Layer, Schedule, Schema } from "effect"
 import { createServer } from "node:http"
 import { AuthCollection, BaseCollection, Field } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
@@ -61,9 +62,11 @@ import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 // 1. Collection definitions
 // ---------------------------------------------------------------------------
 
-const Users = AuthCollection.define("users", {
+const usersDef = AuthCollection.define("users", {
   displayName: Field.text({ maxLength: 100, required: false })
-}).rules((R) => ({
+})
+
+const usersRules = defineRule(usersDef, (R) => ({
   list: R.field("id").eq(R.selfId()),
   view: R.public(),
   create: R.public(),
@@ -71,29 +74,38 @@ const Users = AuthCollection.define("users", {
   delete: R.field("id").eq(R.selfId())
 }))
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 200 }),
   body: Field.text({ required: false }),
-  authorId: Field.relation(Users)
-}).rules((R) => ({
+  authorId: Field.relation(usersDef)
+})
+
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
-  create: R.field("authorId").eq(R.authId(Users)),
-  update: R.field("authorId").eq(R.authId(Users)),
-  delete: R.field("authorId").eq(R.authId(Users))
+  create: R.field("authorId").eq(R.authId(usersDef)),
+  update: R.field("authorId").eq(R.authId(usersDef)),
+  delete: R.field("authorId").eq(R.authId(usersDef))
 }))
 
-const Comments = BaseCollection.define("comments", {
-  postId: Field.relation(Posts),
-  authorId: Field.relation(Users),
+const commentsDef = BaseCollection.define("comments", {
+  postId: Field.relation(postsDef),
+  authorId: Field.relation(usersDef),
   body: Field.text({ maxLength: 2000 })
-}).rules((R) => ({
+})
+
+const commentsRules = defineRule(commentsDef, (R) => ({
   list: R.public(),
   view: R.public(),
-  create: R.field("authorId").eq(R.authId(Users)),
-  update: R.field("authorId").eq(R.authId(Users)),
-  delete: R.field("authorId").eq(R.authId(Users))
+  create: R.field("authorId").eq(R.authId(usersDef)),
+  update: R.field("authorId").eq(R.authId(usersDef)),
+  delete: R.field("authorId").eq(R.authId(usersDef))
 }))
+
+const [Users, Posts, Comments] = applyRulesToCollections(
+  [usersDef, postsDef, commentsDef],
+  [usersRules, postsRules, commentsRules]
+)
 
 const allCollections = [Users, Posts, Comments] as const
 const allSchemas = allCollections.map((c) => ({ name: c.name, schema: c.schema }))

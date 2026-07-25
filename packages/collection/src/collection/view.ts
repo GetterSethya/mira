@@ -1,6 +1,3 @@
-import { makeRuleBuilder } from "@/rule/builder.js"
-import type { RuleBuilder } from "@/rule/builder.js"
-import type { RuleMap } from "@/rule/types.js"
 import { toJSONSchema } from "./serialize.js"
 import type { CollectionSchema, FieldDef, FieldsMap } from "./types.js"
 
@@ -9,25 +6,16 @@ type ViewFields = {
   seqId: FieldDef & { viewOnly: true }
 }
 
-type RuleCb<F extends FieldsMap> = (
-  R: RuleBuilder<F>
-) => RuleMap
-
 /**
  * Builder returned by `ViewCollection.define()`.
  * Immediately satisfies `AnyCollectionDef` — no terminal `.build()` needed.
- * Chain `.rules()` to add access rules. Views have no `.indexes()` — they are not physical tables.
+ * Views have no `.indexes()` — they are not physical tables.
  * Each chained method returns a new builder; the original is unchanged.
  */
 export type ViewCollectionBuilder<F extends FieldsMap> = {
   name: string
   fields: F
   schema: CollectionSchema
-  /**
-   * Add per-action access rules. No rule means deny all.
-   * Pass a callback to get a typed rule builder with auto-completion over field names.
-   */
-  rules(cb: RuleCb<F>): ViewCollectionBuilder<F>
 }
 
 /** @internal Exported for testing only. */
@@ -41,8 +29,7 @@ export function validateViewFields(name: string, fields: Record<string, { viewOn
 function makeViewBuilder<F extends ViewFields & FieldsMap>(
   name: string,
   query: string,
-  fields: F,
-  rulesCb?: RuleCb<F>
+  fields: F
 ): ViewCollectionBuilder<F> {
   let _schema: CollectionSchema | undefined
   return {
@@ -50,15 +37,12 @@ function makeViewBuilder<F extends ViewFields & FieldsMap>(
     fields,
     get schema(): CollectionSchema {
       if (_schema === undefined) {
-        const rules = rulesCb?.(makeRuleBuilder<F>())
         _schema = toJSONSchema("view", name, fields, {
           viewQuery: query,
-          ...(rules !== undefined ? { rules } : {})
         })
       }
       return _schema!
     },
-    rules: (cb) => makeViewBuilder(name, query, fields, cb)
   }
 }
 
@@ -80,7 +64,6 @@ function makeViewBuilder<F extends ViewFields & FieldsMap>(
  *     title: Field.text().view()
  *   }
  * )
- * .rules((R) => ({ list: R.public(), view: R.public() }))
  */
 export const ViewCollection = {
   define<F extends ViewFields & FieldsMap>(

@@ -13,6 +13,7 @@ import { Effect, Layer, Schema } from "effect"
 import { existsSync, unlinkSync } from "node:fs"
 import { resolve } from "node:path"
 import { AuthCollection, BaseCollection, Field, ViewCollection } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
@@ -21,10 +22,12 @@ import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 // 1. Collection definitions
 // ---------------------------------------------------------------------------
 
-const Users = AuthCollection.define("users", {
+const usersDef = AuthCollection.define("users", {
   displayName: Field.text({ maxLength: 100 }),
   role: Field.text({ default: "member" })
-}).rules((R) => ({
+})
+
+const usersRules = defineRule(usersDef, (R) => ({
   list: R.field("id").eq(R.selfId()),
   view: R.field("id").eq(R.selfId()),
   create: R.public(),
@@ -32,7 +35,7 @@ const Users = AuthCollection.define("users", {
   delete: R.field("id").eq(R.selfId())
 }))
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 200 }),
   body: Field.text({ required: false }),
   published: Field.boolean({ default: false }),
@@ -41,36 +44,38 @@ const Posts = BaseCollection.define("posts", {
   viewCount: Field.integer({ default: 0, min: 0 })
 })
   .indexes((I) => [I.on("publishedAt"), I.unique("authorId", "title")])
-  .rules((R) => ({
-    list: R.or(
-      R.field("published").eq(R.literal(true)),
-      R.field("authorId").eq(R.authId(Users))
-    ),
-    view: R.or(
-      R.field("published").eq(R.literal(true)),
-      R.field("authorId").eq(R.authId(Users))
-    ),
-    create: R.field("authorId").eq(R.authId(Users)),
-    update: R.field("authorId").eq(R.authId(Users)),
-    delete: R.field("authorId").eq(R.authId(Users))
-  }))
 
-const Comments = BaseCollection.define("comments", {
+const postsRules = defineRule(postsDef, (R) => ({
+  list: R.or(
+    R.field("published").eq(R.literal(true)),
+    R.field("authorId").eq(R.authId(usersDef))
+  ),
+  view: R.or(
+    R.field("published").eq(R.literal(true)),
+    R.field("authorId").eq(R.authId(usersDef))
+  ),
+  create: R.field("authorId").eq(R.authId(usersDef)),
+  update: R.field("authorId").eq(R.authId(usersDef)),
+  delete: R.field("authorId").eq(R.authId(usersDef))
+}))
+
+const commentsDef = BaseCollection.define("comments", {
   postId: Field.text({ indexed: true }),
   authorId: Field.text({ indexed: true }),
   body: Field.text({ maxLength: 2000 }),
   createdAt: Field.date()
 })
   .indexes((I) => [I.on("postId", "createdAt")])
-  .rules((R) => ({
-    list: R.public(),
-    view: R.public(),
-    create: R.field("authorId").eq(R.authId(Users)),
-    update: R.field("authorId").eq(R.authId(Users)),
-    delete: R.field("authorId").eq(R.authId(Users))
-  }))
 
-const PublishedPosts = ViewCollection.define(
+const commentsRules = defineRule(commentsDef, (R) => ({
+  list: R.public(),
+  view: R.public(),
+  create: R.field("authorId").eq(R.authId(usersDef)),
+  update: R.field("authorId").eq(R.authId(usersDef)),
+  delete: R.field("authorId").eq(R.authId(usersDef))
+}))
+
+const publishedPostsDef = ViewCollection.define(
   "published_posts",
   `SELECT
      CAST(ROW_NUMBER() OVER (ORDER BY p.seqId) AS INTEGER) AS seqId,
@@ -87,7 +92,14 @@ const PublishedPosts = ViewCollection.define(
     authorId:    Field.text().view(),
     authorName:  Field.text().view()
   }
-).rules((R) => ({ list: R.public(), view: R.public() }))
+)
+
+const publishedPostsRules = defineRule(publishedPostsDef, (R) => ({ list: R.public(), view: R.public() }))
+
+const [Users, Posts, Comments, PublishedPosts] = applyRulesToCollections(
+  [usersDef, postsDef, commentsDef, publishedPostsDef],
+  [usersRules, postsRules, commentsRules, publishedPostsRules]
+)
 
 const allSchemas = [
   { name: Users.name, schema: Users.schema },

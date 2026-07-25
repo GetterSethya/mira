@@ -7,6 +7,7 @@ import { AuthCollection, BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
 import { Rule } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { CollectionService, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
@@ -96,30 +97,34 @@ const setupScoredTable = Effect.gen(function* () {
 // ---------------------------------------------------------------------------
 
 // Base collection — all operations public
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 100 }),
   published: Field.boolean({ default: false }),
   authorId: Field.text({ required: false })
-}).rules((R) => ({
+})
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public()
 }))
+const Posts = applyRulesToCollections([postsDef], [postsRules])[0]
 
 // Base collection — rule-enforced: only authorId "user1" can access
-const ProtectedPosts = BaseCollection.define("posts", {
+const protectedPostsDef = BaseCollection.define("posts", {
   title: Field.text(),
   published: Field.boolean({ default: false }),
   authorId: Field.text({ required: false })
-}).rules((R) => ({
+})
+const protectedPostsRules = defineRule(protectedPostsDef, (R) => ({
   list: R.field("authorId").eq(R.literal("user1")),
   view: R.field("authorId").eq(R.literal("user1")),
   create: R.field("authorId").eq(R.literal("user1")),
   update: R.field("authorId").eq(R.literal("user1")),
   delete: R.field("authorId").eq(R.literal("user1"))
 }))
+const ProtectedPosts = applyRulesToCollections([protectedPostsDef], [protectedPostsRules])[0]
 
 // Base collection — no rules (deny all by default)
 const NoRulePosts = BaseCollection.define("posts", {
@@ -127,7 +132,7 @@ const NoRulePosts = BaseCollection.define("posts", {
 })
 
 // View collection — public list/view, no create/update/delete
-const ActivePosts = ViewCollection.define(
+const activePostsDef = ViewCollection.define(
   "active_posts",
   "SELECT seqId, id, title, status, created, updated FROM posts_base WHERE status = 'active'",
   {
@@ -136,13 +141,15 @@ const ActivePosts = ViewCollection.define(
     title:   Field.text().view(),
     status:  Field.text().view()
   }
-).rules((R) => ({
+)
+const activePostsRules = defineRule(activePostsDef, (R) => ({
   list: R.public(),
   view: R.public()
 }))
+const ActivePosts = applyRulesToCollections([activePostsDef], [activePostsRules])[0]
 
 // Collection with error callbacks for integration testing
-const Scored = BaseCollection.define("scored", {
+const scoredDef = BaseCollection.define("scored", {
   name: Field.text({
     minLength: 2,
     error: (kind) => Match.value(kind).pipe(
@@ -160,24 +167,28 @@ const Scored = BaseCollection.define("scored", {
       Match.orElse(()       => "Invalid score")
     )
   })
-}).rules((R) => ({
+})
+const scoredRules = defineRule(scoredDef, (R) => ({
   create: R.public(),
   update: R.public(),
   list:   R.public(),
   view:   R.public(),
   delete: R.public()
 }))
+const Scored = applyRulesToCollections([scoredDef], [scoredRules])[0]
 
 // Collection with a literalText field
-const Roles = BaseCollection.define("roles", {
+const rolesDef = BaseCollection.define("roles", {
   role: Field.literalText({ literal: ["admin", "agent", "readonly"] })
-}).rules((R) => ({
+})
+const rolesRules = defineRule(rolesDef, (R) => ({
   create: R.public(),
   update: R.public(),
   list:   R.public(),
   view:   R.public(),
   delete: R.public()
 }))
+const Roles = applyRulesToCollections([rolesDef], [rolesRules])[0]
 
 // PostsServiceLayer wires Posts into the collection service (registers `published` for boolean encode/decode)
 const collectionServiceWithDeps = makeCollectionServiceLayer([Posts]).pipe(
@@ -1063,13 +1074,15 @@ describe("literalText integration", () => {
 // AuthCollection create — regression: email/password were blocked by x-system
 // ---------------------------------------------------------------------------
 
-const SuperAdmin = AuthCollection.define("_superadmin", {}).rules((R) => ({
+const superAdminDef = AuthCollection.define("_superadmin", {})
+const superAdminRules = defineRule(superAdminDef, (R) => ({
   list: R.field("email").eq(R.literal("")),
   view: R.field("email").eq(R.literal("")),
   create: R.public(),
   update: R.field("email").eq(R.literal("")),
   delete: R.field("email").eq(R.literal(""))
 }))
+const SuperAdmin = applyRulesToCollections([superAdminDef], [superAdminRules])[0]
 
 const setupSuperAdminTable = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient

@@ -4,6 +4,7 @@ import { Effect, Layer } from "effect"
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { CollectionService, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
@@ -15,15 +16,17 @@ import { MiraPlugin } from "@/app/plugin.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text(),
-}).rules((R) => ({
+})
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public(),
 }))
+const Posts = applyRulesToCollections([postsDef], [postsRules])[0]
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
 

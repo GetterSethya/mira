@@ -14,7 +14,9 @@ import { HttpServerFactory } from "@/http/server-factory.js"
 import type { Repository } from "@/repository/index.js"
 import type { CollectionService } from "@/collection-service/collection-service.js"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
+import type { RuleMap } from "@gettersethya/mira-client"
 import type { MiraAppConfig } from "./builder.js"
+import type { RuleBinding } from "./define-rule.js"
 import type { MiraPlugin } from "./plugin.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
@@ -31,6 +33,29 @@ function assertUniqueCronNames(defs: ReadonlyArray<CronDef<any>>) {
     }
     seen.add(def.name)
   }
+}
+
+export function applyRulesToCollections(
+  collections: ReadonlyArray<AnyCollectionDef>,
+  rules: ReadonlyArray<RuleBinding>
+): Array<AnyCollectionDef> {
+  const collectionNames = new Set(collections.map((c) => c.name))
+  for (const rb of rules) {
+    if (!collectionNames.has(rb.collectionName)) {
+      throw new Error(
+        `RuleBinding references unknown collection "${rb.collectionName}". ` +
+        `Available collections: ${[...collectionNames].join(", ")}.`
+      )
+    }
+  }
+  const ruleMap = new Map(rules.map((r) => [r.collectionName, r.ruleMap]))
+  return collections.map((c) => {
+    const rm = ruleMap.get(c.name)
+    if (rm) {
+      return { ...c, schema: { ...c.schema, "x-rules": rm as RuleMap } }
+    }
+    return c
+  })
 }
 
 /**
@@ -85,19 +110,20 @@ export class MiraApp<R = never> {
    * collection definitions.
    *
    * @param plugin - A MiraPlugin (use `fromLayer()` to wrap a plain Layer)
-   * @returns this typed as MiraApp<R | R2> (for chaining)
+   * @returns this (for chaining)
    *
    * @example
    * app.extend(MiraDashboard).serve()
    */
-  extend<R2 = never>(plugin: MiraPlugin<R2>): MiraApp<R | R2> {
-    this.#extras.push(plugin as MiraPlugin<any>)
-    return this as unknown as MiraApp<R | R2>
+  extend(plugin: MiraPlugin<any>): MiraApp<R> {
+    this.#extras.push(plugin)
+    return this
   }
 
   #getAllCollections(): ReadonlyArray<AnyCollectionDef> {
+    const configCollections = applyRulesToCollections(this.#config.collections, this.#config.rules ?? [])
     return [
-      ...(this.#config.collections as ReadonlyArray<AnyCollectionDef>),
+      ...(configCollections as ReadonlyArray<AnyCollectionDef>),
       ...this.#extras.flatMap((p) => p.collections ?? [])
     ]
   }

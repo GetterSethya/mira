@@ -7,6 +7,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
@@ -23,7 +24,8 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 // Collections
 // ---------------------------------------------------------------------------
 
-const Users = AuthCollection.define("users", {}).rules((R) => ({
+const usersDef = AuthCollection.define("users", {})
+const usersRules = defineRule(usersDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
@@ -31,16 +33,19 @@ const Users = AuthCollection.define("users", {}).rules((R) => ({
   delete: R.public(),
 }))
 
-const Docs = BaseCollection.define("docs", {
+const docsDef = BaseCollection.define("docs", {
   title: Field.text(),
   attachment: Field.file({ required: false }),
-}).rules((R) => ({
+})
+const docsRules = defineRule(docsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public(),
 }))
+
+const [Users, Docs] = applyRulesToCollections([usersDef, docsDef], [usersRules, docsRules])
 
 const JWT_SECRET = "test-file-token-secret"
 const ALL_COLLECTIONS = [Users, Docs]

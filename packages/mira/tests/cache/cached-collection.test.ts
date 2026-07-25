@@ -9,6 +9,7 @@ import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
 import { Rule } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import { NotFoundError } from "@/collection-service/errors.js"
 import type { RequestCtx } from "@/collection-service/context.js"
@@ -19,9 +20,10 @@ import { NodeCryptoLayer } from "@/crypto/node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 100 }),
-}).rules((R) => ({
+})
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
@@ -36,31 +38,35 @@ const SLOW_SQL = `
 WITH RECURSIVE gen(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM gen WHERE n < 100000)
 SELECT 1 AS seqId, 'perf-test-id' AS id, CAST(SUM(n) AS TEXT) AS title FROM gen`
 
-const SlowView = ViewCollection.define("slow_posts", SLOW_SQL.trim(), {
+const slowViewDef = ViewCollection.define("slow_posts", SLOW_SQL.trim(), {
   seqId: Field.integer().view(),
   id: Field.text().view(),
   title: Field.text().view(),
-}).rules((R) => ({ list: R.public(), view: R.public() }))
+})
+const slowViewRules = defineRule(slowViewDef, (R) => ({ list: R.public(), view: R.public() }))
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
 const adminCtx: RequestCtx = { headers: {}, query: {}, admin: true }
 
 // Dummy collection — only its `.name` is used by Rule.authId(), never queried.
-const Users = BaseCollection.define("users", {
+const usersDef = BaseCollection.define("users", {
   name: Field.text({ maxLength: 100 }),
-}).rules((R) => ({
+})
+const usersRules = defineRule(usersDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public(),
 }))
+const Users = applyRulesToCollections([usersDef], [usersRules])[0]
 
 // Owner-only rule — scoped by the authenticated identity (@auth_id).
-const Notes = BaseCollection.define("notes", {
+const notesDef = BaseCollection.define("notes", {
   ownerId: Field.text({ maxLength: 100 }),
   body: Field.text({ maxLength: 200 }),
-}).rules((R) => ({
+})
+const notesRules = defineRule(notesDef, (R) => ({
   list: R.public(),
   view: R.field("ownerId").eq(R.authId(Users)),
   create: R.public(),
@@ -69,10 +75,11 @@ const Notes = BaseCollection.define("notes", {
 }))
 
 // Tenant-scoped rule — bound by an incoming request query param (@request_query_tenantId).
-const TenantDocs = BaseCollection.define("tenant_docs", {
+const tenantDocsDef = BaseCollection.define("tenant_docs", {
   tenantId: Field.text({ maxLength: 100 }),
   body: Field.text({ maxLength: 200 }),
-}).rules((R) => ({
+})
+const tenantDocsRules = defineRule(tenantDocsDef, (R) => ({
   list: R.public(),
   view: R.field("tenantId").eq(R.request("query", "tenantId")),
   create: R.public(),
@@ -81,13 +88,19 @@ const TenantDocs = BaseCollection.define("tenant_docs", {
 }))
 
 // Auth collection — `password` is x-hidden, stripped from non-admin responses only.
-const Accounts = AuthCollection.define("accounts", {}).rules((R) => ({
+const accountsDef = AuthCollection.define("accounts", {})
+const accountsRules = defineRule(accountsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public(),
 }))
+
+const [Posts, SlowView, Notes, TenantDocs, Accounts] = applyRulesToCollections(
+  [postsDef, slowViewDef, notesDef, tenantDocsDef, accountsDef],
+  [postsRules, slowViewRules, notesRules, tenantDocsRules, accountsRules]
+)
 
 const FileStorageTest = Layer.succeed(
   FileStorage,

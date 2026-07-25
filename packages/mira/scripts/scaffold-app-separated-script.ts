@@ -20,6 +20,7 @@ import { execSync, spawn } from "node:child_process"
 import { existsSync, unlinkSync } from "node:fs"
 import { createServer } from "node:http"
 import { AuthCollection, BaseCollection, ViewCollection, Field } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
@@ -48,7 +49,7 @@ const BASE = `http://localhost:${PORT}`
 // Collection definitions — shared between server and client modes
 // ---------------------------------------------------------------------------
 
-const Users = AuthCollection.define("users", {
+const usersDef = AuthCollection.define("users", {
   displayName: Field.text({
     maxLength: 100,
     required: false,
@@ -61,7 +62,9 @@ const Users = AuthCollection.define("users", {
         Match.exhaustive
       )
   })
-}).rules((R) => ({
+})
+
+const usersRules = defineRule(usersDef, (R) => ({
   list: R.field("id").eq(R.selfId()),
   view: R.public(),
   create: R.public(),
@@ -69,32 +72,36 @@ const Users = AuthCollection.define("users", {
   delete: R.field("id").eq(R.selfId())
 }))
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 200 }),
   body: Field.text({ required: false }),
-  authorId: Field.relation(Users)
-}).rules((R) => ({
+  authorId: Field.relation(usersDef)
+})
+
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
-  create: R.field("authorId").eq(R.authId(Users)),
-  update: R.field("authorId").eq(R.authId(Users)),
-  delete: R.field("authorId").eq(R.authId(Users))
+  create: R.field("authorId").eq(R.authId(usersDef)),
+  update: R.field("authorId").eq(R.authId(usersDef)),
+  delete: R.field("authorId").eq(R.authId(usersDef))
 }))
 
-const Comments = BaseCollection.define("comments", {
-  postId: Field.relation(Posts),
-  authorId: Field.relation(Users),
+const commentsDef = BaseCollection.define("comments", {
+  postId: Field.relation(postsDef),
+  authorId: Field.relation(usersDef),
   body: Field.text({ maxLength: 2000 })
-}).rules((R) => ({
+})
+
+const commentsRules = defineRule(commentsDef, (R) => ({
   list: R.public(),
   view: R.public(),
-  create: R.field("authorId").eq(R.authId(Users)),
-  update: R.field("authorId").eq(R.authId(Users)),
-  delete: R.field("authorId").eq(R.authId(Users))
+  create: R.field("authorId").eq(R.authId(usersDef)),
+  update: R.field("authorId").eq(R.authId(usersDef)),
+  delete: R.field("authorId").eq(R.authId(usersDef))
 }))
 
 // View collection: joins posts with users to expose the author's display name
-const PostsWithAuthors = ViewCollection.define(
+const postsWithAuthorsDef = ViewCollection.define(
   "posts_with_authors",
   `SELECT
      CAST(ROW_NUMBER() OVER (ORDER BY p.seqId) AS INTEGER) AS seqId,
@@ -111,7 +118,14 @@ const PostsWithAuthors = ViewCollection.define(
     authorId: Field.text().view(),
     authorName: Field.text().view()
   }
-).rules((R) => ({ list: R.public(), view: R.public() }))
+)
+
+const postsWithAuthorsRules = defineRule(postsWithAuthorsDef, (R) => ({ list: R.public(), view: R.public() }))
+
+const [Users, Posts, Comments, PostsWithAuthors] = applyRulesToCollections(
+  [usersDef, postsDef, commentsDef, postsWithAuthorsDef],
+  [usersRules, postsRules, commentsRules, postsWithAuthorsRules]
+)
 
 const allCollections = [Users, Posts, Comments, PostsWithAuthors] as const
 

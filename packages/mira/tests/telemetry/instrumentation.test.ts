@@ -7,6 +7,7 @@ import { expect } from "vitest"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { Rule } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
@@ -18,15 +19,17 @@ import { NodeCryptoLayer } from "@/crypto/node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
-const testCollection = BaseCollection.define("test_items", {
+const testCollectionDef = BaseCollection.define("test_items", {
   title: Field.text(),
-}).rules((R) => ({
+})
+const testCollectionRules = defineRule(testCollectionDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public(),
 }))
+const testCollection = applyRulesToCollections([testCollectionDef], [testCollectionRules])[0]
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
 

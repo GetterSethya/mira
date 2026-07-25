@@ -8,6 +8,7 @@ import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { Rule } from "@gettersethya/mira-client"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
@@ -24,10 +25,11 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 // Collection definitions
 // ---------------------------------------------------------------------------
 
-const Posts = BaseCollection.define("posts", {
+const postsDef = BaseCollection.define("posts", {
   title: Field.text(),
   content: Field.text({ required: false }),
-}).rules((R) => ({
+})
+const postsRules = defineRule(postsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
@@ -39,13 +41,16 @@ const Restricted = BaseCollection.define("restricted", {
   name: Field.text(),
 })
 
-const Users = AuthCollection.define("users", {}).rules((R) => ({
+const usersDef = AuthCollection.define("users", {})
+const usersRules = defineRule(usersDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
   delete: R.public(),
 }))
+
+const [Posts, Users] = applyRulesToCollections([postsDef, usersDef], [postsRules, usersRules])
 
 const JWT_SECRET = "test-jwt-secret"
 const ALL_COLLECTIONS = [Posts, Restricted, Users]

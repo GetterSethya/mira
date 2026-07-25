@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest"
 import { Layer } from "effect"
+import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { MiraBuilder } from "@/app/builder.js"
 import { MiraApp } from "@/app/app.js"
 import { MiraPlugin } from "@/app/plugin.js"
+import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { SqliteDatabase } from "@/databases/sqlite.js"
@@ -79,5 +81,29 @@ describe("MiraApp.extend()", () => {
     const app = fullBuilder().build()
     app.extend(pluginA).extend(pluginB)
     expect(app._getExtras()).toEqual([pluginA, pluginB])
+  })
+})
+
+describe("MiraBuilder.rules()", () => {
+  const postsDef = BaseCollection.define("posts", { title: Field.text() })
+
+  it("stores rules on builder config", () => {
+    const rb = defineRule(postsDef, (R) => ({ list: R.public() }))
+    const b = fullBuilder().rules([rb])
+    expect(b._getPartialConfig().rules).toEqual([rb])
+  })
+
+  it("throws on duplicate collection names", () => {
+    const rb1 = defineRule(postsDef, (R) => ({ list: R.public() }))
+    const rb2 = defineRule(postsDef, (R) => ({ view: R.public() }))
+    expect(() => fullBuilder().rules([rb1, rb2])).toThrow(
+      'Duplicate rule binding for collection "posts"'
+    )
+  })
+
+  it("rules survive through build", () => {
+    const rb = defineRule(postsDef, (R) => ({ list: R.public() }))
+    const app = fullBuilder().rules([rb]).build()
+    expect(app._getConfig().rules).toEqual([rb])
   })
 })
