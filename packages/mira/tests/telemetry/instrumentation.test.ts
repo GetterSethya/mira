@@ -16,6 +16,7 @@ import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
@@ -61,6 +62,7 @@ function makeTestLayer(queue: Queue.Queue<CompletedSpan>) {
     Layer.provide(FileStorageTest),
     Layer.provide(NodeCryptoLayer),
     Layer.provide(dialectLayer),
+    Layer.provide(NodeAuthServiceLayer),
   )
 
   // Expose CollectionService + SqlClient + FileStorage + tracer; requires nothing

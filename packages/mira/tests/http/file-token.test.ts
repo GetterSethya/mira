@@ -81,7 +81,8 @@ const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pi
   Layer.provide(repoWithSql),
   Layer.provide(FileStorageTest),
   Layer.provide(sqliteLayer),
-  Layer.provide(DialectTest)
+  Layer.provide(DialectTest),
+  Layer.provide(NodeAuthServiceLayer)
 )
 
 const testLayer = Layer.mergeAll(

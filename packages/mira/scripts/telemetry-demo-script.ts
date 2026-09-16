@@ -27,6 +27,7 @@ import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 
 // ---------------------------------------------------------------------------
@@ -78,7 +79,12 @@ const serviceLayer = makeCachedCollectionServiceLayer([Posts], {
   listTtlMs: 60_000,
   maxRecords: 1_000,
   maxLists: 200
-}).pipe(Layer.provide(repoLayer), Layer.provide(sqliteLayer), Layer.provide(FileStorageStub))
+}).pipe(
+  Layer.provide(repoLayer),
+  Layer.provide(sqliteLayer),
+  Layer.provide(FileStorageStub),
+  Layer.provide(NodeAuthServiceLayer)
+)
 
 const appLayer = Layer.mergeAll(serviceLayer, sqliteLayer, FileStorageStub, ConsoleTelemetryLayer).pipe(
   Layer.provideMerge(NodeCryptoLayer)

@@ -12,6 +12,7 @@ import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { MiraPlugin } from "@/app/plugin.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
@@ -65,6 +66,7 @@ function makeTestLayer(plugins: ReadonlyArray<MiraPlugin>) {
     Layer.provide(FileStorageTest),
     Layer.provide(NodeCryptoLayer),
     Layer.provide(DialectTest),
+    Layer.provide(NodeAuthServiceLayer),
   )
   return Layer.mergeAll(
     makeHookCollectionServiceLayer().pipe(

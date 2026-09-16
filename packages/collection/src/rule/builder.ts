@@ -46,7 +46,8 @@ export type RuleBuilder<F extends FieldsMap> = RuleBase & {
   ) => { where: (expr: ExprNode<any> | ((R: RuleBuilder<C["fields"]>) => ExprNode<any>)) => OperandNode<any, string> }
 }
 
-function toChainable<K extends string, V>(operand: OperandNode<K, V>): FieldOperand<K, V> {
+/** Attaches fluent comparison methods to a raw operand node. */
+export function toChainable<K extends string, V>(operand: OperandNode<K, V>): FieldOperand<K, V> {
   const methods: FieldOperandMethods<K, V> = {
     eq(right) { return { op: "eq", left: operand, right } },
     neq(right) { return { op: "neq", left: operand, right } },

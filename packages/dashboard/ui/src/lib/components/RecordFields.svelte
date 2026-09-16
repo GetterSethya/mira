@@ -10,7 +10,7 @@
     record
   }: { form: typeof formType; schema: CollectionSchema; record: Record<string, unknown> | null } = $props()
 
-  const entries = $derived(fieldEntries(schema, record !== null))
+  const entries = $derived(fieldEntries(schema))
 </script>
 
 {#each entries as { name, kind, label, collectionName } (name)}
@@ -20,6 +20,8 @@
         <field.RelationField {label} {collectionName} />
       {:else if kind === "file"}
         <field.FileField {label} />
+      {:else if kind === "password"}
+        <field.PasswordField {label} />
       {:else if kind === "bool"}
         <field.BoolField {label} />
       {:else if kind === "number"}

@@ -9,8 +9,11 @@ export type ApiFieldSchema = {
   "x-kind"?: string
   "x-system"?: boolean
   "x-hidden"?: boolean
+  "x-generated"?: boolean
+  "x-view-only"?: boolean
   "x-required"?: boolean
-  "x-relation"?: string
+  "x-collection"?: string
+  "x-field"?: string
   "x-protected"?: boolean
 }
 
@@ -26,6 +29,7 @@ export type ApiCollectionSchema = {
 
 type LogEntry = {
   id: string
+  seqId: number
   level: string
   message: string
   created: string
@@ -35,6 +39,7 @@ type LogEntry = {
 
 export type SpanRow = {
   id: string
+  seqId?: number
   name: string
   traceId: string
   spanId: string
@@ -51,27 +56,28 @@ export type LogsResponse = {
   logs: Array<LogEntry>
   total: number
   limit: number
-  offset: number
+  nextCursor: number | null
 }
 
 export type SpansResponse = {
   spans: Array<SpanRow>
   total: number
   limit: number
-  offset: number
+  nextCursor: number | null
 }
 
 export type TelemetryClient = {
   getLogs(opts?: {
     limit?: number
-    offset?: number
+    cursor?: number | null
     filter?: FilterNode
   }): ClientHandler<LogsResponse>
 
   getSpans(opts?: {
     limit?: number
-    offset?: number
+    cursor?: number | null
     traceId?: string
+    filter?: FilterNode
   }): ClientHandler<SpansResponse>
 
   /**
@@ -96,21 +102,22 @@ export function makeTelemetryClient(execute: ExecuteFn): TelemetryClient {
     getLogs: (opts) => {
       const qs = buildQueryParams({
         limit: opts?.limit !== undefined ? String(opts.limit) : undefined,
-        offset: opts?.offset !== undefined ? String(opts.offset) : undefined,
+        after: opts?.cursor != null ? String(opts.cursor) : undefined,
         filter: opts?.filter !== undefined ? JSON.stringify(opts.filter) : undefined,
       })
-      return makeClientHandler(execute<LogsResponse>(HCR.get(`/api/_telemetry/logs${qs}`)))
+      return makeClientHandler(execute(HCR.get(`/_telemetry/logs${qs}`)))
     },
 
     getSpans: (opts) => {
       const qs = buildQueryParams({
         limit: opts?.limit !== undefined ? String(opts.limit) : undefined,
-        offset: opts?.offset !== undefined ? String(opts.offset) : undefined,
+        after: opts?.cursor != null ? String(opts.cursor) : undefined,
         traceId: opts?.traceId,
+        filter: opts?.filter !== undefined ? JSON.stringify(opts.filter) : undefined,
       })
-      return makeClientHandler(execute<SpansResponse>(HCR.get(`/api/_telemetry/spans${qs}`)))
+      return makeClientHandler(execute(HCR.get(`/_telemetry/spans${qs}`)))
     },
 
-    getSchema: () => makeClientHandler(execute<ApiCollectionSchema[]>(HCR.get("/api/_schema"))),
+    getSchema: () => makeClientHandler(execute(HCR.get("/api/_schema"))),
   }
 }

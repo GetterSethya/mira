@@ -17,9 +17,9 @@ type IndexCb<F extends FieldsMap> = (
  * Each chained method returns a new builder; the original is unchanged.
  */
 export type BaseCollectionBuilder<F extends FieldsMap> = {
-  name: string
-  fields: F
-  schema: CollectionSchema
+  readonly name: string
+  readonly fields: F
+  readonly schema: CollectionSchema & { "x-collection-kind": "base" }
   /**
    * Add collection-level indexes (in addition to field-level `unique`/`indexed` flags).
    * Pass a callback to get a typed index builder with auto-completion over field names.
@@ -33,11 +33,11 @@ function makeBaseBuilder<F extends FieldsMap>(
   indexesCb?: IndexCb<F>
 ): BaseCollectionBuilder<F> {
   type AF = (keyof F & string) | BaseSystemField
-  let _schema: CollectionSchema | undefined
+  let _schema: (CollectionSchema & { "x-collection-kind": "base" }) | undefined
   return {
     name,
     fields,
-    get schema(): CollectionSchema {
+    get schema(): CollectionSchema & { "x-collection-kind": "base" } {
       if (_schema === undefined) {
         const indexes = indexesCb?.(Index as IndexBuilder<AF>)
         _schema = toJSONSchema("base", name, fields, {

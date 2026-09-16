@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest"
 import { AuthCollection } from "@/collection/auth.js"
 import { Field } from "@/collection/field.js"
 
-const ID_PROPERTY = { type: "string", "x-system": true }
-const SEQID_PROPERTY = { type: "integer", "x-kind": "seqId", "x-system": true, "x-hidden": true }
-const CREATED_PROPERTY = { type: "string", "x-system": true }
-const UPDATED_PROPERTY = { type: "string", "x-system": true }
+const ID_PROPERTY = { type: "string", "x-system": true, "x-generated": true }
+const SEQID_PROPERTY = { type: "integer", "x-kind": "seqId", "x-system": true, "x-hidden": true, "x-generated": true }
+const CREATED_PROPERTY = { type: "string", "x-system": true, "x-generated": true }
+const UPDATED_PROPERTY = { type: "string", "x-system": true, "x-generated": true }
 
 describe("AuthCollection", () => {
   it("auth collection injects system fields", () => {
@@ -20,7 +20,7 @@ describe("AuthCollection", () => {
         id: ID_PROPERTY,
         seqId: SEQID_PROPERTY,
         email: { type: "string", format: "email", "x-system": true },
-        password: { type: "string", "x-system": true, "x-hidden": true },
+        password: { type: "string", "x-system": true, "x-hidden": true, "x-kind": "password" },
         emailVerified: { type: "boolean", "x-system": true, default: false },
         displayName: { type: "string" },
         created: CREATED_PROPERTY,

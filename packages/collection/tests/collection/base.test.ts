@@ -4,10 +4,10 @@ import { BaseCollection } from "@/collection/base.js"
 import { Bytes } from "@/collection/bytes.js"
 import { Field } from "@/collection/field.js"
 
-const ID_PROPERTY = { type: "string", "x-system": true }
-const SEQID_PROPERTY = { type: "integer", "x-kind": "seqId", "x-system": true, "x-hidden": true }
-const CREATED_PROPERTY = { type: "string", "x-system": true }
-const UPDATED_PROPERTY = { type: "string", "x-system": true }
+const ID_PROPERTY = { type: "string", "x-system": true, "x-generated": true }
+const SEQID_PROPERTY = { type: "integer", "x-kind": "seqId", "x-system": true, "x-hidden": true, "x-generated": true }
+const CREATED_PROPERTY = { type: "string", "x-system": true, "x-generated": true }
+const UPDATED_PROPERTY = { type: "string", "x-system": true, "x-generated": true }
 
 describe("BaseCollection", () => {
   it("full base collection schema matches expected", () => {

@@ -3,24 +3,28 @@ import type { CollectionSchema, FieldDef, FieldsMap, JsonSchemaProperty } from "
 
 const ID_PROPERTY: JsonSchemaProperty = {
   type: "string",
-  "x-system": true
+  "x-system": true,
+  "x-generated": true
 }
 
 const SEQID_PROPERTY: JsonSchemaProperty = {
   type: "integer",
   "x-kind": "seqId",
   "x-system": true,
-  "x-hidden": true
+  "x-hidden": true,
+  "x-generated": true
 }
 
 const CREATED_PROPERTY: JsonSchemaProperty = {
   type: "string",
-  "x-system": true
+  "x-system": true,
+  "x-generated": true
 }
 
 const UPDATED_PROPERTY: JsonSchemaProperty = {
   type: "string",
-  "x-system": true
+  "x-system": true,
+  "x-generated": true
 }
 
 /**

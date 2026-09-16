@@ -254,7 +254,6 @@ export const Field = {
       kind: "relation" as "relation",
       targetCollection: collection.name,
       targetField,
-      _target: collection,
       ...fieldOpts
     } as FieldDef & { kind: "relation"; _target: C } & O
     return withView(def)

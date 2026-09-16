@@ -5,8 +5,8 @@ import { Index } from "@/collection/index-builder.js"
 import { toJSONSchema } from "@/collection/serialize.js"
 import type { AnyCollectionDef, FieldsMap } from "@/collection/types.js"
 
-const ID_PROPERTY = { type: "string", "x-system": true }
-const SEQID_PROPERTY = { type: "integer", "x-kind": "seqId", "x-system": true, "x-hidden": true }
+const ID_PROPERTY = { type: "string", "x-system": true, "x-generated": true }
+const SEQID_PROPERTY = { type: "integer", "x-kind": "seqId", "x-system": true, "x-hidden": true, "x-generated": true }
 
 describe("serialize", () => {
   it("auto-injects id as system primary key before seqId", () => {

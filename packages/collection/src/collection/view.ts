@@ -15,7 +15,7 @@ type ViewFields = {
 export type ViewCollectionBuilder<F extends FieldsMap> = {
   name: string
   fields: F
-  schema: CollectionSchema
+  schema: CollectionSchema & { "x-collection-kind": "view" }
 }
 
 /** @internal Exported for testing only. */
@@ -31,11 +31,11 @@ function makeViewBuilder<F extends ViewFields & FieldsMap>(
   query: string,
   fields: F
 ): ViewCollectionBuilder<F> {
-  let _schema: CollectionSchema | undefined
+  let _schema: (CollectionSchema & { "x-collection-kind": "view" }) | undefined
   return {
     name,
     fields,
-    get schema(): CollectionSchema {
+    get schema(): CollectionSchema & { "x-collection-kind": "view" } {
       if (_schema === undefined) {
         _schema = toJSONSchema("view", name, fields, {
           viewQuery: query,

@@ -1,9 +1,5 @@
-import { AuthCollection, Field } from "@gettersethya/mira-client"
 import { defineRule, applyRulesToCollections } from "@gettersethya/mira"
-
-const SuperAdminDef = AuthCollection.define("_superadmin", {
-  name: Field.text({ default: "" })
-})
+import { SuperAdminDef } from "./collection.js"
 
 export const SuperAdminRules = defineRule(SuperAdminDef, (R) => ({
   list: R.authCollection().eq(R.literal("_superadmin")),
@@ -14,6 +10,8 @@ export const SuperAdminRules = defineRule(SuperAdminDef, (R) => ({
 }))
 
 export const SuperAdminCollection = applyRulesToCollections([SuperAdminDef], [SuperAdminRules])[0]
+
+export { SuperAdminDef } from "./collection.js"
 
 let _registerToken = ""
 

@@ -17,20 +17,39 @@ pnpm add @gettersethya/mira @gettersethya/mira-collection effect
 ## Quick start
 
 ```typescript
-import { LocalFileStorage, Mira, NodePlatform, SqliteDatabase } from "@gettersethya/mira"
+import { defineRule, LocalFileStorage, Mira, NodePlatform, Rule, SqliteDatabase } from "@gettersethya/mira"
 import { Posts, Users } from "./collections.js"
+
+const userRules = defineRule(Users, (R) => ({
+  list:   Rule.public(),
+  view:   Rule.public(),
+  create: Rule.public(),
+  update: R.selfId().eq(R.authId(Users)),
+}))
+
+const postRules = defineRule(Posts, (R) => ({
+  list:   R.field("published").eq(R.literal(true)),
+  view:   R.or(
+    R.field("published").eq(R.literal(true)),
+    R.field("authorId").eq(R.authId(Users))
+  ),
+  create: R.authId(Users).neq(R.literal(null)),
+  update: R.field("authorId").eq(R.authId(Users)),
+  delete: R.field("authorId").eq(R.authId(Users)),
+}))
 
 const app = Mira.builder()
   .platform(NodePlatform)
   .database(SqliteDatabase({ filename: "mira.db" }))
   .storage(LocalFileStorage({ directory: "./uploads" }))
   .collections([Users, Posts])
+  .rules([userRules, postRules])
   .build()
 
 app.serve({ port: 3000 })
 ```
 
-The builder uses phantom types to enforce step ordering — TypeScript will not let you call `.build()` until all four steps are complete.
+The builder uses phantom types to enforce step ordering — TypeScript will not let you call `.build()` until all four required steps are complete.
 
 On first boot, Mira auto-generates a `jwt_secret`, runs schema migrations, and creates SQL views for view collections. Everything is persisted in the database.
 
@@ -42,6 +61,7 @@ On first boot, Mira auto-generates a `jwt_secret`, runs schema migrations, and c
 | `.database(d)` | Yes | Database backend |
 | `.storage(s)` | Yes | File storage backend |
 | `.collections(c)` | Yes | Collection definitions |
+| `.rules(r)` | No | Array of `RuleBinding` from `defineRule(collection, cb)` |
 | `.crons(c)` | No | Array of `CronDef` — scheduled tasks using Effect `Schedule` |
 | `.telemetry(layer)` | No | Custom Effect telemetry layer |
 | `.extend(plugin)` | No | Register a `MiraPlugin` (lifecycle hooks, routes, crons, layers) |

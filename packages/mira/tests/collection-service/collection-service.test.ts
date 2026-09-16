@@ -14,6 +14,7 @@ import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "@/collection-service/errors.js"
 import type { CursorPage, RequestCtx } from "@/collection-service/context.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
@@ -196,7 +197,8 @@ const collectionServiceWithDeps = makeCollectionServiceLayer([Posts]).pipe(
   Layer.provide(sqliteLayer),
   Layer.provide(FileStorageTest),
   Layer.provide(NodeCryptoLayer),
-  Layer.provide(DialectTest)
+  Layer.provide(DialectTest),
+  Layer.provide(NodeAuthServiceLayer)
 )
 const testLayer = Layer.mergeAll(collectionServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
 
@@ -206,7 +208,8 @@ const scoredServiceWithDeps = makeCollectionServiceLayer([Scored]).pipe(
   Layer.provide(sqliteLayer),
   Layer.provide(FileStorageTest),
   Layer.provide(NodeCryptoLayer),
-  Layer.provide(DialectTest)
+  Layer.provide(DialectTest),
+  Layer.provide(NodeAuthServiceLayer)
 )
 const scoredTestLayer = Layer.mergeAll(scoredServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
 
@@ -216,7 +219,8 @@ const rolesServiceWithDeps = makeCollectionServiceLayer([Roles]).pipe(
   Layer.provide(sqliteLayer),
   Layer.provide(FileStorageTest),
   Layer.provide(NodeCryptoLayer),
-  Layer.provide(DialectTest)
+  Layer.provide(DialectTest),
+  Layer.provide(NodeAuthServiceLayer)
 )
 const rolesTestLayer = Layer.mergeAll(rolesServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
 
@@ -1106,11 +1110,13 @@ const superAdminTestLayer = Layer.mergeAll(
     Layer.provide(sqliteLayer),
     Layer.provide(FileStorageTest),
     Layer.provide(NodeCryptoLayer),
-    Layer.provide(DialectTest)
+    Layer.provide(DialectTest),
+    Layer.provide(NodeAuthServiceLayer)
   ),
   sqliteLayer,
   FileStorageTest,
-  NodeCryptoLayer
+  NodeCryptoLayer,
+  NodeAuthServiceLayer
 )
 
 const adminCtx: RequestCtx = { headers: {}, query: {}, admin: true }
@@ -1157,5 +1163,38 @@ describe("AuthCollection create", () => {
       if (Either.isLeft(result)) {
         expect(result.left._tag).toBe("ValidationError")
       }
+    }).pipe(Effect.provide(superAdminTestLayer)))
+
+  it.effect("hashes the password on create — the stored value is not the plaintext", () =>
+    Effect.gen(function* () {
+      yield* setupSuperAdminTable
+      const svc = yield* CollectionService
+      const record = yield* svc.create(SuperAdmin, { email: "hash@example.com", password: "plaintext-pw" }, adminCtx)
+      const stored = record["password"]
+      expect(typeof stored).toBe("string")
+      expect(stored).not.toBe("plaintext-pw")
+      expect(String(stored).startsWith("scrypt$")).toBe(true)
+    }).pipe(Effect.provide(superAdminTestLayer)))
+
+  it.effect("hashes a new password on update", () =>
+    Effect.gen(function* () {
+      yield* setupSuperAdminTable
+      const svc = yield* CollectionService
+      const created = yield* svc.create(SuperAdmin, { email: "upd@example.com", password: "first-pw" }, adminCtx)
+      const id = created["id"] as string
+      const updated = yield* svc.update(SuperAdmin, id, { password: "second-pw" }, adminCtx)
+      expect(updated["password"]).not.toBe("second-pw")
+      expect(String(updated["password"]).startsWith("scrypt$")).toBe(true)
+    }).pipe(Effect.provide(superAdminTestLayer)))
+
+  it.effect("empty password on update is dropped and keeps the existing hash", () =>
+    Effect.gen(function* () {
+      yield* setupSuperAdminTable
+      const svc = yield* CollectionService
+      const created = yield* svc.create(SuperAdmin, { email: "keep@example.com", password: "keep-pw" }, adminCtx)
+      const id = created["id"] as string
+      const before = created["password"]
+      const updated = yield* svc.update(SuperAdmin, id, { password: "" }, adminCtx)
+      expect(updated["password"]).toBe(before)
     }).pipe(Effect.provide(superAdminTestLayer)))
 })

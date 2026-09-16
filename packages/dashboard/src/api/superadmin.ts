@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { CollectionService, hashPassword } from "@gettersethya/mira"
+import { CollectionService } from "@gettersethya/mira"
 import { Filter } from "@gettersethya/mira-client"
 import { SuperAdminCollection } from "../superadmin.js"
 
@@ -24,12 +24,11 @@ export const createSuperadminRoute = Effect.gen(function* () {
     return HttpServerResponse.unsafeJson({ error: "email_taken" }, { status: 409 })
   }
 
-  const hashedPassword = yield* hashPassword(body.password)
   const record = yield* svc.create(
     SuperAdminCollection,
     {
       email: body.email,
-      password: hashedPassword
+      password: body.password
     },
     adminCtx
   )

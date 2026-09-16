@@ -5,7 +5,7 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js"
   import * as Tooltip from "$lib/components/ui/tooltip/index.js"
   import type { CollectionSchema } from "$lib/dashboard-api.js"
-  import { isSystemField, fieldKind } from "$lib/schema.js"
+  import { isGeneratedField, isTableHiddenField, isSystemField, fieldKind } from "$lib/schema.js"
   import { resolve } from "$app/paths"
   import { goto } from "$app/navigation"
   import { getCoreRowModel, type ColumnDef } from "@tanstack/table-core"
@@ -42,7 +42,10 @@
       }
     ]
 
-    for (const col of Object.keys(schema.fields).filter((c) => !isSystemField(c))) {
+    for (const col of Object.keys(schema.fields).filter((c) => {
+      const field = schema.fields[c]
+      return !isGeneratedField(field) && !isTableHiddenField(field)
+    })) {
       const kind = fieldKind(schema.fields[col]!)
       cols.push({
         accessorKey: col,
@@ -137,7 +140,7 @@
             {@const isCompact = header.getSize() === 20}
             <Table.Head
               colspan={header.colSpan}
-              class={cn(isSystemField(header.column.id) && "text-muted-foreground", isCompact && "w-1")}
+              class={cn(isSystemField(schema.fields[header.column.id]) && "text-muted-foreground", isCompact && "w-1")}
             >
               {#if !header.isPlaceholder}
                 <FlexRender content={header.column.columnDef.header} context={header.getContext()} />

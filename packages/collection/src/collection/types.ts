@@ -110,7 +110,7 @@ export type JsonSchemaProperty = {
   maximum?: number
   minLength?: number
   maxLength?: number
-  "x-kind"?: "date" | "json" | "relation" | "file" | "seqId" | "literalText"
+  "x-kind"?: "date" | "json" | "relation" | "file" | "seqId" | "literalText" | "password"
   "x-collection"?: string
   "x-field"?: string
   "x-maxSize"?: number
@@ -119,6 +119,7 @@ export type JsonSchemaProperty = {
   "x-system"?: boolean
   "x-hidden"?: boolean
   "x-view-only"?: boolean
+  "x-generated"?: boolean
   "x-literal"?: ReadonlyArray<string>
 }
 

@@ -1,8 +1,8 @@
 import { createMiraClient } from "@gettersethya/mira-client"
-import { SuperAdminCollection } from "../../../src/superadmin.js"
+import { SuperAdminDef } from "../../../src/collection.js"
 
 export const mira = createMiraClient("/").withCollections({
-  superadmin: SuperAdminCollection
+  superadmin: SuperAdminDef
 })
 
-export { SuperAdminCollection }
+export { SuperAdminDef as SuperAdminCollection }

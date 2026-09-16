@@ -17,6 +17,7 @@ import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
@@ -128,7 +129,8 @@ const cachedServiceWithDeps = makeCachedCollectionServiceLayer([Posts], {
   Layer.provide(sqliteLayer),
   Layer.provide(FileStorageTest),
   Layer.provide(NodeCryptoLayer),
-  Layer.provide(DialectTest)
+  Layer.provide(DialectTest),
+  Layer.provide(NodeAuthServiceLayer)
 )
 
 // Expose CollectionService AND SqlClient so setupPostsTable can access SqlClient.SqlClient
@@ -144,7 +146,8 @@ const perfCachedServiceWithDeps = makeCachedCollectionServiceLayer([Posts, SlowV
   Layer.provide(perfSqliteLayer),
   Layer.provide(FileStorageTest),
   Layer.provide(NodeCryptoLayer),
-  Layer.provide(DialectTest)
+  Layer.provide(DialectTest),
+  Layer.provide(NodeAuthServiceLayer)
 )
 
 const perfTestLayer = Layer.mergeAll(perfCachedServiceWithDeps, perfSqliteLayer, FileStorageTest, NodeCryptoLayer)
@@ -161,7 +164,8 @@ const securityCachedServiceWithDeps = makeCachedCollectionServiceLayer([Notes, T
   Layer.provide(securitySqliteLayer),
   Layer.provide(FileStorageTest),
   Layer.provide(NodeCryptoLayer),
-  Layer.provide(DialectTest)
+  Layer.provide(DialectTest),
+  Layer.provide(NodeAuthServiceLayer)
 )
 
 const securityTestLayer = Layer.mergeAll(
@@ -464,9 +468,10 @@ describe("Cache key authorization scoping (security)", () => {
       const id = created["id"] as string
 
       // Admin views the record — password is x-hidden but admin bypasses field hiding —
-      // populates the cache with the password included.
+      // populates the cache with the password included. The password is hashed on
+      // write, so assert presence rather than the literal seeded value.
       const adminView = yield* svc.view(Accounts, id, adminCtx)
-      expect(adminView["password"]).toBe("hashed-secret")
+      expect(typeof adminView["password"]).toBe("string")
 
       // Non-admin requests the same id/select/expand within the TTL window.
       // A cache hit must not hand back the admin's unfiltered response.

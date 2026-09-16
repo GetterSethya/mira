@@ -6,9 +6,10 @@ import DateField from "./components/fields/DateField.svelte"
 import JsonField from "./components/fields/JsonField.svelte"
 import FileField from "./components/fields/FileField.svelte"
 import RelationField from "./components/fields/RelationField.svelte"
+import PasswordField from "./components/fields/PasswordField.svelte"
 import SubmitButton from "./components/form/SubmitButton.svelte"
 
 export const { createAppForm, getFormType } = createFormCreator({
-  fieldComponents: { TextField, NumberField, BoolField, DateField, JsonField, FileField, RelationField },
+  fieldComponents: { TextField, NumberField, BoolField, DateField, JsonField, FileField, RelationField, PasswordField },
   formComponents: { SubmitButton },
 })

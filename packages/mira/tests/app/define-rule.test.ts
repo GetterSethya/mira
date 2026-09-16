@@ -79,14 +79,55 @@ describe("defineRule", () => {
     expect(rb.ruleMap).toEqual({})
   })
 
-  it("view collection gets base system fields", () => {
+  it("view collection gets its declared fields", () => {
     defineRule(ActivePosts, (R) => {
       const idOp = R.field("id")
       const seqIdOp = R.field("seqId")
+      const titleOp = R.field("title")
       expect(idOp.kind).toBe("field")
       expect(seqIdOp.kind).toBe("field")
+      expect(titleOp.kind).toBe("field")
       return {}
     })
+  })
+
+  it("view collection rule map keeps list and view only", () => {
+    const rb = defineRule(ActivePosts, (R) => ({
+      list: R.public(),
+      view: R.field("title").eq(R.literal("x")),
+    }))
+    expect(rb._tag).toBe("RuleBinding")
+    expect(rb.collectionName).toBe("active_posts")
+    expect(rb.ruleMap.list).toEqual({ op: "public" })
+    expect(rb.ruleMap.view).toEqual({
+      op: "eq",
+      left: { kind: "field", field: "title" },
+      right: { kind: "literal", value: "x" },
+    })
+    expect(rb.ruleMap.create).toBeUndefined()
+    expect(rb.ruleMap.update).toBeUndefined()
+    expect(rb.ruleMap.delete).toBeUndefined()
+  })
+
+  it("auth collection rule map supports all CRUD actions", () => {
+    const rb = defineRule(Users, (R) => ({
+      list: R.public(),
+      view: R.selfId().eq(R.literal("u1")),
+      create: R.public(),
+      update: R.selfId().eq(R.literal("u1")),
+      delete: R.selfId().eq(R.literal("u1")),
+    }))
+    expect(rb._tag).toBe("RuleBinding")
+    expect(rb.collectionName).toBe("users")
+    expect(rb.ruleMap.list).toEqual({ op: "public" })
+    expect(rb.ruleMap.view).toEqual({
+      op: "eq",
+      left: { kind: "authId", collection: "users" },
+      right: { kind: "literal", value: "u1" },
+    })
+    expect(rb.ruleMap.create).toEqual({ op: "public" })
+    expect(rb.ruleMap.update).toBeDefined()
+    expect(rb.ruleMap.delete).toBeDefined()
   })
 })
 

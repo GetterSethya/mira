@@ -23,6 +23,7 @@ const SpanAttributesSchema = Schema.parseJson(
 const parseAttributes = Schema.decodeUnknown(SpanAttributesSchema)
 
 type RawSpanRow = {
+  seqId: number
   id: string
   name: string
   traceId: string
@@ -40,6 +41,7 @@ const parseSpanRow = (raw: RawSpanRow) =>
   parseAttributes(raw.attributes).pipe(
     Effect.orElseSucceed((): Record<string, string | number | boolean> => ({})),
     Effect.map((attributes) => ({
+      seqId: raw.seqId,
       id: raw.id,
       name: raw.name,
       traceId: raw.traceId,
@@ -81,7 +83,7 @@ function notConfiguredResponse() {
     logs: [],
     total: 0,
     limit: 0,
-    offset: 0,
+    nextCursor: null,
     error: "SQLite telemetry not configured. Use makeSqliteTelemetryLayer() and restart the app.",
   })
 }
@@ -97,7 +99,8 @@ export const telemetryLogsRoute = Effect.gen(function* () {
   const url = new URL(req.url, "http://localhost")
 
   const limit = Math.min(Number(url.searchParams.get("limit") ?? "100"), 1000)
-  const offset = Number(url.searchParams.get("offset") ?? "0")
+  const afterParam = url.searchParams.get("after")
+  const afterCursor = afterParam !== null && afterParam !== "" ? Number(afterParam) : null
 
   // Parse ?filter= and compile against the logs schema.
   // FilterParseError and ValidationError both propagate to the outer pipe.
@@ -118,28 +121,51 @@ export const telemetryLogsRoute = Effect.gen(function* () {
     spanId: string | null
   }
 
-  const logs = yield* (compiledWhere !== null
-    ? sql<LogRow>`
-        SELECT * FROM ${sql("logs")} t
-        WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
-        ORDER BY t.seqId DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `
-    : sql<LogRow>`
-        SELECT * FROM ${sql("logs")} t
-        ORDER BY t.seqId DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `)
+  const fetchLimit = limit + 1
+  let logs: ReadonlyArray<LogRow>
+
+  if (compiledWhere !== null && afterCursor !== null) {
+    logs = yield* sql<LogRow>`
+      SELECT * FROM ${sql("logs")} t
+      WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)} AND t.seqId < ${afterCursor}
+      ORDER BY t.seqId DESC
+      LIMIT ${fetchLimit}
+    `
+  } else if (compiledWhere !== null) {
+    logs = yield* sql<LogRow>`
+      SELECT * FROM ${sql("logs")} t
+      WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
+      ORDER BY t.seqId DESC
+      LIMIT ${fetchLimit}
+    `
+  } else if (afterCursor !== null) {
+    logs = yield* sql<LogRow>`
+      SELECT * FROM ${sql("logs")} t
+      WHERE t.seqId < ${afterCursor}
+      ORDER BY t.seqId DESC
+      LIMIT ${fetchLimit}
+    `
+  } else {
+    logs = yield* sql<LogRow>`
+      SELECT * FROM ${sql("logs")} t
+      ORDER BY t.seqId DESC
+      LIMIT ${fetchLimit}
+    `
+  }
 
   const total = yield* (compiledWhere !== null
     ? sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")} t WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}`
     : sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")} t`)
 
+  const hasMore = logs.length > limit
+  const items = hasMore ? logs.slice(0, limit) : logs
+  const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.seqId : null
+
   return HttpServerResponse.unsafeJson({
-    logs,
+    logs: items,
     total: total[0].cnt,
     limit,
-    offset,
+    nextCursor,
   })
 }).pipe(
   Effect.catchTag("FilterParseError", (e) =>
@@ -153,7 +179,7 @@ export const telemetryLogsRoute = Effect.gen(function* () {
 export const telemetrySpansRoute = Effect.gen(function* () {
   const sqlOpt = yield* Effect.serviceOption(TelemetrySqlClient)
   if (Option.isNone(sqlOpt)) {
-    return HttpServerResponse.unsafeJson({ spans: [], total: 0, limit: 0, offset: 0 })
+    return HttpServerResponse.unsafeJson({ spans: [], total: 0, limit: 0, nextCursor: null })
   }
   const sql = sqlOpt.value
 
@@ -162,7 +188,8 @@ export const telemetrySpansRoute = Effect.gen(function* () {
 
   const limitParam = Number(url.searchParams.get("limit") ?? "50")
   const limit = Math.max(1, Math.min(limitParam, 200))
-  const offset = Number(url.searchParams.get("offset") ?? "0")
+  const afterParam = url.searchParams.get("after")
+  const afterCursor = afterParam !== null && afterParam !== "" ? Number(afterParam) : null
   const traceId = url.searchParams.get("traceId")
 
   // traceId fast path: return all spans for the given trace, ordered chronologically.
@@ -174,7 +201,7 @@ export const telemetrySpansRoute = Effect.gen(function* () {
       ORDER BY created ASC
     `
     const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
-    return HttpServerResponse.unsafeJson({ spans, total: spans.length, limit, offset })
+    return HttpServerResponse.unsafeJson({ spans, total: spans.length, limit, nextCursor: null })
   }
 
   // Parse ?filter= and compile against the spans schema.
@@ -185,46 +212,86 @@ export const telemetrySpansRoute = Effect.gen(function* () {
     compiledWhere = yield* filterNodeToWhereClause(filterNodeOpt.value, SpansCollection.schema, "spans")
   }
 
+  const fetchLimit = limit + 1
+
   if (compiledWhere !== null) {
     // Filtered path: simple SELECT with WHERE clause and pagination.
-    const rawSpans = yield* sql<RawSpanRow>`
-      SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
-      FROM ${sql("spans")} t
-      WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
-      ORDER BY created ASC
-      LIMIT ${limit} OFFSET ${offset}
-    `
+    const rawSpans = yield* (afterCursor !== null
+      ? sql<RawSpanRow>`
+          SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
+          FROM ${sql("spans")} t
+          WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)} AND t.seqId < ${afterCursor}
+          ORDER BY t.seqId DESC
+          LIMIT ${fetchLimit}
+        `
+      : sql<RawSpanRow>`
+          SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
+          FROM ${sql("spans")} t
+          WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
+          ORDER BY t.seqId DESC
+          LIMIT ${fetchLimit}
+        `)
+
     const total = yield* sql<{ cnt: number }>`
       SELECT COUNT(*) as cnt FROM ${sql("spans")} t
       WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
     `
-    const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
-    return HttpServerResponse.unsafeJson({ spans, total: total[0].cnt, limit, offset })
+
+    const hasMore = rawSpans.length > limit
+    const items = hasMore ? rawSpans.slice(0, limit) : rawSpans
+    const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.seqId : null
+    const spans = yield* Effect.all(items.map(parseSpanRow), { concurrency: "unbounded" })
+    return HttpServerResponse.unsafeJson({
+      spans,
+      total: total[0].cnt,
+      limit,
+      nextCursor,
+    })
   }
 
-  // Paginate by trace (effective root spans), then return all child spans for those traces.
-  // A span is an effective root if it has no parent, OR its parent spanId doesn't exist in
-  // our DB (i.e. the parent is a browser-side span propagated via traceparent but never recorded).
+  // Unfiltered path: group by traceId so the UI gets distinct root traces.
+  const traceRows = yield* (afterCursor !== null
+    ? sql<{ traceId: string; maxSeqId: number }>`
+        SELECT traceId, MAX(seqId) as maxSeqId
+        FROM ${sql("spans")} t
+        GROUP BY traceId
+        HAVING MAX(seqId) < ${afterCursor}
+        ORDER BY maxSeqId DESC
+        LIMIT ${fetchLimit}
+      `
+    : sql<{ traceId: string; maxSeqId: number }>`
+        SELECT traceId, MAX(seqId) as maxSeqId
+        FROM ${sql("spans")} t
+        GROUP BY traceId
+        ORDER BY maxSeqId DESC
+        LIMIT ${fetchLimit}
+      `)
+
+  const total = yield* sql<{ cnt: number }>`SELECT COUNT(DISTINCT traceId) as cnt FROM ${sql("spans")} t`
+
+  const hasMore = traceRows.length > limit
+  const pagedTraces = hasMore ? traceRows.slice(0, limit) : traceRows
+  const nextCursor = hasMore && pagedTraces.length > 0 ? pagedTraces[pagedTraces.length - 1]!.maxSeqId : null
+
+  if (pagedTraces.length === 0) {
+    return HttpServerResponse.unsafeJson({ spans: [], total: total[0].cnt, limit, nextCursor: null })
+  }
+
+  const traceIds = pagedTraces.map((r) => r.traceId)
   const rawSpans = yield* sql<RawSpanRow>`
     SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
     FROM ${sql("spans")}
-    WHERE traceId IN (
-      SELECT traceId FROM ${sql("spans")}
-      WHERE parentSpanId IS NULL
-         OR parentSpanId NOT IN (SELECT spanId FROM ${sql("spans")})
-      ORDER BY created DESC
-      LIMIT ${limit} OFFSET ${offset}
-    )
+    WHERE ${sql.in("traceId", traceIds)}
     ORDER BY created ASC
-  `
-  const total = yield* sql<{ cnt: number }>`
-    SELECT COUNT(*) as cnt FROM ${sql("spans")}
-    WHERE parentSpanId IS NULL
-       OR parentSpanId NOT IN (SELECT spanId FROM ${sql("spans")})
   `
   const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
 
-  return HttpServerResponse.unsafeJson({ spans, total: total[0].cnt, limit, offset })
+  return HttpServerResponse.unsafeJson({
+    spans,
+    total: total[0].cnt,
+    limit,
+    nextCursor,
+  })
 }).pipe(
   Effect.catchTag("FilterParseError", (e) =>
     Effect.succeed(HttpServerResponse.unsafeJson({ error: e.message }, { status: 400 }))

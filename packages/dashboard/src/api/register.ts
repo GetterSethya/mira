@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { CollectionService, hashPassword } from "@gettersethya/mira"
+import { CollectionService } from "@gettersethya/mira"
 import { getRegisterToken } from "../superadmin.js"
 import { SuperAdminCollection } from "../superadmin.js"
 
@@ -30,12 +30,11 @@ export const registerRoute = Effect.gen(function* () {
     return HttpServerResponse.unsafeJson({ error: "already_bootstrapped" }, { status: 403 })
   }
 
-  const hashedPassword = yield* hashPassword(body.password)
   const record = yield* svc.create(
     SuperAdminCollection,
     {
       email: body.email,
-      password: hashedPassword,
+      password: body.password,
       name: body.name
     },
     adminCtx

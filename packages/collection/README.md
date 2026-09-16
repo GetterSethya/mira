@@ -21,9 +21,9 @@ pnpm add @gettersethya/mira-collection effect
 Standard CRUD collection. System fields `id`, `seqId`, `created`, and `updated` are added automatically.
 
 ```typescript
-import { BaseCollection, Bytes, Field, Rule } from "@gettersethya/mira-collection"
+import { BaseCollection, Bytes, Field } from "@gettersethya/mira-collection"
 
-const Posts = BaseCollection.define("posts", {
+export const Posts = BaseCollection.define("posts", {
   title:     Field.text({ maxLength: 200 }),
   slug:      Field.text({ unique: true }),
   content:   Field.text(),
@@ -35,43 +35,30 @@ const Posts = BaseCollection.define("posts", {
   I.on("authorId"),
   I.unique("slug"),
 ])
-.rules((R) => ({
-  list:   R.field("published").eq(R.literal(true)),
-  view:   Rule.or(R.field("published").eq(R.literal(true)), R.field("authorId").eq(R.authId(Users))),
-  create: R.authId(Users).neq(R.literal(null)),
-  update: R.field("authorId").eq(R.authId(Users)),
-  delete: R.field("authorId").eq(R.authId(Users)),
-}))
 ```
 
 ### Auth collection
 
-Adds `email`, `password` (hashed), and `emailVerified` system fields. Exposes an `authWithPassword` endpoint.
+Adds `email`, `password` (hashed with scrypt on create/update), and `emailVerified` system fields. Exposes an `authWithPassword` endpoint.
 
 ```typescript
-import { AuthCollection, Field, Rule } from "@gettersethya/mira-collection"
+import { AuthCollection, Field } from "@gettersethya/mira-collection"
 
-const Users = AuthCollection.define("users", {
+export const Users = AuthCollection.define("users", {
   displayName: Field.text(),
   username:    Field.text({ unique: true }),
   role:        Field.text({ default: "user" }),
 })
-.rules((R) => ({
-  list:   Rule.public(),
-  view:   Rule.public(),
-  create: Rule.public(),
-  update: R.selfId().eq(R.authId(Users)),  // users can only edit themselves
-}))
 ```
 
 ### View collection
 
-Read-only, backed by a SQL `VIEW`. Supports `list` and `view` only. Every field must be marked `.view()`.
+Read-only, backed by a SQL `VIEW`. Supports `list` and `view` access rules. Every field must be marked `.view()`.
 
 ```typescript
-import { Field, Rule, ViewCollection } from "@gettersethya/mira-collection"
+import { Field, ViewCollection } from "@gettersethya/mira-collection"
 
-const PostsWithAuthors = ViewCollection.define(
+export const PostsWithAuthors = ViewCollection.define(
   "posts_with_authors",
   `SELECT p.id, p.seqId, p.title, u.displayName AS authorName
    FROM posts p LEFT JOIN users u ON p.authorId = u.id`,
@@ -82,8 +69,9 @@ const PostsWithAuthors = ViewCollection.define(
     authorName: Field.text().view(),
   }
 )
-.rules((R) => ({ list: Rule.public(), view: Rule.public() }))
 ```
+
+Rules for collections are defined server-side using `defineRule()` from `@gettersethya/mira`.
 
 ## Field types
 

@@ -244,12 +244,13 @@ export class MiraApp<R = never> {
       Effect.gen(function* () {
         const cfg = yield* AppConfig
         const factory = yield* HttpServerFactory
-        return factory.makeLayer(options?.port ?? cfg.port)
+        const effectivePort = options?.port ?? cfg.port
+        return factory.makeLayer(effectivePort)
       })
-    )
+    ).pipe(Layer.provide(serviceLayer))
 
     return HttpServer.serve(ipAnnotationMiddleware(router)).pipe(
-      Layer.provideMerge(serverLayer),
+      Layer.provide(serverLayer),
       Layer.provideMerge(serviceLayer)
     )
   }

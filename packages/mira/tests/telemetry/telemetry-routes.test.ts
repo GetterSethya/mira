@@ -84,19 +84,25 @@ describe("telemetryLogsRoute", () => {
     }).pipe(Effect.provide(makeRouteLayer()))
   )
 
-  it.effect("paginates with limit and offset", () =>
+  it.effect("paginates with limit and after cursor", () =>
     Effect.gen(function* () {
       for (let i = 0; i < 5; i++) {
         yield* Effect.logInfo(`log-${i}`)
       }
       yield* Effect.promise(drainMicrotasks)
 
-      const res = yield* runLogsRoute("http://localhost/_telemetry/logs?limit=2&offset=0")
+      const res = yield* runLogsRoute("http://localhost/_telemetry/logs?limit=2")
       const body = yield* getBody(res)
 
-      const { logs, total } = body as { logs: unknown[]; total: number }
+      const { logs, total, nextCursor } = body as { logs: unknown[]; total: number; nextCursor: number | null }
       expect(logs.length).toBe(2)
       expect(total).toBeGreaterThanOrEqual(5)
+      expect(typeof nextCursor).toBe("number")
+
+      const res2 = yield* runLogsRoute(`http://localhost/_telemetry/logs?limit=2&after=${nextCursor}`)
+      const body2 = yield* getBody(res2)
+      const { logs: logs2 } = body2 as { logs: unknown[] }
+      expect(logs2.length).toBe(2)
     }).pipe(Effect.provide(makeRouteLayer()))
   )
 
@@ -188,6 +194,27 @@ describe("telemetrySpansRoute", () => {
     Effect.gen(function* () {
       const res = yield* runSpansRoute("http://localhost/_telemetry/spans?filter=bad")
       expect(res.status).toBe(400)
+    }).pipe(Effect.provide(makeRouteLayer()))
+  )
+
+  it.effect("paginates spans with limit and after cursor", () =>
+    Effect.gen(function* () {
+      yield* Effect.withSpan("span-1")(Effect.void)
+      yield* Effect.withSpan("span-2")(Effect.void)
+      yield* Effect.withSpan("span-3")(Effect.void)
+      yield* Effect.promise(drainMicrotasks)
+
+      const res = yield* runSpansRoute("http://localhost/_telemetry/spans?limit=2")
+      const body = yield* getBody(res)
+      const { spans, total, nextCursor } = body as { spans: unknown[]; total: number; nextCursor: number | null }
+      expect(spans.length).toBe(2)
+      expect(total).toBeGreaterThanOrEqual(3)
+      expect(typeof nextCursor).toBe("number")
+
+      const res2 = yield* runSpansRoute(`http://localhost/_telemetry/spans?limit=2&after=${nextCursor}`)
+      const body2 = yield* getBody(res2)
+      const { spans: spans2 } = body2 as { spans: unknown[] }
+      expect(spans2.length).toBeGreaterThanOrEqual(1)
     }).pipe(Effect.provide(makeRouteLayer()))
   )
 })

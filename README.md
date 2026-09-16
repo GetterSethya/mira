@@ -65,18 +65,12 @@ npm install @gettersethya/mira-dashboard
 
 ```typescript
 // collections.ts
-import { AuthCollection, BaseCollection, Bytes, Field, Rule } from "@gettersethya/mira-collection"
+import { AuthCollection, BaseCollection, Bytes, Field } from "@gettersethya/mira-collection"
 
 export const Users = AuthCollection.define("users", {
   displayName: Field.text({ maxLength: 100 }),
   role:        Field.literalText({ literal: ["user", "admin"], default: "user" }),
 })
-.rules((R) => ({
-  list:   Rule.public(),
-  view:   Rule.public(),
-  create: Rule.public(),
-  update: R.selfId().eq(R.authId(Users)),
-}))
 
 export const Posts = BaseCollection.define("posts", {
   title:     Field.text({ maxLength: 200 }),
@@ -85,7 +79,23 @@ export const Posts = BaseCollection.define("posts", {
   authorId:  Field.relation(Users),
   thumbnail: Field.file({ maxSize: Bytes.fromMB(5), mimeTypes: ["image/*"] }),
 })
-.rules((R) => ({
+```
+
+### 2. Bootstrap the server
+
+```typescript
+// server.ts
+import { defineRule, LocalFileStorage, Mira, NodePlatform, Rule, SqliteDatabase } from "@gettersethya/mira"
+import { Users, Posts } from "./collections.js"
+
+const userRules = defineRule(Users, (R) => ({
+  list:   Rule.public(),
+  view:   Rule.public(),
+  create: Rule.public(),
+  update: R.selfId().eq(R.authId(Users)),
+}))
+
+const postRules = defineRule(Posts, (R) => ({
   list:   R.field("published").eq(R.literal(true)),
   view:   R.or(
     R.field("published").eq(R.literal(true)),
@@ -95,20 +105,13 @@ export const Posts = BaseCollection.define("posts", {
   update: R.field("authorId").eq(R.authId(Users)),
   delete: R.field("authorId").eq(R.authId(Users)),
 }))
-```
-
-### 2. Bootstrap the server
-
-```typescript
-// server.ts
-import { Mira, NodePlatform, SqliteDatabase, LocalFileStorage } from "@gettersethya/mira"
-import { Users, Posts } from "./collections.js"
 
 const app = Mira.builder()
   .platform(NodePlatform)
   .database(SqliteDatabase({ filename: "mira.db" }))
   .storage(LocalFileStorage({ directory: "./uploads" }))
   .collections([Users, Posts])
+  .rules([userRules, postRules])
   .build()
 
 app.serve()
@@ -131,6 +134,7 @@ Mira.builder()
   .database(SqliteDatabase({ filename: "mira.db" }))                // required — SQLite backend
   .storage(LocalFileStorage({ directory: "./uploads" }))            // required — local disk storage
   .collections([Users, Posts])                                      // required — your collections
+  .rules([userRules, postRules])                                    // optional — server-side access rules
   .crons([/* CronDef definitions */])                               // optional — cron jobs
   .telemetry(makeSqliteTelemetryLayer({ dbPath: "logs.db" }))       // optional — SQLite telemetry
   .build()                                                          // produces MiraApp
@@ -144,6 +148,7 @@ Mira.builder()
 | `.database(d)` | yes | SQL backend. Currently `SqliteDatabase({ filename })`. |
 | `.storage(s)` | yes | File storage. Currently `LocalFileStorage({ directory })`. |
 | `.collections(c)` | yes | Array of collection definitions. |
+| `.rules(r)` | no | Array of `RuleBinding` from `defineRule(collection, cb)`. Collections without rules deny all actions. |
 | `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
 | `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). |
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
@@ -154,16 +159,16 @@ Mira.builder()
 
 ## Collection definitions
 
-Collections are the schema of your data. Every collection generates a set of REST endpoints automatically.
+Collections are the schema of your data. Every collection generates a set of REST endpoints automatically. Rules are attached server-side via `defineRule()`.
 
 ### BaseCollection
 
 A standard CRUD collection. System fields `id` (random base64url string), `seqId` (auto-increment integer), `created` (ISO timestamp), and `updated` (ISO timestamp) are injected automatically and are never exposed in user input.
 
 ```typescript
-import { BaseCollection, Bytes, Field, Rule } from "@gettersethya/mira-collection"
+import { BaseCollection, Bytes, Field } from "@gettersethya/mira-collection"
 
-const Posts = BaseCollection.define("posts", {
+export const Posts = BaseCollection.define("posts", {
   title:       Field.text({ maxLength: 200 }),
   slug:        Field.text({ unique: true }),
   content:     Field.text(),
@@ -177,16 +182,6 @@ const Posts = BaseCollection.define("posts", {
   I.on("authorId", "published"), // composite index
   I.unique("slug"),              // unique constraint
 ])
-.rules((R) => ({
-  list:   R.field("published").eq(R.literal(true)),
-  view:   R.or(
-    R.field("published").eq(R.literal(true)),
-    R.field("authorId").eq(R.authId(Users))
-  ),
-  create: R.authId(Users).neq(R.literal(null)),
-  update: R.field("authorId").eq(R.authId(Users)),
-  delete: R.field("authorId").eq(R.authId(Users)),
-}))
 ```
 
 Generated endpoints:
@@ -201,25 +196,20 @@ Generated endpoints:
 
 ### AuthCollection
 
-An `AuthCollection` extends `BaseCollection` with three extra system fields: `email` (unique, required), `password` (bcrypt-hashed, hidden from API responses), and `emailVerified` (boolean). It also adds a login endpoint.
+An `AuthCollection` extends `BaseCollection` with three extra system fields: `email` (unique, required), `password` (scrypt-hashed, hidden from API responses), and `emailVerified` (boolean). It also adds a login endpoint.
+
+Passwords are automatically hashed on create and update. If an update payload passes an empty password string `""` (e.g. from a blank profile edit form), it is safely dropped so the existing hash remains untouched. Hidden fields (`x-hidden: true`) like password are automatically stripped from non-admin responses (including `/api/auth/me` and create/update returns).
 
 ```typescript
-import { AuthCollection, Field, Rule } from "@gettersethya/mira-collection"
+import { AuthCollection, Field } from "@gettersethya/mira-collection"
 
-const Users = AuthCollection.define("users", {
+export const Users = AuthCollection.define("users", {
   displayName: Field.text(),
   username:    Field.text({ unique: true }),
   bio:         Field.text({ required: false }),
   role:        Field.literalText({ literal: ["user", "admin"], default: "user" }),
 })
 .indexes((I) => [I.unique("username")])
-.rules((R) => ({
-  list:   R.public(),
-  view:   R.public(),
-  create: R.public(),
-  update: R.selfId().eq(R.authId(Users)),
-  // delete is omitted → always denied
-}))
 ```
 
 Additional endpoints:
@@ -229,16 +219,16 @@ Additional endpoints:
 | `POST` | `/api/collections/users/auth-with-password` | Login with `{ email, password }`, returns `{ token, record }` |
 | `POST` | `/api/auth/logout` | Clears the server-side session |
 
-`R.selfId()` inside an auth collection rule refers to the record's own `id`. It is equivalent to "the user is editing their own profile".
+Inside auth collection rules defined with `defineRule(Users, (R) => ...)`, `R.selfId()` is a chainable operand referring to the record's own `id` (e.g. `R.selfId().eq(R.authId(Users))`).
 
 ### ViewCollection
 
 A read-only collection backed by a SQL `VIEW`. Use it to expose joined or aggregated data without running the JOIN on every request. Only `list` and `view` rules are supported. Every field must be marked `.view()`. `id` and `seqId` must be declared explicitly because they come from the SQL query, not from auto-injection.
 
 ```typescript
-import { Field, Rule, ViewCollection } from "@gettersethya/mira-collection"
+import { Field, ViewCollection } from "@gettersethya/mira-collection"
 
-const PostsWithAuthors = ViewCollection.define(
+export const PostsWithAuthors = ViewCollection.define(
   "posts_with_authors",
   `SELECT
      p.id,
@@ -257,10 +247,6 @@ const PostsWithAuthors = ViewCollection.define(
     authorName: Field.text().view(),
   }
 )
-.rules((R) => ({
-  list: Rule.public(),
-  view: Rule.public(),
-}))
 ```
 
 The `VIEW` is created in SQLite during auto-migration. If the SQL body or field list changes, the view is dropped and recreated. View collections are read-only — `create`, `update`, `delete` return `405 Method Not Allowed`.
@@ -441,12 +427,16 @@ Field.text({ indexed: true })    // non-unique index on this column
 
 Rules are TypeScript expressions evaluated server-side on every request. They are compiled to SQL `WHERE` clauses and enforced at the database layer.
 
+Rules are defined server-side using `defineRule(Collection, (R) => ({ ... }))` from `@gettersethya/mira` and passed to `Mira.builder().rules([ ... ])`.
+
 A missing rule for an action means **deny all** for that action. `Rule.public()` means allow all.
 
 The `(R) => ({...})` callback receives a rule builder `R`. You must use `R.*` inside this callback — rule expressions cannot be created outside of it.
 
 ```typescript
-.rules((R) => ({
+import { defineRule, Rule } from "@gettersethya/mira"
+
+const postsRules = defineRule(Posts, (R) => ({
   list:   /* rule */,
   view:   /* rule */,
   create: /* rule */,
@@ -454,6 +444,10 @@ The `(R) => ({...})` callback receives a rule builder `R`. You must use `R.*` in
   delete: /* rule */,
 }))
 ```
+
+- **BaseCollection**: accepts rules for `list`, `view`, `create`, `update`, `delete`.
+- **AuthCollection**: accepts rules for `list`, `view`, `create`, `update`, `delete`. `R.selfId()` is a chainable operand representing the authenticated record's own `id`.
+- **ViewCollection**: accepts rules for `list` and `view` only (`create`, `update`, `delete` are disallowed since views are read-only).
 
 ### Allow / deny shorthands
 
@@ -1085,10 +1079,10 @@ const app = Mira.builder()
 
 The telemetry layer writes to two collections in a dedicated SQLite database (separate from your main database to avoid write contention):
 
-- **`logs`** — structured log entries from `Effect.log()`. Fields: `level`, `message`, `traceId?`, `spanId?`, `created`, `updated`.
-- **`spans`** — completed Effect spans. Fields: `name`, `traceId`, `spanId`, `parentSpanId?`, `kind`, `durationMs`, `status`, `error?`, `attributes`, `created`, `updated`.
+- **`logs`** — structured log entries from `Effect.log()`. Fields: `seqId`, `level`, `message`, `traceId?`, `spanId?`, `created`, `updated`.
+- **`spans`** — completed Effect spans. Fields: `seqId`, `name`, `traceId`, `spanId`, `parentSpanId?`, `kind`, `durationMs`, `status`, `error?`, `attributes`, `created`, `updated`.
 
-The dashboard's log/span viewer reads from these collections when `makeSqliteTelemetryLayer` is used.
+The telemetry endpoints (`GET /_telemetry/logs` and `GET /_telemetry/spans`) support cursor-based pagination via `?after=<seqId>&limit=<n>` and return `{ ...items, total, limit, nextCursor }`. The dashboard's log/span viewer uses this to provide fast, continuous pagination.
 
 ---
 
@@ -1101,13 +1095,16 @@ The dashboard's log/span viewer reads from these collections when `makeSqliteTel
   "collections": [
     {
       "name": "posts",
-      "schema": { ... }
+      "kind": "base",
+      "fields": { ... },
+      "required": [ ... ],
+      "indexes": [ ... ]
     }
   ]
 }
 ```
 
-This endpoint is the foundation for future schema codegen tooling.
+The response preserves metadata annotations (`x-system`, `x-hidden`, `x-generated`, `x-kind`) so UI dashboards and code generators can accurately distinguish read-only/generated system fields, write-only password fields, and hidden fields.
 
 ---
 

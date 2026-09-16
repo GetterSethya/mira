@@ -89,7 +89,8 @@ const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pi
   Layer.provide(repoWithSql),
   Layer.provide(FileStorageTest),
   Layer.provide(sqliteLayer),
-  Layer.provide(DialectTest)
+  Layer.provide(DialectTest),
+  Layer.provide(NodeAuthServiceLayer)
 )
 
 // Merge everything needed by the router handlers + table setup into one test layer
@@ -459,6 +460,9 @@ describe("makeCollectionRouter", () => {
       const body = (yield* res.json) as Record<string, unknown>
       assert.strictEqual(body["collection"], "users")
       assert.ok(typeof body["record"] === "object" && body["record"] !== null)
+      const record = body["record"] as Record<string, unknown>
+      assert.strictEqual(record["email"], "meuser@example.com")
+      assert.ok(!("password" in record), "password must not appear in /api/auth/me response")
     }).pipe(Effect.provide(testLayer))
   )
 
@@ -468,6 +472,57 @@ describe("makeCollectionRouter", () => {
       yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/auth/me")
       assert.strictEqual(res.status, 401)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("POST /api/collections/users — password is hashed so auth-with-password succeeds", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const createRes = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users").pipe(
+          HttpClientRequest.bodyUnsafeJson({ email: "newuser@example.com", password: "plaintext-pw" })
+        )
+      )
+      assert.strictEqual(createRes.status, 201)
+      const created = (yield* createRes.json) as Record<string, unknown>
+      assert.ok(!("password" in created), "password must not be returned in create response")
+
+      // If the password were stored verbatim, login would still succeed — so this
+      // also asserts the stored value is a valid hash of the same plaintext.
+      const loginRes = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+          HttpClientRequest.bodyUnsafeJson({ email: "newuser@example.com", password: "plaintext-pw" })
+        )
+      )
+      assert.strictEqual(loginRes.status, 200)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.scoped("GET /api/_schema — passes system annotations through instead of stripping them", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* seedUser("schemaadmin@example.com", "secret")
+      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      const loginRes = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+          HttpClientRequest.bodyUnsafeJson({ email: "schemaadmin@example.com", password: "secret" })
+        )
+      )
+      const token = ((yield* loginRes.json) as Record<string, unknown>)["token"] as string
+
+      const res = yield* HttpClient.get("/api/_schema", {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      assert.strictEqual(res.status, 200)
+      const body = (yield* res.json) as Array<Record<string, unknown>>
+      const users = body.find((s) => s["name"] === "users")
+      assert.ok(users !== undefined)
+      const fields = users["fields"] as Record<string, Record<string, unknown>>
+      assert.strictEqual(fields["password"]?.["x-kind"], "password")
+      assert.strictEqual(fields["password"]?.["x-hidden"], true)
+      assert.strictEqual(fields["id"]?.["x-generated"], true)
+      assert.strictEqual(fields["seqId"]?.["x-generated"], true)
     }).pipe(Effect.provide(testLayer))
   )
 })

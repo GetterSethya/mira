@@ -361,8 +361,17 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       if (!auth) {
         return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
       }
+      // `auth.record` is the full stored row (used as `ctx.auth` for rule
+      // placeholders). Strip hidden fields before serialising it to the client
+      // so credentials like `password` never leave the server.
+      const meCollection = collectionMap.get(auth.collection)
+      const publicRecord: RepoRecord = {}
+      for (const [k, v] of Object.entries(auth.record)) {
+        if (meCollection?.schema.properties[k]?.["x-hidden"] === true) continue
+        publicRecord[k] = v
+      }
       return HttpServerResponse.unsafeJson(
-        { collection: auth.collection, record: auth.record },
+        { collection: auth.collection, record: publicRecord },
         { status: 200 }
       )
     }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation: "me" } }))
