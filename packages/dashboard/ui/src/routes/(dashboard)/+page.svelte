@@ -9,7 +9,7 @@
 
   const logsQuery = createQuery(() => ({
     queryKey: ["logs", "recent"],
-    queryFn: () => mira.telemetry.getLogs({ limit: 5, offset: 0 }).raw()
+    queryFn: () => mira.telemetry.getLogs({ limit: 5 }).raw()
   }))
 
   const spansQuery = createQuery(() => ({

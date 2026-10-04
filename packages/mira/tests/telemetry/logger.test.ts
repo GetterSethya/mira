@@ -1,9 +1,11 @@
-import { Effect, Layer, Queue, Schema } from "effect"
 import { randomBytes } from "node:crypto"
+
 import { afterEach, beforeEach, describe, it } from "@effect/vitest"
-import { expect, vi } from "vitest"
+import { Effect, Layer, Queue, Schema, Tracer } from "effect"
 import type { MockInstance } from "vitest"
-import { ConsoleLoggerLayer } from "@/telemetry/logger.js"
+import { expect, vi } from "vitest"
+
+import { ConsoleLoggerLayer, formatPrettyLog, makeConsoleLoggerLayer } from "@/telemetry/logger.js"
 import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
 
@@ -11,12 +13,12 @@ const LogLineSchema = Schema.Struct({
   level: Schema.String,
   message: Schema.String,
   timestamp: Schema.String,
-  traceId: Schema.optionalWith(Schema.String, { exact: true }),
-  spanId: Schema.optionalWith(Schema.String, { exact: true }),
+  traceId: Schema.optionalKey(Schema.String),
+  spanId: Schema.optionalKey(Schema.String),
 })
 
 function parseLogLine(raw: unknown) {
-  return Schema.decodeUnknown(Schema.parseJson(LogLineSchema))(raw).pipe(Effect.orDie)
+  return Schema.decodeUnknownEffect(Schema.fromJsonString(LogLineSchema))(raw).pipe(Effect.orDie)
 }
 
 describe("makeStructuredLogger", () => {
@@ -72,7 +74,7 @@ describe("makeStructuredLogger", () => {
         Effect.provide(
           Layer.mergeAll(
             ConsoleLoggerLayer,
-            Layer.setTracer(makeConsoleTracer(queue, (size) => randomBytes(size))),
+            Layer.succeed(Tracer.Tracer, makeConsoleTracer(queue, (size) => randomBytes(size))),
           )
         )
       )
@@ -81,5 +83,44 @@ describe("makeStructuredLogger", () => {
       expect(typeof output.traceId).toBe("string")
       expect(output.traceId?.length).toBeGreaterThan(0)
     })
+  )
+})
+
+describe("formatPrettyLog", () => {
+  it("renders level, message and ids as a human-readable line", () => {
+    const output = formatPrettyLog({
+      level: "ERROR",
+      message: "boom",
+      timestamp: "2026-10-04T08:07:42.159Z",
+      traceId: "abcdef0123456789",
+      spanId: "0123456789abcdef"
+    })
+    expect(output).toContain("ERROR")
+    expect(output).toContain("boom")
+    expect(output).toContain("abcdef01/01234567")
+    expect(output.startsWith("{")).toBe(false)
+  })
+})
+
+describe("makeConsoleLoggerLayer({ pretty: true })", () => {
+  let spy: MockInstance
+
+  beforeEach(() => {
+    spy = vi.spyOn(console, "log").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    spy.mockRestore()
+  })
+
+  it.effect("prints a non-JSON line", () =>
+    Effect.gen(function* () {
+      yield* Effect.logInfo("pretty hello")
+      const output = spy.mock.calls[0][0]
+      expect(typeof output).toBe("string")
+      expect(output).toContain("INFO")
+      expect(output).toContain("pretty hello")
+      expect(output.startsWith("{")).toBe(false)
+    }).pipe(Effect.provide(makeConsoleLoggerLayer({ pretty: true })))
   )
 })

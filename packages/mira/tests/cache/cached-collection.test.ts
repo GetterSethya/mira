@@ -1,25 +1,25 @@
-import { SqlClient } from "@effect/sql"
-import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Either, Layer } from "effect"
 import { performance } from "node:perf_hooks"
+
+import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
 import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
-import { Rule } from "@gettersethya/mira-client"
-import { defineRule, applyRulesToCollections } from "@/app/index.js"
-import { CollectionService } from "@/collection-service/collection-service.js"
-import { NotFoundError } from "@/collection-service/errors.js"
-import type { RequestCtx } from "@/collection-service/context.js"
+import { Effect, Layer,Result } from "effect"
+import { SqlClient } from "effect/sql"
+import { expect } from "vitest"
+
+import { applyRulesToCollections,defineRule } from "@/app/index.js"
 import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
-import { RepositoryLive } from "@/repository/repository.js"
-import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
+import { CollectionService } from "@/collection-service/collection-service.js"
+import type { RequestCtx } from "@/collection-service/context.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
-import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
+import { RepositoryLive } from "@/repository/repository.js"
+import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 
 const postsDef = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 100 }),
@@ -313,10 +313,10 @@ describe("CachedCollectionService", () => {
       yield* svc.delete(Posts, id, noCtx)
 
       // View should fail with NotFoundError
-      const result = yield* Effect.either(svc.view(Posts, id, noCtx))
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left instanceof NotFoundError).toBe(true)
+      const result = yield* Effect.result(svc.view(Posts, id, noCtx))
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("NotFoundError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -388,7 +388,7 @@ describe("CachedCollectionService", () => {
       yield* setupPostsTable
       const svc = yield* CollectionService
 
-      const r1 = yield* svc.create(Posts, { title: "Keep" }, noCtx)
+      yield* svc.create(Posts, { title: "Keep" }, noCtx)
       const r2 = yield* svc.create(Posts, { title: "Remove" }, noCtx)
       const id2 = r2["id"] as string
 
@@ -427,10 +427,10 @@ describe("Cache key authorization scoping (security)", () => {
       // A different identity requests the same id/select/expand within the TTL window.
       // The rule (ownerId == @auth_id) denies userB at the DB layer — a cache hit must
       // not bypass that check and hand back userA's row.
-      const otherView = yield* Effect.either(svc.view(Notes, id, ctxOther))
-      expect(Either.isLeft(otherView)).toBe(true)
-      if (Either.isLeft(otherView)) {
-        expect(otherView.left instanceof NotFoundError).toBe(true)
+      const otherView = yield* Effect.result(svc.view(Notes, id, ctxOther))
+      expect(Result.isFailure(otherView)).toBe(true)
+      if (Result.isFailure(otherView)) {
+        expect(otherView.failure._tag).toBe("NotFoundError")
       }
     }).pipe(Effect.provide(securityTestLayer)))
 
@@ -452,10 +452,10 @@ describe("Cache key authorization scoping (security)", () => {
       // tenant-2 requests the same id/select/expand within the TTL window.
       // The rule (tenantId == @request_query_tenantId) denies tenant-2 at the DB layer —
       // a cache hit must not bypass that check.
-      const tenant2View = yield* Effect.either(svc.view(TenantDocs, id, ctxTenant2))
-      expect(Either.isLeft(tenant2View)).toBe(true)
-      if (Either.isLeft(tenant2View)) {
-        expect(tenant2View.left instanceof NotFoundError).toBe(true)
+      const tenant2View = yield* Effect.result(svc.view(TenantDocs, id, ctxTenant2))
+      expect(Result.isFailure(tenant2View)).toBe(true)
+      if (Result.isFailure(tenant2View)) {
+        expect(tenant2View.failure._tag).toBe("NotFoundError")
       }
     }).pipe(Effect.provide(securityTestLayer)))
 

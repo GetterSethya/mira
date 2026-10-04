@@ -1,8 +1,9 @@
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
 import { Effect } from "effect"
-import { NodeCryptoLayer } from "@/crypto/node.js"
+import { expect } from "vitest"
+
 import { CryptoService } from "@/crypto/crypto.js"
+import { NodeCryptoLayer } from "@/crypto/node.js"
 
 const testLayer = NodeCryptoLayer
 

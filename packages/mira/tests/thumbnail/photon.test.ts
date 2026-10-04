@@ -1,9 +1,11 @@
+import { deflateSync } from "node:zlib"
+
 import { PhotonImage } from "@cf-wasm/photon/node"
-import { Effect, Either } from "effect"
 import { assert, describe, it } from "@effect/vitest"
+import { Effect, Result } from "effect"
+
 import { ThumbnailService, ThumbnailServicePhotonLive } from "@/thumbnail/index.js"
 import { computeDimensions } from "@/thumbnail/photon.js"
-import { deflateSync } from "node:zlib"
 
 function crc32(buf: Uint8Array): number {
   let crc = 0xFFFFFFFF
@@ -281,35 +283,35 @@ describe("computeDimensions", () => {
 const PhotonLiveLayer = ThumbnailServicePhotonLive
 
 describe("ThumbnailServicePhotonLive — supported()", () => {
-  it.scoped("returns true for image/jpeg", () =>
+  it.effect("returns true for image/jpeg", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       assert.ok(svc.supported("image/jpeg"))
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("returns true for image/png", () =>
+  it.effect("returns true for image/png", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       assert.ok(svc.supported("image/png"))
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("returns true for image/webp", () =>
+  it.effect("returns true for image/webp", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       assert.ok(svc.supported("image/webp"))
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("returns false for image/gif (regression guard)", () =>
+  it.effect("returns false for image/gif (regression guard)", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       assert.strictEqual(svc.supported("image/gif"), false)
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("returns false for image/avif (regression guard)", () =>
+  it.effect("returns false for image/avif (regression guard)", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       assert.strictEqual(svc.supported("image/avif"), false)
@@ -318,7 +320,7 @@ describe("ThumbnailServicePhotonLive — supported()", () => {
 })
 
 describe("ThumbnailServicePhotonLive — resize PNG", () => {
-  it.scoped("resize PNG with cover fit produces correct output dimensions", () =>
+  it.effect("resize PNG with cover fit produces correct output dimensions", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(80, 60, 0, 200, 100)
@@ -330,7 +332,7 @@ describe("ThumbnailServicePhotonLive — resize PNG", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("resize PNG with contain fit on differing-AR image produces exact 4:3 result", () =>
+  it.effect("resize PNG with contain fit on differing-AR image produces exact 4:3 result", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(80, 60, 0, 200, 100)
@@ -342,7 +344,7 @@ describe("ThumbnailServicePhotonLive — resize PNG", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("resize PNG with fill fit to non-square produces exact dimensions", () =>
+  it.effect("resize PNG with fill fit to non-square produces exact dimensions", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(80, 60, 0, 200, 100)
@@ -356,7 +358,7 @@ describe("ThumbnailServicePhotonLive — resize PNG", () => {
 })
 
 describe("ThumbnailServicePhotonLive — cover crop (crop() API regression guard)", () => {
-  it.scoped("cover crop on a wide image produces correctly centred result", () =>
+  it.effect("cover crop on a wide image produces correctly centred result", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(160, 90, 255, 0, 0)
@@ -368,7 +370,7 @@ describe("ThumbnailServicePhotonLive — cover crop (crop() API regression guard
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("cover crop on a tall image produces correctly centred result", () =>
+  it.effect("cover crop on a tall image produces correctly centred result", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(90, 160, 0, 255, 0)
@@ -380,22 +382,22 @@ describe("ThumbnailServicePhotonLive — cover crop (crop() API regression guard
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("cover crop does not panic on larger-than-target image", () =>
+  it.effect("cover crop does not panic on larger-than-target image", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(300, 200, 100, 100, 100)
-      const result = yield* Effect.either(svc.resize(png, "image/png", { width: 50, height: 50, fit: "cover" }))
-      if (Either.isLeft(result)) {
-        assert.fail("expected Right, got Left: " + result.left._tag)
+      const result = yield* Effect.result(svc.resize(png, "image/png", { width: 50, height: 50, fit: "cover" }))
+      if (Result.isFailure(result)) {
+        assert.fail("expected Right, got Left: " + result.failure._tag)
       }
-      const img = PhotonImage.new_from_byteslice(result.right)
+      const img = PhotonImage.new_from_byteslice(result.success)
       assert.strictEqual(img.get_width(), 50)
       assert.strictEqual(img.get_height(), 50)
       img.free()
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("cover crop with x0 > 0 offset produces correct dimensions", () =>
+  it.effect("cover crop with x0 > 0 offset produces correct dimensions", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(160, 90, 200, 100, 50)
@@ -407,7 +409,7 @@ describe("ThumbnailServicePhotonLive — cover crop (crop() API regression guard
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("cover crop with y0 > 0 offset produces correct dimensions", () =>
+  it.effect("cover crop with y0 > 0 offset produces correct dimensions", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(90, 160, 50, 100, 200)
@@ -419,7 +421,7 @@ describe("ThumbnailServicePhotonLive — cover crop (crop() API regression guard
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("cover crop centred horizontally — pixel near right edge is predominantly blue", () =>
+  it.effect("cover crop centred horizontally — pixel near right edge is predominantly blue", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makeSplitPng(300, 100, 150, 255, 0, 0, 0, 0, 255)
@@ -442,7 +444,7 @@ describe("ThumbnailServicePhotonLive — cover crop (crop() API regression guard
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("cover crop centred vertically — pixel from bottom of output is blue (centred), not red (top-cropped)", () =>
+  it.effect("cover crop centred vertically — pixel from bottom of output is blue (centred), not red (top-cropped)", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makeRowSplitPng(100, 300, 150, 255, 0, 0, 0, 0, 255)
@@ -463,7 +465,7 @@ describe("ThumbnailServicePhotonLive — cover crop (crop() API regression guard
 })
 
 describe("ThumbnailServicePhotonLive — zero-axis spec", () => {
-  it.scoped("zero-width (0x200) cover produces non-squashed result", () =>
+  it.effect("zero-width (0x200) cover produces non-squashed result", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(160, 90, 128, 128, 128)
@@ -475,7 +477,7 @@ describe("ThumbnailServicePhotonLive — zero-axis spec", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("zero-height (100x0) contain produces non-squashed result", () =>
+  it.effect("zero-height (100x0) contain produces non-squashed result", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(160, 90, 128, 128, 128)
@@ -487,7 +489,7 @@ describe("ThumbnailServicePhotonLive — zero-axis spec", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("fill+zero-width (0x40) produces imgWidth by spec.height", () =>
+  it.effect("fill+zero-width (0x40) produces imgWidth by spec.height", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(160, 90, 128, 128, 128)
@@ -499,7 +501,7 @@ describe("ThumbnailServicePhotonLive — zero-axis spec", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("cover+zero-height (100x0) produces spec.width by proportional height", () =>
+  it.effect("cover+zero-height (100x0) produces spec.width by proportional height", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(160, 90, 128, 128, 128)
@@ -511,7 +513,7 @@ describe("ThumbnailServicePhotonLive — zero-axis spec", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("contain+zero-width (0x40) produces proportional width by spec.height", () =>
+  it.effect("contain+zero-width (0x40) produces proportional width by spec.height", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(160, 90, 128, 128, 128)
@@ -523,7 +525,7 @@ describe("ThumbnailServicePhotonLive — zero-axis spec", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("fill+zero-height (100x0) produces spec.width by srcHeight", () =>
+  it.effect("fill+zero-height (100x0) produces spec.width by srcHeight", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(160, 90, 128, 128, 128)
@@ -537,7 +539,7 @@ describe("ThumbnailServicePhotonLive — zero-axis spec", () => {
 })
 
 describe("ThumbnailServicePhotonLive — MIME encoding arms", () => {
-  it.scoped("PNG input with image/png produces valid PNG output", () =>
+  it.effect("PNG input with image/png produces valid PNG output", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(20, 20, 0, 200, 100)
@@ -547,7 +549,7 @@ describe("ThumbnailServicePhotonLive — MIME encoding arms", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("JPEG input with image/jpeg produces valid JPEG output", () =>
+  it.effect("JPEG input with image/jpeg produces valid JPEG output", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const jpeg = makeJpeg(20, 20)
@@ -557,7 +559,7 @@ describe("ThumbnailServicePhotonLive — MIME encoding arms", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("WebP input with image/webp produces valid WebP output", () =>
+  it.effect("WebP input with image/webp produces valid WebP output", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const webp = makeWebp(20, 20)
@@ -567,7 +569,7 @@ describe("ThumbnailServicePhotonLive — MIME encoding arms", () => {
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 
-  it.scoped("explicit PNG arm: output is always PNG bytes", () =>
+  it.effect("explicit PNG arm: output is always PNG bytes", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const png = makePng(20, 20, 255, 0, 0)
@@ -579,14 +581,14 @@ describe("ThumbnailServicePhotonLive — MIME encoding arms", () => {
 })
 
 describe("ThumbnailServicePhotonLive — error handling", () => {
-  it.scoped("resize with garbage input fails with ThumbnailError", () =>
+  it.effect("resize with garbage input fails with ThumbnailError", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         svc.resize(new Uint8Array([0, 1, 2, 3]), "image/png", { width: 100, height: 100, fit: "fill" })
       )
-      assert.ok(Either.isLeft(result))
-      assert.strictEqual(result.left._tag, "ThumbnailError")
+      assert.ok(Result.isFailure(result))
+      assert.strictEqual(result.failure._tag, "ThumbnailError")
     }).pipe(Effect.provide(PhotonLiveLayer))
   )
 })

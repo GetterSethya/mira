@@ -1,13 +1,14 @@
-import { Effect, Layer, Option, Redacted } from "effect"
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
-import { defineRule, applyRulesToCollections } from "@/app/index.js"
-import { HookService, makeHookServiceLayer } from "@/hooks/hook-service.js"
+import { Effect, Layer, Option, Redacted } from "effect"
+import { expect } from "vitest"
+
+import { applyRulesToCollections,defineRule } from "@/app/index.js"
 import { MiraPlugin } from "@/app/plugin.js"
-import type { RecordHookContext, ListHookContext, ViewHookContext } from "@/hooks/types.js"
-import { AppConfig } from "@/config/index.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
+import { AppConfig } from "@/config/index.js"
+import { HookService, makeHookServiceLayer } from "@/hooks/hook-service.js"
+import type { ListHookContext, RecordHookContext, ViewHookContext } from "@/hooks/types.js"
 
 const TestCollectionService = Layer.succeed(
   CollectionService,

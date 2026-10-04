@@ -1,5 +1,6 @@
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { FileSystem, Path } from "@effect/platform"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { FileSystem, Path } from "effect"
+import type { AppConfig, CollectionService, CronService } from "@gettersethya/mira"
 import { Cause, Effect, Option, Tracer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { bootstrapStatusRoute } from "./api/bootstrap-status.js"
@@ -26,15 +27,15 @@ function makeContentType(ext: string): string {
 }
 
 function wrapRoute<E, R>(operation: string, effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) {
-  return Effect.catchAllCause(effect, (cause) => {
-    const failure = Cause.failureOption(cause)
+  return Effect.catchCause(effect, (cause) => {
+    const failure = Cause.findErrorOption(cause)
     if (Option.isSome(failure)) {
       if (failure.value instanceof DashboardUnauthorizedError) {
-        return Effect.succeed(HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 }))
+        return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 }))
       }
-      return Effect.succeed(HttpServerResponse.unsafeJson({ error: "bad_request" }, { status: 400 }))
+      return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "bad_request" }, { status: 400 }))
     }
-    return Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))
+    return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
   }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation } }))
 }
 
@@ -45,7 +46,7 @@ function wrapAuthRoute<E, R>(operation: string, effect: Effect.Effect<HttpServer
     )
 
     if (authResult === null) {
-      return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
+      return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
     }
 
     yield* Effect.currentSpan.pipe(
@@ -61,12 +62,12 @@ function wrapAuthRoute<E, R>(operation: string, effect: Effect.Effect<HttpServer
       Effect.ignore
     )
 
-    return yield* Effect.catchAllCause(effect, (cause) => {
-      const failure = Cause.failureOption(cause)
+    return yield* Effect.catchCause(effect, (cause) => {
+      const failure = Cause.findErrorOption(cause)
       if (Option.isSome(failure)) {
-        return Effect.succeed(HttpServerResponse.unsafeJson({ error: "bad_request" }, { status: 400 }))
+        return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "bad_request" }, { status: 400 }))
       }
-      return Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))
+      return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
     })
   }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation } }))
 }
@@ -104,19 +105,30 @@ function makeDashboardSpaRoute() {
     })
   )
 
-  return HttpRouter.empty.pipe(HttpRouter.get("/_dashboard", spaHandler), HttpRouter.get("/_dashboard/*", spaHandler))
+  return [
+    HttpRouter.route("GET", "/_dashboard/*", spaHandler)
+  ]
 }
 
-export function makeDashboardRouter(_collections: ReadonlyArray<AnyCollectionDef>) {
-  return HttpRouter.empty.pipe(
-    HttpRouter.get("/_dashboard/api/bootstrap-status", wrapRoute("bootstrap_status", bootstrapStatusRoute)),
-    HttpRouter.post("/_dashboard/api/register", wrapRoute("register", registerRoute)),
-    HttpRouter.post("/_dashboard/api/superadmin/create", wrapAuthRoute("superadmin_create", createSuperadminRoute)),
-    HttpRouter.get("/_dashboard/api/superadmin", wrapAuthRoute("superadmin_list", listSuperadminsRoute)),
-    HttpRouter.del("/_dashboard/api/superadmin/:id", wrapAuthRoute("superadmin_delete", deleteSuperadminRoute)),
-    HttpRouter.get("/_dashboard/api/config", wrapAuthRoute("config", configRoute)),
-    HttpRouter.get("/_dashboard/api/crons", wrapAuthRoute("crons_list", cronsRoute)),
-    HttpRouter.post("/_dashboard/api/crons/:name/run", wrapAuthRoute("crons_run", cronRunNowRoute)),
-    HttpRouter.concat(makeDashboardSpaRoute())
-  )
+type DashboardRouteServices =
+  | FileSystem.FileSystem
+  | Path.Path
+  | CollectionService
+  | AppConfig
+  | CronService
+
+export function makeDashboardRouter(
+  _collections: ReadonlyArray<AnyCollectionDef>
+): ReadonlyArray<HttpRouter.Route<never, DashboardRouteServices>> {
+  return [
+    ...makeDashboardSpaRoute(),
+    HttpRouter.route("GET", "/_dashboard/api/bootstrap-status", wrapRoute("bootstrap_status", bootstrapStatusRoute)),
+    HttpRouter.route("POST", "/_dashboard/api/register", wrapRoute("register", registerRoute)),
+    HttpRouter.route("POST", "/_dashboard/api/superadmin/create", wrapAuthRoute("superadmin_create", createSuperadminRoute)),
+    HttpRouter.route("GET", "/_dashboard/api/superadmin", wrapAuthRoute("superadmin_list", listSuperadminsRoute)),
+    HttpRouter.route("DELETE", "/_dashboard/api/superadmin/:id", wrapAuthRoute("superadmin_delete", deleteSuperadminRoute)),
+    HttpRouter.route("GET", "/_dashboard/api/config", wrapAuthRoute("config", configRoute)),
+    HttpRouter.route("GET", "/_dashboard/api/crons", wrapAuthRoute("crons_list", cronsRoute)),
+    HttpRouter.route("POST", "/_dashboard/api/crons/:name/run", wrapAuthRoute("crons_run", cronRunNowRoute))
+  ]
 }

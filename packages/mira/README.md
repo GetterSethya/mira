@@ -4,7 +4,7 @@
 
 > **Early pre-alpha.** Breaking changes may occur without notice.
 
-Self-hosted backend in TypeScript using [Effect](https://effect.website). Define collections, get a full REST API with auth, file storage, access rules, and schema migrations — all with zero config.
+Self-hosted backend in TypeScript using [Effect v4](https://effect.website). Define collections, get a full REST API with auth, file storage, access rules, and schema migrations — all with zero config.
 
 ## Installation
 
@@ -97,15 +97,17 @@ Each collection gets a full set of REST endpoints:
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/:collection` | List (filter, sort, cursor, expand, select) |
-| `GET` | `/api/:collection/:id` | Get one |
-| `POST` | `/api/:collection` | Create |
-| `PATCH` | `/api/:collection/:id` | Update |
-| `DELETE` | `/api/:collection/:id` | Delete |
-| `POST` | `/api/:collection/authWithPassword` | Login (auth collections only) |
+| `GET` | `/api/collections/:collection` | List (filter, sort, cursor, expand, select) |
+| `GET` | `/api/collections/:collection/:id` | Get one |
+| `POST` | `/api/collections/:collection` | Create |
+| `PATCH` | `/api/collections/:collection/:id` | Update |
+| `DELETE` | `/api/collections/:collection/:id` | Delete |
+| `POST` | `/api/collections/:collection/auth-with-password` | Login (auth collections only) |
+| `GET` | `/api/auth/me` | Current authenticated record |
 | `POST` | `/api/auth/logout` | Logout |
 | `POST` | `/api/files/token` | Request protected file token |
 | `GET` | `/api/files/:collection/:id/:filename` | Serve file |
+| `GET` | `/api/_schema` | Schema introspection |
 
 ## Cron jobs
 

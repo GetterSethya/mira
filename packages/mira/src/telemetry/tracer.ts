@@ -1,5 +1,9 @@
+import chalk from "chalk"
 import { Cause, Effect, Exit, Layer, Option, Queue, Schema, Tracer } from "effect"
+
 import { CryptoService } from "@/crypto/index.js"
+
+import type { ConsolePrintOptions } from "./types.js"
 
 export interface CompletedSpan {
   readonly name: string
@@ -13,7 +17,7 @@ export interface CompletedSpan {
   readonly attributes: Record<string, string | number | boolean>
 }
 
-const SpanAttributeValueSchema = Schema.Union(Schema.String, Schema.Number, Schema.Boolean)
+const SpanAttributeValueSchema = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
 
 const SpanOutputSchema = Schema.Struct({
   span: Schema.String,
@@ -21,17 +25,41 @@ const SpanOutputSchema = Schema.Struct({
   spanId: Schema.String,
   kind: Schema.String,
   durationMs: Schema.Number,
-  status: Schema.Literal("ok", "error"),
-  attributes: Schema.optionalWith(Schema.Record({ key: Schema.String, value: SpanAttributeValueSchema }), {
-    exact: true
-  }),
-  parentSpanId: Schema.optionalWith(Schema.String, { exact: true }),
-  error: Schema.optionalWith(Schema.String, { exact: true })
+  status: Schema.Literals(["ok", "error"]),
+  attributes: Schema.optionalKey(Schema.Record(Schema.String, SpanAttributeValueSchema)),
+  parentSpanId: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String)
 })
 
-const encodeSpanLine = Schema.encode(Schema.parseJson(SpanOutputSchema))
+const encodeSpanLine = Schema.encodeEffect(Schema.fromJsonString(SpanOutputSchema))
 
-function printSpan(span: CompletedSpan) {
+const STATUS_COLORS: Record<"ok" | "error", (text: string) => string> = {
+  ok: (text) => chalk.green(text),
+  error: (text) => chalk.red(text)
+}
+
+/**
+ * Renders a completed span for human-readable console output.
+ * Used when `pretty: true` is passed to a console telemetry factory.
+ */
+export function formatPrettySpan(span: CompletedSpan): string {
+  const header = [
+    chalk.dim("[trace]"),
+    chalk.bold(span.name),
+    chalk.magenta(span.kind),
+    chalk.cyan(`${span.durationMs.toFixed(2)}ms`),
+    STATUS_COLORS[span.status](span.status)
+  ].join(" ")
+  const attributes = Object.entries(span.attributes)
+  const attributeText =
+    attributes.length > 0
+      ? " " + chalk.dim(attributes.map(([key, value]) => `${key}=${String(value)}`).join(" "))
+      : ""
+  const errorText = span.error !== undefined ? `\n${chalk.red(span.error)}` : ""
+  return `${header}${attributeText}${errorText}`
+}
+
+function printSpanJson(span: CompletedSpan) {
   const line: {
     span: string
     traceId: string
@@ -59,92 +87,95 @@ function printSpan(span: CompletedSpan) {
   )
 }
 
+function printSpanPretty(span: CompletedSpan) {
+  return Effect.sync(() => console.log(formatPrettySpan(span)))
+}
+
+const makePrintSpan = (pretty: boolean): ((span: CompletedSpan) => Effect.Effect<void>) =>
+  pretty ? printSpanPretty : printSpanJson
+
+class QueueSpan extends Tracer.NativeSpan {
+  readonly #queue: Queue.Queue<CompletedSpan>
+  constructor(
+    queue: Queue.Queue<CompletedSpan>,
+    options: ConstructorParameters<typeof Tracer.NativeSpan>[0]
+  ) {
+    super(options)
+    this.#queue = queue
+  }
+  override end(endTime: bigint, exit: Exit.Exit<unknown, unknown>): void {
+    super.end(endTime, exit)
+    const durationMs = Number(endTime - this.startTime) / 1_000_000
+    const attributes: Record<string, string | number | boolean> = {}
+    for (const [k, v] of this.attributes) {
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        attributes[k] = v
+      }
+    }
+    Queue.offerUnsafe(this.#queue, {
+      name: this.name,
+      traceId: this.traceId,
+      spanId: this.spanId,
+      parentSpanId: Option.isSome(this.parent) ? this.parent.value.spanId : undefined,
+      kind: this.kind,
+      durationMs,
+      status: Exit.isSuccess(exit) ? "ok" : "error",
+      error: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : undefined,
+      attributes
+    })
+  }
+}
+
 export function makeConsoleTracer(
   queue: Queue.Queue<CompletedSpan>,
-  randomBytesSync: (size: number) => Uint8Array
+  _randomBytesSync: (size: number) => Uint8Array
 ): Tracer.Tracer {
   return Tracer.make({
-    span(name, parent, context, links, startTime, kind, options) {
-      const spanId = Buffer.from(randomBytesSync(8)).toString("hex")
-      const traceId = Option.isSome(parent) ? parent.value.traceId : Buffer.from(randomBytesSync(16)).toString("hex")
-      const attrs = new Map<string, unknown>()
-
-      if (options?.attributes) {
-        for (const [k, v] of Object.entries(options.attributes)) {
-          attrs.set(k, v)
-        }
-      }
-
-      let currentStatus: Tracer.SpanStatus = { _tag: "Started", startTime }
-
-      const span: Tracer.Span = {
-        _tag: "Span",
-        name,
-        spanId,
-        traceId,
-        parent,
-        context,
-        links,
-        kind,
-        sampled: true,
-        get status() {
-          return currentStatus
-        },
-        get attributes(): ReadonlyMap<string, unknown> {
-          return attrs
-        },
-        attribute(key: string, value: unknown) {
-          attrs.set(key, value)
-        },
-        end(endTime: bigint, exit: Exit.Exit<unknown, unknown>) {
-          currentStatus = { _tag: "Ended", startTime, endTime, exit }
-          const durationMs = Number(endTime - startTime) / 1_000_000
-          const attributes: Record<string, string | number | boolean> = {}
-          for (const [k, v] of attrs) {
-            if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-              attributes[k] = v
-            }
-          }
-          Queue.unsafeOffer(queue, {
-            name,
-            traceId,
-            spanId,
-            parentSpanId: Option.isSome(parent) ? parent.value.spanId : undefined,
-            kind,
-            durationMs,
-            status: Exit.isSuccess(exit) ? "ok" : "error",
-            error: Exit.isFailure(exit) ? Cause.pretty(exit.cause) : undefined,
-            attributes
-          })
-        },
-        event() {},
-        addLinks() {}
-      }
-
-      return span
-    },
-    context(f, _fiber) {
-      return f()
+    span(options) {
+      return new QueueSpan(queue, {
+        name: options.name,
+        parent: options.parent,
+        annotations: options.annotations,
+        links: options.links,
+        startTime: options.startTime,
+        kind: options.kind,
+        sampled: options.sampled
+      })
     }
   })
 }
 
-export const ConsoleTracerLayer: Layer.Layer<never, never, CryptoService> = Layer.unwrapScoped(
-  Effect.gen(function* () {
-    const cryptoSvc = yield* CryptoService
-    const queue = yield* Queue.unbounded<CompletedSpan>()
+/**
+ * Creates the console tracer layer that drains completed spans to stdout.
+ * When `options.pretty` is `true`, spans are printed with Chalk coloring
+ * instead of as raw JSON lines.
+ *
+ * @param options - Console print options (`pretty`, default `false`)
+ */
+export const makeConsoleTracerLayer = (
+  options: ConsolePrintOptions = {}
+): Layer.Layer<never, never, CryptoService> =>
+  Layer.effect(
+    Tracer.Tracer,
+    Effect.gen(function* () {
+      const cryptoSvc = yield* CryptoService
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const printSpan = makePrintSpan(options.pretty ?? false)
 
-    // Registered first → runs last (LIFO): drain items still in the queue at shutdown.
-    yield* Effect.addFinalizer(() =>
-      Queue.takeAll(queue).pipe(
-        Effect.flatMap(Effect.forEach(printSpan)),
-        Effect.asVoid
+      // Registered first → runs last (LIFO): drain items still in the queue at shutdown.
+      yield* Effect.addFinalizer(() =>
+        Queue.clear(queue).pipe(
+          Effect.flatMap(Effect.forEach(printSpan)),
+          Effect.asVoid
+        )
       )
-    )
 
-    // Registered second → runs first (LIFO): stop the consumer fiber.
-    yield* Effect.forkScoped(Effect.forever(Queue.take(queue).pipe(Effect.tap(printSpan))))
+      // Registered second → runs first (LIFO): stop the consumer fiber.
+      yield* Effect.forkScoped(Effect.forever(Queue.take(queue).pipe(Effect.tap(printSpan))))
 
-    return Layer.setTracer(makeConsoleTracer(queue, (size) => cryptoSvc.randomBytesSync(size)))
-  })
-)
+      return makeConsoleTracer(queue, (size) => cryptoSvc.randomBytesSync(size))
+    })
+  )
+
+/** Console tracer layer using raw JSON output (`pretty: false`). */
+export const ConsoleTracerLayer: Layer.Layer<never, never, CryptoService> = makeConsoleTracerLayer()

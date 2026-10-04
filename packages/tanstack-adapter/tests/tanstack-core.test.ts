@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Effect } from "effect"
 import { MutableRef } from "effect"
-import { HttpClientRequest } from "@effect/platform"
+import { HttpClientRequest } from "effect/http"
 import { ActionKeys, createCollectionAdapter, enrichMutation, enrichQuery } from "../src/_core.js"
 import type { QueryKey } from "../src/_core.js"
 import { makeClientHandler, makeMutationHandler } from "@gettersethya/mira-client"

@@ -1,6 +1,7 @@
-import { Effect, Either } from "effect"
 import { assert, describe, it } from "@effect/vitest"
-import { ThumbnailService, ThumbnailServiceNoopLive, parseThumbSpec } from "@/thumbnail/index.js"
+import { Effect, Result } from "effect"
+
+import { parseThumbSpec,ThumbnailService, ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
 
 describe("parseThumbSpec", () => {
   it("parses WxH as cover", () =>
@@ -37,7 +38,7 @@ describe("parseThumbSpec", () => {
 })
 
 describe("ThumbnailServiceNoopLive", () => {
-  it.scoped("supported always returns false", () =>
+  it.effect("supported always returns false", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       assert.strictEqual(svc.supported("image/jpeg"), false)
@@ -46,14 +47,14 @@ describe("ThumbnailServiceNoopLive", () => {
     }).pipe(Effect.provide(ThumbnailServiceNoopLive))
   )
 
-  it.scoped("resize fails with ThumbnailError", () =>
+  it.effect("resize fails with ThumbnailError", () =>
     Effect.gen(function* () {
       const svc = yield* ThumbnailService
       const result = yield* svc
         .resize(new Uint8Array([1, 2, 3]), "image/jpeg", { width: 100, height: 100, fit: "cover" })
-        .pipe(Effect.either)
-      assert.ok(Either.isLeft(result))
-      assert.strictEqual(result.left._tag, "ThumbnailError")
+        .pipe(Effect.result)
+      assert.ok(Result.isFailure(result))
+      assert.strictEqual(result.failure._tag, "ThumbnailError")
     }).pipe(Effect.provide(ThumbnailServiceNoopLive))
   )
 })

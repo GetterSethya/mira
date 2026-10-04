@@ -1,13 +1,12 @@
+import type { AnyCollectionDef } from "@gettersethya/mira-collection"
+import { Bytes,Field } from "@gettersethya/mira-collection"
+import { Effect, MutableRef, Option, Schedule } from "effect"
+import type { HttpClientRequest } from "effect/http";
 import { describe, expect, it } from "vitest"
 
-import { Effect, MutableRef, Option, Schedule } from "effect"
-import { HttpClient, HttpClientRequest } from "@effect/platform"
-import type { AnyCollectionDef } from "@gettersethya/mira-collection"
-import { Field, Bytes } from "@gettersethya/mira-collection"
 import { makeCollectionClient } from "@/client/collection.js"
-import type { ExecuteFn } from "@/client/handler.js"
-import { makeClientHandler } from "@/client/handler.js"
 import { MiraError } from "@/client/errors.js"
+import type { ExecuteFn } from "@/client/handler.js"
 
 const TestCollection: AnyCollectionDef = {
   name: "tasks",
@@ -59,7 +58,7 @@ function makeTestExecute(
   captured: Array<{ method: string; url: string }>
 ): ExecuteFn {
   return <T>(req: HttpClientRequest.HttpClientRequest) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       captured.push({
         method: req.method,
         url: req.url
@@ -81,7 +80,7 @@ function makeBodyCapturingExecute(
   captured: Array<{ method: string; url: string; bodyIsFormData: boolean }>
 ): ExecuteFn {
   return <T>(req: HttpClientRequest.HttpClientRequest) =>
-    Effect.gen(function* () {
+    Effect.sync(() => {
       captured.push({
         method: req.method,
         url: req.url,
@@ -521,37 +520,37 @@ describe("retryOptions", () => {
   const retrySchedule = Schedule.recurs(2)
 
   it("getList retries on failure and succeeds", async () => {
-    const { execute, callsMade } = makeRetryExecute(2)
+    const { callsMade, execute } = makeRetryExecute(2)
     await makeClient(execute).getList({ retryOptions: { schedule: retrySchedule } }).raw()
     expect(callsMade()).toBe(3)
   })
 
   it("getOne retries on failure and succeeds", async () => {
-    const { execute, callsMade } = makeRetryExecute(2)
+    const { callsMade, execute } = makeRetryExecute(2)
     await makeClient(execute).getOne("1", { retryOptions: { schedule: retrySchedule } }).raw()
     expect(callsMade()).toBe(3)
   })
 
   it("create retries on failure via defaultRetryOptions", async () => {
-    const { execute, callsMade } = makeRetryExecute(2)
+    const { callsMade, execute } = makeRetryExecute(2)
     await makeClient(execute, { schedule: retrySchedule }).create().raw({ title: "t" })
     expect(callsMade()).toBe(3)
   })
 
   it("update retries on failure via defaultRetryOptions", async () => {
-    const { execute, callsMade } = makeRetryExecute(2)
+    const { callsMade, execute } = makeRetryExecute(2)
     await makeClient(execute, { schedule: retrySchedule }).update().raw({ id: "1", data: { title: "t" } })
     expect(callsMade()).toBe(3)
   })
 
   it("delete retries on failure via defaultRetryOptions", async () => {
-    const { execute, callsMade } = makeRetryExecute(2)
+    const { callsMade, execute } = makeRetryExecute(2)
     await makeClient(execute, { schedule: retrySchedule }).delete().raw("1")
     expect(callsMade()).toBe(3)
   })
 
   it("authWithPassword retries on failure via defaultRetryOptions", async () => {
-    const { execute, callsMade } = makeRetryExecute(2)
+    const { callsMade, execute } = makeRetryExecute(2)
     const client = makeCollectionClient({
       collectionName: "users",
       schema: AuthCollectionDef.schema,
@@ -571,7 +570,7 @@ describe("retryOptions", () => {
   })
 
   it("propagates error once the retry schedule is exhausted", async () => {
-    const { execute, callsMade } = makeRetryExecute(Infinity)
+    const { callsMade, execute } = makeRetryExecute(Infinity)
     await expect(
       makeClient(execute).getOne("1", { retryOptions: { schedule: retrySchedule } }).raw()
     ).rejects.toBeInstanceOf(MiraError)
@@ -579,13 +578,13 @@ describe("retryOptions", () => {
   })
 
   it("without retryOptions failure propagates on the first attempt with no retry", async () => {
-    const { execute, callsMade } = makeRetryExecute(Infinity)
+    const { callsMade, execute } = makeRetryExecute(Infinity)
     await expect(makeClient(execute).getOne("1").raw()).rejects.toBeInstanceOf(MiraError)
     expect(callsMade()).toBe(1)
   })
 
   it("defaultRetryOptions applies when no method-level retryOptions is given", async () => {
-    const { execute, callsMade } = makeRetryExecute(2)
+    const { callsMade, execute } = makeRetryExecute(2)
     const client = makeCollectionClient({
       collectionName: "tasks",
       schema: TestCollection.schema,
@@ -603,7 +602,7 @@ describe("retryOptions", () => {
   })
 
   it("method-level retryOptions.schedule overrides defaultRetryOptions for queries", async () => {
-    const { execute, callsMade } = makeRetryExecute(1)
+    const { callsMade, execute } = makeRetryExecute(1)
     const client = makeCollectionClient({
       collectionName: "tasks",
       schema: TestCollection.schema,

@@ -1,17 +1,19 @@
-import { SqlClient, SqlSchema } from "@effect/sql"
 import { Effect, HashMap, Schema } from "effect"
+import type { SqlClient} from "effect/sql";
+import { SqlSchema } from "effect/sql"
+
 import type { CronState } from "./types.js"
 
 export const CRON_STATE_CONFIG_KEY = "cron_state"
 
 const PersistedCronEntrySchema = Schema.Struct({
   lastRunAt: Schema.NullOr(Schema.String),
-  lastStatus: Schema.NullOr(Schema.Literal("success", "error")),
+  lastStatus: Schema.NullOr(Schema.Literals(["success", "error"])),
   lastDurationMs: Schema.NullOr(Schema.Number),
   lastError: Schema.NullOr(Schema.String)
 })
 
-const PersistedCronStateSchema = Schema.Record({ key: Schema.String, value: PersistedCronEntrySchema })
+const PersistedCronStateSchema = Schema.Record(Schema.String, PersistedCronEntrySchema)
 
 export type PersistedCronState = typeof PersistedCronStateSchema.Type
 
@@ -31,8 +33,8 @@ export function loadPersistedCronState(sql: SqlClient.SqlClient) {
     const row = rows[0]
     if (row === undefined) return {} as PersistedCronState
 
-    return yield* Schema.decode(Schema.parseJson(PersistedCronStateSchema))(row.value).pipe(
-      Effect.catchAll((e) =>
+    return yield* Schema.decodeEffect(Schema.fromJsonString(PersistedCronStateSchema))(row.value).pipe(
+      Effect.catch((e) =>
         Effect.logWarning(`[cron] failed to decode persisted cron_state, starting fresh: ${String(e)}`).pipe(
           Effect.as({} as PersistedCronState)
         )
@@ -57,13 +59,13 @@ export function savePersistedCronState(sql: SqlClient.SqlClient, states: HashMap
         lastError: state.lastError !== undefined ? String(state.lastError) : null
       }
     }
-    const json = yield* Schema.encode(Schema.parseJson(PersistedCronStateSchema))(blob)
+    const json = yield* Schema.encodeEffect(Schema.fromJsonString(PersistedCronStateSchema))(blob)
     yield* sql`INSERT OR REPLACE INTO ${sql("_config")} ${sql.insert({ key: CRON_STATE_CONFIG_KEY, value: json })}`
   }).pipe(
     Effect.withSpan("cron.persistence.save", {
       kind: "client",
       attributes: { table: "_config", "cron.config_key": CRON_STATE_CONFIG_KEY }
     }),
-    Effect.catchAllCause((cause) => Effect.logWarning(`[cron] failed to persist cron_state: ${String(cause)}`))
+    Effect.catchCause((cause) => Effect.logWarning(`[cron] failed to persist cron_state: ${String(cause)}`))
   )
 }

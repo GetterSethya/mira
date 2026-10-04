@@ -1,11 +1,12 @@
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer, Schema } from "effect"
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
 import type { CollectionSchema } from "@gettersethya/mira-client"
-import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { Effect, Layer, Schema } from "effect"
+import { SqlClient } from "effect/sql"
+import { expect } from "vitest"
+
 import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
@@ -60,7 +61,7 @@ describe("migrator", () => {
       const rows = yield* sql`SELECT name, schema FROM _collections`
       expect(rows.length).toBe(1)
       expect(rows[0].name).toBe("base")
-      const parsed = yield* Schema.decodeUnknown(Schema.parseJson())(rows[0].schema).pipe(
+      const parsed = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(rows[0].schema).pipe(
         Effect.map((v) => v as CollectionSchema)
       )
       expect(parsed.properties.title).toEqual({ type: "string" })

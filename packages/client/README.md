@@ -69,7 +69,7 @@ const post = await mira.posts.create().raw({
 })
 
 // Update
-const updated = await mira.posts.update().raw(["post-id", { title: "Updated" }])
+const updated = await mira.posts.update().raw({ id: "post-id", data: { title: "Updated" } })
 
 // Delete
 await mira.posts.delete().raw("post-id")
@@ -78,20 +78,22 @@ await mira.posts.delete().raw("post-id")
 ## Authentication
 
 ```typescript
-// Login — token stored automatically (browser) or set manually (server)
+// Login — the server sets an HttpOnly cookie (browser) or returns a token (server)
 const { token, record } = await mira.users.authWithPassword().raw({
   email:    "user@example.com",
   password: "password123",
 })
 
-// Server: set the token after login
+// Browser: restore session state from the persisted cookie on app startup
+await mira.auth.refresh()   // hits GET /api/auth/me
+mira.auth.isLoggedIn()      // boolean — synchronous, reflects last known state
+mira.auth.clear()           // POST /api/auth/logout, then resets the flag
+
+// Server: manage the token manually
 mira.auth.setToken(token)
-
-// Check login state
-mira.auth.loggedIn()  // boolean
-
-// Logout
-mira.auth.logout()
+mira.auth.token             // string | null
+mira.auth.isValid()         // boolean — checks the JWT exp claim
+mira.auth.clear()
 ```
 
 ## Effect-based usage

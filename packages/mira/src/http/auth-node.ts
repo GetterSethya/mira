@@ -1,9 +1,11 @@
 import * as nodeCrypto from "node:crypto"
+
 import { Effect, Layer } from "effect"
+
 import { AuthService } from "./auth.js"
 
 function scryptHash(plain: string, salt: string) {
-  return Effect.async<Buffer, never>((resume) => {
+  return Effect.callback<Buffer, never>((resume) => {
     nodeCrypto.scrypt(plain, salt, 64, (err, key) => {
       if (err) {
         resume(Effect.die(err))

@@ -1,11 +1,12 @@
+import type { CollectionSchema } from "@gettersethya/mira-client"
+import type { FilterNode } from "@gettersethya/mira-client"
+import { FilterNodeSchema } from "@gettersethya/mira-client"
 import { Schema } from "effect"
 import { Effect } from "effect"
-import type { CollectionSchema } from "@gettersethya/mira-client"
-import { ValidationError } from "@/collection-service/errors.js"
-import { FilterNodeSchema } from "@gettersethya/mira-client"
-import type { FilterNode } from "@gettersethya/mira-client"
-import type { SortOrder, WhereClause } from "@/repository/types.js"
+
 import type { RequestCtx } from "@/collection-service/context.js"
+import { ValidationError } from "@/collection-service/errors.js"
+import type { SortOrder } from "@/repository/types.js"
 
 export function parseFilterParam(
   query: RequestCtx["query"],
@@ -21,7 +22,7 @@ export function parseFilterParam(
       catch: () => new ValidationError({ collection: collectionName, issues: ["filter: invalid JSON"] })
     })
 
-    const decoded = yield* Schema.decodeUnknown(FilterNodeSchema)(parsed).pipe(
+    const decoded = yield* Schema.decodeUnknownEffect(FilterNodeSchema)(parsed).pipe(
       Effect.mapError((e) =>
         new ValidationError({
           collection: collectionName,

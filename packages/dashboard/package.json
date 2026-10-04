@@ -1,6 +1,6 @@
 {
   "name": "@gettersethya/mira-dashboard",
-  "version": "0.1.0-alpha.16",
+  "version": "0.1.0-alpha.17",
   "type": "module",
   "description": "Admin dashboard plugin for Mira",
   "author": "Getter Sethya",
@@ -22,8 +22,7 @@
     "dev:ui": "cd ui && pnpm dev"
   },
   "dependencies": {
-    "@effect/language-service": "^0.86.2",
-    "@effect/platform": "^0.96.1",
+    "@effect/language-service": "^0.87.3",
     "@gettersethya/mira": "workspace:*",
     "@gettersethya/mira-client": "workspace:*",
     "@tanstack/svelte-table": "^8.21.3",
@@ -31,13 +30,14 @@
     "jose": "^6.2.3"
   },
   "peerDependencies": {
-    "effect": ">=3.21"
+    "effect": "^4.0.0"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.29.0",
+    "@effect/vitest": "^4.0.0",
     "@types/node": "^25.7.0",
+    "effect": "^4.0.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.6"
+    "vitest": "^5.0.0"
   },
   "publishConfig": {
     "access": "public"

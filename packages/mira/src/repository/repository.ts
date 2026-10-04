@@ -1,7 +1,10 @@
-import { SqlClient, SqlError } from "@effect/sql"
-import { unsafeFragment } from "@effect/sql/Statement"
 import { Context, Effect, Layer, Option } from "effect"
+import type { SqlError } from "effect/sql";
+import { SqlClient } from "effect/sql"
+import { literal } from "effect/sql/Statement"
+
 import { CryptoService } from "@/crypto/index.js"
+
 import type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord, SortOrder } from "./types.js"
 
 /**
@@ -30,7 +33,7 @@ import type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord, S
  * @see RepositoryLive — the default implementation layer
  * @see CollectionService — the layer above that uses Repository
  */
-export class Repository extends Context.Tag("Repository")<
+export class Repository extends Context.Service<
   Repository,
   {
     create(table: string, data: RepoRecord): Effect.Effect<RepoRecord, SqlError.SqlError>
@@ -44,7 +47,7 @@ export class Repository extends Context.Tag("Repository")<
     ): Effect.Effect<CursorResult<RepoRecord>, SqlError.SqlError>
     delete(table: string, id: string): Effect.Effect<Option.Option<void>, SqlError.SqlError>
   }
->() {}
+>()("Repository") {}
 
 function orderFrag(sql: SqlClient.SqlClient, sort?: SortOrder) {
   if (!sort) return sql.literal("")
@@ -151,7 +154,7 @@ export const RepositoryLive = Layer.effect(
 
       viewFilter: (table, filter) =>
         Effect.gen(function* () {
-          const where = unsafeFragment(filter.where.sql, filter.where.params)
+          const where = literal(filter.where.sql, filter.where.params)
           const order = orderFrag(sql, filter.sort)
           const select = buildSelect(sql, filter.fields, filter.expand)
           const joins = buildJoins(sql, filter.expand)
@@ -167,7 +170,7 @@ export const RepositoryLive = Layer.effect(
           const joins = buildJoins(sql, options?.expand)
 
           const items = options?.where
-            ? yield* sql<RepoRecord>`${select} FROM ${sql(table)} t${joins} WHERE ${unsafeFragment(options.where.sql, options.where.params)}${order} LIMIT ${limit}`
+            ? yield* sql<RepoRecord>`${select} FROM ${sql(table)} t${joins} WHERE ${literal(options.where.sql, options.where.params)}${order} LIMIT ${limit}`
             : yield* sql<RepoRecord>`${select} FROM ${sql(table)} t${joins}${order} LIMIT ${limit}`
 
           return { items: items.map((r) => reshapeExpand(r, options?.expand)) }

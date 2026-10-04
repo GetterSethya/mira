@@ -1,7 +1,8 @@
+import { describe, expect, it } from "vitest"
+
 import { AuthCollection } from "@/collection/auth.js"
 import { BaseCollection } from "@/collection/base.js"
 import { Field } from "@/collection/field.js"
-import { describe, expect, it } from "vitest"
 
 describe("Index type safety", () => {
   it("BaseCollection: supports callback pattern", () => {

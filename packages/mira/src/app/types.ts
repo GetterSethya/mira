@@ -1,10 +1,11 @@
-import type { FileSystem, Path } from "@effect/platform"
+import type { FileSystem, Path } from "effect"
 import type { Effect, Layer } from "effect"
-import type { SqlClient } from "@effect/sql"
-import type { AuthService } from "@/http/auth.js"
-import type { HttpServerFactory } from "@/http/server-factory.js"
+import type { SqlClient } from "effect/sql"
+
 import type { CryptoService } from "@/crypto/crypto.js"
 import type { Dialect } from "@/dialect/dialect.js"
+import type { AuthService } from "@/http/auth.js"
+import type { HttpServerFactory } from "@/http/server-factory.js"
 import type { FileStorage } from "@/storage/storage.js"
 
 /**

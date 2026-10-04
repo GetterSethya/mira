@@ -1,22 +1,21 @@
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Either, Layer, Match } from "effect"
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
 import { AuthCollection, BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
-import { Rule } from "@gettersethya/mira-client"
-import { defineRule, applyRulesToCollections } from "@/app/index.js"
-import { RepositoryLive } from "@/repository/repository.js"
+import { Effect, Layer, Match,Result } from "effect"
+import { SqlClient } from "effect/sql"
+import { expect } from "vitest"
+
+import { applyRulesToCollections,defineRule } from "@/app/index.js"
 import { CollectionService, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
-import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
-import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "@/collection-service/errors.js"
 import type { CursorPage, RequestCtx } from "@/collection-service/context.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
-import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
+import { RepositoryLive } from "@/repository/repository.js"
+import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 
 // ---------------------------------------------------------------------------
 // Test layer
@@ -334,12 +333,12 @@ describe("list", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.list(NoRulePosts, null, 10, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ForbiddenError")
-        if (result.left._tag === "ForbiddenError") {
-          expect(result.left.action).toBe("list")
+      const result = yield* svc.list(NoRulePosts, null, 10, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ForbiddenError")
+        if (result.failure._tag === "ForbiddenError") {
+          expect(result.failure.action).toBe("list")
         }
       }
     }).pipe(Effect.provide(testLayer)))
@@ -526,10 +525,10 @@ describe("view", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.view(Posts, "nonexistent123", noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("NotFoundError")
+      const result = yield* svc.view(Posts, "nonexistent123", noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("NotFoundError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -551,10 +550,10 @@ describe("view", () => {
       const created = yield* svc.create(Posts, { title: "Other", authorId: "user2" }, noCtx)
       const id = created["id"]
       if (typeof id !== "string") throw new Error("expected string id")
-      const result = yield* svc.view(ProtectedPosts, id, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("NotFoundError")
+      const result = yield* svc.view(ProtectedPosts, id, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("NotFoundError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -562,10 +561,10 @@ describe("view", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.view(NoRulePosts, "any", noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ForbiddenError")
+      const result = yield* svc.view(NoRulePosts, "any", noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ForbiddenError")
       }
     }).pipe(Effect.provide(testLayer)))
 })
@@ -614,12 +613,12 @@ describe("create", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Posts, { published: true }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
-        if (result.left._tag === "ValidationError") {
-          expect(result.left.issues.some((i) => i.includes("title"))).toBe(true)
+      const result = yield* svc.create(Posts, { published: true }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
+        if (result.failure._tag === "ValidationError") {
+          expect(result.failure.issues.some((i) => i.includes("title"))).toBe(true)
         }
       }
     }).pipe(Effect.provide(testLayer)))
@@ -628,12 +627,12 @@ describe("create", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Posts, { title: "X", id: "hacked" }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
-        if (result.left._tag === "ValidationError") {
-          expect(result.left.issues.some((i) => i.includes("id"))).toBe(true)
+      const result = yield* svc.create(Posts, { title: "X", id: "hacked" }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
+        if (result.failure._tag === "ValidationError") {
+          expect(result.failure.issues.some((i) => i.includes("id"))).toBe(true)
         }
       }
     }).pipe(Effect.provide(testLayer)))
@@ -642,10 +641,10 @@ describe("create", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Posts, { title: "X", seqId: 99 }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
+      const result = yield* svc.create(Posts, { title: "X", seqId: 99 }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -653,10 +652,10 @@ describe("create", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Posts, { title: 42 }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
+      const result = yield* svc.create(Posts, { title: 42 }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -666,12 +665,12 @@ describe("create", () => {
       const svc = yield* CollectionService
       const result = yield* svc
         .create(Posts, { title: "x".repeat(101) }, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
-        if (result.left._tag === "ValidationError") {
-          expect(result.left.issues.some((i) => i.includes("100"))).toBe(true)
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
+        if (result.failure._tag === "ValidationError") {
+          expect(result.failure.issues.some((i) => i.includes("100"))).toBe(true)
         }
       }
     }).pipe(Effect.provide(testLayer)))
@@ -683,10 +682,10 @@ describe("create", () => {
       // ProtectedPosts requires authorId = "user1"; supply "user2" → rule fails
       const result = yield* svc
         .create(ProtectedPosts, { title: "X", authorId: "user2" }, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ForbiddenError")
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ForbiddenError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -702,10 +701,10 @@ describe("create", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(NoRulePosts, { title: "X" }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ForbiddenError")
+      const result = yield* svc.create(NoRulePosts, { title: "X" }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ForbiddenError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -715,10 +714,10 @@ describe("create", () => {
       const svc = yield* CollectionService
       const result = yield* svc
         .create(ActivePosts, { id: "x", title: "X", status: "active" }, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ReadOnlyError")
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ReadOnlyError")
       }
     }).pipe(Effect.provide(testLayer)))
 })
@@ -773,10 +772,10 @@ describe("update", () => {
       if (typeof id !== "string") throw new Error("expected string id")
       const result = yield* svc
         .update(Posts, id, { title: "Y", id: "hacked", created: "1970" }, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -786,10 +785,10 @@ describe("update", () => {
       const svc = yield* CollectionService
       const result = yield* svc
         .update(Posts, "nosuchid1234567", { title: "X" }, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("NotFoundError")
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("NotFoundError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -803,12 +802,12 @@ describe("update", () => {
       if (typeof id !== "string") throw new Error("expected string id")
       const result = yield* svc
         .update(ProtectedPosts, id, { title: "Y" }, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ForbiddenError")
-        if (result.left._tag === "ForbiddenError") {
-          expect(result.left.action).toBe("update")
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ForbiddenError")
+        if (result.failure._tag === "ForbiddenError") {
+          expect(result.failure.action).toBe("update")
         }
       }
     }).pipe(Effect.provide(testLayer)))
@@ -819,10 +818,10 @@ describe("update", () => {
       const svc = yield* CollectionService
       const result = yield* svc
         .update(NoRulePosts, "anyid", { title: "X" }, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ForbiddenError")
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ForbiddenError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -832,10 +831,10 @@ describe("update", () => {
       const svc = yield* CollectionService
       const result = yield* svc
         .update(ActivePosts, "anyid", { title: "X" }, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ReadOnlyError")
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ReadOnlyError")
       }
     }).pipe(Effect.provide(testLayer)))
 })
@@ -863,10 +862,10 @@ describe("delete", () => {
       const id = created["id"]
       if (typeof id !== "string") throw new Error("expected string id")
       yield* svc.delete(Posts, id, noCtx)
-      const result = yield* svc.view(Posts, id, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("NotFoundError")
+      const result = yield* svc.view(Posts, id, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("NotFoundError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -874,10 +873,10 @@ describe("delete", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.delete(Posts, "nosuchid1234567", noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("NotFoundError")
+      const result = yield* svc.delete(Posts, "nosuchid1234567", noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("NotFoundError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -890,12 +889,12 @@ describe("delete", () => {
       if (typeof id !== "string") throw new Error("expected string id")
       const result = yield* svc
         .delete(ProtectedPosts, id, noCtx)
-        .pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ForbiddenError")
-        if (result.left._tag === "ForbiddenError") {
-          expect(result.left.action).toBe("delete")
+        .pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ForbiddenError")
+        if (result.failure._tag === "ForbiddenError") {
+          expect(result.failure.action).toBe("delete")
         }
       }
     }).pipe(Effect.provide(testLayer)))
@@ -904,10 +903,10 @@ describe("delete", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc.delete(NoRulePosts, "anyid", noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ForbiddenError")
+      const result = yield* svc.delete(NoRulePosts, "anyid", noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ForbiddenError")
       }
     }).pipe(Effect.provide(testLayer)))
 
@@ -915,10 +914,10 @@ describe("delete", () => {
     Effect.gen(function* () {
       yield* setupViewTables
       const svc = yield* CollectionService
-      const result = yield* svc.delete(ActivePosts, "anyid", noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ReadOnlyError")
+      const result = yield* svc.delete(ActivePosts, "anyid", noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ReadOnlyError")
       }
     }).pipe(Effect.provide(testLayer)))
 })
@@ -932,10 +931,10 @@ describe("error callback — integration", () => {
     Effect.gen(function* () {
       yield* setupScoredTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Scored, { name: "x", score: 50 }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result) && result.left._tag === "ValidationError") {
-        expect(result.left.issues.some((i) => i.includes("Name too short"))).toBe(true)
+      const result = yield* svc.create(Scored, { name: "x", score: 50 }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
+        expect(result.failure.issues.some((i) => i.includes("Name too short"))).toBe(true)
       }
     }).pipe(Effect.provide(scoredTestLayer)))
 
@@ -943,10 +942,10 @@ describe("error callback — integration", () => {
     Effect.gen(function* () {
       yield* setupScoredTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Scored, { name: "ok", score: -1 }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result) && result.left._tag === "ValidationError") {
-        expect(result.left.issues.some((i) => i.includes("Score below zero"))).toBe(true)
+      const result = yield* svc.create(Scored, { name: "ok", score: -1 }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
+        expect(result.failure.issues.some((i) => i.includes("Score below zero"))).toBe(true)
       }
     }).pipe(Effect.provide(scoredTestLayer)))
 
@@ -954,10 +953,10 @@ describe("error callback — integration", () => {
     Effect.gen(function* () {
       yield* setupScoredTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Scored, { name: "ok", score: 200 }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result) && result.left._tag === "ValidationError") {
-        expect(result.left.issues.some((i) => i.includes("Score above 100"))).toBe(true)
+      const result = yield* svc.create(Scored, { name: "ok", score: 200 }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
+        expect(result.failure.issues.some((i) => i.includes("Score above 100"))).toBe(true)
       }
     }).pipe(Effect.provide(scoredTestLayer)))
 
@@ -965,10 +964,10 @@ describe("error callback — integration", () => {
     Effect.gen(function* () {
       yield* setupScoredTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Scored, { score: 50 }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result) && result.left._tag === "ValidationError") {
-        expect(result.left.issues.some((i) => i.includes("Name is required"))).toBe(true)
+      const result = yield* svc.create(Scored, { score: 50 }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
+        expect(result.failure.issues.some((i) => i.includes("Name is required"))).toBe(true)
       }
     }).pipe(Effect.provide(scoredTestLayer)))
 
@@ -976,10 +975,10 @@ describe("error callback — integration", () => {
     Effect.gen(function* () {
       yield* setupScoredTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Scored, { name: 999, score: 50 }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result) && result.left._tag === "ValidationError") {
-        expect(result.left.issues.some((i) => i.includes("Invalid name"))).toBe(true)
+      const result = yield* svc.create(Scored, { name: 999, score: 50 }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
+        expect(result.failure.issues.some((i) => i.includes("Invalid name"))).toBe(true)
       }
     }).pipe(Effect.provide(scoredTestLayer)))
 
@@ -990,12 +989,12 @@ describe("error callback — integration", () => {
       const created = yield* svc.create(Scored, { name: "ok", score: 50 }, noCtx)
       const id = created["id"]
       if (typeof id !== "string") throw new Error("expected string id")
-      const result = yield* svc.update(Scored, id, { name: "x" }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
-        if (result.left._tag === "ValidationError") {
-          expect(result.left.issues.length).toBeGreaterThan(0)
+      const result = yield* svc.update(Scored, id, { name: "x" }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
+        if (result.failure._tag === "ValidationError") {
+          expect(result.failure.issues.length).toBeGreaterThan(0)
         }
       }
     }).pipe(Effect.provide(scoredTestLayer)))
@@ -1041,10 +1040,10 @@ describe("literalText integration", () => {
     Effect.gen(function* () {
       yield* setupRolesTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(Roles, { role: "superadmin" }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
+      const result = yield* svc.create(Roles, { role: "superadmin" }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
       }
     }).pipe(Effect.provide(rolesTestLayer)))
 
@@ -1055,10 +1054,10 @@ describe("literalText integration", () => {
       const created = yield* svc.create(Roles, { role: "admin" }, noCtx)
       const id = created["id"]
       if (typeof id !== "string") throw new Error("expected string id")
-      const result = yield* svc.update(Roles, id, { role: "superadmin" }, noCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
+      const result = yield* svc.update(Roles, id, { role: "superadmin" }, noCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
       }
     }).pipe(Effect.provide(rolesTestLayer)))
 
@@ -1136,10 +1135,10 @@ describe("AuthCollection create", () => {
     Effect.gen(function* () {
       yield* setupSuperAdminTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(SuperAdmin, { email: "a@b.com", password: "pw", id: "custom-id" }, adminCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
+      const result = yield* svc.create(SuperAdmin, { email: "a@b.com", password: "pw", id: "custom-id" }, adminCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
       }
     }).pipe(Effect.provide(superAdminTestLayer)))
 
@@ -1147,10 +1146,10 @@ describe("AuthCollection create", () => {
     Effect.gen(function* () {
       yield* setupSuperAdminTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(SuperAdmin, { password: "pw" }, adminCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
+      const result = yield* svc.create(SuperAdmin, { password: "pw" }, adminCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
       }
     }).pipe(Effect.provide(superAdminTestLayer)))
 
@@ -1158,10 +1157,10 @@ describe("AuthCollection create", () => {
     Effect.gen(function* () {
       yield* setupSuperAdminTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(SuperAdmin, { email: "notanemail", password: "pw" }, adminCtx).pipe(Effect.either)
-      expect(Either.isLeft(result)).toBe(true)
-      if (Either.isLeft(result)) {
-        expect(result.left._tag).toBe("ValidationError")
+      const result = yield* svc.create(SuperAdmin, { email: "notanemail", password: "pw" }, adminCtx).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
       }
     }).pipe(Effect.provide(superAdminTestLayer)))
 

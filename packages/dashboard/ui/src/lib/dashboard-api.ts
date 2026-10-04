@@ -1,5 +1,5 @@
-import { FetchHttpClient, HttpClient, HttpClientRequest as HCR } from "@effect/platform"
-import type { HttpBodyError } from "@effect/platform/HttpBody"
+import { FetchHttpClient, HttpClient, HttpClientRequest as HCR } from "effect/http"
+import type { HttpBodyError } from "effect/http/HttpBody"
 import { Data, Effect, Exit, Cause, Option } from "effect"
 import type {
   ApiCollectionSchema,
@@ -35,10 +35,9 @@ function execute<T>(req: HCR.HttpClientRequest): DashboardEffect<T> {
 
     return (yield* res.json) as T
   }).pipe(
-    Effect.catchTags({
-      RequestError: (e) => Effect.fail(new DashboardApiError({ status: 0, body: e.message })),
-      ResponseError: (e) => Effect.fail(new DashboardApiError({ status: e.response.status, body: e.message }))
-    })
+    Effect.catchTag("HttpClientError", (e) =>
+      Effect.fail(new DashboardApiError({ status: e.response?.status ?? 0, body: e.message }))
+    )
   )
 }
 
@@ -52,7 +51,7 @@ function executeWithBody<T>(reqEffect: Effect.Effect<HCR.HttpClientRequest, Http
 export async function run<T>(effect: DashboardEffect<T>) {
   const exit = await Effect.runPromiseExit(effect.pipe(Effect.provide(FetchHttpClient.layer)))
   if (Exit.isSuccess(exit)) return exit.value
-  return Promise.reject(Option.getOrElse(Cause.failureOption(exit.cause), () => Cause.squash(exit.cause)))
+  return Promise.reject(Option.getOrElse(Cause.findErrorOption(exit.cause), () => Cause.squash(exit.cause)))
 }
 
 export interface CronApiState {

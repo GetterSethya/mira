@@ -1,6 +1,6 @@
 {
   "name": "@gettersethya/mira-collection",
-  "version": "0.1.0-alpha.16",
+  "version": "0.1.0-alpha.17",
   "type": "module",
   "description": "Collection definitions, filter DSL, and rule builder for Mira",
   "author": "Getter Sethya",
@@ -21,14 +21,15 @@
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\""
   },
   "peerDependencies": {
-    "effect": ">=3.21"
+    "effect": "^4.0.0"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.29.0",
+    "@effect/vitest": "^4.0.0",
     "@types/node": "^25.7.0",
+    "effect": "^4.0.0",
     "tsc-alias": "^1.8.17",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.6"
+    "vitest": "^5.0.0"
   },
   "publishConfig": {
     "access": "public"

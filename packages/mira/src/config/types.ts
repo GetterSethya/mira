@@ -28,4 +28,12 @@ export interface AppConfigShape {
   readonly useS3: boolean
   readonly s3Config: Option.Option<S3Config>
   readonly logRetentionDays: number
+  /**
+   * @internal
+   * Called when the HTTP server binds to a port different from the configured
+   * one (the configured port was in use and the app auto-incremented). Updates
+   * `port` and `applicationUrl` so they reflect the actual listening port.
+   * Optional so manually-constructed configs (tests) need not provide it.
+   */
+  readonly updateBoundPort?: (port: number) => void
 }

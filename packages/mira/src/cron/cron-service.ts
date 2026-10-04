@@ -1,6 +1,9 @@
-import { SqlClient } from "@effect/sql"
 import { Cause, Context, Effect, Exit, HashMap, Layer, Option, Ref } from "effect"
-import type { HookService } from "@/hooks/hook-service.js"
+import { SqlClient } from "effect/sql"
+
+import { HookService as HookServiceTag } from "@/hooks/hook-service.js"
+
+import { loadPersistedCronState, savePersistedCronState } from "./persistence.js"
 import type {
   CronContext,
   CronDef,
@@ -10,22 +13,20 @@ import type {
   CronState
 } from "./types.js"
 import { CronNotFoundError } from "./types.js"
-import { HookService as HookServiceTag } from "@/hooks/hook-service.js"
-import { loadPersistedCronState, savePersistedCronState } from "./persistence.js"
 
-export class CronService extends Context.Tag("CronService")<
+export class CronService extends Context.Service<
   CronService,
   {
     getAll(): Effect.Effect<ReadonlyArray<CronState>, never, never>
     runNow(name: string): Effect.Effect<void, CronNotFoundError, never>
   }
->() {}
+>()("CronService") {}
 
 function executeAndTrack<R>(
   def: CronDef<R>,
   stateRef: Ref.Ref<HashMap.HashMap<string, CronState>>,
   ctx: CronContext,
-  hookService: HookService["Type"],
+  hookService: Context.Service.Shape<typeof HookServiceTag>,
   env: Context.Context<R>,
   sql: SqlClient.SqlClient
 ) {
@@ -39,7 +40,6 @@ function executeAndTrack<R>(
     const startedAt = Date.now()
     const exit = yield* Effect.exit(
       def.handler().pipe(
-        Effect.provide(env),
         Effect.withSpan("cron.execute", { kind: "internal" })
       )
     )
@@ -66,11 +66,11 @@ function executeAndTrack<R>(
         status: "success",
         error: undefined
       }
-      yield* Effect.forkDaemon(hookService.runCronSuccess(resultCtx))
-      yield* Effect.forkDaemon(hookService.runCronFinished(finishedCtx))
+      yield* Effect.forkDetach(hookService.runCronSuccess(resultCtx))
+      yield* Effect.forkDetach(hookService.runCronFinished(finishedCtx))
     } else {
-      const maybeFailure = Cause.failureOption(exit.cause)
-      const defects = Array.from(Cause.defects(exit.cause))
+      const maybeFailure = Cause.findErrorOption(exit.cause)
+      const defects = exit.cause.reasons.filter(Cause.isDieReason).map((reason) => reason.defect)
       const error: unknown = Option.isSome(maybeFailure) ? maybeFailure.value : defects[0]
       const updated = yield* Ref.updateAndGet(stateRef, (m) =>
         HashMap.set(m, def.name, {
@@ -93,22 +93,23 @@ function executeAndTrack<R>(
         status: "error",
         error
       }
-      yield* Effect.forkDaemon(hookService.runCronError(errorCtx))
-      yield* Effect.forkDaemon(hookService.runCronFinished(finishedCtx))
+      yield* Effect.forkDetach(hookService.runCronError(errorCtx))
+      yield* Effect.forkDetach(hookService.runCronFinished(finishedCtx))
       return yield* Effect.failCause(exit.cause)
     }
   }).pipe(
     Effect.withSpan(`cron.server ${def.name}`, {
       kind: "server",
       attributes: { "cron.name": def.name, "cron.scheduled_at": ctx.scheduledAt.toISOString() }
-    })
+    }),
+    Effect.provideContext(env)
   )
 }
 
 function runOneTick<R>(
   def: CronDef<R>,
   stateRef: Ref.Ref<HashMap.HashMap<string, CronState>>,
-  hookService: HookService["Type"],
+  hookService: Context.Service.Shape<typeof HookServiceTag>,
   env: Context.Context<R>,
   sql: SqlClient.SqlClient
 ) {
@@ -117,14 +118,14 @@ function runOneTick<R>(
     let ctx: CronContext = { name: def.name, scheduledAt }
     ctx = yield* hookService.runCronStart(ctx)
     ctx = yield* hookService.runCronExecute(ctx)
-    yield* Effect.forkDaemon(
-      executeAndTrack(def, stateRef, ctx, hookService, env, sql).pipe(Effect.catchAllCause(() => Effect.void))
+    yield* Effect.forkDetach(
+      executeAndTrack(def, stateRef, ctx, hookService, env, sql).pipe(Effect.catchCause(() => Effect.void))
     )
   })
 }
 
 export function makeCronServiceLayer<R>(defs: ReadonlyArray<CronDef<R>>) {
-  return Layer.scoped(
+  return Layer.effect(
     CronService,
     Effect.gen(function* () {
       const seen = new Set<string>()
@@ -184,9 +185,9 @@ export function makeCronServiceLayer<R>(defs: ReadonlyArray<CronDef<R>>) {
             }
             const scheduledAt = new Date()
             const ctx: CronContext = { name, scheduledAt }
-            yield* Effect.forkDaemon(
+            yield* Effect.forkDetach(
               executeAndTrack(def, stateRef, ctx, hookService, env, sql).pipe(
-                Effect.catchAllCause(() => Effect.void)
+                Effect.catchCause(() => Effect.void)
               )
             )
           })

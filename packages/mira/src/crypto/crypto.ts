@@ -1,6 +1,7 @@
-import { Context, Effect } from "effect"
+import type { Effect } from "effect";
+import { Context } from "effect"
 
-export class CryptoService extends Context.Tag("CryptoService")<
+export class CryptoService extends Context.Service<
   CryptoService,
   {
     /** Synchronous variant — for use in callbacks that cannot yield an Effect. */
@@ -8,4 +9,4 @@ export class CryptoService extends Context.Tag("CryptoService")<
     randomBytes(size: number): Effect.Effect<Uint8Array>
     randomUUID(): Effect.Effect<string>
   }
->() {}
+>()("CryptoService") {}

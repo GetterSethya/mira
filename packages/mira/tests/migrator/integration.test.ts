@@ -1,16 +1,17 @@
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer } from "effect"
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
 import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
-import { schemaToColumns } from "@/migrator/schema-diff.js"
-import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { Effect, Layer } from "effect"
+import { SqlClient } from "effect/sql"
+import { expect } from "vitest"
+
 import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
+import { schemaToColumns } from "@/migrator/schema-diff.js"
 
 const Users = AuthCollection.define("users", {
   displayName: Field.text()

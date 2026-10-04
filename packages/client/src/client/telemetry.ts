@@ -1,5 +1,6 @@
-import { HttpClientRequest as HCR } from "@effect/platform"
 import type { FilterNode } from "@gettersethya/mira-collection"
+import { HttpClientRequest as HCR } from "effect/http"
+
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler } from "./handler.js"
 
@@ -21,8 +22,8 @@ export type ApiCollectionSchema = {
   name: string
   kind: "base" | "auth" | "view"
   fields: Record<string, ApiFieldSchema>
-  required?: string[]
-  indexes?: unknown[]
+  required?: Array<string>
+  indexes?: Array<unknown>
   rules?: unknown
   viewQuery?: string
 }
@@ -85,7 +86,7 @@ export type TelemetryClient = {
    * Returns an array of `CollectionSchema` objects describing each collection's
    * fields, kind, indexes, rules, and (for view collections) the SQL view query.
    */
-  getSchema(): ClientHandler<ApiCollectionSchema[]>
+  getSchema(): ClientHandler<Array<ApiCollectionSchema>>
 }
 
 function buildQueryParams(params: Record<string, string | undefined>): string {
@@ -105,7 +106,7 @@ export function makeTelemetryClient(execute: ExecuteFn): TelemetryClient {
         after: opts?.cursor != null ? String(opts.cursor) : undefined,
         filter: opts?.filter !== undefined ? JSON.stringify(opts.filter) : undefined,
       })
-      return makeClientHandler(execute(HCR.get(`/_telemetry/logs${qs}`)))
+      return makeClientHandler(execute(HCR.get(`/api/_telemetry/logs${qs}`)))
     },
 
     getSpans: (opts) => {
@@ -115,7 +116,7 @@ export function makeTelemetryClient(execute: ExecuteFn): TelemetryClient {
         traceId: opts?.traceId,
         filter: opts?.filter !== undefined ? JSON.stringify(opts.filter) : undefined,
       })
-      return makeClientHandler(execute(HCR.get(`/_telemetry/spans${qs}`)))
+      return makeClientHandler(execute(HCR.get(`/api/_telemetry/spans${qs}`)))
     },
 
     getSchema: () => makeClientHandler(execute(HCR.get("/api/_schema"))),

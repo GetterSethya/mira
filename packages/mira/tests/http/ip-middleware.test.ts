@@ -1,19 +1,21 @@
-import { HttpClient, HttpClientRequest, HttpServer, HttpServerResponse } from "@effect/platform"
-import { NodeHttpServer } from "@effect/platform-node"
-import { Chunk, Effect, Layer, Queue } from "effect"
 import { randomBytes } from "node:crypto"
+
+import { NodeHttpServer } from "@effect/platform-node"
 import { describe, it } from "@effect/vitest"
+import { Effect, Layer, Queue, Tracer } from "effect"
+import { HttpClient, HttpClientRequest, HttpServer, HttpServerResponse } from "effect/http"
 import { expect } from "vitest"
+
+import { ipAnnotationMiddleware } from "@/http/ip-middleware.js"
 import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
-import { ipAnnotationMiddleware } from "@/http/ip-middleware.js"
 
 const testApp = ipAnnotationMiddleware(Effect.succeed(HttpServerResponse.text("ok")))
 
 function makeIpTestLayer(queue: Queue.Queue<CompletedSpan>) {
   return Layer.mergeAll(
     NodeHttpServer.layerTest,
-    Layer.setTracer(makeConsoleTracer(queue, (size) => randomBytes(size))),
+    Layer.succeed(Tracer.Tracer, makeConsoleTracer(queue, (size) => randomBytes(size))),
   )
 }
 
@@ -22,7 +24,7 @@ function findSpanWithIp(spans: ReadonlyArray<CompletedSpan>): CompletedSpan | un
 }
 
 describe("ipAnnotationMiddleware", () => {
-  it.scoped("x-forwarded-for — single IP annotates span", () =>
+  it.effect("x-forwarded-for — single IP annotates span", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
       yield* Effect.gen(function* () {
@@ -32,13 +34,13 @@ describe("ipAnnotationMiddleware", () => {
           HttpClient.execute,
         )
       }).pipe(Effect.provide(makeIpTestLayer(queue)))
-      const spans = Chunk.toArray(yield* Queue.takeAll(queue))
+      const spans = (yield* Queue.clear(queue))
       const span = findSpanWithIp(spans)
       expect(span?.attributes["http.client_ip"]).toBe("1.2.3.4")
     })
   )
 
-  it.scoped("x-forwarded-for — multiple IPs uses first entry", () =>
+  it.effect("x-forwarded-for — multiple IPs uses first entry", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
       yield* Effect.gen(function* () {
@@ -48,13 +50,13 @@ describe("ipAnnotationMiddleware", () => {
           HttpClient.execute,
         )
       }).pipe(Effect.provide(makeIpTestLayer(queue)))
-      const spans = Chunk.toArray(yield* Queue.takeAll(queue))
+      const spans = (yield* Queue.clear(queue))
       const span = findSpanWithIp(spans)
       expect(span?.attributes["http.client_ip"]).toBe("1.2.3.4")
     })
   )
 
-  it.scoped("x-real-ip fallback when no x-forwarded-for", () =>
+  it.effect("x-real-ip fallback when no x-forwarded-for", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
       yield* Effect.gen(function* () {
@@ -64,20 +66,20 @@ describe("ipAnnotationMiddleware", () => {
           HttpClient.execute,
         )
       }).pipe(Effect.provide(makeIpTestLayer(queue)))
-      const spans = Chunk.toArray(yield* Queue.takeAll(queue))
+      const spans = (yield* Queue.clear(queue))
       const span = findSpanWithIp(spans)
       expect(span?.attributes["http.client_ip"]).toBe("2.3.4.5")
     })
   )
 
-  it.scoped("no IP headers — http.client_ip attribute absent", () =>
+  it.effect("no IP headers — http.client_ip attribute absent", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
       yield* Effect.gen(function* () {
         yield* testApp.pipe(HttpServer.serveEffect())
         yield* HttpClient.get("/")
       }).pipe(Effect.provide(makeIpTestLayer(queue)))
-      const spans = Chunk.toArray(yield* Queue.takeAll(queue))
+      const spans = (yield* Queue.clear(queue))
       const span = findSpanWithIp(spans)
       expect(span).toBeUndefined()
     })

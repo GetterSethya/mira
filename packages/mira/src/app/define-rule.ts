@@ -1,5 +1,5 @@
-import type { FieldsMap, RuleMap, FieldDef } from "@gettersethya/mira-client"
-import type { RuleBuilder, FieldOperand } from "@gettersethya/mira-client"
+import type { FieldDef,FieldsMap, RuleMap } from "@gettersethya/mira-client"
+import type { FieldOperand,RuleBuilder } from "@gettersethya/mira-client"
 import { makeRuleBuilder, toChainable } from "@gettersethya/mira-client"
 
 type BaseSystemFieldDefs = {

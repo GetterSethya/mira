@@ -1,14 +1,15 @@
+import type { Cron, Effect, Schedule } from "effect"
 import { Data } from "effect"
-import type { Effect, Schedule } from "effect"
+
 import type { PlatformServices } from "@/app/types.js"
+import type { CollectionService } from "@/collection-service/collection-service.js"
 import type { AppConfig } from "@/config/index.js"
 import type { Repository } from "@/repository/index.js"
-import type { CollectionService } from "@/collection-service/collection-service.js"
 
 export interface CronDef<R = PlatformServices | AppConfig | Repository | CollectionService> {
   readonly name: string
   readonly description?: string
-  readonly schedule: Schedule.Schedule<unknown, unknown, never>
+  readonly schedule: Schedule.Schedule<unknown, unknown, Cron.CronParseError>
   readonly handler: () => Effect.Effect<void, unknown, R>
 }
 

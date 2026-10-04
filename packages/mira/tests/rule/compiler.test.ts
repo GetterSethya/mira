@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
-
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { Rule } from "@gettersethya/mira-client"
+import { describe, expect, it } from "vitest"
+
 import type { CompileCtx } from "@/rule/compiler.js"
 import { compile, compileOperand } from "@/rule/compiler.js"
 

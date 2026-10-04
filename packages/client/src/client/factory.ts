@@ -1,8 +1,9 @@
-import { HttpClient, HttpClientRequest as HCR } from "@effect/platform"
-import type { HttpClientError } from "@effect/platform/HttpClientError"
-import type { HttpBodyError } from "@effect/platform/HttpBody"
-import { Effect, MutableRef } from "effect"
 import type { AnyCollectionDef, FieldsMap } from "@gettersethya/mira-collection"
+import { Effect, MutableRef } from "effect"
+import { HttpClient, HttpClientRequest as HCR } from "effect/http"
+import type { HttpBodyError } from "effect/http/HttpBody"
+import type { HttpClientError } from "effect/http/HttpClientError"
+
 import type { BrowserAuth, ServerAuth } from "./auth.js"
 import { makeBrowserAuth, makeServerAuth } from "./auth.js"
 import type { CollectionClient, RetryOptions } from "./collection.js"
@@ -10,9 +11,9 @@ import { makeCollectionClient } from "./collection.js"
 import { MiraError } from "./errors.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler as makeHandler } from "./handler.js"
-import type { AnyAuthCollectionDef, InferRecord } from "./types.js"
 import type { TelemetryClient } from "./telemetry.js"
 import { makeTelemetryClient } from "./telemetry.js"
+import type { AnyAuthCollectionDef, InferRecord } from "./types.js"
 
 type CollectionAdapter = <F extends FieldsMap>(client: CollectionClient<F>, name: string) => CollectionClient<F>
 
@@ -62,8 +63,8 @@ function catchAllErrors<T>(
 ): Effect.Effect<T, MiraError, HttpClient.HttpClient> {
   return effect.pipe(
     Effect.catchTags({
-      RequestError: (e) => Effect.fail(new MiraError({ status: 0, body: e.message })),
-      ResponseError: (e) => Effect.fail(new MiraError({ status: e.response.status, body: e.message })),
+      HttpClientError: (e) =>
+        Effect.fail(new MiraError({ status: e.response?.status ?? 0, body: e.message })),
       HttpBodyError: (e) => Effect.fail(new MiraError({ status: 500, body: String(e) }))
     })
   )
@@ -152,7 +153,7 @@ function createMiraClientInternal(
       auth: makeAuth(),
       telemetry: makeTelemetryClient(execute),
       withCollections,
-      me: (<C extends AnyAuthCollectionDef>(def?: C) => {
+      me: (<C extends AnyAuthCollectionDef>(_def?: C) => {
         return makeClientHandler(
           execute<{
             collection: string
@@ -241,6 +242,6 @@ export function createMiraClient(
   baseUrl = "/",
   opts: { type?: "browser" | "server"; defaultRetryOptions?: RetryOptions } = {}
 ) {
-  const { type = "browser", defaultRetryOptions } = opts
+  const { defaultRetryOptions, type = "browser" } = opts
   return createMiraClientInternal(baseUrl, type, defaultRetryOptions) as BrowserMiraClient | ServerMiraClient
 }

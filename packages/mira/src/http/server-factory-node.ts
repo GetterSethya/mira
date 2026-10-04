@@ -1,6 +1,8 @@
-import { NodeHttpServer } from "@effect/platform-node"
 import { createServer } from "node:http"
+
+import { NodeHttpServer } from "@effect/platform-node"
 import { Layer } from "effect"
+
 import { HttpServerFactory } from "./server-factory.js"
 
 export const NodeHttpServerFactoryLayer = Layer.succeed(

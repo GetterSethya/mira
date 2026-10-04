@@ -1,38 +1,44 @@
-import { SqlClient, SqlError } from "@effect/sql"
-import { Context, Effect, Layer, Logger, ParseResult, Schema } from "effect"
 import type { CollectionSchema } from "@gettersethya/mira-client"
-import { computePlan, diffSchemas } from "./schema-diff.js"
+import { Context, Effect, Layer, References, Schema } from "effect"
+import { SqlClient, SqlError } from "effect/sql"
+
 import type { DialectType } from "@/dialect/dialect.js"
 import { Dialect } from "@/dialect/dialect.js"
-import type { ColumnDef, MigrationPlan, MigrationStep, MigrateOptions, NamedSchema } from "./types.js"
+
+import { computePlan, diffSchemas } from "./schema-diff.js"
+import type { ColumnDef, MigrateOptions, MigrationPlan, MigrationStep, NamedSchema } from "./types.js"
 import { toEffectLogLevel } from "./types.js"
 
-const parseJsonSchema = Schema.parseJson()
+const parseJsonSchema = Schema.fromJsonString(Schema.Unknown)
+
+function sqlError(message: string): SqlError.SqlError {
+  return new SqlError.SqlError({ reason: new SqlError.UnknownError({ cause: undefined, message }) })
+}
 
 function decodeStoredSchema(json: string) {
-  return Schema.decodeUnknown(parseJsonSchema)(json).pipe(
+  return Schema.decodeUnknownEffect(parseJsonSchema)(json).pipe(
     Effect.mapError(
-      (e: ParseResult.ParseError) => new SqlError.SqlError({ message: `Invalid stored schema: ${e.message}` })
+      (e: Schema.SchemaError) => sqlError(`Invalid stored schema: ${e.message}`)
     ),
     Effect.map((v) => v as CollectionSchema)
   )
 }
 
 function encodeStoredSchema(schema: CollectionSchema) {
-  return Schema.encode(parseJsonSchema)(schema).pipe(
+  return Schema.encodeEffect(parseJsonSchema)(schema).pipe(
     Effect.mapError(
-      (e: ParseResult.ParseError) => new SqlError.SqlError({ message: `Failed to serialize schema: ${e.message}` })
+      (e: Schema.SchemaError) => sqlError(`Failed to serialize schema: ${e.message}`)
     )
   )
 }
 
-const collectionsColumns: ColumnDef[] = [
+const collectionsColumns: Array<ColumnDef> = [
   { name: "name", type: "text", nullable: false, primaryKey: true },
   { name: "schema", type: "text", nullable: false },
   { name: "updated_at", type: "text", nullable: false }
 ]
 
-const migrationsColumns: ColumnDef[] = [
+const migrationsColumns: Array<ColumnDef> = [
   { name: "id", type: "text", nullable: false, primaryKey: true },
   { name: "name", type: "text", nullable: false },
   { name: "steps", type: "text", nullable: false },
@@ -40,7 +46,7 @@ const migrationsColumns: ColumnDef[] = [
 ]
 
 /** DDL steps to bootstrap the `_collections` and `_migrations` system tables on first run. */
-export const SYSTEM_TABLE_STEPS: MigrationStep[] = [
+export const SYSTEM_TABLE_STEPS: Array<MigrationStep> = [
   {
     kind: "createSystemTable",
     table: "_collections",
@@ -62,21 +68,21 @@ export const SYSTEM_TABLE_STEPS: MigrationStep[] = [
  *
  * Inject via `MigratorLive` layer.
  */
-export class Migrator extends Context.Tag("Migrator")<
+export class Migrator extends Context.Service<
   Migrator,
   {
-    readonly migrate: (schemas: NamedSchema[], options?: MigrateOptions) => Effect.Effect<void, SqlError.SqlError>
-    readonly plan: (schemas: NamedSchema[], options?: MigrateOptions) => Effect.Effect<MigrationPlan, SqlError.SqlError>
+    readonly migrate: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<void, SqlError.SqlError>
+    readonly plan: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<MigrationPlan, SqlError.SqlError>
     readonly status: (
-      schemas: NamedSchema[]
+      schemas: Array<NamedSchema>
     ) => Effect.Effect<Array<{ name: string; status: "current" | "ahead" | "behind" }>, SqlError.SqlError>
   }
->() {}
+>()("Migrator") {}
 
 function migrateImplWith(
   sql: SqlClient.SqlClient,
   dialect: DialectType,
-  schemas: NamedSchema[],
+  schemas: Array<NamedSchema>,
   options?: MigrateOptions
 ) {
   return Effect.gen(function* () {
@@ -120,15 +126,15 @@ function migrateImplWith(
     yield* Effect.logDebug("Starting transaction")
     yield* sql`BEGIN TRANSACTION`
 
-    yield* Effect.catchAll(
+    yield* Effect.catch(
       Effect.gen(function* () {
         for (let i = 0; i < plan.steps.length; i++) {
           const step = plan.steps[i]
           yield* Effect.logInfo(
             `Step [${i + 1}/${plan.steps.length}]: ${step.kind} on ${"table" in step ? step.table : ""}`
           )
-          const stepJson = yield* Schema.encode(parseJsonSchema)(step).pipe(
-            Effect.mapError((e: ParseResult.ParseError) => new SqlError.SqlError({ message: String(e) }))
+          const stepJson = yield* Schema.encodeEffect(parseJsonSchema)(step).pipe(
+            Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
           )
           yield* Effect.logDebug(`Step details: ${stepJson}`)
           for (const stmt of dialect.translate(step)) {
@@ -137,8 +143,8 @@ function migrateImplWith(
           }
           yield* Effect.logDebug(`Step ${i + 1} applied successfully`)
         }
-        const stepsJson = yield* Schema.encode(parseJsonSchema)(plan.steps).pipe(
-          Effect.mapError((e: ParseResult.ParseError) => new SqlError.SqlError({ message: String(e) }))
+        const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
+          Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
         )
         const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
         const migrationName = schemas.map((s) => s.name).join(", ")
@@ -165,7 +171,7 @@ function migrateImplWith(
 function planImplWith(
   sql: SqlClient.SqlClient,
   dialect: DialectType,
-  schemas: NamedSchema[],
+  schemas: Array<NamedSchema>,
   options?: MigrateOptions
 ) {
   return Effect.gen(function* () {
@@ -185,15 +191,15 @@ function planImplWith(
     const plan = computePlan(schemas, storedRecord, options)
 
     yield* Effect.logInfo(`Plan: ${plan.steps.length} steps`)
-    const planJson = yield* Schema.encode(parseJsonSchema)(plan.steps).pipe(
-      Effect.mapError((e: ParseResult.ParseError) => new SqlError.SqlError({ message: String(e) }))
+    const planJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
+      Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
     )
     yield* Effect.logDebug(`Steps: ${planJson}`)
     return plan
   })
 }
 
-function statusImplWith(sql: SqlClient.SqlClient, dialect: DialectType, schemas: NamedSchema[]) {
+function statusImplWith(sql: SqlClient.SqlClient, dialect: DialectType, schemas: Array<NamedSchema>) {
   return Effect.gen(function* () {
     yield* Effect.logDebug("Checking migration status")
 
@@ -255,15 +261,15 @@ export const MigratorLive = Layer.effect(
     const sql = yield* SqlClient.SqlClient
     const dialect = yield* Dialect
     return {
-      migrate: (schemas: NamedSchema[], options?: MigrateOptions) => {
+      migrate: (schemas: Array<NamedSchema>, options?: MigrateOptions) => {
         const level = toEffectLogLevel(options?.logLevel)
-        return migrateImplWith(sql, dialect, schemas, options).pipe(Logger.withMinimumLogLevel(level))
+        return migrateImplWith(sql, dialect, schemas, options).pipe(Effect.provideService(References.MinimumLogLevel, level))
       },
-      plan: (schemas: NamedSchema[], options?: MigrateOptions) => {
+      plan: (schemas: Array<NamedSchema>, options?: MigrateOptions) => {
         const level = toEffectLogLevel(options?.logLevel)
-        return planImplWith(sql, dialect, schemas, options).pipe(Logger.withMinimumLogLevel(level))
+        return planImplWith(sql, dialect, schemas, options).pipe(Effect.provideService(References.MinimumLogLevel, level))
       },
-      status: (schemas: NamedSchema[]) => statusImplWith(sql, dialect, schemas)
+      status: (schemas: Array<NamedSchema>) => statusImplWith(sql, dialect, schemas)
     }
   })
 )

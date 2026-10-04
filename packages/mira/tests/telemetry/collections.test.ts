@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest"
+import { describe, expect,it } from "vitest"
+
 import { LogsCollection, SpansCollection } from "@/telemetry/collections.js"
 
 describe("telemetry collection definitions", () => {

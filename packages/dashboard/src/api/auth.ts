@@ -1,5 +1,5 @@
 import { Data, Effect, Redacted, Tracer } from "effect"
-import { HttpServerRequest } from "@effect/platform"
+import { HttpServerRequest } from "effect/http"
 import { AppConfig, verifyJwt } from "@gettersethya/mira"
 
 export class DashboardUnauthorizedError extends Data.TaggedError("DashboardUnauthorizedError")<{}> {}
@@ -30,7 +30,7 @@ export const requireDashboardAuth = Effect.gen(function* () {
 
   const config = yield* AppConfig
   const payload = yield* verifyJwt(token, Redacted.value(config.jwtSecret)).pipe(
-    Effect.catchAll(() => new DashboardUnauthorizedError())
+    Effect.catch(() => new DashboardUnauthorizedError())
   )
 
   if (payload.col !== "_superadmin") {

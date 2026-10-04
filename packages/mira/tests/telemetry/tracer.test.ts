@@ -1,12 +1,14 @@
-import { Chunk, Effect, Layer, Option, Queue } from "effect"
 import { randomBytes } from "node:crypto"
+
 import { describe, it } from "@effect/vitest"
+import { Effect, Layer, Option, Queue, Tracer } from "effect"
 import { expect } from "vitest"
+
 import type { CompletedSpan } from "@/telemetry/tracer.js"
-import { makeConsoleTracer } from "@/telemetry/tracer.js"
+import { formatPrettySpan, makeConsoleTracer } from "@/telemetry/tracer.js"
 
 function tracerLayer(queue: Queue.Queue<CompletedSpan>): Layer.Layer<never> {
-  return Layer.setTracer(makeConsoleTracer(queue, (size) => randomBytes(size)))
+  return Layer.succeed(Tracer.Tracer, makeConsoleTracer(queue, (size) => randomBytes(size)))
 }
 
 describe("makeConsoleTracer", () => {
@@ -48,7 +50,7 @@ describe("makeConsoleTracer", () => {
         Effect.withSpan("outer"),
         Effect.provide(tracerLayer(queue))
       )
-      const all = Chunk.toArray(yield* Queue.takeAll(queue))
+      const all = (yield* Queue.clear(queue))
       const inner = all.find((s) => s.name === "inner")
       const outer = all.find((s) => s.name === "outer")
       expect(inner).toBeDefined()
@@ -105,4 +107,43 @@ describe("makeConsoleTracer", () => {
       expect(Option.isSome(result)).toBe(true)
     })
   )
+})
+
+describe("formatPrettySpan", () => {
+  it("renders name, kind, duration, status and attributes", () => {
+    const output = formatPrettySpan({
+      name: "collection.list",
+      traceId: "abcdef0123456789",
+      spanId: "0123456789abcdef",
+      parentSpanId: undefined,
+      kind: "client",
+      durationMs: 1.234,
+      status: "ok",
+      error: undefined,
+      attributes: { table: "posts" }
+    })
+    expect(output).toContain("[trace]")
+    expect(output).toContain("collection.list")
+    expect(output).toContain("client")
+    expect(output).toContain("1.23ms")
+    expect(output).toContain("ok")
+    expect(output).toContain("table=posts")
+    expect(output.startsWith("{")).toBe(false)
+  })
+
+  it("appends the error text for failed spans", () => {
+    const output = formatPrettySpan({
+      name: "op",
+      traceId: "t",
+      spanId: "s",
+      parentSpanId: undefined,
+      kind: "internal",
+      durationMs: 0,
+      status: "error",
+      error: "kaboom",
+      attributes: {}
+    })
+    expect(output).toContain("error")
+    expect(output).toContain("kaboom")
+  })
 })

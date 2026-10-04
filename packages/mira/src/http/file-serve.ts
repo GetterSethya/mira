@@ -1,13 +1,15 @@
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Chunk, Effect, Redacted, Stream } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import { andWhere, idClause, resolveCtxPlaceholders } from "@/collection-service/where.js"
+import { Effect, Redacted, Stream } from "effect"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+
 import type { RequestCtx } from "@/collection-service/context.js"
-import { Repository } from "@/repository/repository.js"
-import { FileStorage } from "@/storage/storage.js"
-import { ThumbnailService, parseThumbSpec } from "@/thumbnail/types.js"
+import { andWhere, idClause, resolveCtxPlaceholders } from "@/collection-service/where.js"
 import { AppConfig } from "@/config/index.js"
+import { Repository } from "@/repository/repository.js"
 import { enforcerForAction } from "@/rule/enforcer.js"
+import { FileStorage } from "@/storage/storage.js"
+import { parseThumbSpec,ThumbnailService } from "@/thumbnail/types.js"
+
 import { verifyFileToken } from "./auth.js"
 
 export type FileServeServices = Repository | FileStorage | ThumbnailService | AppConfig
@@ -61,13 +63,13 @@ export function makeFileServeRoute(
 
     if (colName === undefined || recordId === undefined || filename === undefined) {
       return Effect.succeed(
-        HttpServerResponse.unsafeJson({ error: "not_found" }, { status: 404 })
+        HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
       )
     }
     const collection = collectionMap.get(colName)
     if (collection === undefined) {
       return Effect.succeed(
-        HttpServerResponse.unsafeJson(
+        HttpServerResponse.jsonUnsafe(
           { error: "not_found", message: `Unknown collection "${colName}"` },
           { status: 404 }
         )
@@ -75,10 +77,10 @@ export function makeFileServeRoute(
     }
 
     return Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
-      Effect.catchAllCause(
+      Effect.catchCause(
         serveFile(collection, recordId, filename, req),
         () =>
-          Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))
+          Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
       )
     )
   })
@@ -103,7 +105,7 @@ function serveFile(
       .pipe(Effect.orElseSucceed(() => []))
 
     if (rows.length === 0) {
-      return HttpServerResponse.unsafeJson({ error: "not_found" }, { status: 404 })
+      return HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
     }
     const record = rows[0]
 
@@ -119,21 +121,21 @@ function serveFile(
     }
 
     if (fieldName === undefined || fieldProp === undefined) {
-      return HttpServerResponse.unsafeJson({ error: "not_found" }, { status: 404 })
+      return HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
     }
 
     // Step 4: protected field — verify token and enforce view rule
     if (fieldProp["x-protected"] === true) {
       const tokenParam = getQueryParam(req, "token")
       if (tokenParam === undefined) {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
 
       const tokenPayload = yield* verifyFileToken(tokenParam, jwtSecret).pipe(
         Effect.orElseSucceed(() => null)
       )
       if (tokenPayload === null || tokenPayload.filecol !== collection.name) {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
 
       // Reconstruct auth context from file token sub + col
@@ -142,7 +144,7 @@ function serveFile(
         .pipe(Effect.orElseSucceed(() => []))
 
       if (authRows.length === 0) {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
 
       const ctx: RequestCtx = {
@@ -154,7 +156,7 @@ function serveFile(
       // Enforce the collection's view rule against the specific record
       const ruleResult = enforcerForAction(collection.schema, "view")
       if (ruleResult === null) {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
 
       const ruleWhere = yield* resolveCtxPlaceholders(
@@ -165,7 +167,7 @@ function serveFile(
       ).pipe(Effect.catchTag("ForbiddenError", () => Effect.succeed(null)))
 
       if (ruleWhere === null) {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
 
       const allowed = yield* repo
@@ -173,7 +175,7 @@ function serveFile(
         .pipe(Effect.orElseSucceed(() => []))
 
       if (allowed.length === 0) {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
     }
 
@@ -196,18 +198,18 @@ function serveFile(
           Effect.orDie
         )
         if (original === null) {
-          return HttpServerResponse.unsafeJson({ error: "not_found" }, { status: 404 })
+          return HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
         }
 
         // On thumb error fall back to original rather than returning an error
         const resized = yield* thumbSvc
           .resize(original, mimeType, thumbSpec)
-          .pipe(Effect.orElse(() => Effect.succeed(original)))
+          .pipe(Effect.catch(() => Effect.succeed(original)))
 
         // Best-effort: persist the thumbnail for future requests
         yield* fileStorage
-          .upload(cacheKey, Stream.fromChunk(Chunk.of(resized)), mimeType)
-          .pipe(Effect.orElse(() => Effect.void))
+          .upload(cacheKey, Stream.fromArray([resized]), mimeType)
+          .pipe(Effect.catch(() => Effect.void))
 
         bytes = resized
       }
@@ -217,7 +219,7 @@ function serveFile(
         Effect.orDie
       )
       if (result === null) {
-        return HttpServerResponse.unsafeJson({ error: "not_found" }, { status: 404 })
+        return HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
       }
       bytes = result
     }

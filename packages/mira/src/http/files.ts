@@ -1,9 +1,10 @@
-import { HttpServerRequest } from "@effect/platform"
-import * as Multipart from "@effect/platform/Multipart"
-import { Effect, Stream } from "effect"
-import { CryptoService } from "@/crypto/index.js"
 import type { CollectionSchema } from "@gettersethya/mira-client"
+import { Effect, Stream } from "effect"
+import type { HttpServerRequest } from "effect/http"
+import * as Multipart from "effect/http/Multipart"
+
 import { ValidationError } from "@/collection-service/errors.js"
+import { CryptoService } from "@/crypto/index.js"
 import { FileStorage } from "@/storage/storage.js"
 
 export const makeFileKey = (originalFilename: string) =>
@@ -17,7 +18,7 @@ export const makeFileKey = (originalFilename: string) =>
 
 function withSizeLimit<E>(stream: Stream.Stream<Uint8Array, E>, maxSize: number, field: string, collection: string) {
   return stream.pipe(
-    Stream.mapAccumEffect(0, (total, chunk) => {
+    Stream.mapAccumEffect(() => 0, (total, chunk) => {
       const next = total + chunk.byteLength
       if (next > maxSize) {
         return Effect.fail(
@@ -27,7 +28,7 @@ function withSizeLimit<E>(stream: Stream.Stream<Uint8Array, E>, maxSize: number,
           })
         )
       }
-      const pair: readonly [number, Uint8Array] = [next, chunk]
+      const pair: readonly [number, ReadonlyArray<Uint8Array>] = [next, [chunk]]
       return Effect.succeed(pair)
     })
   )
@@ -106,7 +107,7 @@ export function processMultipartUpload(
 
             yield* fileStorage
               .upload(key, uploadStream, part.contentType)
-              .pipe(Effect.onError(() => fileStorage.delete(key).pipe(Effect.orElse(() => Effect.void))))
+              .pipe(Effect.onError(() => fileStorage.delete(key).pipe(Effect.catch(() => Effect.void))))
 
             fileKeys[part.key] = key
           } else if (Multipart.isField(part)) {

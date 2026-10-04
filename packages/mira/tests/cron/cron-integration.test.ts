@@ -1,11 +1,12 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Cause, Deferred, Effect, Exit, Layer, Option, Schedule } from "effect"
 import { assert, describe, it } from "@effect/vitest"
-import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
-import { CronNotFoundError } from "@/cron/types.js"
-import type { CronDef } from "@/cron/types.js"
-import { makeHookServiceLayer } from "@/hooks/hook-service.js"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Schedule } from "effect"
+
 import { MiraPlugin } from "@/app/plugin.js"
+import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
+import type { CronDef } from "@/cron/types.js"
+import { CronNotFoundError } from "@/cron/types.js"
+import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 
 type StubDef = CronDef<never>
 
@@ -69,7 +70,7 @@ describe("CronService integration", () => {
     Effect.gen(function* () {
       const svc = yield* CronService
       yield* svc.runNow("quick-cron")
-      yield* Effect.yieldNow()
+      yield* Effect.yieldNow
       yield* Effect.sleep(0)
       const [state] = yield* svc.getAll()
       assert.strictEqual(state.lastStatus, "success")
@@ -85,7 +86,7 @@ describe("CronService integration", () => {
     Effect.gen(function* () {
       const svc = yield* CronService
       yield* svc.runNow("error-cron")
-      yield* Effect.yieldNow()
+      yield* Effect.yieldNow
       yield* Effect.sleep(0)
       const [state] = yield* svc.getAll()
       assert.strictEqual(state.lastStatus, "error")
@@ -109,7 +110,7 @@ describe("CronService integration", () => {
       const result = yield* Effect.exit(svc.runNow("not-registered"))
       assert.isTrue(Exit.isFailure(result))
       if (Exit.isFailure(result)) {
-        const failure = Cause.failureOption(result.cause)
+        const failure = Cause.findErrorOption(result.cause)
         assert.isTrue(Option.isSome(failure))
         if (Option.isSome(failure)) {
           assert.ok(failure.value instanceof CronNotFoundError)

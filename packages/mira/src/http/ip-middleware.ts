@@ -1,5 +1,6 @@
-import { Headers, HttpApp, HttpServerRequest } from "@effect/platform"
 import { Effect, Option } from "effect"
+import type { HttpServerResponse } from "effect/http";
+import { Headers, HttpServerRequest } from "effect/http"
 
 function extractClientIp(headers: Headers.Headers) {
   const forwarded = Headers.get(headers, "x-forwarded-for")
@@ -11,7 +12,13 @@ function extractClientIp(headers: Headers.Headers) {
   return Option.isSome(realIp) ? realIp.value.trim() : undefined
 }
 
-export const ipAnnotationMiddleware = <E, R>(app: HttpApp.Default<E, R>) =>
+export const ipAnnotationMiddleware = <E, R>(
+  app: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    E,
+    R | HttpServerRequest.HttpServerRequest
+  >
+) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const ip = extractClientIp(request.headers)

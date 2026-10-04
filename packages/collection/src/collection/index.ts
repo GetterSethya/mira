@@ -12,14 +12,14 @@
  * - `Bytes.*` — human-readable byte size constants
  */
 
+export type { AuthCollectionBuilder } from "./auth.js"
 export { AuthCollection } from "./auth.js"
+export type { BaseCollectionBuilder } from "./base.js"
 export { BaseCollection } from "./base.js"
 export { Bytes } from "./bytes.js"
 export { ValidationError } from "./errors.js"
 export { Field } from "./field.js"
 export { Index } from "./index-builder.js"
 export type { AnyCollectionDef, CollectionSchema, FieldDef, FieldsMap, LiteralTextConstraintKind } from "./types.js"
-export type { AuthCollectionBuilder } from "./auth.js"
-export type { BaseCollectionBuilder } from "./base.js"
 export type { ViewCollectionBuilder } from "./view.js"
 export { ViewCollection } from "./view.js"

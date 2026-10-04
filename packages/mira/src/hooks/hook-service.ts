@@ -1,22 +1,23 @@
 import { Context, Effect, Layer } from "effect"
+
 import type { MiraPlugin } from "@/app/plugin.js"
+import type { CollectionService } from "@/collection-service/collection-service.js"
 import type { AppConfig } from "@/config/index.js"
+
 import type {
-  RecordHookContext,
-  RecordResultContext,
+  CronContext,
+  CronErrorContext,
+  CronFinishedContext,
+  CronResultContext,
+  HookErrorContext,
   ListHookContext,
   ListResultContext,
+  RecordHookContext,
+  RecordResultContext,
   ViewHookContext,
-  ViewResultContext,
-  HookErrorContext,
-  CronContext,
-  CronResultContext,
-  CronErrorContext,
-  CronFinishedContext
-} from "./types.js"
-import { CollectionService } from "@/collection-service/collection-service.js"
+  ViewResultContext} from "./types.js"
 
-export class HookService extends Context.Tag("HookService")<
+export class HookService extends Context.Service<
   HookService,
   {
     runRecordCreate(ctx: RecordHookContext): Effect.Effect<RecordHookContext, never, never>
@@ -52,7 +53,7 @@ export class HookService extends Context.Tag("HookService")<
     runCronError(ctx: CronErrorContext): Effect.Effect<void, never, never>
     runCronFinished(ctx: CronFinishedContext): Effect.Effect<void, never, never>
   }
->() {}
+>()("HookService") {}
 
 function matchesCollection(hook: { collections?: ReadonlyArray<string> } | undefined, collectionName: string) {
   if (!hook || !hook.collections) return true
@@ -89,7 +90,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       }),
 
     runRecordCreateSuccess: (ctx: RecordResultContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -101,7 +102,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       ).pipe(Effect.asVoid),
 
     runRecordCreateError: (ctx: HookErrorContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -135,7 +136,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       }),
 
     runRecordUpdateSuccess: (ctx: RecordResultContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -147,7 +148,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       ).pipe(Effect.asVoid),
 
     runRecordUpdateError: (ctx: HookErrorContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -181,7 +182,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       }),
 
     runRecordDeleteSuccess: (ctx: RecordResultContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -193,7 +194,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       ).pipe(Effect.asVoid),
 
     runRecordDeleteError: (ctx: HookErrorContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -216,7 +217,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       }),
 
     runRecordListSuccess: (ctx: ListResultContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -228,7 +229,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       ).pipe(Effect.asVoid),
 
     runRecordListError: (ctx: HookErrorContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -251,7 +252,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       }),
 
     runRecordViewSuccess: (ctx: ViewResultContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -263,7 +264,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       ).pipe(Effect.asVoid),
 
     runRecordViewError: (ctx: HookErrorContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -309,7 +310,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       }),
 
     runCronSuccess: (ctx: CronResultContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -321,7 +322,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       ).pipe(Effect.asVoid),
 
     runCronError: (ctx: CronErrorContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>
@@ -333,7 +334,7 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
       ).pipe(Effect.asVoid),
 
     runCronFinished: (ctx: CronFinishedContext) =>
-      Effect.forkDaemon(
+      Effect.forkDetach(
         Effect.forEach(
           plugins,
           (p) =>

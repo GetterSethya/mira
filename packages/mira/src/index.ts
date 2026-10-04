@@ -3,8 +3,8 @@ export * from "@gettersethya/mira-client"
 
 // App builder
 export * from "./app/index.js"
-export * from "./platforms/node.js"
 export * from "./databases/index.js"
+export * from "./platforms/node.js"
 export * from "./storage/index.js"
 
 // Server errors
@@ -17,26 +17,30 @@ export type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord, S
 export * from "./hooks/index.js"
 
 // Server services (for plugins and advanced usage)
-export { Repository, RepositoryLive } from "./repository/index.js"
+export type { CursorPage,RequestCtx } from "./collection-service/index.js"
 export { CollectionService, makeCollectionServiceLayer } from "./collection-service/index.js"
-export type { RequestCtx, CursorPage } from "./collection-service/index.js"
-export { AuthService, hashPassword, verifyPassword, verifyJwt } from "./http/auth.js"
 export { AppConfig, AppConfigLive } from "./config/index.js"
 export { CryptoService } from "./crypto/index.js"
+export { AuthService, hashPassword, verifyJwt,verifyPassword } from "./http/auth.js"
 export { catchCollectionErrors } from "./http/errors.js"
+export { Repository, RepositoryLive } from "./repository/index.js"
 
 // Telemetry (sqlite logger)
-export { makeSqliteTelemetryLayer, logCleanupCronDef } from "./telemetry/sqlite-logger.js"
 export type { SqliteLoggerConfig } from "./telemetry/sqlite-logger.js"
+export { logCleanupCronDef,makeSqliteTelemetryLayer } from "./telemetry/sqlite-logger.js"
 export { TelemetrySqlClient } from "./telemetry/telemetry-sql-client.js"
 
+// Telemetry (console tracer/logger)
+export type { ConsolePrintOptions } from "./telemetry/index.js"
+export { ConsoleTelemetryLayer, makeConsoleTelemetryLayer } from "./telemetry/index.js"
+
 // Cron system
-export { CronService, makeCronServiceLayer, CronNotFoundError } from "./cron/index.js"
 export type {
-  CronDef,
   CronContext,
-  CronResultContext,
+  CronDef,
   CronErrorContext,
   CronFinishedContext,
+  CronResultContext,
   CronState
 } from "./cron/index.js"
+export { CronNotFoundError,CronService, makeCronServiceLayer } from "./cron/index.js"

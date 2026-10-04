@@ -1,5 +1,6 @@
-import { HttpServerResponse } from "@effect/platform"
 import { Effect } from "effect"
+import { HttpServerResponse } from "effect/http"
+
 import type { CollectionError } from "@/collection-service/errors.js"
 import type { FileStorageError } from "@/storage/storage.js"
 
@@ -34,35 +35,35 @@ export const catchCollectionErrors = <A, R>(
   Effect.catchTags(eff, {
     NotFoundError: (e) =>
       Effect.fail(
-        HttpServerResponse.unsafeJson(
+        HttpServerResponse.jsonUnsafe(
           { error: "not_found", message: `Record not found in "${e.collection}"` },
           { status: 404 as const }
         )
       ),
     ForbiddenError: () =>
       Effect.fail(
-        HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 as const })
+        HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 as const })
       ),
     ValidationError: (e) =>
       Effect.fail(
-        HttpServerResponse.unsafeJson(
+        HttpServerResponse.jsonUnsafe(
           { error: "validation_failed", issues: e.issues },
           { status: 422 as const }
         )
       ),
     ReadOnlyError: () =>
       Effect.fail(
-        HttpServerResponse.unsafeJson({ error: "read_only" }, { status: 405 as const })
+        HttpServerResponse.jsonUnsafe({ error: "read_only" }, { status: 405 as const })
       ),
     FileStorageError: (e) =>
       Effect.fail(
-        HttpServerResponse.unsafeJson(
+        HttpServerResponse.jsonUnsafe(
           { error: "storage_error", reason: e.reason },
           { status: 502 as const }
         )
       ),
     SqlError: () =>
       Effect.fail(
-        HttpServerResponse.unsafeJson({ error: "internal_error" }, { status: 500 as const })
+        HttpServerResponse.jsonUnsafe({ error: "internal_error" }, { status: 500 as const })
       ),
   })

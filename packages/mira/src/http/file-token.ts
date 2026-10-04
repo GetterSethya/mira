@@ -1,9 +1,12 @@
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Effect, Redacted, Schema } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import { Repository } from "@/repository/repository.js"
+import { Effect, Redacted, Schema } from "effect"
+import type { HttpRouter} from "effect/http";
+import { HttpServerRequest, HttpServerResponse } from "effect/http"
+
 import { idClause } from "@/collection-service/where.js"
 import { AppConfig } from "@/config/index.js"
+import { Repository } from "@/repository/repository.js"
+
 import { signFileToken, verifyJwt } from "./auth.js"
 
 const TokenRequestSchema = Schema.Struct({
@@ -31,10 +34,10 @@ export function makeFileTokenRoute(
   const collectionMap = new Map(collections.map((c) => [c.name, c]))
 
   return Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
-    Effect.catchAllCause(
+    Effect.catchCause(
       issueToken(req, collectionMap),
       () =>
-        Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
     )
   )
 }
@@ -50,14 +53,14 @@ function issueToken(
     // Require auth token from Bearer header or mira_token cookie
     const rawToken = extractToken(req)
     if (rawToken === null) {
-      return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
+      return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
     }
 
     const authPayload = yield* verifyJwt(rawToken, jwtSecret).pipe(
       Effect.orElseSucceed(() => null)
     )
     if (authPayload === null) {
-      return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
+      return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
     }
 
     // Verify the auth user still exists
@@ -67,23 +70,23 @@ function issueToken(
       .pipe(Effect.orElseSucceed(() => []))
 
     if (authRows.length === 0) {
-      return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
+      return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
     }
 
     // Parse body for target collection
     const body = yield* req.json.pipe(
-      Effect.flatMap(Schema.decodeUnknown(TokenRequestSchema)),
+      Effect.flatMap(Schema.decodeUnknownEffect(TokenRequestSchema)),
       Effect.orElseSucceed(() => null)
     )
     if (body === null) {
-      return HttpServerResponse.unsafeJson(
+      return HttpServerResponse.jsonUnsafe(
         { error: "validation_failed", issues: ["collection is required"] },
         { status: 422 }
       )
     }
 
     if (!collectionMap.has(body.collection)) {
-      return HttpServerResponse.unsafeJson(
+      return HttpServerResponse.jsonUnsafe(
         { error: "not_found", message: `Unknown collection "${body.collection}"` },
         { status: 404 }
       )
@@ -96,6 +99,6 @@ function issueToken(
 
     const expiresAt = Date.now() + 5 * 60 * 1000
 
-    return HttpServerResponse.unsafeJson({ token: fileToken, expiresAt }, { status: 200 })
+    return HttpServerResponse.jsonUnsafe({ token: fileToken, expiresAt }, { status: 200 })
   }).pipe(Effect.orDie)
 }

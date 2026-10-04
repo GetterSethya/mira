@@ -77,6 +77,7 @@ Rules for collections are defined server-side using `defineRule()` from `@getter
 
 ```typescript
 Field.text({ minLength?, maxLength?, unique?, indexed?, required?, default? })
+Field.literalText({ literal: ["a", "b"], default? })
 Field.email()
 Field.integer({ min?, max?, unique?, indexed?, default? })
 Field.number({ min?, max? })
@@ -90,6 +91,7 @@ Field.relation(Collection)
 Bytes.fromKB(n)
 Bytes.fromMB(n)
 Bytes.fromGB(n)
+Bytes.fromTB(n)
 ```
 
 ## Indexes

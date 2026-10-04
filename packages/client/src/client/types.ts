@@ -1,4 +1,5 @@
-import type { AnyCollectionDef, FieldDef, FieldKindToType, FieldsMap, InferFieldValue } from "@gettersethya/mira-collection"
+import type { AnyCollectionDef, FieldDef, FieldsMap, InferFieldValue } from "@gettersethya/mira-collection"
+
 import type { ProtectedFileFieldClient, PublicFileFieldClient } from "./file.js"
 
 /**
@@ -13,10 +14,6 @@ import type { ProtectedFileFieldClient, PublicFileFieldClient } from "./file.js"
  */
 export type AnyAuthCollectionDef = AnyCollectionDef & {
   schema: { "x-collection-kind": "auth" }
-}
-
-type FieldKindToInputType = Omit<FieldKindToType, "file"> & {
-  file: File | Blob
 }
 
 /** Resolves the mutation value type for a field: File | Blob for file fields, InferFieldValue for everything else. */

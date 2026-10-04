@@ -1,17 +1,17 @@
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer } from "effect"
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
-
 import type { CollectionSchema } from "@gettersethya/mira-client"
 import { Rule } from "@gettersethya/mira-client"
+import { Effect } from "effect"
+import { SqlClient } from "effect/sql"
+import { expect } from "vitest"
+
 import { enforcerForAction, enforceRule } from "@/rule/enforcer.js"
 
 describe("Rule enforcer integration", () => {
   const testLayer = SqliteClient.layer({ filename: ":memory:" })
 
-  it.scoped("list rule filters rows correctly", () =>
+  it.effect("list rule filters rows correctly", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
 
@@ -42,7 +42,7 @@ describe("Rule enforcer integration", () => {
       expect(rows.map((r: any) => r.id)).not.toContain("p4")
     }).pipe(Effect.provide(testLayer)))
 
-  it.scoped("complex boolean rule filters correctly", () =>
+  it.effect("complex boolean rule filters correctly", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
 
@@ -74,7 +74,7 @@ describe("Rule enforcer integration", () => {
       expect(rows.map((r: any) => r.id)).toEqual(["a1", "a3"])
     }).pipe(Effect.provide(testLayer)))
 
-  it.scoped("date-based rule filters correctly", () =>
+  it.effect("date-based rule filters correctly", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
 
@@ -101,7 +101,7 @@ describe("Rule enforcer integration", () => {
       expect(rows.map((r: any) => r.id)).toEqual(["e2"])
     }).pipe(Effect.provide(testLayer)))
 
-  it.scoped("rule with gt/lt range filters correctly", () =>
+  it.effect("rule with gt/lt range filters correctly", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
 
@@ -130,7 +130,7 @@ describe("Rule enforcer integration", () => {
       expect(rows.map((r: any) => r.id)).toEqual(["pr2"])
     }).pipe(Effect.provide(testLayer)))
 
-  it.scoped("rule with in and startsWith", () =>
+  it.effect("rule with in and startsWith", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
 
@@ -159,7 +159,7 @@ describe("Rule enforcer integration", () => {
       expect(rows.map((r: any) => r.id)).toEqual(["f1"])
     }).pipe(Effect.provide(testLayer)))
 
-  it.scoped("rule with contains and neq", () =>
+  it.effect("rule with contains and neq", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
 

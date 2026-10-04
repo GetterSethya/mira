@@ -1,13 +1,14 @@
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Effect, Layer } from "effect"
 import { describe, it } from "@effect/vitest"
+import { Effect, Layer } from "effect"
+import { HttpServerRequest, HttpServerResponse } from "effect/http"
+import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
+
+import { NodeCryptoLayer } from "@/crypto/index.js"
+import { telemetryLogsRoute, telemetrySpansRoute } from "@/http/telemetry-routes.js"
 import { makeSqliteTelemetryLayerForClient } from "@/telemetry/sqlite-logger.js"
 import { TelemetrySqlClient } from "@/telemetry/telemetry-sql-client.js"
-import { telemetryLogsRoute, telemetrySpansRoute } from "@/http/telemetry-routes.js"
-import { NodeCryptoLayer } from "@/crypto/index.js"
 
 // ---------------------------------------------------------------------------
 // Layers
@@ -74,7 +75,7 @@ describe("telemetryLogsRoute", () => {
       const body = yield* getBody(res)
 
       expect(body).toMatchObject({ total: expect.any(Number) })
-      const { logs } = body as { logs: unknown[] }
+      const { logs } = body as { logs: Array<unknown> }
       expect(logs.length).toBeGreaterThan(0)
       const log = (logs as Array<Record<string, unknown>>).find((l) => l["message"] === "test")
       expect(log).toBeDefined()
@@ -94,14 +95,14 @@ describe("telemetryLogsRoute", () => {
       const res = yield* runLogsRoute("http://localhost/_telemetry/logs?limit=2")
       const body = yield* getBody(res)
 
-      const { logs, total, nextCursor } = body as { logs: unknown[]; total: number; nextCursor: number | null }
+      const { logs, nextCursor, total } = body as { logs: Array<unknown>; total: number; nextCursor: number | null }
       expect(logs.length).toBe(2)
       expect(total).toBeGreaterThanOrEqual(5)
       expect(typeof nextCursor).toBe("number")
 
       const res2 = yield* runLogsRoute(`http://localhost/_telemetry/logs?limit=2&after=${nextCursor}`)
       const body2 = yield* getBody(res2)
-      const { logs: logs2 } = body2 as { logs: unknown[] }
+      const { logs: logs2 } = body2 as { logs: Array<unknown> }
       expect(logs2.length).toBe(2)
     }).pipe(Effect.provide(makeRouteLayer()))
   )
@@ -206,14 +207,14 @@ describe("telemetrySpansRoute", () => {
 
       const res = yield* runSpansRoute("http://localhost/_telemetry/spans?limit=2")
       const body = yield* getBody(res)
-      const { spans, total, nextCursor } = body as { spans: unknown[]; total: number; nextCursor: number | null }
+      const { nextCursor, spans, total } = body as { spans: Array<unknown>; total: number; nextCursor: number | null }
       expect(spans.length).toBe(2)
       expect(total).toBeGreaterThanOrEqual(3)
       expect(typeof nextCursor).toBe("number")
 
       const res2 = yield* runSpansRoute(`http://localhost/_telemetry/spans?limit=2&after=${nextCursor}`)
       const body2 = yield* getBody(res2)
-      const { spans: spans2 } = body2 as { spans: unknown[] }
+      const { spans: spans2 } = body2 as { spans: Array<unknown> }
       expect(spans2.length).toBeGreaterThanOrEqual(1)
     }).pipe(Effect.provide(makeRouteLayer()))
   )

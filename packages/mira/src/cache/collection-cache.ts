@@ -1,9 +1,11 @@
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect"
+
 import type { CursorPage } from "@/collection-service/context.js"
 import type { RepoRecord } from "@/repository/types.js"
+
 import type { CacheEntry, CollectionCacheConfigValues } from "./types.js"
 
-export class CollectionCache extends Context.Tag("CollectionCache")<
+export class CollectionCache extends Context.Service<
   CollectionCache,
   {
     getRecord(key: string): Effect.Effect<Option.Option<RepoRecord>>
@@ -13,7 +15,7 @@ export class CollectionCache extends Context.Tag("CollectionCache")<
     putList(key: string, v: CursorPage): Effect.Effect<void>
     nukeListsFor(col: string): Effect.Effect<void>
   }
->() {}
+>()("CollectionCache") {}
 
 const get = <A>(
   ref: Ref.Ref<HashMap.HashMap<string, CacheEntry<A>>>,

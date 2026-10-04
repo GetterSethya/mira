@@ -1,9 +1,12 @@
-import { FileSystem, Path } from "@effect/platform"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
-import { Chunk, Effect, Either, Layer, Scope, Stream } from "effect"
 import { assert, describe, it } from "@effect/vitest"
-import { FileStorage, makeFileStorageLayer } from "@/storage/storage.js"
+import type { Path } from "effect";
+import type { Scope} from "effect";
+import { FileSystem } from "effect"
+import { Effect, Layer, Result, Stream } from "effect"
+
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { FileStorage, makeFileStorageLayer } from "@/storage/storage.js"
 
 const nodePlatformLayer = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer, NodeCryptoLayer)
 
@@ -18,16 +21,16 @@ function withTempDir<A, E>(
   }).pipe(Effect.provide(nodePlatformLayer))
 }
 
-function bytes(...values: number[]): Uint8Array {
+function bytes(...values: Array<number>): Uint8Array {
   return new Uint8Array(values)
 }
 
 function toStream(data: Uint8Array): Stream.Stream<Uint8Array, never> {
-  return Stream.fromChunk(Chunk.of(data))
+  return Stream.fromArray([data])
 }
 
 describe("FileStorage (local)", () => {
-  it.scoped("upload and read roundtrip", () =>
+  it.effect("upload and read roundtrip", () =>
     withTempDir((layer) =>
       Effect.gen(function* () {
         const storage = yield* FileStorage
@@ -39,18 +42,18 @@ describe("FileStorage (local)", () => {
     )
   )
 
-  it.scoped("read returns FileStorageNotFound for missing key", () =>
+  it.effect("read returns FileStorageNotFound for missing key", () =>
     withTempDir((layer) =>
       Effect.gen(function* () {
         const storage = yield* FileStorage
-        const result = yield* storage.read("ghost.txt").pipe(Effect.either)
-        assert.ok(Either.isLeft(result))
-        assert.strictEqual(result.left._tag, "FileStorageNotFound")
+        const result = yield* storage.read("ghost.txt").pipe(Effect.result)
+        assert.ok(Result.isFailure(result))
+        assert.strictEqual(result.failure._tag, "FileStorageNotFound")
       }).pipe(Effect.provide(layer))
     )
   )
 
-  it.scoped("exists returns true for an uploaded key", () =>
+  it.effect("exists returns true for an uploaded key", () =>
     withTempDir((layer) =>
       Effect.gen(function* () {
         const storage = yield* FileStorage
@@ -61,7 +64,7 @@ describe("FileStorage (local)", () => {
     )
   )
 
-  it.scoped("exists returns false for a missing key", () =>
+  it.effect("exists returns false for a missing key", () =>
     withTempDir((layer) =>
       Effect.gen(function* () {
         const storage = yield* FileStorage
@@ -71,7 +74,7 @@ describe("FileStorage (local)", () => {
     )
   )
 
-  it.scoped("delete removes a file and exists returns false", () =>
+  it.effect("delete removes a file and exists returns false", () =>
     withTempDir((layer) =>
       Effect.gen(function* () {
         const storage = yield* FileStorage
@@ -83,7 +86,7 @@ describe("FileStorage (local)", () => {
     )
   )
 
-  it.scoped("list returns keys under a prefix", () =>
+  it.effect("list returns keys under a prefix", () =>
     withTempDir((layer) =>
       Effect.gen(function* () {
         const storage = yield* FileStorage
@@ -99,7 +102,7 @@ describe("FileStorage (local)", () => {
     )
   )
 
-  it.scoped("list returns empty array for non-existent prefix", () =>
+  it.effect("list returns empty array for non-existent prefix", () =>
     withTempDir((layer) =>
       Effect.gen(function* () {
         const storage = yield* FileStorage
@@ -109,7 +112,7 @@ describe("FileStorage (local)", () => {
     )
   )
 
-  it.scoped("upload creates nested directories as needed", () =>
+  it.effect("upload creates nested directories as needed", () =>
     withTempDir((layer) =>
       Effect.gen(function* () {
         const storage = yield* FileStorage

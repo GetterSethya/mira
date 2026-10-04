@@ -1,24 +1,25 @@
-import { SqlClient } from "@effect/sql"
-import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Chunk, Effect, Layer, Queue } from "effect"
 import { randomBytes } from "node:crypto"
+
+import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
-import { Rule } from "@gettersethya/mira-client"
-import { defineRule, applyRulesToCollections } from "@/app/index.js"
+import { Effect, Layer, Queue, Tracer } from "effect"
+import { SqlClient } from "effect/sql"
+import { expect } from "vitest"
+
+import { applyRulesToCollections,defineRule } from "@/app/index.js"
+import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
-import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
+import { NodeCryptoLayer } from "@/crypto/node.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
-import { NodeCryptoLayer } from "@/crypto/node.js"
-import { NodeAuthServiceLayer } from "@/http/auth-node.js"
-import { Dialect } from "@/dialect/dialect.js"
-import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 const testCollectionDef = BaseCollection.define("test_items", {
   title: Field.text(),
@@ -48,7 +49,7 @@ const FileStorageTest = Layer.succeed(
 
 function makeTestLayer(queue: Queue.Queue<CompletedSpan>) {
   const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-  const tracerLayer = Layer.setTracer(makeConsoleTracer(queue, (size) => randomBytes(size)))
+  const tracerLayer = Layer.succeed(Tracer.Tracer, makeConsoleTracer(queue, (size) => randomBytes(size)))
 
   // Wire Repository to its SqlClient dependency
   const repoLayer = RepositoryLive.pipe(Layer.provide(sqliteLayer))
@@ -84,7 +85,7 @@ const setupTable = Effect.gen(function* () {
 })
 
 function collectSpans(queue: Queue.Queue<CompletedSpan>) {
-  return Queue.takeAll(queue).pipe(Effect.map(Chunk.toArray))
+  return Queue.clear(queue)
 }
 
 describe("instrumentation integration", () => {

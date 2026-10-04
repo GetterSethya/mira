@@ -16,7 +16,7 @@
  * On cache hits only the cache.* span appears (no children).
  */
 
-import { SqlClient } from "@effect/sql"
+import { SqlClient } from "effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer, Logger, LogLevel } from "effect"
 import { BaseCollection, Field } from "@gettersethya/mira-client"

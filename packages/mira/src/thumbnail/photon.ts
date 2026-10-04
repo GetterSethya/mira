@@ -1,5 +1,6 @@
-import { PhotonImage, SamplingFilter, resize, crop } from "@cf-wasm/photon/node"
+import { crop,PhotonImage, resize, SamplingFilter } from "@cf-wasm/photon/node"
 import { Effect, Layer, Match } from "effect"
+
 import { ThumbnailError, ThumbnailService, type ThumbSpec } from "./types.js"
 
 function computeDimensions(

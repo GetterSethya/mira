@@ -10,7 +10,7 @@
   "dependencies": {
     "@gettersethya/mira": "workspace:*",
     "@gettersethya/mira-dashboard": "workspace:*",
-    "effect": "^3.21.2"
+    "effect": "^4.0.0"
   },
   "devDependencies": {
     "tsx": "^4.21.0",

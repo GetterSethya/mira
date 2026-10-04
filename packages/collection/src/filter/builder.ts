@@ -1,4 +1,5 @@
 import type { FieldsMap, InferFieldValue } from "@/collection/types.js"
+
 import type { FilterNode } from "./types.js"
 
 /**

@@ -1,23 +1,27 @@
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { Cause, Duration, Effect, Option, Redacted, Schema, Tracer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
+import type { Tracer } from "effect";
+import { Cause, Duration, Effect, Option, Redacted, Schema } from "effect"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+
 import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
+import { makeRowDecoder } from "@/collection-service/decode.js"
 import { ValidationError } from "@/collection-service/errors.js"
+import { AppConfig } from "@/config/index.js"
+import type { CryptoService } from "@/crypto/index.js"
+import { Dialect } from "@/dialect/dialect.js"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
-import { FileStorage } from "@/storage/storage.js"
-import { ThumbnailService } from "@/thumbnail/types.js"
-import { AppConfig } from "@/config/index.js"
-import { CryptoService } from "@/crypto/index.js"
-import { Dialect } from "@/dialect/dialect.js"
-import { AuthService, signJwt, verifyAnyJwt, verifyJwt, verifyPassword } from "./auth.js"
-import { makeRowDecoder } from "@/collection-service/decode.js"
+import type { FileStorage } from "@/storage/storage.js"
+import type { ThumbnailService } from "@/thumbnail/types.js"
+
+import type { AuthService} from "./auth.js";
+import { signJwt, verifyAnyJwt, verifyJwt, verifyPassword } from "./auth.js"
 import { catchCollectionErrors } from "./errors.js"
-import { parseExpandParam, parseFilterParam, parsePaginationParam, parseSelectParam, parseSortParam } from "./params.js"
-import { processMultipartUpload } from "./files.js"
 import { makeFileServeRoute } from "./file-serve.js"
 import { makeFileTokenRoute } from "./file-token.js"
+import { processMultipartUpload } from "./files.js"
+import { parseExpandParam, parseFilterParam, parsePaginationParam, parseSelectParam, parseSortParam } from "./params.js"
 import { makeSchemaRoute } from "./schema.js"
 import { telemetryLogsRoute, telemetrySpansRoute } from "./telemetry-routes.js"
 
@@ -110,20 +114,20 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       col: AnyCollectionDef,
       ctx: RequestCtx,
       req: HttpServerRequest.HttpServerRequest,
-      routeCtx: HttpRouter.RouteContext
+      params: Readonly<Record<string, string | undefined>>
     ) => Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerResponse.HttpServerResponse, Ms>
   ) {
-    return Effect.flatMap(HttpRouter.RouteContext, (routeCtx) => {
-      const name = routeCtx.params["name"]
+    return Effect.flatMap(HttpRouter.params, (params) => {
+      const name = params["name"]
       if (name === undefined) {
         return Effect.succeed(
-          HttpServerResponse.unsafeJson({ error: "not_found", message: "Missing collection" }, { status: 404 })
+          HttpServerResponse.jsonUnsafe({ error: "not_found", message: "Missing collection" }, { status: 404 })
         )
       }
       const col = collectionMap.get(name)
       if (col === undefined) {
         return Effect.succeed(
-          HttpServerResponse.unsafeJson(
+          HttpServerResponse.jsonUnsafe(
             { error: "not_found", message: `Unknown collection "${name}"` },
             { status: 404 }
           )
@@ -146,12 +150,12 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
             ),
             Effect.ignore
           )
-          return yield* Effect.catchAllCause(body(col, ctx, req, routeCtx), (cause) => {
-            const failure = Cause.failureOption(cause)
+          return yield* Effect.catchCause(body(col, ctx, req, params), (cause) => {
+            const failure = Cause.findErrorOption(cause)
             if (Option.isSome(failure)) {
               return Effect.succeed(failure.value)
             }
-            return Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))
+            return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
           })
         }).pipe(
           Effect.withSpan("http.handler", {
@@ -214,7 +218,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       const list = yield* svc
         .list(col, cursor, limit, ctx, filter ?? undefined, sort ?? undefined, select, expand)
         .pipe(catchCollectionErrors)
-      return HttpServerResponse.unsafeJson(list, { status: 200 })
+      return HttpServerResponse.jsonUnsafe(list, { status: 200 })
     })
   )
 
@@ -223,15 +227,15 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       const body = yield* getBody(req, col).pipe(catchCollectionErrors)
       const svc = yield* CollectionService
       const record = yield* svc.create(col, body, ctx).pipe(catchCollectionErrors)
-      return HttpServerResponse.unsafeJson(record, { status: 201 })
+      return HttpServerResponse.jsonUnsafe(record, { status: 201 })
     })
   )
 
-  const viewRoute = collectionRoute("view", (col, ctx, _req, routeCtx) => {
-    const id = routeCtx.params["id"]
+  const viewRoute = collectionRoute("view", (col, ctx, _req, params) => {
+    const id = params["id"]
     if (id === undefined) {
       return Effect.succeed(
-        HttpServerResponse.unsafeJson({ error: "not_found", message: "Missing id" }, { status: 404 })
+        HttpServerResponse.jsonUnsafe({ error: "not_found", message: "Missing id" }, { status: 404 })
       )
     }
     const select = parseSelectParam(ctx.query)
@@ -239,30 +243,30 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     return Effect.gen(function* () {
       const svc = yield* CollectionService
       const record = yield* svc.view(col, id, ctx, select, expand).pipe(catchCollectionErrors)
-      return HttpServerResponse.unsafeJson(record, { status: 200 })
+      return HttpServerResponse.jsonUnsafe(record, { status: 200 })
     })
   })
 
-  const updateRoute = collectionRoute("update", (col, ctx, req, routeCtx) => {
-    const id = routeCtx.params["id"]
+  const updateRoute = collectionRoute("update", (col, ctx, req, params) => {
+    const id = params["id"]
     if (id === undefined) {
       return Effect.succeed(
-        HttpServerResponse.unsafeJson({ error: "not_found", message: "Missing id" }, { status: 404 })
+        HttpServerResponse.jsonUnsafe({ error: "not_found", message: "Missing id" }, { status: 404 })
       )
     }
     return Effect.gen(function* () {
       const body = yield* getBody(req, col).pipe(catchCollectionErrors)
       const svc = yield* CollectionService
       const record = yield* svc.update(col, id, body, ctx).pipe(catchCollectionErrors)
-      return HttpServerResponse.unsafeJson(record, { status: 200 })
+      return HttpServerResponse.jsonUnsafe(record, { status: 200 })
     })
   })
 
-  const deleteRoute = collectionRoute("delete", (col, ctx, _req, routeCtx) => {
-    const id = routeCtx.params["id"]
+  const deleteRoute = collectionRoute("delete", (col, ctx, _req, params) => {
+    const id = params["id"]
     if (id === undefined) {
       return Effect.succeed(
-        HttpServerResponse.unsafeJson({ error: "not_found", message: "Missing id" }, { status: 404 })
+        HttpServerResponse.jsonUnsafe({ error: "not_found", message: "Missing id" }, { status: 404 })
       )
     }
     return Effect.gen(function* () {
@@ -275,12 +279,12 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
   const authRoute = collectionRoute("auth", (col, _ctx, req) =>
     Effect.gen(function* () {
       if (col.schema["x-collection-kind"] !== "auth") {
-        return HttpServerResponse.unsafeJson({ error: "read_only" }, { status: 405 })
+        return HttpServerResponse.jsonUnsafe({ error: "read_only" }, { status: 405 })
       }
       const { email, password } = yield* req.json.pipe(
-        Effect.flatMap(Schema.decodeUnknown(AuthBodySchema)),
+        Effect.flatMap(Schema.decodeUnknownEffect(AuthBodySchema)),
         Effect.mapError(() =>
-          HttpServerResponse.unsafeJson(
+          HttpServerResponse.jsonUnsafe(
             { error: "validation_failed", issues: ["email and password are required"] },
             { status: 422 }
           )
@@ -291,25 +295,25 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
         .viewFilter(col.name, { where: { sql: "t.email = ?", params: [email] } })
         .pipe(Effect.orElseSucceed(() => []))
       if (rows.length === 0) {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
       const fullRow = rows[0]
       const storedHash = fullRow["password"]
       if (typeof storedHash !== "string") {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
       const rid = fullRow["id"]
       if (typeof rid !== "string") {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
       const valid = yield* verifyPassword(password, storedHash).pipe(Effect.orElseSucceed(() => false))
       if (!valid) {
-        return HttpServerResponse.unsafeJson({ error: "forbidden" }, { status: 403 })
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
       const config = yield* AppConfig
       const jwtSecret = Redacted.value(config.jwtSecret)
       const token = yield* signJwt({ sub: rid, col: col.name }, jwtSecret).pipe(
-        Effect.mapError(() => HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 }))
+        Effect.mapError(() => HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
       )
       const dialect = yield* Dialect
       const decode = makeRowDecoder(col.schema, dialect.storesBooleanAsInteger)
@@ -320,8 +324,8 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
           return prop !== undefined && !prop["x-hidden"] && k !== "password"
         })
       )
-      return HttpServerResponse.unsafeJson({ token, record: publicRow }, { status: 200 }).pipe(
-        HttpServerResponse.unsafeSetCookie("mira_token", token, {
+      return HttpServerResponse.jsonUnsafe({ token, record: publicRow }, { status: 200 }).pipe(
+        HttpServerResponse.setCookieUnsafe("mira_token", token, {
           httpOnly: true,
           sameSite: "strict",
           path: "/",
@@ -333,7 +337,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
 
   const logoutRoute = Effect.succeed(
     HttpServerResponse.empty({ status: 204 }).pipe(
-      HttpServerResponse.unsafeSetCookie("mira_token", "", {
+      HttpServerResponse.setCookieUnsafe("mira_token", "", {
         httpOnly: true,
         sameSite: "strict",
         path: "/",
@@ -359,7 +363,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
         Effect.ignore
       )
       if (!auth) {
-        return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
+        return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
       }
       // `auth.record` is the full stored row (used as `ctx.auth` for rule
       // placeholders). Strip hidden fields before serialising it to the client
@@ -370,7 +374,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
         if (meCollection?.schema.properties[k]?.["x-hidden"] === true) continue
         publicRecord[k] = v
       }
-      return HttpServerResponse.unsafeJson(
+      return HttpServerResponse.jsonUnsafe(
         { collection: auth.collection, record: publicRecord },
         { status: 200 }
       )
@@ -433,10 +437,10 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       }
 
       if (authCol === null) {
-        return HttpServerResponse.unsafeJson({ error: "unauthorized" }, { status: 401 })
+        return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
       }
       return yield* effect.pipe(
-        Effect.catchAll(() => Effect.succeed(HttpServerResponse.unsafeJson({ error: "internal" }, { status: 500 })))
+        Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })))
       )
     }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation } }))
   }
@@ -444,19 +448,19 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
   const telemetryLogs = requireApiAuth("telemetry_logs", telemetryLogsRoute)
   const telemetrySpans = requireApiAuth("telemetry_spans", telemetrySpansRoute)
 
-  return HttpRouter.empty.pipe(
-    HttpRouter.get("/api/collections/:name", listRoute),
-    HttpRouter.post("/api/collections/:name", createRoute),
-    HttpRouter.get("/api/collections/:name/:id", viewRoute),
-    HttpRouter.patch("/api/collections/:name/:id", updateRoute),
-    HttpRouter.del("/api/collections/:name/:id", deleteRoute),
-    HttpRouter.post("/api/collections/:name/auth-with-password", authRoute),
-    HttpRouter.post("/api/auth/logout", logoutRoute),
-    HttpRouter.get("/api/auth/me", meRoute),
-    HttpRouter.get("/api/files/:collection/:id/:filename", fileServeRoute),
-    HttpRouter.post("/api/files/token", fileTokenRoute),
-    HttpRouter.get("/api/_schema", schemaRoute),
-    HttpRouter.get("/api/_telemetry/logs", telemetryLogs),
-    HttpRouter.get("/api/_telemetry/spans", telemetrySpans)
-  )
+  return [
+    HttpRouter.route("GET", "/api/collections/:name", listRoute),
+    HttpRouter.route("POST", "/api/collections/:name", createRoute),
+    HttpRouter.route("GET", "/api/collections/:name/:id", viewRoute),
+    HttpRouter.route("PATCH", "/api/collections/:name/:id", updateRoute),
+    HttpRouter.route("DELETE", "/api/collections/:name/:id", deleteRoute),
+    HttpRouter.route("POST", "/api/collections/:name/auth-with-password", authRoute),
+    HttpRouter.route("POST", "/api/auth/logout", logoutRoute),
+    HttpRouter.route("GET", "/api/auth/me", meRoute),
+    HttpRouter.route("GET", "/api/files/:collection/:id/:filename", fileServeRoute),
+    HttpRouter.route("POST", "/api/files/token", fileTokenRoute),
+    HttpRouter.route("GET", "/api/_schema", schemaRoute),
+    HttpRouter.route("GET", "/api/_telemetry/logs", telemetryLogs),
+    HttpRouter.route("GET", "/api/_telemetry/spans", telemetrySpans)
+  ]
 }

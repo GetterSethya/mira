@@ -1,4 +1,4 @@
-import { FileSystem, Path } from "@effect/platform"
+import { FileSystem, Path } from "effect"
 import { Context, Data, Effect, Layer, Sink, Stream } from "effect"
 
 /**
@@ -45,7 +45,7 @@ export class FileStorageNotFound extends Data.TaggedError("FileStorageNotFound")
  * @see makeFileStorageLayer — factory function
  * @see LocalFileStorage — local disk preset
  */
-export class FileStorage extends Context.Tag("FileStorage")<
+export class FileStorage extends Context.Service<
   FileStorage,
   {
     upload<E>(
@@ -59,7 +59,7 @@ export class FileStorage extends Context.Tag("FileStorage")<
     exists(key: string): Effect.Effect<boolean, FileStorageError>
     list(prefix: string): Effect.Effect<ReadonlyArray<string>, FileStorageError>
   }
->() {}
+>()("FileStorage") {}
 
 /**
  * Create a FileStorage layer backed by the local filesystem.
@@ -92,10 +92,7 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
           Effect.gen(function* () {
             const fullPath = pathSvc.join(root, key)
             yield* fs.makeDirectory(pathSvc.dirname(fullPath), { recursive: true }).pipe(
-              Effect.catchTags({
-                BadArgument: (e) => Effect.fail(new FileStorageError({ reason: e.message })),
-                SystemError: (e) => Effect.fail(new FileStorageError({ reason: e.message }))
-              })
+              Effect.catchTag("PlatformError", (e) => Effect.fail(new FileStorageError({ reason: e.message })))
             )
             // Map PlatformError at the sink level so generic E is not involved
             const mappedSink = Sink.mapError(
@@ -110,10 +107,7 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
           Effect.gen(function* () {
             const fullPath = pathSvc.join(root, key)
             yield* fs.remove(fullPath, { force: true }).pipe(
-              Effect.catchTags({
-                BadArgument: (e) => Effect.fail(new FileStorageError({ reason: e.message })),
-                SystemError: (e) => Effect.fail(new FileStorageError({ reason: e.message }))
-              })
+              Effect.catchTag("PlatformError", (e) => Effect.fail(new FileStorageError({ reason: e.message })))
             )
           }),
 
@@ -123,17 +117,11 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
           Effect.gen(function* () {
             const fullPath = pathSvc.join(root, key)
             const present = yield* fs.exists(fullPath).pipe(
-              Effect.catchTags({
-                BadArgument: () => Effect.succeed(false),
-                SystemError: () => Effect.succeed(false)
-              })
+              Effect.catchTag("PlatformError", () => Effect.succeed(false))
             )
             if (!present) return yield* new FileStorageNotFound({ key })
             return yield* fs.readFile(fullPath).pipe(
-              Effect.catchTags({
-                BadArgument: (e) => Effect.fail(new FileStorageError({ reason: e.message })),
-                SystemError: (e) => Effect.fail(new FileStorageError({ reason: e.message }))
-              })
+              Effect.catchTag("PlatformError", (e) => Effect.fail(new FileStorageError({ reason: e.message })))
             )
           }),
 
@@ -141,10 +129,7 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
           Effect.gen(function* () {
             const fullPath = pathSvc.join(root, key)
             return yield* fs.exists(fullPath).pipe(
-              Effect.catchTags({
-                BadArgument: () => Effect.succeed(false),
-                SystemError: () => Effect.succeed(false)
-              })
+              Effect.catchTag("PlatformError", () => Effect.succeed(false))
             )
           }),
 
@@ -152,10 +137,7 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
           Effect.gen(function* () {
             const prefixPath = pathSvc.join(root, prefix)
             const entries = yield* fs.readDirectory(prefixPath, { recursive: true }).pipe(
-              Effect.catchTags({
-                BadArgument: () => Effect.succeed<string[]>([]),
-                SystemError: () => Effect.succeed<string[]>([])
-              })
+              Effect.catchTag("PlatformError", () => Effect.succeed<Array<string>>([]))
             )
             const fileEntries = yield* Effect.filter(
               entries,

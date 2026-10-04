@@ -1,25 +1,26 @@
-import { Cookies, HttpClient, HttpClientRequest, HttpServer } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer, Option, Redacted } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
-import { Rule } from "@gettersethya/mira-client"
-import { defineRule, applyRulesToCollections } from "@/app/index.js"
+import { Effect, Layer, Option, Redacted } from "effect"
+import { Cookies, HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { SqlClient } from "effect/sql"
+
+import { applyRulesToCollections,defineRule } from "@/app/index.js"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
+import { AppConfig } from "@/config/index.js"
+import { NodeCryptoLayer } from "@/crypto/node.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import type { AuthService} from "@/http/auth.js";
+import {hashPassword } from "@/http/auth.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
+import { makeCollectionRouter } from "@/http/router.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
-import { hashPassword, AuthService } from "@/http/auth.js"
-import { makeCollectionRouter } from "@/http/router.js"
-import { AppConfig } from "@/config/index.js"
-import { NodeCryptoLayer } from "@/crypto/node.js"
-import { NodeAuthServiceLayer } from "@/http/auth-node.js"
-import { Dialect } from "@/dialect/dialect.js"
-import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 // ---------------------------------------------------------------------------
 // Collection definitions
@@ -169,36 +170,36 @@ function seedUser(
 // ---------------------------------------------------------------------------
 
 describe("makeCollectionRouter", () => {
-  it.scoped("GET /api/collections/:name — list returns empty result on empty table", () =>
+  it.effect("GET /api/collections/:name — list returns empty result on empty table", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/collections/posts")
       assert.strictEqual(res.status, 200)
       const body = yield* res.json
       assert.ok(typeof body === "object" && body !== null)
-      const items = (body as { items: unknown[] }).items
+      const items = (body as { items: Array<unknown> }).items
       assert.ok(Array.isArray(items))
       assert.strictEqual(items.length, 0)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("GET /api/collections/:name — list returns 404 for unknown collection", () =>
+  it.effect("GET /api/collections/:name — list returns 404 for unknown collection", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/collections/no_such_collection")
       assert.strictEqual(res.status, 404)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST /api/collections/:name — create returns 201 with record", () =>
+  it.effect("POST /api/collections/:name — create returns 201 with record", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyUnsafeJson({ title: "Hello World", content: "body text" })
+          HttpClientRequest.bodyJsonUnsafe({ title: "Hello World", content: "body text" })
         )
       )
       assert.strictEqual(res.status, 201)
@@ -210,26 +211,26 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST /api/collections/:name — create returns 403 when rules deny", () =>
+  it.effect("POST /api/collections/:name — create returns 403 when rules deny", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/restricted").pipe(
-          HttpClientRequest.bodyUnsafeJson({ name: "secret" })
+          HttpClientRequest.bodyJsonUnsafe({ name: "secret" })
         )
       )
       assert.strictEqual(res.status, 403)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("GET /api/collections/:name/:id — view returns 200 with record", () =>
+  it.effect("GET /api/collections/:name/:id — view returns 200 with record", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const createRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyUnsafeJson({ title: "Test Post" })
+          HttpClientRequest.bodyJsonUnsafe({ title: "Test Post" })
         )
       )
       assert.strictEqual(createRes.status, 201)
@@ -243,29 +244,29 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("GET /api/collections/:name/:id — view returns 404 for unknown id", () =>
+  it.effect("GET /api/collections/:name/:id — view returns 404 for unknown id", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/collections/posts/nonexistent-id")
       assert.strictEqual(res.status, 404)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("PATCH /api/collections/:name/:id — update returns 200 with updated record", () =>
+  it.effect("PATCH /api/collections/:name/:id — update returns 200 with updated record", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const createRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyUnsafeJson({ title: "Original" })
+          HttpClientRequest.bodyJsonUnsafe({ title: "Original" })
         )
       )
       const created = (yield* createRes.json) as Record<string, unknown>
       const id = created["id"] as string
       const res = yield* HttpClient.execute(
         HttpClientRequest.patch(`/api/collections/posts/${id}`).pipe(
-          HttpClientRequest.bodyUnsafeJson({ title: "Updated" })
+          HttpClientRequest.bodyJsonUnsafe({ title: "Updated" })
         )
       )
       assert.strictEqual(res.status, 200)
@@ -274,41 +275,41 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("DELETE /api/collections/:name/:id — delete returns 204 with empty body", () =>
+  it.effect("DELETE /api/collections/:name/:id — delete returns 204 with empty body", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const createRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyUnsafeJson({ title: "To Delete" })
+          HttpClientRequest.bodyJsonUnsafe({ title: "To Delete" })
         )
       )
       const created = (yield* createRes.json) as Record<string, unknown>
       const id = created["id"] as string
-      const res = yield* HttpClient.execute(HttpClientRequest.del(`/api/collections/posts/${id}`))
+      const res = yield* HttpClient.execute(HttpClientRequest.delete(`/api/collections/posts/${id}`))
       assert.strictEqual(res.status, 204)
       const text = yield* res.text
       assert.strictEqual(text, "")
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("DELETE /api/collections/:name/:id — delete returns 404 for unknown id", () =>
+  it.effect("DELETE /api/collections/:name/:id — delete returns 404 for unknown id", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
-      const res = yield* HttpClient.execute(HttpClientRequest.del("/api/collections/posts/no-such-id"))
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+      const res = yield* HttpClient.execute(HttpClientRequest.delete("/api/collections/posts/no-such-id"))
       assert.strictEqual(res.status, 404)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST auth-with-password — valid credentials return token and stripped record", () =>
+  it.effect("POST auth-with-password — valid credentials return token and stripped record", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("alice@example.com", "password123")
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "alice@example.com", password: "password123" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "alice@example.com", password: "password123" })
         )
       )
       assert.strictEqual(res.status, 200)
@@ -321,54 +322,54 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST auth-with-password — wrong password returns 403", () =>
+  it.effect("POST auth-with-password — wrong password returns 403", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("bob@example.com", "correctpass")
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "bob@example.com", password: "wrongpass" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "bob@example.com", password: "wrongpass" })
         )
       )
       assert.strictEqual(res.status, 403)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST auth-with-password — non-auth collection returns 405", () =>
+  it.effect("POST auth-with-password — non-auth collection returns 405", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "x@x.com", password: "pass" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "x@x.com", password: "pass" })
         )
       )
       assert.strictEqual(res.status, 405)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST auth-with-password — missing fields returns 422", () =>
+  it.effect("POST auth-with-password — missing fields returns 422", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "only@example.com" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "only@example.com" })
         )
       )
       assert.strictEqual(res.status, 422)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("JWT bearer token resolves auth context for subsequent requests", () =>
+  it.effect("JWT bearer token resolves auth context for subsequent requests", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("carol@example.com", "secret")
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const loginRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "carol@example.com", password: "secret" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "carol@example.com", password: "secret" })
         )
       )
       assert.strictEqual(loginRes.status, 200)
@@ -382,14 +383,14 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST auth-with-password — response sets HttpOnly mira_token cookie", () =>
+  it.effect("POST auth-with-password — response sets HttpOnly mira_token cookie", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("cookieuser@example.com", "secret")
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "cookieuser@example.com", password: "secret" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "cookieuser@example.com", password: "secret" })
         )
       )
       assert.strictEqual(res.status, 200)
@@ -399,14 +400,14 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("GET /api/collections/:name — cookie auth returns 200 without Bearer header", () =>
+  it.effect("GET /api/collections/:name — cookie auth returns 200 without Bearer header", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("cookieauth@example.com", "secret")
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const loginRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "cookieauth@example.com", password: "secret" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "cookieauth@example.com", password: "secret" })
         )
       )
       assert.strictEqual(loginRes.status, 200)
@@ -418,10 +419,10 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("GET /api/collections/:name — invalid cookie is treated as anonymous, returns 200 for public route", () =>
+  it.effect("GET /api/collections/:name — invalid cookie is treated as anonymous, returns 200 for public route", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/collections/posts", {
         headers: { Cookie: "mira_token=not-a-valid-jwt" }
       })
@@ -429,10 +430,10 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST /api/auth/logout — response clears mira_token cookie with Max-Age=0", () =>
+  it.effect("POST /api/auth/logout — response clears mira_token cookie with Max-Age=0", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(HttpClientRequest.post("/api/auth/logout"))
       assert.strictEqual(res.status, 204)
       const cookieOpt = Cookies.get(res.cookies, "mira_token")
@@ -441,14 +442,14 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("GET /api/auth/me — valid cookie returns 200 with collection and record", () =>
+  it.effect("GET /api/auth/me — valid cookie returns 200 with collection and record", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("meuser@example.com", "secret")
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const loginRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "meuser@example.com", password: "secret" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "meuser@example.com", password: "secret" })
         )
       )
       assert.strictEqual(loginRes.status, 200)
@@ -466,22 +467,22 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("GET /api/auth/me — no token returns 401", () =>
+  it.effect("GET /api/auth/me — no token returns 401", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/auth/me")
       assert.strictEqual(res.status, 401)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("POST /api/collections/users — password is hashed so auth-with-password succeeds", () =>
+  it.effect("POST /api/collections/users — password is hashed so auth-with-password succeeds", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const createRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "newuser@example.com", password: "plaintext-pw" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "newuser@example.com", password: "plaintext-pw" })
         )
       )
       assert.strictEqual(createRes.status, 201)
@@ -492,21 +493,21 @@ describe("makeCollectionRouter", () => {
       // also asserts the stored value is a valid hash of the same plaintext.
       const loginRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "newuser@example.com", password: "plaintext-pw" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "newuser@example.com", password: "plaintext-pw" })
         )
       )
       assert.strictEqual(loginRes.status, 200)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.scoped("GET /api/_schema — passes system annotations through instead of stripping them", () =>
+  it.effect("GET /api/_schema — passes system annotations through instead of stripping them", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("schemaadmin@example.com", "secret")
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const loginRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyUnsafeJson({ email: "schemaadmin@example.com", password: "secret" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "schemaadmin@example.com", password: "secret" })
         )
       )
       const token = ((yield* loginRes.json) as Record<string, unknown>)["token"] as string

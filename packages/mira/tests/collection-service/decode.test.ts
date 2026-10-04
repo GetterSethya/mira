@@ -1,7 +1,8 @@
-import { Effect } from "effect"
 import { describe, it } from "@effect/vitest"
-import { expect } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { Effect } from "effect"
+import { expect } from "vitest"
+
 import { makeRowDecoder, makeRowEncoder } from "@/collection-service/decode.js"
 
 const Posts = BaseCollection.define("posts", {

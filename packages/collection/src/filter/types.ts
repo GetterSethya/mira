@@ -61,11 +61,9 @@ export type FilterNode =
   | { op: "and" | "or"; left: FilterNode; right: FilterNode }
   | { op: "not"; node: FilterNode }
 
-let _filterNodeSchema: Schema.Schema<FilterNode>
-
-_filterNodeSchema = Schema.Union(
+const _filterNodeSchema: Schema.Codec<FilterNode> = Schema.Union([
   Schema.Struct({
-    op: Schema.Literal("eq", "neq", "gt", "gte", "lt", "lte"),
+    op: Schema.Literals(["eq", "neq", "gt", "gte", "lt", "lte"]),
     field: Schema.String,
     value: Schema.Unknown
   }),
@@ -80,11 +78,11 @@ _filterNodeSchema = Schema.Union(
     value: Schema.String
   }),
   Schema.Struct({
-    op: Schema.Literal("null", "not_null"),
+    op: Schema.Literals(["null", "not_null"]),
     field: Schema.String
   }),
   Schema.Struct({
-    op: Schema.Literal("and", "or"),
+    op: Schema.Literals(["and", "or"]),
     left: Schema.suspend(() => _filterNodeSchema),
     right: Schema.suspend(() => _filterNodeSchema)
   }),
@@ -92,15 +90,15 @@ _filterNodeSchema = Schema.Union(
     op: Schema.Literal("not"),
     node: Schema.suspend(() => _filterNodeSchema)
   })
-)
+])
 
 /**
  * Effect Schema for `FilterNode`. Used to decode filter query parameters
  * from HTTP request JSON bodies.
  *
  * The schema is self-referential (recursive via `Schema.suspend`) to handle
- * nested `and`/`or`/`not` nodes. This is why the underlying `let` variable
- * exists — the recursive `suspend` needs a forward reference.
+ * nested `and`/`or`/`not` nodes — the recursive `suspend` closures forward
+ * reference the `const` binding.
  *
  * @example
  * import { Schema } from "effect"

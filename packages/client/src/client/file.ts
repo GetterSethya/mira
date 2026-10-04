@@ -1,8 +1,9 @@
-import type { HttpClient, HttpClientRequest } from "@effect/platform"
-import { HttpClientRequest as HCR } from "@effect/platform"
-import type { HttpBodyError } from "@effect/platform/HttpBody"
-import { Effect, MutableRef } from "effect"
 import type { AnyCollectionDef, FieldsMap } from "@gettersethya/mira-collection"
+import { Effect, MutableRef } from "effect"
+import type { HttpClient, HttpClientRequest } from "effect/http"
+import { HttpClientRequest as HCR } from "effect/http"
+import type { HttpBodyError } from "effect/http/HttpBody"
+
 import { MiraError } from "./errors.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import type { CollectionFileFields } from "./types.js"

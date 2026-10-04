@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import type { MigrationStep } from "@/migrator/types.js"
 

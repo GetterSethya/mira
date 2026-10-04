@@ -1,10 +1,10 @@
-import { Effect } from "effect"
+import { Effect, Result } from "effect"
 import { describe, expect, it } from "vitest"
-import { filterNodeToWhereClause } from "@/filter/compiler.js"
-import { Filter } from "@/filter/builder.js"
-import type { FilterNode } from "@/filter/types.js"
+
 import type { CollectionSchema } from "@/collection/types.js"
-import { ValidationError } from "@/collection/errors.js"
+import { Filter } from "@/filter/builder.js"
+import { filterNodeToWhereClause } from "@/filter/compiler.js"
+import type { FilterNode } from "@/filter/types.js"
 
 const testSchema: CollectionSchema = {
   "x-collection-kind": "base",
@@ -162,14 +162,14 @@ describe("filterNodeToWhereClause", () => {
   it("unknown field returns ValidationError", () =>
     Effect.gen(function* () {
       const node: FilterNode = { op: "eq", field: "nonexistent", value: "x" }
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         filterNodeToWhereClause(node, testSchema, "testCollection")
       )
-      expect(result._tag).toBe("Left")
-      if (result._tag === "Left" && result.left instanceof ValidationError) {
-        expect(result.left.issues[0]).toContain("nonexistent")
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
+        expect(result.failure.issues[0]).toContain("nonexistent")
       } else {
-        expect.fail("Expected a Left<ValidationError>")
+        expect.fail("Expected a Failure<ValidationError>")
       }
     }).pipe(Effect.runPromise))
 
@@ -188,10 +188,10 @@ describe("filterNodeToWhereClause", () => {
         left: { op: "eq", field: "title", value: "ok" },
         right: { op: "eq", field: "bogus", value: "x" }
       }
-      const result = yield* Effect.either(
+      const result = yield* Effect.result(
         filterNodeToWhereClause(node, testSchema, "testCollection")
       )
-      expect(result._tag).toBe("Left")
-      expect(result._tag === "Left" && result.left instanceof ValidationError).toBe(true)
+      expect(Result.isFailure(result)).toBe(true)
+      expect(Result.isFailure(result) && result.failure._tag === "ValidationError").toBe(true)
     }).pipe(Effect.runPromise))
 })

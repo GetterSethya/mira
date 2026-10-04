@@ -1,12 +1,12 @@
 import { Effect } from "effect"
-import { HttpRouter, HttpServerResponse } from "@effect/platform"
+import { HttpRouter, HttpServerResponse } from "effect/http"
 import { CronService, CronNotFoundError } from "@gettersethya/mira"
 
 export const cronsRoute = Effect.gen(function* () {
   const cronService = yield* CronService
   const states = yield* cronService.getAll()
 
-  return HttpServerResponse.unsafeJson(
+  return HttpServerResponse.jsonUnsafe(
     states.map((s) => ({
       name: s.name,
       description: s.description ?? null,
@@ -28,7 +28,7 @@ export const cronRunNowRoute = Effect.flatMap(HttpRouter.RouteContext, (routeCtx
     return yield* cronService.runNow(name).pipe(
       Effect.as(HttpServerResponse.empty({ status: 204 })),
       Effect.catchTag("CronNotFoundError", (_: CronNotFoundError) =>
-        Effect.succeed(HttpServerResponse.unsafeJson({ error: "not_found" }, { status: 404 }))
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 }))
       )
     )
   })

@@ -5,39 +5,43 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js"
   import * as Tooltip from "$lib/components/ui/tooltip/index.js"
   import type { CollectionSchema } from "$lib/dashboard-api.js"
-  import { isGeneratedField, isTableHiddenField, isSystemField, fieldKind } from "$lib/schema.js"
-  import { resolve } from "$app/paths"
-  import { goto } from "$app/navigation"
-  import { getCoreRowModel, type ColumnDef } from "@tanstack/table-core"
-  import { createSvelteTable, renderSnippet, FlexRender } from "$lib/components/ui/data-table"
-  import { cn } from "$lib/utils"
-  import { Switch } from "$lib/components/ui/switch/index.js"
-  import { IconDotsVertical, IconCopy, IconTrash } from "@tabler/icons-svelte"
-  import { IconSize } from "$lib/constants"
-  import { toast } from "svelte-sonner"
+import { isGeneratedField, isTableHiddenField, isSystemField, fieldKind } from "$lib/schema.js"
+import { getCoreRowModel, type ColumnDef } from "@tanstack/table-core"
+import { createSvelteTable, renderSnippet, FlexRender } from "$lib/components/ui/data-table"
+import { cn } from "$lib/utils"
+import { Switch } from "$lib/components/ui/switch/index.js"
+import { IconDotsVertical, IconCopy, IconTrash, IconPencil } from "@tabler/icons-svelte"
+import { IconSize } from "$lib/constants"
+import { toast } from "svelte-sonner"
 
-  const {
-    schema,
-    records,
-    collectionName,
-    onDelete,
-    onLoadMore,
-    hasMore = false
-  }: {
-    schema: CollectionSchema
-    records: Record<string, unknown>[]
-    collectionName: string
-    onDelete: (id: string) => Promise<void>
-    onLoadMore?: () => void
-    hasMore?: boolean
-  } = $props()
+/** Every collection row has a string `id`. Rows are untyped `Record<string, unknown>`. */
+function recordId(record: Record<string, unknown>): string {
+  const id = record["id"]
+  return typeof id === "string" ? id : String(id)
+}
+
+const {
+  schema,
+  records,
+  onEdit,
+  onDelete,
+  onLoadMore,
+  hasMore = false
+}: {
+  schema: CollectionSchema
+  records: Record<string, unknown>[]
+  onEdit: (id: string) => void
+  onDelete: (id: string) => Promise<void>
+  onLoadMore?: () => void
+  hasMore?: boolean
+} = $props()
 
   const columns = $derived.by((): ColumnDef<Record<string, unknown>>[] => {
     const cols: ColumnDef<Record<string, unknown>>[] = [
       {
         accessorKey: "id",
         header: "id",
-        cell: ({ row }) => renderSnippet(IdCell, { id: row.original["id"] }),
+        cell: ({ row }) => renderSnippet(IdCell, { id: recordId(row.original) }),
         size: 1
       }
     ]
@@ -75,7 +79,7 @@
     cols.push({
       id: "actions",
       header: "Actions",
-      cell: ({ row }) => renderSnippet(ActionsCell, { id: row.original["id"], record: row.original }),
+      cell: ({ row }) => renderSnippet(ActionsCell, { id: recordId(row.original), record: row.original }),
       size: 1
     })
 
@@ -154,10 +158,7 @@
       {#each table.getRowModel().rows as row (row.id)}
         <Table.Row
           class="cursor-pointer hover:bg-muted/50"
-          onclick={() => {
-            const id = row.original["id"]
-            if (typeof id === "string") goto(resolve(`/collections/${collectionName}/${id}`))
-          }}
+          onclick={() => onEdit(recordId(row.original))}
         >
           {#each row.getVisibleCells() as cell (cell.id)}
             {#if cell.column.id === "actions"}
@@ -208,9 +209,9 @@
   </AlertDialog.Content>
 </AlertDialog.Root>
 
-{#snippet IdCell({ id }: { id: unknown })}
+{#snippet IdCell({ id }: { id: string })}
   <div class="max-w-[200px] truncate text-sm">
-    {String(id).slice(0, 80)}
+    {id.slice(0, 80)}
   </div>
 {/snippet}
 
@@ -248,7 +249,7 @@
   {/if}
 {/snippet}
 
-{#snippet ActionsCell({ id, record }: { id: unknown; record: any })}
+{#snippet ActionsCell({ id, record }: { id: string; record: Record<string, unknown> })}
   <DropdownMenu.Root>
     <DropdownMenu.Trigger>
       {#snippet child({ props })}
@@ -258,17 +259,16 @@
       {/snippet}
     </DropdownMenu.Trigger>
     <DropdownMenu.Content align="end">
+      <DropdownMenu.Item class="cursor-pointer" onclick={() => onEdit(id)}>
+        <IconPencil />
+        Edit
+      </DropdownMenu.Item>
       <DropdownMenu.Item class="cursor-pointer" onclick={() => copyJson(record)}>
         <IconCopy />
         Copy JSON
       </DropdownMenu.Item>
       <DropdownMenu.Separator />
-      <DropdownMenu.Item
-        class="cursor-pointer text-destructive"
-        onclick={() => {
-          deleteId = String(id)
-        }}
-      >
+      <DropdownMenu.Item class="cursor-pointer text-destructive" onclick={() => (deleteId = id)}>
         <IconTrash class="text-destructive" />
         Delete
       </DropdownMenu.Item>

@@ -1,18 +1,18 @@
-import * as jose from "jose"
 import { Context, Data, Effect } from "effect"
+import * as jose from "jose"
 
 export type JwtPayload = { sub: string; col: string }
 export type FileTokenPayload = { sub: string; col: string; filecol: string }
 
 export class AuthError extends Data.TaggedError("AuthError")<{ reason: string }> {}
 
-export class AuthService extends Context.Tag("AuthService")<
+export class AuthService extends Context.Service<
   AuthService,
   {
     hashPassword(plain: string): Effect.Effect<string>
     verifyPassword(plain: string, stored: string): Effect.Effect<boolean>
   }
->() {}
+>()("AuthService") {}
 
 export const hashPassword = (plain: string) => Effect.flatMap(AuthService, (auth) => auth.hashPassword(plain))
 

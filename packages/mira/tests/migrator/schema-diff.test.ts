@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
 import type { CollectionSchema } from "@gettersethya/mira-client"
+import { describe, expect, it } from "vitest"
+
 import { computePlan, diffSchemas, propertyToColumnType, schemaToColumns } from "@/migrator/schema-diff.js"
 import type { NamedSchema } from "@/migrator/types.js"
 
@@ -302,7 +303,7 @@ describe("diffSchemas — view collections", () => {
 
 describe("computePlan", () => {
   it("produces createTable for new schema", () => {
-    const schemas: NamedSchema[] = [
+    const schemas: Array<NamedSchema> = [
       {
         name: "posts",
         schema: {

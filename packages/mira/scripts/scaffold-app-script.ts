@@ -37,9 +37,9 @@
  *     body: { "postId": "...", "authorId": "YOUR_ID", "body": "..." }
  */
 
-import { HttpServer } from "@effect/platform"
+import { HttpServer } from "effect/http"
 import { NodeFileSystem, NodeHttpServer, NodePath, NodeRuntime } from "@effect/platform-node"
-import { SqlClient } from "@effect/sql"
+import { SqlClient } from "effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Data, Effect, Layer, Schedule, Schema } from "effect"
 import { createServer } from "node:http"
@@ -154,8 +154,8 @@ const startupEffect = Effect.gen(function* () {
     .pipe(Effect.orDie)
 
   const IdSchema = Schema.Struct({ id: Schema.String })
-  const { id: aliceId } = yield* Schema.decodeUnknown(IdSchema)(alice).pipe(Effect.orDie)
-  const { id: bobId } = yield* Schema.decodeUnknown(IdSchema)(bob).pipe(Effect.orDie)
+  const { id: aliceId } = yield* Schema.decodeUnknownEffect(IdSchema)(alice).pipe(Effect.orDie)
+  const { id: bobId } = yield* Schema.decodeUnknownEffect(IdSchema)(bob).pipe(Effect.orDie)
 
   // Seed posts
   const post1 = yield* repo
@@ -172,9 +172,9 @@ const startupEffect = Effect.gen(function* () {
     })
     .pipe(Effect.orDie)
 
-  const { id: post1Id } = yield* Schema.decodeUnknown(IdSchema)(post1).pipe(Effect.orDie)
-  const { id: post2Id } = yield* Schema.decodeUnknown(IdSchema)(post2).pipe(Effect.orDie)
-  const { id: post3Id } = yield* Schema.decodeUnknown(IdSchema)(post3).pipe(Effect.orDie)
+  const { id: post1Id } = yield* Schema.decodeUnknownEffect(IdSchema)(post1).pipe(Effect.orDie)
+  const { id: post2Id } = yield* Schema.decodeUnknownEffect(IdSchema)(post2).pipe(Effect.orDie)
+  const { id: post3Id } = yield* Schema.decodeUnknownEffect(IdSchema)(post3).pipe(Effect.orDie)
 
   // Seed comments
   yield* repo.create("comments", { postId: post1Id, authorId: bobId, body: "Great post, Alice!" }).pipe(Effect.orDie)
@@ -225,7 +225,7 @@ const infraMigrated = Layer.effectDiscard(startupEffect).pipe(Layer.provideMerge
 const collectionLayer = makeCachedCollectionServiceLayer([...allCollections]).pipe(Layer.provideMerge(infraMigrated))
 
 // config: pre-seed port into _config so AppConfigLive picks it up, then run AppConfigLive
-const configLayer = Layer.unwrapEffect(
+const configLayer = Layer.unwrap(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
@@ -235,7 +235,7 @@ const configLayer = Layer.unwrapEffect(
 ).pipe(Layer.provideMerge(foundation))
 
 // http: derive port from AppConfig (reads the value we just seeded)
-const serverLayer = Layer.unwrapEffect(
+const serverLayer = Layer.unwrap(
   Effect.map(AppConfig, (cfg) => NodeHttpServer.layer(() => createServer(), { port: cfg.port }))
 )
 
@@ -559,7 +559,7 @@ async function runTests(): Promise<void> {
 }
 
 const program = Effect.gen(function* () {
-  yield* Effect.forkDaemon(Layer.launch(appLayer))
+  yield* Effect.forkDetach(Layer.launch(appLayer))
   yield* Effect.promise(() =>
     runTests().catch((e: unknown) => { console.error("[tests] Fatal:", e) })
   )

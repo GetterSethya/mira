@@ -1,26 +1,27 @@
-import { HttpClient, HttpClientRequest, HttpServer } from "@effect/platform"
 import { NodeHttpServer } from "@effect/platform-node"
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer, Option, Redacted } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
-import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { createMiraClient } from "@gettersethya/mira-client"
+import { Effect, Layer, Option, Redacted } from "effect"
+import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { SqlClient } from "effect/sql"
+
+import { applyRulesToCollections,defineRule } from "@/app/index.js"
+import { Mira } from "@/app/index.js"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
-import { Repository, RepositoryLive } from "@/repository/repository.js"
-import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
-import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
-import { makeCollectionRouter } from "@/http/router.js"
 import { AppConfig } from "@/config/index.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
-import { NodeAuthServiceLayer } from "@/http/auth-node.js"
-import { Mira } from "@/app/index.js"
-import { NodePlatform } from "@/platforms/node.js"
 import { SqliteDatabase } from "@/databases/sqlite.js"
-import { LocalFileStorage } from "@/storage/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { NodeAuthServiceLayer } from "@/http/auth-node.js"
+import { makeCollectionRouter } from "@/http/router.js"
+import { NodePlatform } from "@/platforms/node.js"
+import { RepositoryLive } from "@/repository/repository.js"
+import { LocalFileStorage } from "@/storage/index.js"
+import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
+import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
 
 const postsDef = BaseCollection.define("posts", {
   title: Field.text(),
@@ -104,27 +105,27 @@ const setupTables = Effect.gen(function* () {
 })
 
 describe("MiraApp integration", () => {
-  it.scoped("GET /api/collections/posts returns empty list after migration", () =>
+  it.effect("GET /api/collections/posts returns empty list after migration", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/collections/posts")
       assert.strictEqual(res.status, 200)
       const body = yield* res.json
       assert.ok(typeof body === "object" && body !== null && "items" in body)
-      const items = (body as { items: unknown[] }).items
+      const items = (body as { items: Array<unknown> }).items
       assert.ok(Array.isArray(items))
       assert.strictEqual(items.length, 0)
     }).pipe(Effect.provide(testLayer)),
   )
 
-  it.scoped("POST /api/collections/posts creates a record", () =>
+  it.effect("POST /api/collections/posts creates a record", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyUnsafeJson({ title: "hello" }),
+          HttpClientRequest.bodyJsonUnsafe({ title: "hello" }),
         ),
       )
       assert.strictEqual(res.status, 201)
@@ -135,31 +136,31 @@ describe("MiraApp integration", () => {
     }).pipe(Effect.provide(testLayer)),
   )
 
-  it.scoped("POST then GET list returns the created record", () =>
+  it.effect("POST then GET list returns the created record", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyUnsafeJson({ title: "my post" }),
+          HttpClientRequest.bodyJsonUnsafe({ title: "my post" }),
         ),
       )
       const res = yield* HttpClient.get("/api/collections/posts")
       assert.strictEqual(res.status, 200)
       const body = yield* res.json
       assert.ok(typeof body === "object" && body !== null && "items" in body)
-      const items = (body as { items: unknown[] }).items
+      const items = (body as { items: Array<unknown> }).items
       assert.strictEqual(items.length, 1)
     }).pipe(Effect.provide(testLayer)),
   )
 
-  it.scoped("POST then GET by id returns the record", () =>
+  it.effect("POST then GET by id returns the record", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const createRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyUnsafeJson({ title: "find me" }),
+          HttpClientRequest.bodyJsonUnsafe({ title: "find me" }),
         ),
       )
       const created = yield* createRes.json
@@ -173,35 +174,35 @@ describe("MiraApp integration", () => {
     }).pipe(Effect.provide(testLayer)),
   )
 
-  it.scoped("GET /api/collections/unknown returns 404", () =>
+  it.effect("GET /api/collections/unknown returns 404", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/collections/unknown")
       assert.strictEqual(res.status, 404)
     }).pipe(Effect.provide(testLayer)),
   )
 
-  it.scoped("MiraApp builder can be constructed", () =>
-    Effect.gen(function* () {
+  it.effect("MiraApp builder can be constructed", () =>
+    Effect.sync(() => {
       assert.ok(app)
     }).pipe(Effect.provide(testLayer)),
   )
 
-  it.scoped("create with published: true round-trips a real JS boolean through the client", () =>
+  it.effect("create with published: true round-trips a real JS boolean through the client", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const posts = createMiraClient("/").collection(Posts)
       const created = yield* posts.create().toEffect({ title: "bool create", published: true })
       assert.strictEqual(created.published, true)
     }).pipe(Effect.provide(testLayer)),
   )
 
-  it.scoped("update toggling published persists and round-trips through GET", () =>
+  it.effect("update toggling published persists and round-trips through GET", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* makeCollectionRouter(ALL_COLLECTIONS).pipe(HttpServer.serveEffect())
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const posts = createMiraClient("/").collection(Posts)
       const created = yield* posts.create().toEffect({ title: "bool update", published: true })
       const updated = yield* posts.update().toEffect({ id: created.id, data: { published: false } })

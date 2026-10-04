@@ -1,8 +1,10 @@
 # Mira
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/GetterSethya/mira)
+
 > **Early pre-alpha.** This project is under active development. Any new feature or fix may introduce breaking changes without notice. Use at your own risk.
 
-Mira is a self-hosted backend framework in TypeScript built on [Effect](https://effect.website/). You define your data model as typed collections, and Mira generates a full REST API with authentication, file uploads, access rules, cursor pagination, hooks, and an admin dashboard — all from code, with zero config files.
+Mira is a self-hosted backend framework in TypeScript built on [Effect v4](https://effect.website/). You define your data model as typed collections, and Mira generates a full REST API with authentication, file uploads, access rules, cursor pagination, hooks, and an admin dashboard — all from code, with zero config files.
 
 Your collections are TypeScript files. Your rules are composable expressions evaluated server-side on every request.
 
@@ -18,7 +20,7 @@ Your collections are TypeScript files. Your rules are composable expressions eva
 | `@gettersethya/mira-tanstack-adapter` | TanStack Query adapters (React / Svelte / Solid) | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-tanstack-adapter)](https://www.npmjs.com/package/@gettersethya/mira-tanstack-adapter) |
 | `@gettersethya/mira-dashboard` | Admin dashboard plugin — SvelteKit SPA with a record editor, log viewer, and config display | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-dashboard)](https://www.npmjs.com/package/@gettersethya/mira-dashboard) |
 
-All packages require `effect >= 3.21` as a peer dependency.
+All packages require `effect >= 4` (Effect v4) as a peer dependency.
 
 ---
 
@@ -153,7 +155,7 @@ Mira.builder()
 | `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). |
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
 | `.extend(plugin)` | — | Called on `MiraApp` after `.build()`. Registers a `MiraPlugin`. |
-| `.serve(opts?)` | — | Starts the HTTP server. Optional `{ port }` overrides `AppConfig`. |
+| `.serve(opts?)` | — | Starts the HTTP server. Optional `{ port, maxPortAttempts }` overrides `AppConfig`. If the port is already in use, the server automatically retries on the next available port (up to `maxPortAttempts`, default 10). |
 
 ---
 
@@ -622,7 +624,7 @@ import { MiraPlugin } from "@gettersethya/mira"
 import { Layer, Effect, Schedule } from "effect"
 
 // A background job that runs every minute
-const backgroundJobLayer = Layer.scopedDiscard(
+const backgroundJobLayer = Layer.effectDiscard(
   Effect.forkScoped(
     Effect.repeat(
       Effect.log("background tick"),
@@ -887,13 +889,16 @@ MiraPlugin.define({
 Plugins can expose HTTP routes that are merged into the server router. Routes have access to the full service stack (`AppConfig`, `Repository`, `CollectionService`, `AuthService`, `SqlClient`, `FileSystem`, `Path`).
 
 ```typescript
-import { HttpRouter, HttpServerResponse } from "@effect/platform"
+import { HttpRouter, HttpServerResponse } from "effect/http"
 
 MiraPlugin.define({
-  routes: HttpRouter.get(
-    "/api/health",
-    HttpServerResponse.json({ status: "ok" })
-  ),
+  routes: [
+    HttpRouter.route(
+      "GET",
+      "/api/health",
+      HttpServerResponse.json({ status: "ok" })
+    )
+  ],
 })
 ```
 
@@ -1060,6 +1065,19 @@ By default Mira uses `ConsoleTelemetryLayer`, which prints JSON trace spans to s
 [trace] {"span":"collection.list","traceId":"...","spanId":"...","durationMs":3.2,"status":"ok","attributes":{"collection":"posts","cache.hit":true}}
 ```
 
+Pass `{ pretty: true }` to `makeConsoleTelemetryLayer` to print human-readable, Chalk-colored logs and spans instead:
+
+```typescript
+import { makeConsoleTelemetryLayer } from "@gettersethya/mira"
+
+.telemetry(makeConsoleTelemetryLayer({ pretty: true }))
+```
+
+```text
+08:07:42.159 INFO  Migrating 4 collections...  0a0aa8ba/cf6a2535
+[trace] collection.list client 3.20ms ok posts cache.hit=true
+```
+
 To persist logs and spans to a SQLite database instead, use `makeSqliteTelemetryLayer`:
 
 ```typescript
@@ -1073,6 +1091,7 @@ const app = Mira.builder()
   .telemetry(makeSqliteTelemetryLayer({
     dbPath:     "mira-logs.db",   // defaults to "mira-logs.db"
     logConsole: true,             // also print to stdout (default: false)
+    pretty:     true,             // colorize the console output (default: false)
   }))
   .build()
 ```
@@ -1082,7 +1101,7 @@ The telemetry layer writes to two collections in a dedicated SQLite database (se
 - **`logs`** — structured log entries from `Effect.log()`. Fields: `seqId`, `level`, `message`, `traceId?`, `spanId?`, `created`, `updated`.
 - **`spans`** — completed Effect spans. Fields: `seqId`, `name`, `traceId`, `spanId`, `parentSpanId?`, `kind`, `durationMs`, `status`, `error?`, `attributes`, `created`, `updated`.
 
-The telemetry endpoints (`GET /_telemetry/logs` and `GET /_telemetry/spans`) support cursor-based pagination via `?after=<seqId>&limit=<n>` and return `{ ...items, total, limit, nextCursor }`. The dashboard's log/span viewer uses this to provide fast, continuous pagination.
+The telemetry endpoints (`GET /api/_telemetry/logs` and `GET /api/_telemetry/spans`) support cursor-based pagination via `?after=<seqId>&limit=<n>` and return `{ ...items, total, limit, nextCursor }`. The dashboard's log/span viewer uses this to provide fast, continuous pagination.
 
 ---
 
@@ -1170,7 +1189,7 @@ const post = await mira.posts.create().raw({
 })
 
 // Update (partial patch)
-const updated = await mira.posts.update().raw(["post-id", { title: "Updated title" }])
+const updated = await mira.posts.update().raw({ id: "post-id", data: { title: "Updated title" } })
 
 // Delete
 await mira.posts.delete().raw("post-id")
@@ -1362,7 +1381,7 @@ File tokens are scoped to a single collection. A token issued for `"posts"` cann
 ## Commands
 
 ```bash
-# Build all packages in dependency order (client → mira → adapter)
+# Build all packages in dependency order (collection → client → mira → adapter → dashboard)
 pnpm build
 
 # Typecheck all packages (client must be built first)
@@ -1371,10 +1390,14 @@ pnpm -r typecheck
 # Run all tests across all packages
 pnpm -r test
 
+# Rebuild the dashboard SPA bundle (not part of `pnpm build`)
+pnpm build:ui
+
 # Build individual packages
+pnpm --filter @gettersethya/mira-collection build
 pnpm --filter @gettersethya/mira-client build
 pnpm --filter @gettersethya/mira build
 pnpm --filter @gettersethya/mira-tanstack-adapter build
 ```
 
-> Build order matters: `@gettersethya/mira-client` must be built before running typecheck or tests in `@gettersethya/mira` or `@gettersethya/mira-tanstack-adapter`.
+> Build order matters: `@gettersethya/mira-collection` and `@gettersethya/mira-client` must be built before running typecheck or tests in `@gettersethya/mira` or `@gettersethya/mira-tanstack-adapter`.

@@ -1,18 +1,20 @@
-import { SqlClient } from "@effect/sql"
-import { unsafeFragment } from "@effect/sql/Statement"
-import { Context, Effect, Layer, Option, Schema } from "effect"
 import type { AnyCollectionDef, CollectionSchema } from "@gettersethya/mira-client"
-import { filterNodeToWhereClause } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
-import { enforcerForAction } from "@/rule/enforcer.js"
-import { Repository } from "@/repository/repository.js"
-import type { ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
-import { FileStorage } from "@/storage/storage.js"
+import { filterNodeToWhereClause } from "@gettersethya/mira-client"
+import { Context, Effect, Layer, Option, Schema } from "effect"
+import { SqlClient } from "effect/sql"
+import { literal } from "effect/sql/Statement"
+
 import { Dialect } from "@/dialect/dialect.js"
 import { AuthService } from "@/http/auth.js"
+import { Repository } from "@/repository/repository.js"
+import type { ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
+import { enforcerForAction } from "@/rule/enforcer.js"
+import { FileStorage } from "@/storage/storage.js"
+
+import type { CursorPage, RequestCtx } from "./context.js"
 import type { RowDecoder, RowEncoder } from "./decode.js"
 import { makeRowDecoder, makeRowEncoder } from "./decode.js"
-import type { CursorPage, RequestCtx } from "./context.js"
 import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
@@ -41,7 +43,7 @@ import { andWhere, cursorClause, idClause, resolveCtxPlaceholders, resolveFieldR
  * @see makeCollectionServiceLayer — factory function
  * @see Repository — the underlying data access layer
  */
-export class CollectionService extends Context.Tag("CollectionService")<
+export class CollectionService extends Context.Service<
   CollectionService,
   {
     list(
@@ -74,7 +76,7 @@ export class CollectionService extends Context.Tag("CollectionService")<
 
     delete(collection: AnyCollectionDef, id: string, ctx: RequestCtx): Effect.Effect<void, CollectionError>
   }
->() {}
+>()("CollectionService") {}
 
 function resolveFields(schema: CollectionSchema, userSelect: ReadonlyArray<string> | null, admin = false): ReadonlyArray<string> {
   const nonHidden = Object.entries(schema.properties)
@@ -354,8 +356,8 @@ export function makeCollectionServiceLayer(
 
           yield* rejectSystemFields(data, collection.schema, collection.name)
           const schemas = getInputSchemas(collection)
-          const cleaned = yield* Schema.decodeUnknown(schemas.create)(data).pipe(
-            Effect.mapError(parseErrToValidationError(collection.name))
+          const cleaned = yield* Schema.decodeUnknownEffect(schemas.create)(data).pipe(
+            Effect.mapError(parseErrToValidationError(collection.name)),
           )
 
           if (!ctx.admin) {
@@ -363,7 +365,7 @@ export function makeCollectionServiceLayer(
 
             // Pre-check: evaluate the create rule against the payload (no table needed).
             const payloadBound = resolveFieldRefs(ruleWhere, cleaned)
-            const where = unsafeFragment(payloadBound.sql, payloadBound.params)
+            const where = literal(payloadBound.sql, payloadBound.params)
             const check = yield* sql<{ ok: number }>`SELECT 1 AS ok WHERE ${where}`
 
             if (check.length === 0) {
@@ -391,8 +393,8 @@ export function makeCollectionServiceLayer(
 
           yield* rejectSystemFields(data, collection.schema, collection.name)
           const schemas = getInputSchemas(collection)
-          const cleaned = yield* Schema.decodeUnknown(schemas.update)(data).pipe(
-            Effect.mapError(parseErrToValidationError(collection.name))
+          const cleaned = yield* Schema.decodeUnknownEffect(schemas.update)(data).pipe(
+            Effect.mapError(parseErrToValidationError(collection.name)),
           )
 
           // If the collection has no rules at all, deny immediately (don't leak existence)
@@ -431,11 +433,11 @@ export function makeCollectionServiceLayer(
             oldKeys,
             (key) =>
               Effect.gen(function* () {
-                yield* fileStorage.delete(key).pipe(Effect.orElse(() => Effect.void))
+                yield* fileStorage.delete(key).pipe(Effect.catch(() => Effect.void))
                 const thumbKeys = yield* fileStorage.list(`_thumbs/${key}/`).pipe(Effect.orElseSucceed(() => []))
                 yield* Effect.forEach(
                   thumbKeys,
-                  (tk) => fileStorage.delete(tk).pipe(Effect.orElse(() => Effect.void)),
+                  (tk) => fileStorage.delete(tk).pipe(Effect.catch(() => Effect.void)),
                   { concurrency: "unbounded" }
                 )
               }),
@@ -490,11 +492,11 @@ export function makeCollectionServiceLayer(
             keys,
             (key) =>
               Effect.gen(function* () {
-                yield* fileStorage.delete(key).pipe(Effect.orElse(() => Effect.void))
+                yield* fileStorage.delete(key).pipe(Effect.catch(() => Effect.void))
                 const thumbKeys = yield* fileStorage.list(`_thumbs/${key}/`).pipe(Effect.orElseSucceed(() => []))
                 yield* Effect.forEach(
                   thumbKeys,
-                  (tk) => fileStorage.delete(tk).pipe(Effect.orElse(() => Effect.void)),
+                  (tk) => fileStorage.delete(tk).pipe(Effect.catch(() => Effect.void)),
                   { concurrency: "unbounded" }
                 )
               }),

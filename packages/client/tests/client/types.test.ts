@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest"
-
 import type { AnyCollectionDef, FieldDef } from "@gettersethya/mira-collection"
 import { Field } from "@gettersethya/mira-collection"
+import { describe, expect, it } from "vitest"
+
 import type { FilterBuilder } from "@/client/collection.js"
-import type { InferRecord, InferCreateInput, WithExpand, RelationKeys } from "@/client/types.js"
+import type { InferCreateInput, InferRecord, RelationKeys,WithExpand } from "@/client/types.js"
 
 describe("InferRecord", () => {
   it("has correct field types and system fields", () => {
@@ -110,7 +110,7 @@ describe("WithExpand", () => {
   })
 
   it("with expand produces typed expand.fieldName", () => {
-    const Users: AnyCollectionDef = {
+    const _Users: AnyCollectionDef = {
       name: "users",
       fields: {
         name: Field.text()
@@ -124,7 +124,7 @@ describe("WithExpand", () => {
 
     type F = {
       title: { _tag: "FieldDef"; kind: "text"; required: true }
-      ownerId: { _tag: "FieldDef"; kind: "relation"; required: true; _target: typeof Users }
+      ownerId: { _tag: "FieldDef"; kind: "relation"; required: true; _target: typeof _Users }
     }
 
     type Rec = WithExpand<F, ["ownerId"]>
@@ -151,7 +151,7 @@ describe("WithExpand", () => {
 
 describe("RelationKeys", () => {
   it("extracts only relation field keys", () => {
-    const Users: AnyCollectionDef = {
+    const _Users: AnyCollectionDef = {
       name: "users",
       fields: {},
       schema: { "x-collection-kind": "auth", type: "object", properties: {} }
@@ -159,7 +159,7 @@ describe("RelationKeys", () => {
 
     type F = {
       title: { _tag: "FieldDef"; kind: "text"; required: true }
-      ownerId: { _tag: "FieldDef"; kind: "relation"; required: true; _target: typeof Users }
+      ownerId: { _tag: "FieldDef"; kind: "relation"; required: true; _target: typeof _Users }
       tags: { _tag: "FieldDef"; kind: "text"; required: true }
     }
 

@@ -1,4 +1,5 @@
 import type { CollectionSchema, JsonSchemaProperty } from "@gettersethya/mira-client"
+
 import type { ColumnDef, MigrationPlan, MigrationStep, NamedSchema } from "./types.js"
 
 function jsonKeysDiffer(a: unknown, b: unknown) {
@@ -61,7 +62,7 @@ function diffViewSchemas(
   name: string,
   stored: CollectionSchema | null,
   desired: CollectionSchema
-): MigrationStep[] {
+): Array<MigrationStep> {
   const query = desired["x-view-query"]
   if (!query) return []
 
@@ -88,7 +89,7 @@ export function diffSchemas(name: string, stored: CollectionSchema | null, desir
     return diffViewSchemas(name, stored, desired)
   }
 
-  const steps: MigrationStep[] = []
+  const steps: Array<MigrationStep> = []
 
   if (stored === null) {
     steps.push({ kind: "createTable", table: name, columns: schemaToColumns(desired) })
@@ -141,11 +142,11 @@ export function diffSchemas(name: string, stored: CollectionSchema | null, desir
  * When `allowDestructive` is true, tables absent from `schemas` are dropped.
  */
 export function computePlan(
-  schemas: NamedSchema[],
+  schemas: Array<NamedSchema>,
   stored: Record<string, CollectionSchema>,
   options?: { allowDestructive?: boolean }
 ): MigrationPlan {
-  const steps: MigrationStep[] = []
+  const steps: Array<MigrationStep> = []
   let destructive = false
 
   for (const { name, schema } of schemas) {

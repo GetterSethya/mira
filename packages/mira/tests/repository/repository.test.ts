@@ -1,10 +1,11 @@
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer, Option } from "effect"
 import { describe, it } from "@effect/vitest"
+import { Effect, Layer, Option, Result } from "effect"
+import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
-import { Repository, RepositoryLive } from "@/repository/repository.js"
+
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { Repository, RepositoryLive } from "@/repository/repository.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const testLayer = Layer.mergeAll(RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer)), sqliteLayer, NodeCryptoLayer)
@@ -301,17 +302,19 @@ describe("repository", () => {
     it.effect("SqlError is raised for genuinely bad SQL (non-existent table)", () =>
       Effect.gen(function* () {
         const repo = yield* Repository
-        const result = yield* repo.view("no_such_table", "abc").pipe(Effect.either)
-        expect(result._tag).toBe("Left")
+        const result = yield* repo.view("no_such_table", "abc").pipe(Effect.result)
+        expect(Result.isFailure(result)).toBe(true)
       }).pipe(Effect.provide(testLayer)))
 
     it.effect("not found is always Option.none, never SqlError", () =>
       Effect.gen(function* () {
         yield* setupTable
         const repo = yield* Repository
-        const view = yield* repo.view("posts", "missing123456").pipe(Effect.either)
-        expect(view._tag).toBe("Right")
-        expect(Option.isNone((view as { _tag: "Right"; right: Option.Option<unknown> }).right)).toBe(true)
+        const view = yield* repo.view("posts", "missing123456").pipe(Effect.result)
+        expect(Result.isSuccess(view)).toBe(true)
+        if (Result.isSuccess(view)) {
+          expect(Option.isNone(view.success)).toBe(true)
+        }
       }).pipe(Effect.provide(testLayer)))
   })
 })

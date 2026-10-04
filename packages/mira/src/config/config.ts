@@ -1,6 +1,8 @@
-import { SqlClient, SqlSchema } from "@effect/sql"
-import { CryptoService } from "@/crypto/index.js"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { SqlClient, SqlSchema } from "effect/sql"
+
+import { CryptoService } from "@/crypto/index.js"
+
 import type { AppConfigShape, S3Config } from "./types.js"
 
 const ConfigRowSchema = Schema.Struct({
@@ -32,7 +34,7 @@ const ConfigRowSchema = Schema.Struct({
  * @see AppConfigLive — the live layer implementation
  * @see AppConfigShape — the full config shape
  */
-export class AppConfig extends Context.Tag("AppConfig")<AppConfig, AppConfigShape>() {}
+export class AppConfig extends Context.Service<AppConfig, AppConfigShape>()("AppConfig") {}
 
 /**
  * Live layer for `AppConfig`.
@@ -69,7 +71,7 @@ export const AppConfigLive = Layer.effect(
       })
 
     const require = (key: string) =>
-      Effect.fromNullable(stored.get(key)).pipe(
+      Effect.fromOption(Option.fromNullishOr(stored.get(key))).pipe(
         Effect.mapError(() => new Error(`_config key "${key}" is required when use_s3=true`)),
         Effect.orDie
       )
@@ -106,6 +108,34 @@ export const AppConfigLive = Layer.effect(
 
     const logRetentionDays = Number(yield* seed("log_retention_days", "30"))
 
-    return { appName, port, applicationUrl, jwtSecret, useS3, s3Config, logRetentionDays }
+    let boundPort = port
+    let boundUrl = applicationUrl
+    const updateBoundPort = (next: number) => {
+      if (next === boundPort) return
+      boundPort = next
+      boundUrl = replaceUrlPort(applicationUrl, next)
+    }
+
+    return {
+      appName,
+      get port() {
+        return boundPort
+      },
+      get applicationUrl() {
+        return boundUrl
+      },
+      jwtSecret,
+      useS3,
+      s3Config,
+      logRetentionDays,
+      updateBoundPort
+    }
   })
 )
+
+function replaceUrlPort(url: string, port: number): string {
+  if (!URL.canParse(url)) return url
+  const parsed = new URL(url)
+  parsed.port = String(port)
+  return parsed.toString().replace(/\/$/, "")
+}

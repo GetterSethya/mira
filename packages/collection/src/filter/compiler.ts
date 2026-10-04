@@ -1,6 +1,8 @@
 import { Effect } from "effect"
-import type { CollectionSchema } from "@/collection/types.js"
+
 import { ValidationError } from "@/collection/errors.js"
+import type { CollectionSchema } from "@/collection/types.js"
+
 import type { FilterNode, WhereClause } from "./types.js"
 
 /**

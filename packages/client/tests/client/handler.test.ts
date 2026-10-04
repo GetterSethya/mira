@@ -1,9 +1,8 @@
+import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 
-import { Effect } from "effect"
-import { FetchHttpClient } from "@effect/platform"
-import { makeClientHandler } from "@/client/handler.js"
 import { MiraError } from "@/client/errors.js"
+import { makeClientHandler } from "@/client/handler.js"
 
 describe("ClientHandler", () => {
   it("raw() resolves the Effect and returns the value", async () => {

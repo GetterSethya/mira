@@ -1,8 +1,9 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Layer } from "effect"
+
+import type { MiraDatabase } from "@/app/types.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
-import type { MiraDatabase } from "@/app/types.js"
 
 /**
  * SQLite database preset using `@effect/sql-sqlite-node`.

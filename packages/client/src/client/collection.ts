@@ -1,13 +1,15 @@
-import type { HttpClient, HttpClientRequest } from "@effect/platform"
-import { HttpClientRequest as HCR } from "@effect/platform"
-import type { HttpBodyError } from "@effect/platform/HttpBody"
-import { Effect, MutableRef, Option, Schedule, Schema } from "effect"
-import type { AnyCollectionDef, FieldsMap, InferFieldValue, FilterNode, FieldFilterOperand } from "@gettersethya/mira-collection"
+import type { AnyCollectionDef, FieldFilterOperand,FieldsMap, FilterNode, InferFieldValue } from "@gettersethya/mira-collection"
 import { Filter, FilterNodeSchema } from "@gettersethya/mira-collection"
+import type { Schedule} from "effect";
+import { Effect, MutableRef, Option, Schema } from "effect"
+import type { HttpClient, HttpClientRequest } from "effect/http"
+import { HttpClientRequest as HCR } from "effect/http"
+import type { HttpBodyError } from "effect/http/HttpBody"
+
 import { MiraError } from "./errors.js"
+import { makeFileFields } from "./file.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler as makeHandler, makeMutationHandler } from "./handler.js"
-import { makeFileFields } from "./file.js"
 import type { CollectionFileFields, InferMutationInput, InferRecord, RelationKeys, WithExpand } from "./types.js"
 
 type RequestWithBody = Effect.Effect<HttpClientRequest.HttpClientRequest, HttpBodyError, never>
@@ -164,7 +166,7 @@ export type CollectionClient<F extends FieldsMap> = {
    */
   getList<E extends ReadonlyArray<RelationKeys<F>> = []>(
     options?: GetListOptions<F, E>
-  ): ClientHandler<{ items: WithExpand<F, E>[]; nextCursor: number | null }>
+  ): ClientHandler<{ items: Array<WithExpand<F, E>>; nextCursor: number | null }>
 
   /**
    * Get the first record matching a filter, or `Option.none()` if none match.
@@ -203,7 +205,7 @@ export type CollectionClient<F extends FieldsMap> = {
    */
   getFullList<E extends ReadonlyArray<RelationKeys<F>> = []>(
     options?: Omit<GetListOptions<F, E>, "limit" | "cursor"> & { limit?: number }
-  ): ClientHandler<WithExpand<F, E>[]>
+  ): ClientHandler<Array<WithExpand<F, E>>>
 
   /**
    * Get a single record by its `id`.
@@ -297,7 +299,7 @@ type MakeCollectionClientParams<F extends FieldsMap> = {
 export function makeCollectionClient<F extends FieldsMap>(
   params: MakeCollectionClientParams<F>
 ): CollectionClient<F> {
-  const { collectionName, schema, fields, execute, baseUrl, authTokenRef, loggedInRef, fileTokenCacheRef, isAuth, defaultRetryOptions } = params
+  const { authTokenRef, baseUrl, collectionName, defaultRetryOptions, execute, fields, fileTokenCacheRef, isAuth, loggedInRef, schema } = params
 
   function withRetry<T>(
     effect: Effect.Effect<T, MiraError, HttpClient.HttpClient>,
@@ -318,10 +320,10 @@ export function makeCollectionClient<F extends FieldsMap>(
 
   function getList<E extends ReadonlyArray<RelationKeys<F>> = []>(
     options?: GetListOptions<F, E>
-  ): ClientHandler<{ items: WithExpand<F, E>[]; nextCursor: number | null }> {
+  ): ClientHandler<{ items: Array<WithExpand<F, E>>; nextCursor: number | null }> {
     const filterNode = options?.filter?.(makeFilterBuilder<F>())
     const queryParams = buildQueryParams({
-      ...(filterNode ? { filter: Schema.encodeSync(Schema.parseJson(FilterNodeSchema))(filterNode) } : {}),
+      ...(filterNode ? { filter: Schema.encodeSync(Schema.fromJsonString(FilterNodeSchema))(filterNode) } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
       ...(options?.order ? { order: options.order } : {}),
       ...(options?.cursor != null ? { after: String(options.cursor) } : {}),
@@ -330,7 +332,7 @@ export function makeCollectionClient<F extends FieldsMap>(
       ...(options?.expand ? { expand: options.expand.join(",") } : {}),
     })
 
-    const effect = execute<{ items: WithExpand<F, E>[]; nextCursor: number | null }>(
+    const effect = execute<{ items: Array<WithExpand<F, E>>; nextCursor: number | null }>(
       HCR.get(`/api/collections/${collectionName}${queryParams}`)
     )
     return makeHandler(withRetry(effect, options))
@@ -342,13 +344,13 @@ export function makeCollectionClient<F extends FieldsMap>(
   ): ClientHandler<Option.Option<WithExpand<F, E>>> {
     const effect = getList<E>({ ...options, filter, limit: 1 })
       .toEffect()
-      .pipe(Effect.map(({ items }) => Option.fromNullable(items[0] ?? null)))
+      .pipe(Effect.map(({ items }) => Option.fromNullishOr(items[0] ?? null)))
     return makeHandler(effect)
   }
 
   function getFullList<E extends ReadonlyArray<RelationKeys<F>> = []>(
     options?: Omit<GetListOptions<F, E>, "limit" | "cursor"> & { limit?: number }
-  ): ClientHandler<WithExpand<F, E>[]> {
+  ): ClientHandler<Array<WithExpand<F, E>>> {
     const effect = getList<E>({ ...options, limit: options?.limit ?? 1000 })
       .toEffect()
       .pipe(Effect.map(({ items }) => items))
@@ -380,7 +382,7 @@ export function makeCollectionClient<F extends FieldsMap>(
   }
 
   function update() {
-    return makeMutationHandler<InferRecord<F>, { id: string; data: Partial<InferMutationInput<F>> }>(({ id, data }) => {
+    return makeMutationHandler<InferRecord<F>, { id: string; data: Partial<InferMutationInput<F>> }>(({ data, id }) => {
       const reqEffect: RequestWithBody = hasFileOrBlob(data)
         ? Effect.succeed(HCR.bodyFormData(HCR.patch(`/api/collections/${collectionName}/${id}`), buildFormData(data)))
         : HCR.bodyJson(HCR.patch(`/api/collections/${collectionName}/${id}`), data)
@@ -390,7 +392,7 @@ export function makeCollectionClient<F extends FieldsMap>(
 
   function deleteFn() {
     return makeMutationHandler<void, string>((id) => {
-      const effect = execute<void>(HCR.del(`/api/collections/${collectionName}/${id}`))
+      const effect = execute<void>(HCR.delete(`/api/collections/${collectionName}/${id}`))
       return withRetry(effect)
     })
   }

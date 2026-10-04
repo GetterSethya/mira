@@ -1,6 +1,7 @@
-import type { HttpClient } from "@effect/platform"
-import { HttpClientRequest as HCR } from "@effect/platform"
 import { Effect, MutableRef } from "effect"
+import type { HttpClient } from "effect/http"
+import { HttpClientRequest as HCR } from "effect/http"
+
 import type { MiraError } from "./errors.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 

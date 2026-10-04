@@ -39,7 +39,7 @@
 
   const form = createAppForm(() => ({
     defaultValues: { email: "", password: "" },
-    validators: { onChange: Schema.standardSchemaV1(LoginSchema) },
+    validators: { onChange: Schema.toStandardSchemaV1(LoginSchema) },
     onSubmit: async ({ value }) => {
       return await loginMutation.mutateAsync(value)
     }

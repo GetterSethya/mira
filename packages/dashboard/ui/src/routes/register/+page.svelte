@@ -39,7 +39,7 @@
 
   const form = createAppForm(() => ({
     defaultValues: { name: "", email: "", password: "" },
-    validators: { onChange: Schema.standardSchemaV1(RegisterSchema) },
+    validators: { onChange: Schema.toStandardSchemaV1(RegisterSchema) },
     onSubmit: async ({ value }) => {
       return await registerMutation.mutateAsync({ ...value, token })
     }

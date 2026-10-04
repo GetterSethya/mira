@@ -39,7 +39,7 @@ function makeField<K extends FieldKind, O extends BaseFieldOptions>(
   kind: K,
   opts?: O
 ): FieldDef & { kind: K } & O & { view(): FieldDef & { kind: K } & O & { viewOnly: true } } {
-  const def = { _tag: "FieldDef" as "FieldDef", kind, ...opts } as FieldDef & { kind: K } & O
+  const def = { _tag: "FieldDef" as const, kind, ...opts } as FieldDef & { kind: K } & O
   return withView(def)
 }
 
@@ -93,13 +93,13 @@ export const Field = {
    * Field.literalText({ literal: ["admin", "agent", "readonly"] })
    * Field.literalText({ literal: ["draft", "published"], default: "draft" })
    */
-  literalText: <const L extends readonly string[], O extends Omit<BaseFieldOptions, "default"> & { default?: L[number] }>(
+  literalText: <const L extends ReadonlyArray<string>, O extends Omit<BaseFieldOptions, "default"> & { default?: L[number] }>(
     opts: { literal: L } & O & { error?: (kind: LiteralTextConstraintKind) => string | undefined }
   ) => {
     const { literal, ...rest } = opts as { literal: L } & O
     const def = {
-      _tag: "FieldDef" as "FieldDef",
-      kind: "literalText" as "literalText",
+      _tag: "FieldDef" as const,
+      kind: "literalText" as const,
       literal,
       _literal: literal,
       ...rest
@@ -250,8 +250,8 @@ export const Field = {
     const targetField = opts?.field ?? "id"
     const { field: _field, ...fieldOpts } = (opts ?? {}) as { field?: string } & O
     const def = {
-      _tag: "FieldDef" as "FieldDef",
-      kind: "relation" as "relation",
+      _tag: "FieldDef" as const,
+      kind: "relation" as const,
       targetCollection: collection.name,
       targetField,
       ...fieldOpts

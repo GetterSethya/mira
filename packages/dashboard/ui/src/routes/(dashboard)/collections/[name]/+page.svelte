@@ -17,13 +17,15 @@
 
   const name = $derived(page.params["name"] ?? "")
   const cursor = $derived(Number(page.url.searchParams.get("cursor") || "0"))
-  const showSheet = $derived(page.url.searchParams.get("open"))
+  const showSheet = $derived(page.url.searchParams.get("open") !== null)
   const id = $derived(page.url.searchParams.get("id"))
   const schema = $derived(schemaQuery.data?.find((s) => s.name === name) ?? null)
   const api = $derived(makeCollectionApi(name))
   const columnCount = $derived(schema ? Object.keys(schema.fields).length + 1 : 5)
 
   const listQuery = createQuery(() => api.listOptions({ limit: 50, after: cursor }))
+  const recordQuery = createQuery(() => ({ ...api.getOneOptions(id ?? ""), enabled: id !== null }))
+  const editRecord = $derived(id !== null ? recordQuery.data ?? null : null)
 
   let records = $state<Record<string, unknown>[]>([])
   let nextCursor = $state<number | null>(null)
@@ -38,24 +40,48 @@
 
   const queryClient = useQueryClient()
 
-  async function handleCreate(data: FormData | Record<string, unknown>) {
+  function closeSheet() {
+    const searchParams = page.url.searchParams
+    searchParams.delete("open")
+    searchParams.delete("id")
+    goto(`${page.url.pathname}?${searchParams.toString()}`)
+  }
+
+  function resetToList() {
+    const searchParams = page.url.searchParams
+    searchParams.delete("cursor")
+    searchParams.delete("open")
+    searchParams.delete("id")
+    goto(`${page.url.pathname}?${searchParams.toString()}`)
+  }
+
+  function openEdit(recordId: string) {
+    const searchParams = page.url.searchParams
+    searchParams.set("open", "true")
+    searchParams.set("id", recordId)
+    goto(`${page.url.pathname}?${searchParams.toString()}`)
+  }
+
+  async function handleSubmit(data: FormData | Record<string, unknown>) {
     try {
-      await api.create(data as Record<string, unknown>)
+      if (id !== null) {
+        await api.update(id, data as Record<string, unknown>)
+        toast.success("Record saved")
+      } else {
+        await api.create(data as Record<string, unknown>)
+        toast.success("Record created")
+      }
       await queryClient.invalidateQueries({ queryKey: api.invalidationKey() })
-      const searchParams = page.url.searchParams
-      searchParams.delete("cursor")
-      searchParams.delete("open")
-      goto(`${page.url.pathname}?${searchParams.toString()}`)
-      toast.success("Record created")
+      resetToList()
     } catch {
-      toast.error("Failed to create record")
+      toast.error(id !== null ? "Failed to save record" : "Failed to create record")
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(recordId: string) {
     try {
-      await api.delete(id)
-      records = records.filter((r) => r["id"] !== id)
+      await api.delete(recordId)
+      records = records.filter((r) => r["id"] !== recordId)
       toast.success("Record deleted")
     } catch {
       toast.error("Failed to delete record")
@@ -91,7 +117,7 @@
       <RecordTable
         {schema}
         {records}
-        collectionName={name}
+        onEdit={openEdit}
         onDelete={handleDelete}
         onLoadMore={() => {
           if (nextCursor !== null) {
@@ -106,35 +132,33 @@
   {/if}
 </div>
 
-<Sheet.Root
-  open={!!showSheet}
-  onOpenChange={(value) => {
-    const searchParams = page.url.searchParams
-    if (!value) {
-      searchParams.delete("open")
-      searchParams.delete("id")
-    }
-    goto(`${page.url.pathname}?${searchParams.toString()}`)
-  }}
->
+<Sheet.Root open={showSheet} onOpenChange={(value) => !value && closeSheet()}>
   <Sheet.Content showCloseButton={false} side="right" class="min-w-full md:min-w-lg overflow-y-auto">
     <Sheet.Header class="sticky top-0 bg-card z-30 border-b">
-      <Sheet.Title>New {name} record</Sheet.Title>
+      <Sheet.Title>{id ? `Edit ${name} record` : `New ${name} record`}</Sheet.Title>
     </Sheet.Header>
     {#if schema}
-      <div class="mt-4 px-5">
-        <RecordForm {schema} record={null} onSubmit={handleCreate} />
-      </div>
+      {#if id !== null && recordQuery.isLoading}
+        <p class="text-muted-foreground px-5 py-4">Loading…</p>
+      {:else if id !== null && !editRecord}
+        <p class="text-muted-foreground px-5 py-4">Record not found.</p>
+      {:else}
+        <div class="mt-4 px-5">
+          {#key id}
+            <RecordForm {schema} record={editRecord} onSubmit={handleSubmit} />
+          {/key}
+        </div>
+      {/if}
     {/if}
 
     <Sheet.Footer class="flex flex-row sticky bottom-0 bg-card border-t z-30">
-      <Button class="flex-1" variant="destructive">Cancel</Button>
-      <Button type="submit" class="flex-1" form="record-form">
+      <Button class="flex-1" variant="outline" onclick={closeSheet}>Cancel</Button>
+      <Button type="submit" class="flex-1" form="record-form" disabled={id !== null && !editRecord}>
         {#if recordFormStore.isLoading}
           <Spinner />
         {/if}
-        {id ? "Save" : "Submit"}</Button
-      >
+        {id ? "Save" : "Submit"}
+      </Button>
     </Sheet.Footer>
   </Sheet.Content>
 </Sheet.Root>

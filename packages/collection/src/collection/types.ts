@@ -72,8 +72,8 @@ export type FieldDef = {
   mimeTypes?: Array<string>
   viewOnly?: boolean
   protected?: boolean
-  literal?: readonly string[]
-  _literal?: readonly string[]
+  literal?: ReadonlyArray<string>
+  _literal?: ReadonlyArray<string>
   _target?: AnyCollectionDef
   error?(kind: ConstraintKind): string | undefined
 }
@@ -160,5 +160,5 @@ export type FieldKindToType = {
 /** Infers the TypeScript value type for a given FieldDef. */
 export type InferFieldValue<T extends FieldDef> =
   T["kind"] extends "literalText"
-    ? T extends { _literal: readonly (infer V)[] } ? V : string
+    ? T extends { _literal: ReadonlyArray<infer V> } ? V : string
     : FieldKindToType[T["kind"]]

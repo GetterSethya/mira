@@ -1,11 +1,12 @@
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import { describe, it } from "@effect/vitest"
+import { Effect, Layer, Option, Redacted, Schema } from "effect"
+import { SqlClient } from "effect/sql"
 import { expect, vi } from "vitest"
-import { makeSqliteTelemetryLayerForClient, logCleanupCronDef } from "@/telemetry/sqlite-logger.js"
-import { NodeCryptoLayer } from "@/crypto/index.js"
+
 import { AppConfig } from "@/config/index.js"
+import { NodeCryptoLayer } from "@/crypto/index.js"
+import { logCleanupCronDef,makeSqliteTelemetryLayerForClient } from "@/telemetry/sqlite-logger.js"
 import { TelemetrySqlClient } from "@/telemetry/telemetry-sql-client.js"
 
 function makeLayer(logConsole = false) {
@@ -152,8 +153,8 @@ describe("makeSqliteTelemetryLayerForClient", () => {
       expect(firstRow).toBeDefined()
       if (firstRow === undefined) return
 
-      const decoded = yield* Schema.decodeUnknown(
-        Schema.parseJson(Schema.Record({ key: Schema.String, value: Schema.Union(Schema.String, Schema.Number, Schema.Boolean) }))
+      const decoded = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean])))
       )(firstRow.attributes).pipe(Effect.orDie)
 
       expect(decoded["cache.hit"]).toBe(true)

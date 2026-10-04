@@ -1,7 +1,7 @@
+import { AuthCollection, BaseCollection, Field,ViewCollection } from "@gettersethya/mira-client"
 import { describe, expect, it } from "vitest"
-import { BaseCollection, AuthCollection, ViewCollection, Field } from "@gettersethya/mira-client"
-import { Rule } from "@gettersethya/mira-client"
-import { defineRule, applyRulesToCollections } from "@/app/index.js"
+
+import { applyRulesToCollections,defineRule } from "@/app/index.js"
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text({ maxLength: 200 }),

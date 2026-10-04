@@ -27,11 +27,11 @@ export const Mira = {
   builder: () => new MiraBuilder(),
 }
 
-export type { MiraPlatform, MiraDatabase, MiraStorage, PlatformServices } from "./types.js"
-export type { MiraApp } from "./app.js"
+export type { MiraApp, ServeOptions } from "./app.js"
+export { applyRulesToCollections } from "./app.js"
 export { MiraBuilder } from "./builder.js"
 export type { RuleBinding } from "./define-rule.js"
 export { defineRule } from "./define-rule.js"
-export { applyRulesToCollections } from "./app.js"
-export type { RecordHook, RecordSuccessHook, ListHook, ListSuccessHook } from "./plugin.js"
+export type { ListHook, ListSuccessHook,RecordHook, RecordSuccessHook } from "./plugin.js"
 export { MiraPlugin, onCollection, onCollectionSuccess } from "./plugin.js"
+export type { MiraDatabase, MiraPlatform, MiraStorage, PlatformServices } from "./types.js"

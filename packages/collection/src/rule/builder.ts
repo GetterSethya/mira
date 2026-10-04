@@ -1,4 +1,5 @@
 import type { AnyCollectionDef, FieldsMap, InferFieldValue } from "@/collection/types.js"
+
 import type { ExprNode, OperandNode } from "./types.js"
 
 type FieldOperandMethods<K extends string, V = unknown> = {

@@ -1,6 +1,7 @@
-import type { HttpClient, HttpClientRequest } from "@effect/platform"
-import { FetchHttpClient } from "@effect/platform"
 import { Cause, Effect, Exit, Option } from "effect"
+import type { HttpClient, HttpClientRequest } from "effect/http"
+import { FetchHttpClient } from "effect/http"
+
 import type { MiraError } from "./errors.js"
 
 /**
@@ -68,7 +69,7 @@ export function makeClientHandler<T>(
       Effect.runPromiseExit(effect.pipe(Effect.provide(FetchHttpClient.layer))).then((exit) => {
         if (Exit.isSuccess(exit)) return exit.value
         return Promise.reject(
-          Option.getOrElse(Cause.failureOption(exit.cause), () => Cause.squash(exit.cause))
+          Option.getOrElse(Cause.findErrorOption(exit.cause), () => Cause.squash(exit.cause))
         )
       }),
     toEffect: () => effect,
@@ -102,7 +103,7 @@ export function makeMutationHandler<TData, TInput>(
       Effect.runPromiseExit(fn(input).pipe(Effect.provide(FetchHttpClient.layer))).then((exit) => {
         if (Exit.isSuccess(exit)) return exit.value
         return Promise.reject(
-          Option.getOrElse(Cause.failureOption(exit.cause), () => Cause.squash(exit.cause))
+          Option.getOrElse(Cause.findErrorOption(exit.cause), () => Cause.squash(exit.cause))
         )
       }),
     toEffect: (input: TInput) => fn(input),

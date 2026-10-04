@@ -1,10 +1,11 @@
-import { Data, Effect, Option, Schema } from "effect"
-import { HttpServerRequest, HttpServerResponse } from "@effect/platform"
-import { unsafeFragment } from "@effect/sql/Statement"
 import type { FilterNode } from "@gettersethya/mira-client"
 import { FilterNodeSchema, filterNodeToWhereClause } from "@gettersethya/mira-client"
-import { TelemetrySqlClient } from "@/telemetry/telemetry-sql-client.js"
+import { Data, Effect, Option, Schema } from "effect"
+import { HttpServerRequest, HttpServerResponse } from "effect/http"
+import { literal } from "effect/sql/Statement"
+
 import { LogsCollection, SpansCollection } from "@/telemetry/collections.js"
+import { TelemetrySqlClient } from "@/telemetry/telemetry-sql-client.js"
 
 // ---------------------------------------------------------------------------
 // Tagged error for JSON / schema parse failures in the filter param
@@ -16,11 +17,11 @@ class FilterParseError extends Data.TaggedError("FilterParseError")<{ message: s
 // Span row parsing
 // ---------------------------------------------------------------------------
 
-const SpanAttributeValueSchema = Schema.Union(Schema.String, Schema.Number, Schema.Boolean)
-const SpanAttributesSchema = Schema.parseJson(
-  Schema.Record({ key: Schema.String, value: SpanAttributeValueSchema })
+const SpanAttributeValueSchema = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
+const SpanAttributesSchema = Schema.fromJsonString(
+  Schema.Record(Schema.String, SpanAttributeValueSchema)
 )
-const parseAttributes = Schema.decodeUnknown(SpanAttributesSchema)
+const parseAttributes = Schema.decodeUnknownEffect(SpanAttributesSchema)
 
 type RawSpanRow = {
   seqId: number
@@ -60,7 +61,7 @@ const parseSpanRow = (raw: RawSpanRow) =>
 // Helper: parse ?filter= query param → FilterNode option
 // ---------------------------------------------------------------------------
 
-const FilterNodeFromJson = Schema.parseJson(FilterNodeSchema)
+const FilterNodeFromJson = Schema.fromJsonString(FilterNodeSchema)
 
 function parseFilterParam(
   url: URL
@@ -68,7 +69,7 @@ function parseFilterParam(
   const raw = url.searchParams.get("filter")
   if (raw === null) return Effect.succeed(Option.none())
 
-  return Schema.decodeUnknown(FilterNodeFromJson)(raw).pipe(
+  return Schema.decodeUnknownEffect(FilterNodeFromJson)(raw).pipe(
     Effect.mapError((e) => new FilterParseError({ message: `filter: ${e.message}` })),
     Effect.map(Option.some)
   )
@@ -79,7 +80,7 @@ function parseFilterParam(
 // ---------------------------------------------------------------------------
 
 function notConfiguredResponse() {
-  return HttpServerResponse.unsafeJson({
+  return HttpServerResponse.jsonUnsafe({
     logs: [],
     total: 0,
     limit: 0,
@@ -127,14 +128,14 @@ export const telemetryLogsRoute = Effect.gen(function* () {
   if (compiledWhere !== null && afterCursor !== null) {
     logs = yield* sql<LogRow>`
       SELECT * FROM ${sql("logs")} t
-      WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)} AND t.seqId < ${afterCursor}
+      WHERE ${literal(compiledWhere.sql, compiledWhere.params)} AND t.seqId < ${afterCursor}
       ORDER BY t.seqId DESC
       LIMIT ${fetchLimit}
     `
   } else if (compiledWhere !== null) {
     logs = yield* sql<LogRow>`
       SELECT * FROM ${sql("logs")} t
-      WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
+      WHERE ${literal(compiledWhere.sql, compiledWhere.params)}
       ORDER BY t.seqId DESC
       LIMIT ${fetchLimit}
     `
@@ -154,14 +155,14 @@ export const telemetryLogsRoute = Effect.gen(function* () {
   }
 
   const total = yield* (compiledWhere !== null
-    ? sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")} t WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}`
+    ? sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")} t WHERE ${literal(compiledWhere.sql, compiledWhere.params)}`
     : sql<{ cnt: number }>`SELECT COUNT(*) as cnt FROM ${sql("logs")} t`)
 
   const hasMore = logs.length > limit
   const items = hasMore ? logs.slice(0, limit) : logs
   const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.seqId : null
 
-  return HttpServerResponse.unsafeJson({
+  return HttpServerResponse.jsonUnsafe({
     logs: items,
     total: total[0].cnt,
     limit,
@@ -169,17 +170,17 @@ export const telemetryLogsRoute = Effect.gen(function* () {
   })
 }).pipe(
   Effect.catchTag("FilterParseError", (e) =>
-    Effect.succeed(HttpServerResponse.unsafeJson({ error: e.message }, { status: 400 }))
+    Effect.succeed(HttpServerResponse.jsonUnsafe({ error: e.message }, { status: 400 }))
   ),
   Effect.catchTag("ValidationError", (e) =>
-    Effect.succeed(HttpServerResponse.unsafeJson({ error: e.issues.join(", ") }, { status: 400 }))
+    Effect.succeed(HttpServerResponse.jsonUnsafe({ error: e.issues.join(", ") }, { status: 400 }))
   )
 )
 
 export const telemetrySpansRoute = Effect.gen(function* () {
   const sqlOpt = yield* Effect.serviceOption(TelemetrySqlClient)
   if (Option.isNone(sqlOpt)) {
-    return HttpServerResponse.unsafeJson({ spans: [], total: 0, limit: 0, nextCursor: null })
+    return HttpServerResponse.jsonUnsafe({ spans: [], total: 0, limit: 0, nextCursor: null })
   }
   const sql = sqlOpt.value
 
@@ -201,7 +202,7 @@ export const telemetrySpansRoute = Effect.gen(function* () {
       ORDER BY created ASC
     `
     const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
-    return HttpServerResponse.unsafeJson({ spans, total: spans.length, limit, nextCursor: null })
+    return HttpServerResponse.jsonUnsafe({ spans, total: spans.length, limit, nextCursor: null })
   }
 
   // Parse ?filter= and compile against the spans schema.
@@ -220,28 +221,28 @@ export const telemetrySpansRoute = Effect.gen(function* () {
       ? sql<RawSpanRow>`
           SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
           FROM ${sql("spans")} t
-          WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)} AND t.seqId < ${afterCursor}
+          WHERE ${literal(compiledWhere.sql, compiledWhere.params)} AND t.seqId < ${afterCursor}
           ORDER BY t.seqId DESC
           LIMIT ${fetchLimit}
         `
       : sql<RawSpanRow>`
           SELECT id, name, traceId, spanId, parentSpanId, kind, durationMs, status, error, attributes, created
           FROM ${sql("spans")} t
-          WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
+          WHERE ${literal(compiledWhere.sql, compiledWhere.params)}
           ORDER BY t.seqId DESC
           LIMIT ${fetchLimit}
         `)
 
     const total = yield* sql<{ cnt: number }>`
       SELECT COUNT(*) as cnt FROM ${sql("spans")} t
-      WHERE ${unsafeFragment(compiledWhere.sql, compiledWhere.params)}
+      WHERE ${literal(compiledWhere.sql, compiledWhere.params)}
     `
 
     const hasMore = rawSpans.length > limit
     const items = hasMore ? rawSpans.slice(0, limit) : rawSpans
     const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.seqId : null
     const spans = yield* Effect.all(items.map(parseSpanRow), { concurrency: "unbounded" })
-    return HttpServerResponse.unsafeJson({
+    return HttpServerResponse.jsonUnsafe({
       spans,
       total: total[0].cnt,
       limit,
@@ -274,7 +275,7 @@ export const telemetrySpansRoute = Effect.gen(function* () {
   const nextCursor = hasMore && pagedTraces.length > 0 ? pagedTraces[pagedTraces.length - 1]!.maxSeqId : null
 
   if (pagedTraces.length === 0) {
-    return HttpServerResponse.unsafeJson({ spans: [], total: total[0].cnt, limit, nextCursor: null })
+    return HttpServerResponse.jsonUnsafe({ spans: [], total: total[0].cnt, limit, nextCursor: null })
   }
 
   const traceIds = pagedTraces.map((r) => r.traceId)
@@ -286,7 +287,7 @@ export const telemetrySpansRoute = Effect.gen(function* () {
   `
   const spans = yield* Effect.all(rawSpans.map(parseSpanRow), { concurrency: "unbounded" })
 
-  return HttpServerResponse.unsafeJson({
+  return HttpServerResponse.jsonUnsafe({
     spans,
     total: total[0].cnt,
     limit,
@@ -294,9 +295,9 @@ export const telemetrySpansRoute = Effect.gen(function* () {
   })
 }).pipe(
   Effect.catchTag("FilterParseError", (e) =>
-    Effect.succeed(HttpServerResponse.unsafeJson({ error: e.message }, { status: 400 }))
+    Effect.succeed(HttpServerResponse.jsonUnsafe({ error: e.message }, { status: 400 }))
   ),
   Effect.catchTag("ValidationError", (e) =>
-    Effect.succeed(HttpServerResponse.unsafeJson({ error: e.issues.join(", ") }, { status: 400 }))
+    Effect.succeed(HttpServerResponse.jsonUnsafe({ error: e.issues.join(", ") }, { status: 400 }))
   )
 )

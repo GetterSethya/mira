@@ -1,29 +1,27 @@
-import { FileSystem, HttpRouter, HttpServer, Path } from "@effect/platform"
-import type { SqlClient } from "@effect/sql"
-import { Effect, Layer } from "effect"
-import { RepositoryLive } from "@/repository/repository.js"
-import { Migrator, MigratorLive } from "@/migrator/migrator.js"
-import type { NamedSchema } from "@/migrator/types.js"
-import { makeCachedCollectionServiceLayer } from "@/cache/index.js"
-import { makeCollectionRouter } from "@/http/router.js"
-import { ThumbnailServicePhotonLive } from "@/thumbnail/index.js"
-import { ipAnnotationMiddleware } from "@/http/ip-middleware.js"
-import { AppConfig, AppConfigLive } from "@/config/index.js"
-import type { AuthService } from "@/http/auth.js"
-import { HttpServerFactory } from "@/http/server-factory.js"
-import type { Repository } from "@/repository/index.js"
-import type { CollectionService } from "@/collection-service/collection-service.js"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { RuleMap } from "@gettersethya/mira-client"
+import { Effect, Layer } from "effect"
+import { HttpRouter } from "effect/http"
+
+import { makeCachedCollectionServiceLayer } from "@/cache/index.js"
+import { AppConfig, AppConfigLive } from "@/config/index.js"
+import { makeCronServiceLayer } from "@/cron/cron-service.js"
+import type { CronDef } from "@/cron/types.js"
+import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
+import { makeHookServiceLayer } from "@/hooks/hook-service.js"
+import { HookService } from "@/hooks/hook-service.js"
+import { ipAnnotationMiddleware } from "@/http/ip-middleware.js"
+import { makePortRetryServerLayer } from "@/http/port-retry.js"
+import { makeCollectionRouter } from "@/http/router.js"
+import { HttpServerFactory } from "@/http/server-factory.js"
+import { Migrator, MigratorLive } from "@/migrator/migrator.js"
+import type { NamedSchema } from "@/migrator/types.js"
+import { RepositoryLive } from "@/repository/repository.js"
+import { ThumbnailServicePhotonLive } from "@/thumbnail/index.js"
+
 import type { MiraAppConfig } from "./builder.js"
 import type { RuleBinding } from "./define-rule.js"
 import type { MiraPlugin } from "./plugin.js"
-import { makeHookServiceLayer } from "@/hooks/hook-service.js"
-import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
-import { HookService } from "@/hooks/hook-service.js"
-import { makeCronServiceLayer } from "@/cron/cron-service.js"
-import { CronService } from "@/cron/cron-service.js"
-import type { CronDef } from "@/cron/types.js"
 
 function assertUniqueCronNames(defs: ReadonlyArray<CronDef<any>>) {
   const seen = new Set<string>()
@@ -44,7 +42,7 @@ export function applyRulesToCollections(
     if (!collectionNames.has(rb.collectionName)) {
       throw new Error(
         `RuleBinding references unknown collection "${rb.collectionName}". ` +
-        `Available collections: ${[...collectionNames].join(", ")}.`
+          `Available collections: ${[...collectionNames].join(", ")}.`
       )
     }
   }
@@ -56,6 +54,20 @@ export function applyRulesToCollections(
     }
     return c
   })
+}
+
+/**
+ * Options for `MiraApp.serve()` and `MiraApp.buildLayer()`.
+ */
+export interface ServeOptions {
+  /** Port to listen on. Defaults to the port from `AppConfig`. */
+  port?: number
+  /**
+   * Total number of ports to try when the requested port is already in use.
+   * The server increments the port and retries until a free one is found.
+   * Defaults to 10. Pass `1` to disable retrying.
+   */
+  maxPortAttempts?: number
 }
 
 /**
@@ -88,7 +100,6 @@ export function applyRulesToCollections(
 export class MiraApp<R = never> {
   readonly #config: MiraAppConfig
   readonly #extras: Array<MiraPlugin<any>>
-
   constructor(config: MiraAppConfig) {
     this.#config = config
     this.#extras = []
@@ -153,7 +164,7 @@ export class MiraApp<R = never> {
    * )
    */
   buildServiceLayer() {
-    const { platform, database, storage, telemetry } = this.#config
+    const { database, platform, storage, telemetry } = this.#config
     const allCollections = this.#getAllCollections()
     const allPlugins = this.#getAllPlugins()
     const allCronDefs = this.#getAllCrons()
@@ -176,7 +187,7 @@ export class MiraApp<R = never> {
     const fullMid = Layer.merge(mid, extrasProvided)
 
     // Auto-migrate on boot: runs during layer initialization before requests are served
-    const schemas: NamedSchema[] = allCollections.map((c) => ({ name: c.name, schema: c.schema }))
+    const schemas: Array<NamedSchema> = allCollections.map((c) => ({ name: c.name, schema: c.schema }))
     const autoMigrateLayer = Layer.effectDiscard(
       Effect.gen(function* () {
         const migrator = yield* Migrator
@@ -210,49 +221,33 @@ export class MiraApp<R = never> {
    * Build the complete server layer including the HTTP router and server.
    * Accepts an optional port override (otherwise uses the port from AppConfig).
    *
-   * @param options.port - Optional port number override
+   * @param options - Optional serve options (`port`, `maxPortAttempts`)
    * @returns A Layer ready to be launched
    *
    * @internal Called by serve() — most users should use serve() directly.
    */
-  buildLayer(options?: { port?: number }) {
+  buildLayer(options?: ServeOptions) {
     const allCollections = this.#getAllCollections()
-    const collectionRouter = makeCollectionRouter(allCollections)
+    const collectionRoutes = makeCollectionRouter(allCollections)
+    const pluginRoutes = this.#extras.flatMap((p) => p.routes ?? [])
+    const routes = [...collectionRoutes, ...pluginRoutes]
 
-    // Plugin routes
-    let pluginRouter: HttpRouter.HttpRouter<
-      never,
-      | FileSystem.FileSystem
-      | Path.Path
-      | Repository
-      | AppConfig
-      | AuthService
-      | SqlClient.SqlClient
-      | CollectionService
-      | CronService
-    > = HttpRouter.empty
-    for (const plugin of this.#extras) {
-      if (plugin.routes !== undefined) {
-        pluginRouter = HttpRouter.concat(pluginRouter, plugin.routes)
-      }
-    }
-
-    const router = HttpRouter.concat(collectionRouter, pluginRouter)
     const serviceLayer = this.buildServiceLayer()
 
-    const serverLayer = Layer.unwrapEffect(
+    const serverLayer = Layer.unwrap(
       Effect.gen(function* () {
         const cfg = yield* AppConfig
         const factory = yield* HttpServerFactory
         const effectivePort = options?.port ?? cfg.port
-        return factory.makeLayer(effectivePort)
+        return makePortRetryServerLayer(factory, effectivePort, options?.maxPortAttempts, (boundPort) =>
+          cfg.updateBoundPort?.(boundPort)
+        )
       })
     ).pipe(Layer.provide(serviceLayer))
 
-    return HttpServer.serve(ipAnnotationMiddleware(router)).pipe(
-      Layer.provide(serverLayer),
-      Layer.provideMerge(serviceLayer)
-    )
+    return HttpRouter.serve(HttpRouter.addAll(routes), {
+      middleware: (effect) => ipAnnotationMiddleware(effect)
+    }).pipe(Layer.provide(serverLayer), Layer.provideMerge(serviceLayer))
   }
 
   /**
@@ -261,19 +256,23 @@ export class MiraApp<R = never> {
    * and listens for incoming requests.
    * Blocks the main thread until the server is shut down.
    *
-   * @param options.port - Optional port override (default: from AppConfig, typically 8080)
+   * If the requested port is already in use, the server automatically retries
+   * on the next available port (up to `maxPortAttempts`, default 10).
+   *
+   * @param options - Optional serve options (`port`, `maxPortAttempts`)
    *
    * @example
-   * app.serve()              // default port
-   * app.serve({ port: 8080 }) // port override
+   * app.serve()                       // default port, auto-increment if busy
+   * app.serve({ port: 8080 })         // explicit port, auto-increment if busy
+   * app.serve({ port: 8080, maxPortAttempts: 1 }) // fail instead of incrementing
    */
-  serve(options?: { port?: number }): void {
+  serve(options?: ServeOptions): void {
     const allPlugins = this.#getAllPlugins()
     const hookServiceLayer = makeHookServiceLayer(allPlugins)
     const fullLayer = this.buildLayer(options)
 
     this.#config.platform.runMain(
-      Effect.gen(this, function* () {
+      Effect.gen(function* () {
         const hookService = yield* HookService.pipe(Effect.provide(hookServiceLayer))
         const bootstrapLayer = Layer.effectDiscard(hookService.runBootstrap())
         yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))

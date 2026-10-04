@@ -1,5 +1,5 @@
+export type { FieldFilterOperand,FilterBuilder } from "./builder.js"
 export { Filter } from "./builder.js"
 export { filterNodeToWhereClause } from "./compiler.js"
-export { FilterNodeSchema } from "./types.js"
-export type { FilterBuilder, FieldFilterOperand } from "./builder.js"
 export type { FilterNode, WhereClause } from "./types.js"
+export { FilterNodeSchema } from "./types.js"

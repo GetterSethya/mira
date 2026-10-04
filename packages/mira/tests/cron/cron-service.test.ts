@@ -1,7 +1,9 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Cause, Deferred, Effect, Exit, Layer, Option, Schedule, TestClock } from "effect"
 import { describe, it } from "@effect/vitest"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Schedule } from "effect"
+import { adjust as adjustTestClock } from "effect/testing/TestClock"
 import { expect } from "vitest"
+
 import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
 import type { CronDef } from "@/cron/types.js"
 import { CronNotFoundError } from "@/cron/types.js"
@@ -43,8 +45,8 @@ describe("CronService unit tests", () => {
   it.effect("successful cron (Schedule.once) updates state after tick", () =>
     Effect.gen(function* () {
       const svc = yield* CronService
-      yield* TestClock.adjust("1 hours")
-      yield* Effect.yieldNow()
+      yield* adjustTestClock("1 hours")
+      yield* Effect.yieldNow
       yield* Effect.sleep(0)
       const [state] = yield* svc.getAll()
       expect(state.status).toBe("standby")
@@ -63,8 +65,8 @@ describe("CronService unit tests", () => {
   it.effect("failing cron records error state", () =>
     Effect.gen(function* () {
       const svc = yield* CronService
-      yield* TestClock.adjust("1 hours")
-      yield* Effect.yieldNow()
+      yield* adjustTestClock("1 hours")
+      yield* Effect.yieldNow
       yield* Effect.sleep(0)
       const [state] = yield* svc.getAll()
       expect(state.lastStatus).toBe("error")
@@ -86,7 +88,7 @@ describe("CronService unit tests", () => {
     Effect.gen(function* () {
       const svc = yield* CronService
       yield* svc.runNow("immediate-job")
-      yield* Effect.yieldNow()
+      yield* Effect.yieldNow
       yield* Effect.sleep(0)
       const [state] = yield* svc.getAll()
       expect(state.lastStatus).toBe("success")
@@ -105,7 +107,7 @@ describe("CronService unit tests", () => {
       const result = yield* Effect.exit(svc.runNow("no-such-cron"))
       expect(Exit.isFailure(result)).toBe(true)
       if (Exit.isFailure(result)) {
-        const failure = Cause.failureOption(result.cause)
+        const failure = Cause.findErrorOption(result.cause)
         expect(Option.isSome(failure)).toBe(true)
         if (Option.isSome(failure)) {
           expect(failure.value instanceof CronNotFoundError).toBe(true)
@@ -151,7 +153,7 @@ describe("CronService unit tests", () => {
       )
       expect(Exit.isFailure(result)).toBe(true)
       if (Exit.isFailure(result)) {
-        const defects = Cause.defects(result.cause)
+        const defects = result.cause.reasons.filter(Cause.isDieReason).map((r) => r.defect)
         expect(Array.from(defects).length).toBeGreaterThan(0)
       }
     })
@@ -171,13 +173,13 @@ describe("CronService unit tests", () => {
 
       const svc = yield* CronService.pipe(Effect.provide(layer))
       yield* svc.runNow("slow-job")
-      yield* Effect.yieldNow()
+      yield* Effect.yieldNow
 
       const runningStates = yield* svc.getAll()
       expect(runningStates[0].status).toBe("running")
 
       yield* Deferred.succeed(latch, undefined)
-      yield* Effect.yieldNow()
+      yield* Effect.yieldNow
       yield* Effect.sleep(0)
 
       const doneStates = yield* svc.getAll()

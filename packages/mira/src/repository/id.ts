@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+
 import { CryptoService } from "@/crypto/index.js"
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

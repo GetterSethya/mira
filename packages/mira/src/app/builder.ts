@@ -1,10 +1,12 @@
-import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
-import type { Layer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
+import type { Layer } from "effect"
+
 import type { CronDef } from "@/cron/types.js"
-import type { MiraPlatform, MiraDatabase, MiraStorage } from "./types.js"
-import type { RuleBinding } from "./define-rule.js"
+import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
+
 import { MiraApp } from "./app.js"
+import type { RuleBinding } from "./define-rule.js"
+import type { MiraDatabase, MiraPlatform, MiraStorage, PlatformServices } from "./types.js"
 
 /**
  * Configuration object for `MiraApp`. Constructed by `MiraBuilder` after all
@@ -20,7 +22,7 @@ export interface MiraAppConfig {
   collections: ReadonlyArray<AnyCollectionDef>
   rules?: ReadonlyArray<RuleBinding>
   crons: ReadonlyArray<CronDef<any>>
-  telemetry: Layer.Layer<never, never, never>
+  telemetry: Layer.Layer<never, never, PlatformServices>
 }
 
 function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfig {
@@ -150,12 +152,13 @@ export class MiraBuilder<Has extends string = never, R = never> {
 
   /**
    * Set a custom telemetry layer (optional).
-   * Defaults to `ConsoleTelemetryLayer` (prints JSON trace lines to stdout).
+   * Defaults to `ConsoleTelemetryLayer` (prints JSON trace lines to stdout),
+   * or `makeConsoleTelemetryLayer({ pretty: true })` for Chalk-colored output.
    *
-   * @param l - A Layer providing telemetry services
+   * @param l - A Layer providing telemetry services (may require platform services)
    * @returns A new builder with "telemetry" added to the phantom type
    */
-  telemetry(l: Layer.Layer<never, never, never>): MiraBuilder<Has | "telemetry", R> {
+  telemetry(l: Layer.Layer<never, never, PlatformServices>): MiraBuilder<Has | "telemetry", R> {
     return new MiraBuilder({ ...this.#config, telemetry: l })
   }
 

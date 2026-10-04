@@ -18,7 +18,6 @@
   const form = createAppForm(() => ({
     defaultValues: buildDefaultValues(schema, record) as Record<string, unknown>,
     onSubmit: async ({ value }: { value: Record<string, unknown> }) => {
-      console.log("onSubmit")
       const data = hasFileField(schema) ? toFormData(value) : value
       await onSubmit(data)
     }

@@ -1,27 +1,25 @@
-import type { Effect, Layer } from "effect"
-import type { HttpRouter, FileSystem, Path } from "@effect/platform"
-import type { SqlClient } from "@effect/sql"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import type { Repository } from "@/repository/index.js"
-import type { AppConfig } from "@/config/index.js"
-import type { AuthService } from "@/http/auth.js"
+import type { Effect, Layer } from "effect"
+import type { HttpRouter } from "effect/http"
+
 import type { CollectionService } from "@/collection-service/collection-service.js"
-import type { CronService } from "@/cron/cron-service.js"
+import type { AppConfig } from "@/config/index.js"
 import type { CronDef } from "@/cron/types.js"
-import type { PlatformServices } from "./types.js"
 import type {
-  RecordHookContext,
-  RecordResultContext,
+  CronContext,
+  CronErrorContext,
+  CronFinishedContext,
+  CronResultContext,
+  HookErrorContext,
   ListHookContext,
   ListResultContext,
+  RecordHookContext,
+  RecordResultContext,
   ViewHookContext,
-  ViewResultContext,
-  HookErrorContext,
-  CronContext,
-  CronResultContext,
-  CronErrorContext,
-  CronFinishedContext
-} from "@/hooks/types.js"
+  ViewResultContext} from "@/hooks/types.js"
+import type { Repository } from "@/repository/index.js"
+
+import type { PlatformServices } from "./types.js"
 
 export interface RecordHook<T> {
   readonly collections?: ReadonlyArray<string>
@@ -99,17 +97,7 @@ export interface MiraPlugin<R = never> {
   readonly onCronError?: CronObserverHook<CronErrorContext>
 
   readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository | CollectionService>
-  readonly routes?: HttpRouter.HttpRouter<
-    never,
-    | FileSystem.FileSystem
-    | Path.Path
-    | Repository
-    | AppConfig
-    | AuthService
-    | SqlClient.SqlClient
-    | CollectionService
-    | CronService
-  >
+  readonly routes?: ReadonlyArray<HttpRouter.Route<never, R>>
   readonly collections?: ReadonlyArray<AnyCollectionDef>
 }
 

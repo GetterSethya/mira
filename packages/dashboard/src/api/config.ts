@@ -1,5 +1,5 @@
 import { Effect, Redacted } from "effect"
-import { HttpServerResponse } from "@effect/platform"
+import { HttpServerResponse } from "effect/http"
 import { AppConfig } from "@gettersethya/mira"
 
 export const configRoute = Effect.gen(function* () {
@@ -13,7 +13,7 @@ export const configRoute = Effect.gen(function* () {
     useS3: config.useS3
   }
 
-  return HttpServerResponse.unsafeJson({
+  return HttpServerResponse.jsonUnsafe({
     config: allConfig,
     keys: Object.keys(allConfig)
   })

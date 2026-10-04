@@ -10,7 +10,7 @@ export class ThumbnailError extends Data.TaggedError("ThumbnailError")<{
   reason: string
 }> {}
 
-export class ThumbnailService extends Context.Tag("ThumbnailService")<
+export class ThumbnailService extends Context.Service<
   ThumbnailService,
   {
     supported(mimeType: string): boolean
@@ -20,10 +20,10 @@ export class ThumbnailService extends Context.Tag("ThumbnailService")<
       spec: ThumbSpec
     ): Effect.Effect<Uint8Array, ThumbnailError>
   }
->() {}
+>()("ThumbnailService") {}
 
 // Format: "WxH", "WxHt" (cover), "WxHb" (contain), "WxHf" (fill)
-// Either dimension may be 0 (auto-scale). Returns null for unrecognised strings.
+// Result dimension may be 0 (auto-scale). Returns null for unrecognised strings.
 export function parseThumbSpec(raw: string): ThumbSpec | null {
   const match = /^(\d+)x(\d+)([tbf]?)$/.exec(raw)
   if (match === null) return null

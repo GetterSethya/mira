@@ -1,5 +1,5 @@
-import { Index } from "./index-builder.js"
 import type { IndexBuilder, IndexEntry } from "./index-builder.js"
+import { Index } from "./index-builder.js"
 import { toJSONSchema } from "./serialize.js"
 import type { CollectionSchema, FieldDef, FieldsMap, IndexDef, JsonSchemaProperty } from "./types.js"
 

@@ -1,10 +1,9 @@
+import { Effect, MutableRef } from "effect"
 import { describe, expect, it } from "vitest"
 
-import { Effect, MutableRef } from "effect"
-import { HttpClientRequest } from "@effect/platform"
 import { makeBrowserAuth, makeServerAuth } from "@/client/auth.js"
-import { makeClientHandler } from "@/client/handler.js"
 import type { ExecuteFn } from "@/client/handler.js"
+import { makeClientHandler } from "@/client/handler.js"
 
 describe("BrowserAuth", () => {
   it("isLoggedIn() false initially", () => {

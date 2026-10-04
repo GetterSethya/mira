@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { Field } from "@/collection/field.js"
-import { ViewCollection, validateViewFields } from "@/collection/view.js"
+import { validateViewFields,ViewCollection } from "@/collection/view.js"
 
 describe("ViewCollection", () => {
   it("view collection schema", () => {

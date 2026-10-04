@@ -7,7 +7,7 @@
  * Creates mira-dev.db in the project root. Delete it to start fresh.
  */
 
-import { SqlClient } from "@effect/sql"
+import { SqlClient } from "effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer, Schema } from "effect"
 import { existsSync, unlinkSync } from "node:fs"
@@ -164,8 +164,8 @@ const program = Effect.gen(function* () {
     SELECT name, schema FROM _collections ORDER BY name
   `
   for (const row of collections) {
-    const parsed = yield* Schema.decodeUnknown(
-      Schema.parseJson(Schema.Record({ key: Schema.String, value: Schema.Unknown }))
+    const parsed = yield* Schema.decodeUnknownEffect(
+      Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
     )(row.schema).pipe(Effect.orDie)
     const props = parsed["properties"]
     const fieldNames = Object.keys(typeof props === "object" && props !== null ? props : {})

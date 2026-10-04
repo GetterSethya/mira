@@ -1,6 +1,7 @@
-import { Effect, Option } from "effect"
 import { describe, it } from "@effect/vitest"
+import { Effect, Option } from "effect"
 import { expect } from "vitest"
+
 import { CollectionCache, makeCollectionCacheLayer } from "@/cache/collection-cache.js"
 import type { CursorPage } from "@/collection-service/context.js"
 

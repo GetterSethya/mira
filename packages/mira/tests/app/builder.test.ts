@@ -1,15 +1,16 @@
-import { describe, it, expect } from "vitest"
-import { Layer } from "effect"
-import { BaseCollection, Field } from "@gettersethya/mira-client"
-import { MiraBuilder } from "@/app/builder.js"
-import { MiraApp } from "@/app/app.js"
-import { MiraPlugin } from "@/app/plugin.js"
-import { defineRule, applyRulesToCollections } from "@/app/index.js"
-import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
-import { NodePlatform } from "@/platforms/node.js"
-import { SqliteDatabase } from "@/databases/sqlite.js"
-import { LocalFileStorage } from "@/storage/index.js"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
+import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { Layer } from "effect"
+import { describe, expect,it } from "vitest"
+
+import { MiraApp } from "@/app/app.js"
+import { MiraBuilder } from "@/app/builder.js"
+import { defineRule } from "@/app/index.js"
+import { MiraPlugin } from "@/app/plugin.js"
+import { SqliteDatabase } from "@/databases/sqlite.js"
+import { NodePlatform } from "@/platforms/node.js"
+import { LocalFileStorage } from "@/storage/index.js"
+import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
 
 // Use real presets as stubs — builder stores them without invoking them in unit tests
 const stubPlatform = NodePlatform
