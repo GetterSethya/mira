@@ -328,9 +328,8 @@ export type AuthByKind<F extends FieldsMap> = {
 export type AdaptedAuthByKind<F extends FieldsMap> = {
   [P in CollectionKind]: P extends "auth"
     ? {
-        authWithPassword(): ClientHandler<
-          { token: string; record: InferRecord<F> },
-          { email: string; password: string }
+        authWithPassword(): EnrichedMutationHandler<
+          ClientHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>
         >
         register(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, RegisterInput<F>>>
       }

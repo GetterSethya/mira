@@ -33,7 +33,7 @@ describe("withCollections({ adapter })", () => {
   })
 
   it("preserves auth accessors on auth collections", () => {
-    expect(typeof Mira.User.authWithPassword().raw).toBe("function")
+    expect(typeof Mira.User.authWithPassword().mutationOptions.mutationFn).toBe("function")
     expect(typeof Mira.User.register().mutationOptions.mutationFn).toBe("function")
   })
 

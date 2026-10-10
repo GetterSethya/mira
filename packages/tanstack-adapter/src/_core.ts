@@ -160,7 +160,7 @@ export function createCollectionAdapter() {
       base: () => ({}),
       view: () => ({}),
       auth: (authClient) => ({
-        authWithPassword: () => authClient.authWithPassword(),
+        authWithPassword: () => enrichMutation(authClient.authWithPassword()),
         register: () => enrichMutation(authClient.register()),
       }),
     }
