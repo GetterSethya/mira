@@ -128,11 +128,14 @@ export function makeBrowserAuth(
     },
 
     clear: () => {
+      // Flip the flag synchronously so a route guard that runs immediately after
+      // `clear()` (e.g. `navigate({ to: "/login" })`) does not still see the user
+      // as logged in and bounce back to the protected route.
+      MutableRef.set(loggedInRef, false)
       MutableRef.set(sessionMemoRef, null)
-      const effect = Effect.gen(function* () {
-        yield* execute<void>(HCR.post("/api/auth/logout"))
-        MutableRef.set(loggedInRef, false)
-      })
+      // The server cookie is cleared in the background; `isLoggedIn()` is
+      // already false and the next `ensureSession()` re-checks the server.
+      const effect = execute<void>(HCR.post("/api/auth/logout"))
       void makeClientHandler(effect).raw()
     },
   }

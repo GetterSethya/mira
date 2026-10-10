@@ -34,6 +34,12 @@ describe("BrowserAuth session restore across login", () => {
         if (req.url.includes("auth-with-password")) {
           return { token: "tok", record: { id: "u1", created: "", updated: "", name: "Budi" } } as T
         }
+        if (req.url.includes("/api/auth/logout")) {
+          // Async like the real network call — `clear()` must not depend on this
+          // completing before it flips the logged-in flag.
+          yield* Effect.sleep("20 millis")
+          return undefined as T
+        }
         if (req.url.includes("/api/auth/me")) {
           if (!MutableRef.get(loggedInRef)) {
             return yield* Effect.fail(new MiraError({ status: 401, body: "unauthorized" }))
@@ -77,6 +83,21 @@ describe("BrowserAuth session restore across login", () => {
     // The stale `false` must be gone — otherwise this returns false and the
     // guarded route redirects back to /login.
     expect(await auth.ensureSession()).toBe(true)
+  })
+
+  it("clear() flips isLoggedIn() to false synchronously (no logout redirect bounce)", async () => {
+    const { auth, users } = makeHarness()
+
+    const authWithPassword = users.authWithPassword
+    if (!authWithPassword) throw new Error("expected authWithPassword on an auth collection")
+    await authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
+    expect(auth.isLoggedIn()).toBe(true)
+
+    auth.clear()
+    // Must be false immediately — before the logout POST settles — so a route
+    // guard running right after `clear()` (e.g. navigate to /login) does not see
+    // a logged-in user and redirect back to the protected route.
+    expect(auth.isLoggedIn()).toBe(false)
   })
 
   it("logout clears the memo so ensureSession() reports logged out again", async () => {
