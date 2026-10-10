@@ -257,6 +257,125 @@ export function makeCollectionServiceLayer(
         return out
       }
 
+      const isAuthCollection = (collection: AnyCollectionDef) =>
+        collection.schema["x-collection-kind"] === "auth"
+
+      const asString = (value: unknown) => (typeof value === "string" ? value : undefined)
+
+      // canManage = admin OR (auth + authenticated + manage rule matches). Evaluated
+      // against the incoming payload for create (emailVerified forced false so the
+      // rule can't be gamed by the field it guards) and against the stored record for
+      // update. Additive: the base create/update rule still gates access — manage only
+      // escalates privileges (email, emailVerified, password without oldPassword).
+      const canManagePayload = (
+        collection: AnyCollectionDef,
+        payload: RepoRecord,
+        ctx: RequestCtx
+      ) =>
+        Effect.gen(function* () {
+          if (ctx.admin === true) return true
+          if (!isAuthCollection(collection) || ctx.auth === undefined) return false
+          const rule = enforcerForAction(collection.schema, "manage")
+          if (rule === null) return false
+          const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage")
+          const bound = resolveFieldRefs(resolved, { ...payload, emailVerified: false })
+          const where = literal(bound.sql, bound.params)
+          const check = yield* sql<{ ok: number }>`SELECT 1 AS ok WHERE ${where}`
+          return check.length > 0
+        })
+
+      const canManageRecord = (
+        collection: AnyCollectionDef,
+        id: string,
+        ctx: RequestCtx
+      ) =>
+        Effect.gen(function* () {
+          if (ctx.admin === true) return true
+          if (!isAuthCollection(collection) || ctx.auth === undefined) return false
+          const rule = enforcerForAction(collection.schema, "manage")
+          if (rule === null) return false
+          const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage")
+          const allowed = yield* repo.viewFilter(collection.name, {
+            where: andWhere(resolved, idClause(id))
+          })
+          return allowed.length > 0
+        })
+
+      const credentialError = (collection: AnyCollectionDef, issue: string) =>
+        new ValidationError({ collection: collection.name, issues: [issue] })
+
+      const verifyOldPassword = (
+        collection: AnyCollectionDef,
+        raw: RepoRecord,
+        existing: RepoRecord
+      ) =>
+        Effect.gen(function* () {
+          const oldPassword = asString(raw["oldPassword"])
+          if (oldPassword === undefined || oldPassword.length === 0) {
+            return yield* Effect.fail(credentialError(collection, "oldPassword is required"))
+          }
+          const stored = asString(existing["password"])
+          const ok = stored !== undefined
+            ? yield* authService.verifyPassword(oldPassword, stored).pipe(Effect.orElseSucceed(() => false))
+            : false
+          if (!ok) {
+            return yield* Effect.fail(credentialError(collection, "Missing or invalid old password"))
+          }
+        })
+
+      const enforceCreateCredentials = (
+        collection: AnyCollectionDef,
+        raw: RepoRecord,
+        cleaned: RepoRecord,
+        canManage: boolean,
+        ctx: RequestCtx
+      ) =>
+        Effect.gen(function* () {
+          if (!isAuthCollection(collection) || ctx.admin === true) return
+          const password = asString(cleaned["password"]) ?? asString(raw["password"]) ?? ""
+          if (password.length > 0) {
+            const confirm = asString(raw["passwordConfirm"])
+            if (confirm === undefined || confirm !== password) {
+              return yield* Effect.fail(credentialError(collection, "passwordConfirm must match password"))
+            }
+          }
+          if (!canManage && cleaned["emailVerified"] === true) {
+            return yield* Effect.fail(credentialError(collection, "emailVerified cannot be set"))
+          }
+        })
+
+      const enforceUpdateCredentials = (
+        collection: AnyCollectionDef,
+        raw: RepoRecord,
+        cleaned: RepoRecord,
+        existing: RepoRecord,
+        canManage: boolean,
+        ctx: RequestCtx
+      ) =>
+        Effect.gen(function* () {
+          if (!isAuthCollection(collection) || ctx.admin === true) return
+          const newPassword = asString(cleaned["password"])
+          const passwordChanging = newPassword !== undefined && newPassword.length > 0
+          const emailChanging = "email" in cleaned && cleaned["email"] !== existing["email"]
+          const verifiedChanging =
+            "emailVerified" in cleaned && Boolean(cleaned["emailVerified"]) !== Boolean(existing["emailVerified"])
+
+          if (passwordChanging) {
+            const confirm = asString(raw["passwordConfirm"])
+            if (confirm === undefined || confirm !== newPassword) {
+              return yield* Effect.fail(credentialError(collection, "passwordConfirm must match password"))
+            }
+          }
+
+          if (!canManage && (passwordChanging || emailChanging)) {
+            yield* verifyOldPassword(collection, raw, existing)
+          }
+
+          if (!canManage && verifiedChanging) {
+            return yield* Effect.fail(credentialError(collection, "emailVerified cannot be changed"))
+          }
+        })
+
       const list = (
         collection: AnyCollectionDef,
         cursor: number | null,
@@ -373,6 +492,9 @@ export function makeCollectionServiceLayer(
             }
           }
 
+          const canManage = yield* canManagePayload(collection, cleaned, ctx)
+          yield* enforceCreateCredentials(collection, data, cleaned, canManage, ctx)
+
           const row = yield* repo.create(
             collection.name,
             getEncoder(collection)(yield* hashAuthPassword(collection, cleaned, false))
@@ -420,6 +542,9 @@ export function makeCollectionServiceLayer(
               return yield* new ForbiddenError({ collection: collection.name, action: "update" })
             }
           }
+
+          const canManage = yield* canManageRecord(collection, id, ctx)
+          yield* enforceUpdateCredentials(collection, data, cleaned, existing.value, canManage, ctx)
 
           const updated = yield* repo.update(
             collection.name,

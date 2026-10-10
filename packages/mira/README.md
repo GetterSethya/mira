@@ -33,7 +33,7 @@ const postRules = defineRule(Posts, (R) => ({
     R.field("published").eq(R.literal(true)),
     R.field("authorId").eq(R.authId(Users))
   ),
-  create: R.authId(Users).neq(R.literal(null)),
+  create: R.authId(Users).neq(R.literal("")),
   update: R.field("authorId").eq(R.authId(Users)),
   delete: R.field("authorId").eq(R.authId(Users)),
 }))
@@ -64,6 +64,7 @@ On first boot, Mira auto-generates a `jwt_secret`, runs schema migrations, and c
 | `.rules(r)` | No | Array of `RuleBinding` from `defineRule(collection, cb)` |
 | `.crons(c)` | No | Array of `CronDef` — scheduled tasks using Effect `Schedule` |
 | `.telemetry(layer)` | No | Custom Effect telemetry layer |
+| `.cors(c)` | No | CORS config. Defaults to permissive (`*`), so a separately-hosted frontend works with zero config |
 | `.extend(plugin)` | No | Register a `MiraPlugin` (lifecycle hooks, routes, crons, layers) |
 
 ## Platforms
@@ -90,6 +91,23 @@ import { LocalFileStorage } from "@gettersethya/mira"
 
 LocalFileStorage({ directory: "./uploads" })
 ```
+
+## CORS
+
+By default the server is fully permissive (`Access-Control-Allow-Origin: *`), so a frontend hosted on another origin works with zero configuration. `OPTIONS` preflights are answered automatically, and error responses carry CORS headers too.
+
+```typescript
+Mira.builder()
+  // ... required steps
+  .cors({
+    allowedOrigins: ["https://app.example.com"],  // list, or (origin) => boolean predicate
+    credentials: true,                            // requires explicit origins — never combines with "*"
+    // allowedMethods, allowedHeaders, exposedHeaders, maxAge are optional
+  })
+  .build()
+```
+
+`credentials: true` combined with a wildcard origin throws at build time.
 
 ## Auto-generated endpoints
 

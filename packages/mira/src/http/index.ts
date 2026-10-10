@@ -7,6 +7,8 @@ export {
   verifyFileToken,
   verifyJwt,
   verifyPassword} from "./auth.js"
+export type { CorsConfig } from "./cors.js"
+export { assertValidCorsConfig, defaultCorsConfig, makeCorsMiddleware } from "./cors.js"
 export { catchCollectionErrors } from "./errors.js"
 export type { FileServeServices } from "./file-serve.js"
 export { makeFileServeRoute } from "./file-serve.js"

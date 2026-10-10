@@ -240,13 +240,6 @@ importers:
         version: 5.0.3(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3))
 
   packages/tanstack-adapter:
-    dependencies:
-      '@tanstack/solid-query':
-        specifier: '>=5.0.0'
-        version: 5.100.14(solid-js@1.9.13)
-      '@tanstack/svelte-query':
-        specifier: '>=5.0.0'
-        version: 6.1.33(svelte@5.55.10)
     devDependencies:
       '@gettersethya/mira-client':
         specifier: workspace:*
@@ -254,6 +247,12 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.0.0
         version: 5.100.14(react@19.2.6)
+      '@tanstack/solid-query':
+        specifier: ^5.0.0
+        version: 5.100.14(solid-js@1.9.13)
+      '@tanstack/svelte-query':
+        specifier: ^6.0.0
+        version: 6.1.33(svelte@5.55.10)
       effect:
         specifier: ^4.0.0
         version: 4.0.0

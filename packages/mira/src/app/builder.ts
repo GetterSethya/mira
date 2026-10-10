@@ -2,6 +2,8 @@ import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { Layer } from "effect"
 
 import type { CronDef } from "@/cron/types.js"
+import type { CorsConfig } from "@/http/cors.js"
+import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
 import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
 
 import { MiraApp } from "./app.js"
@@ -10,8 +12,9 @@ import type { MiraDatabase, MiraPlatform, MiraStorage, PlatformServices } from "
 
 /**
  * Configuration object for `MiraApp`. Constructed by `MiraBuilder` after all
- * required steps are called. Only the `telemetry` field is optional — it defaults
- * to `ConsoleTelemetryLayer`.
+ * required steps are called. `telemetry` and `cors` are defaulted when unset —
+ * `telemetry` to `ConsoleTelemetryLayer`, `cors` to `defaultCorsConfig`
+ * (permissive).
  *
  * @see MiraBuilder — builds this config
  */
@@ -23,6 +26,7 @@ export interface MiraAppConfig {
   rules?: ReadonlyArray<RuleBinding>
   crons: ReadonlyArray<CronDef<any>>
   telemetry: Layer.Layer<never, never, PlatformServices>
+  cors: CorsConfig
 }
 
 function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfig {
@@ -48,6 +52,9 @@ function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfi
  * 4. `.collections(c)` — provide collection definitions
  *
  * Optional step: `.telemetry(l)` — custom telemetry layer
+ *
+ * Optional step: `.cors(c)` — CORS configuration (defaults to permissive,
+ * so a separately-hosted frontend works with zero config)
  *
  * @example
  * const app = Mira.builder()
@@ -163,6 +170,22 @@ export class MiraBuilder<Has extends string = never, R = never> {
   }
 
   /**
+   * Set the CORS configuration (optional).
+   * Defaults to `defaultCorsConfig` (permissive: all origins allowed), so a
+   * frontend hosted on another origin works without any configuration.
+   * Pass explicit `allowedOrigins` to lock the API down.
+   *
+   * @param c - A CorsConfig (see `@/http/cors.js`)
+   * @returns A new builder (same phantom type — cors is optional)
+   *
+   * @throws If `credentials: true` is combined with a wildcard origin
+   */
+  cors(c: CorsConfig): MiraBuilder<Has, R> {
+    assertValidCorsConfig(c)
+    return new MiraBuilder({ ...this.#config, cors: c })
+  }
+
+  /**
    * Build the MiraApp from the accumulated configuration.
    * Only compiles when all required steps (platform, database, storage, collections)
    * have been called. If telemetry was not set, defaults to ConsoleTelemetryLayer.
@@ -185,7 +208,8 @@ export class MiraBuilder<Has extends string = never, R = never> {
       collections: config.collections,
       rules: config.rules ?? [],
       crons: config.crons ?? [],
-      telemetry: config.telemetry ?? ConsoleTelemetryLayer
+      telemetry: config.telemetry ?? ConsoleTelemetryLayer,
+      cors: config.cors ?? defaultCorsConfig
     })
   }
 }

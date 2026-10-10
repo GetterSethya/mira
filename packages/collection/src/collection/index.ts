@@ -20,6 +20,23 @@ export { Bytes } from "./bytes.js"
 export { ValidationError } from "./errors.js"
 export { Field } from "./field.js"
 export { Index } from "./index-builder.js"
+export type {
+  AnyAuthCollectionDef,
+  AuthCreateExtras,
+  AuthCreateInput,
+  AuthUpdateCreds,
+  AuthUpdateInput,
+  CollectionKind,
+  CreateInput,
+  FileKeys,
+  InferCreateInput,
+  InferMutationInput,
+  InferRecord,
+  RegisterInput,
+  RelationKeys,
+  UpdateInput,
+  WithExpand
+} from "./infer.js"
 export type { AnyCollectionDef, CollectionSchema, FieldDef, FieldsMap, LiteralTextConstraintKind } from "./types.js"
 export type { ViewCollectionBuilder } from "./view.js"
 export { ViewCollection } from "./view.js"

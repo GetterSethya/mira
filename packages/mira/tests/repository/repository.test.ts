@@ -10,6 +10,10 @@ import { Repository, RepositoryLive } from "@/repository/repository.js"
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const testLayer = Layer.mergeAll(RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer)), sqliteLayer, NodeCryptoLayer)
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 const setupTable = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   yield* sql.unsafe(`
@@ -266,6 +270,68 @@ describe("repository", () => {
         const repo = yield* Repository
         const result = yield* repo.list("posts", 10)
         expect(result.items).toEqual([])
+      }).pipe(Effect.provide(testLayer)))
+  })
+
+  describe("expand (relation LEFT JOIN)", () => {
+    it.effect("list inlines the related record under `expand.<field>` and drops flat join columns", () =>
+      Effect.gen(function* () {
+        yield* setupTable
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(`
+          CREATE TABLE IF NOT EXISTS "users" (
+            "id" TEXT NOT NULL PRIMARY KEY,
+            "name" TEXT NOT NULL,
+            "created" TEXT NOT NULL
+          )
+        `)
+        yield* sql`INSERT INTO ${sql("users")} ${sql.insert({ id: "u1", name: "Alice", created: "2020-01-01" })}`
+        const repo = yield* Repository
+        const post = yield* repo.create("posts", { title: "With author", authorId: "u1" })
+
+        const result = yield* repo.list("posts", 10, {
+          expand: [{ localField: "authorId", targetTable: "users", targetColumns: ["id", "name"] }]
+        })
+
+        expect(result.items.length).toBe(1)
+        const row = result.items[0]
+        expect(row["title"]).toBe("With author")
+        expect(row["authorId"]).toBe("u1")
+        const expandValue: unknown = row["expand"]
+        if (!isRecord(expandValue)) return yield* Effect.die("expected expand object")
+        const authorValue: unknown = expandValue["authorId"]
+        if (!isRecord(authorValue)) return yield* Effect.die("expected expanded author record")
+        expect(authorValue["name"]).toBe("Alice")
+        expect(row["__e_authorId__name"]).toBeUndefined()
+        expect(row["id"]).toBe(post["id"])
+      }).pipe(Effect.provide(testLayer)))
+
+    it.effect("viewFilter inlines the related record", () =>
+      Effect.gen(function* () {
+        yield* setupTable
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(`
+          CREATE TABLE IF NOT EXISTS "users" (
+            "id" TEXT NOT NULL PRIMARY KEY,
+            "name" TEXT NOT NULL,
+            "created" TEXT NOT NULL
+          )
+        `)
+        yield* sql`INSERT INTO ${sql("users")} ${sql.insert({ id: "u2", name: "Bob", created: "2020-01-01" })}`
+        const repo = yield* Repository
+        yield* repo.create("posts", { title: "By Bob", authorId: "u2" })
+
+        const rows = yield* repo.viewFilter("posts", {
+          where: { sql: "t.authorId = ?", params: ["u2"] },
+          expand: [{ localField: "authorId", targetTable: "users", targetColumns: ["id", "name"] }]
+        })
+
+        expect(rows.length).toBe(1)
+        const viewExpand: unknown = rows[0]["expand"]
+        if (!isRecord(viewExpand)) return yield* Effect.die("expected expand object")
+        const viewAuthor: unknown = viewExpand["authorId"]
+        if (!isRecord(viewAuthor)) return yield* Effect.die("expected expanded author record")
+        expect(viewAuthor["name"]).toBe("Bob")
       }).pipe(Effect.provide(testLayer)))
   })
 

@@ -76,10 +76,12 @@ function buildSelect(sql: SqlClient.SqlClient, fields?: ReadonlyArray<string>, e
 
 function buildJoins(sql: SqlClient.SqlClient, expand?: ReadonlyArray<ExpandDef>) {
   if (!expand || expand.length === 0) return sql.literal("")
-  const joins = expand.map(
-    (e) => ` LEFT JOIN ${sql(e.targetTable)} _e_${e.localField} ON _e_${e.localField}."id" = t."${e.localField}"`
-  )
-  return sql.literal(joins.join(""))
+  let result = sql.literal("")
+  for (const e of expand) {
+    const alias = `_e_${e.localField}`
+    result = sql`${result} LEFT JOIN ${sql(e.targetTable)} ${sql(alias)} ON ${sql(alias)}.${sql("id")} = t.${sql(e.localField)}`
+  }
+  return result
 }
 
 function reshapeExpand(row: RepoRecord, expand?: ReadonlyArray<ExpandDef>): RepoRecord {

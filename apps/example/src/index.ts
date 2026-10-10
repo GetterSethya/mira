@@ -14,7 +14,7 @@ import {
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
 
 const UserCollection = AuthCollection.define("users", {
-  name: Field.text({ required: true, minLength: 1 })
+  name: Field.text({ required: true, minLength: 1 }),
 })
 
 type UserCollection = InferRecord<typeof UserCollection.fields>

@@ -103,7 +103,7 @@ const postRules = defineRule(Posts, (R) => ({
     R.field("published").eq(R.literal(true)),
     R.field("authorId").eq(R.authId(Users))
   ),
-  create: R.authId(Users).neq(R.literal(null)),
+  create: R.authId(Users).neq(R.literal("")),
   update: R.field("authorId").eq(R.authId(Users)),
   delete: R.field("authorId").eq(R.authId(Users)),
 }))
@@ -139,6 +139,7 @@ Mira.builder()
   .rules([userRules, postRules])                                    // optional — server-side access rules
   .crons([/* CronDef definitions */])                               // optional — cron jobs
   .telemetry(makeSqliteTelemetryLayer({ dbPath: "logs.db" }))       // optional — SQLite telemetry
+  .cors({ allowedOrigins: ["https://app.example.com"] })            // optional — CORS (defaults to permissive *)
   .build()                                                          // produces MiraApp
   .extend(MiraDashboard)                                            // optional — register plugins
   .serve({ port: 3000 })                                            // starts the HTTP server
@@ -153,9 +154,29 @@ Mira.builder()
 | `.rules(r)` | no | Array of `RuleBinding` from `defineRule(collection, cb)`. Collections without rules deny all actions. |
 | `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
 | `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). |
+| `.cors(c)` | no | CORS config. Defaults to permissive (`*`), so a separately-hosted frontend works with zero config. |
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
 | `.extend(plugin)` | — | Called on `MiraApp` after `.build()`. Registers a `MiraPlugin`. |
 | `.serve(opts?)` | — | Starts the HTTP server. Optional `{ port, maxPortAttempts }` overrides `AppConfig`. If the port is already in use, the server automatically retries on the next available port (up to `maxPortAttempts`, default 10). |
+
+### CORS
+
+By default the server is fully permissive (`Access-Control-Allow-Origin: *`), so a frontend hosted on another origin (e.g. API on `:8000`, SPA on `:3000`) works with zero configuration. `OPTIONS` preflights are answered automatically, and error responses carry CORS headers too.
+
+Lock the API down with the optional `.cors()` step:
+
+```typescript
+Mira.builder()
+  // ... required steps
+  .cors({
+    allowedOrigins: ["https://app.example.com"],  // list, or (origin) => boolean predicate
+    credentials: true,                            // requires explicit origins — never combines with "*"
+    // allowedMethods, allowedHeaders, exposedHeaders, maxAge are optional
+  })
+  .build()
+```
+
+`credentials: true` combined with a wildcard origin throws at build time — browsers reject that combination.
 
 ---
 
@@ -462,7 +483,7 @@ Rule.public()   // always allow (1 = 1)
 
 ```typescript
 // Any logged-in user
-R.authId(Users).neq(R.literal(null))
+R.authId(Users).neq(R.literal(""))
 
 // Specific user owns the record
 R.field("authorId").eq(R.authId(Users))
@@ -473,6 +494,19 @@ R.selfId().eq(R.authId(Users))
 // Check an attribute of the authenticated user's record
 R.auth(Users, "role").eq(R.literal("admin"))
 ```
+
+> **Use `R.literal("")`, not `R.literal(null)`, for the logged-in check.**
+> `authId` is a string, and an unauthenticated request is already rejected before the
+> rule even runs. In SQLite `value != NULL` evaluates to `NULL` (never true), so
+> `R.authId(Users).neq(R.literal(null))` would deny *every* request:
+>
+> ```typescript
+> // ✗ Wrong — matches nobody
+> create: R.authId(Users).neq(R.literal(null)),
+>
+> // ✓ Correct — any logged-in user
+> create: R.authId(Users).neq(R.literal("")),
+> ```
 
 ### Field comparisons
 
@@ -493,7 +527,7 @@ R.field("body").contains(R.literal("effect"))
 ```typescript
 Rule.and(
   R.field("published").eq(R.literal(true)),
-  R.authId(Users).neq(R.literal(null))
+  R.authId(Users).neq(R.literal(""))
 )
 
 Rule.or(
@@ -1316,14 +1350,18 @@ function CreatePost() {
 ### Svelte and Solid
 
 ```typescript
-// Svelte
-import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/svelte"
+// Svelte (factory + reactive getters for v6)
+import { mutationOptions, queryOptions } from "@tanstack/svelte-query"
+import { createSvelteCollectionAdapter } from "@gettersethya/mira-tanstack-adapter/svelte"
+const collectionAdapter = createSvelteCollectionAdapter(queryOptions, mutationOptions)
+// const query = createQuery(() => api.getList({ limit: 10 }).queryOptions)
 
 // Solid
 import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/solid"
 ```
 
-The API is identical across all three adapters — only the import path changes.
+The API is identical across all three adapters — only the import shape changes
+(Svelte takes factories because its v6 option types cannot be re-exported).
 
 ### Query key structure
 

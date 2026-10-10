@@ -14,7 +14,6 @@ import { AppConfig } from "@/config/index.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
-import type { AuthService} from "@/http/auth.js";
 import {hashPassword } from "@/http/auth.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
@@ -42,8 +41,17 @@ const Restricted = BaseCollection.define("restricted", {
   name: Field.text(),
 })
 
-const usersDef = AuthCollection.define("users", {})
-const usersRules = defineRule(usersDef, (R) => ({
+const UserCollection = AuthCollection.define("users", {})
+const userRules = defineRule(UserCollection, (R) => ({
+  list: R.public(),
+  view: R.public(),
+  create: R.public(),
+  update: R.field("id").eq(R.selfId()),
+  delete: R.field("id").eq(R.selfId()),
+}))
+
+const SuperAdminCollection = AuthCollection.define("_superadmin", {})
+const superAdminRules = defineRule(SuperAdminCollection, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
@@ -51,10 +59,14 @@ const usersRules = defineRule(usersDef, (R) => ({
   delete: R.public(),
 }))
 
-const [Posts, Users] = applyRulesToCollections([postsDef, usersDef], [postsRules, usersRules])
+const [Posts, Users, SuperAdmin] = applyRulesToCollections(
+  [postsDef, UserCollection, SuperAdminCollection],
+  [postsRules, userRules, superAdminRules]
+)
 
 const JWT_SECRET = "test-jwt-secret"
-const ALL_COLLECTIONS = [Posts, Restricted, Users]
+const ALL_COLLECTIONS = [Posts, Restricted, Users, SuperAdmin]
+const ADMIN_COLLECTIONS = ["_superadmin"]
 
 const AppConfigTest = Layer.succeed(AppConfig, AppConfig.of({
   appName: "test",
@@ -147,21 +159,47 @@ const setupTables = Effect.gen(function* () {
     )
   `)
   yield* sql.unsafe(`DELETE FROM "users"`)
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "_superadmin" (
+      "seqId"          INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"             TEXT NOT NULL UNIQUE,
+      "email"          TEXT NOT NULL UNIQUE,
+      "password"       TEXT NOT NULL,
+      "emailVerified"  INTEGER NOT NULL DEFAULT 0,
+      "created"        TEXT NOT NULL,
+      "updated"        TEXT NOT NULL
+    )
+  `)
+  yield* sql`DELETE FROM ${sql("_superadmin")}`
 })
 
 // ---------------------------------------------------------------------------
 // Helper: seed a user with hashed password, bypassing system-field validation
 // ---------------------------------------------------------------------------
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function tokenFromLogin(body: unknown) {
+  if (!isRecord(body)) return Effect.die("expected JSON object login response")
+  const token: unknown = body["token"]
+  if (typeof token !== "string") return Effect.die("expected string token in login response")
+  return Effect.succeed(token)
+}
+
 function seedUser(
   email: string,
-  plainPassword: string
-): Effect.Effect<string, never, Repository | AuthService> {
+  plainPassword: string,
+  table = "users"
+) {
   return Effect.gen(function* () {
     const repo = yield* Repository
     const hash = yield* hashPassword(plainPassword)
-    const record = yield* repo.create("users", { email, password: hash }).pipe(Effect.orDie)
-    return record["id"] as string
+    const record = yield* repo.create(table, { email, password: hash }).pipe(Effect.orDie)
+    const id: unknown = record["id"]
+    if (typeof id !== "string") return yield* Effect.die("seedUser: expected string record id")
+    return id
   })
 }
 
@@ -482,7 +520,7 @@ describe("makeCollectionRouter", () => {
       yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const createRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users").pipe(
-          HttpClientRequest.bodyJsonUnsafe({ email: "newuser@example.com", password: "plaintext-pw" })
+          HttpClientRequest.bodyJsonUnsafe({ email: "newuser@example.com", password: "plaintext-pw", passwordConfirm: "plaintext-pw" })
         )
       )
       assert.strictEqual(createRes.status, 201)
@@ -524,6 +562,99 @@ describe("makeCollectionRouter", () => {
       assert.strictEqual(fields["password"]?.["x-hidden"], true)
       assert.strictEqual(fields["id"]?.["x-generated"], true)
       assert.strictEqual(fields["seqId"]?.["x-generated"], true)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("admin token bypasses rules; non-admin and anonymous are forbidden", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* seedUser("admin@example.com", "secret", "_superadmin")
+
+      // `restricted` has no rules at all → deny-all for non-admins
+      const repo = yield* Repository
+      const record = yield* repo.create("restricted", { name: "secret" }).pipe(Effect.orDie)
+
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(
+          HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS, ADMIN_COLLECTIONS))
+        ),
+        HttpServer.serveEffect()
+      )
+
+      const adminLogin = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/_superadmin/auth-with-password").pipe(
+          HttpClientRequest.bodyJsonUnsafe({ email: "admin@example.com", password: "secret" })
+        )
+      )
+      assert.strictEqual(adminLogin.status, 200)
+      const adminToken = yield* tokenFromLogin(yield* adminLogin.json)
+
+      const adminPatch = yield* HttpClient.execute(
+        HttpClientRequest.patch(`/api/collections/restricted/${record["id"]}`).pipe(
+          HttpClientRequest.bearerToken(adminToken),
+          HttpClientRequest.bodyJsonUnsafe({ name: "edited" })
+        )
+      )
+      assert.strictEqual(adminPatch.status, 200)
+      const updatedBody: unknown = yield* adminPatch.json
+      if (!isRecord(updatedBody)) return yield* Effect.die("expected JSON object patch response")
+      assert.strictEqual(updatedBody["name"], "edited")
+
+      const ownerId = yield* seedUser("owner@example.com", "secret")
+      const userLogin = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+          HttpClientRequest.bodyJsonUnsafe({ email: "owner@example.com", password: "secret" })
+        )
+      )
+      assert.strictEqual(userLogin.status, 200)
+      const userToken = yield* tokenFromLogin(yield* userLogin.json)
+      assert.ok(ownerId.length > 0)
+
+      const userPatch = yield* HttpClient.execute(
+        HttpClientRequest.patch(`/api/collections/restricted/${record["id"]}`).pipe(
+          HttpClientRequest.bearerToken(userToken),
+          HttpClientRequest.bodyJsonUnsafe({ name: "nope" })
+        )
+      )
+      assert.strictEqual(userPatch.status, 403)
+
+      const anonPatch = yield* HttpClient.execute(
+        HttpClientRequest.patch(`/api/collections/restricted/${record["id"]}`).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ name: "nope" })
+        )
+      )
+      assert.strictEqual(anonPatch.status, 403)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("no admin collections configured means even the admin collection token is not admin", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* seedUser("admin2@example.com", "secret", "_superadmin")
+
+      const repo = yield* Repository
+      const record = yield* repo.create("restricted", { name: "still secret" }).pipe(Effect.orDie)
+
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+        HttpServer.serveEffect()
+      )
+
+      const adminLogin = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/_superadmin/auth-with-password").pipe(
+          HttpClientRequest.bodyJsonUnsafe({ email: "admin2@example.com", password: "secret" })
+        )
+      )
+      assert.strictEqual(adminLogin.status, 200)
+      const adminToken = yield* tokenFromLogin(yield* adminLogin.json)
+
+      const res = yield* HttpClient.execute(
+        HttpClientRequest.patch(`/api/collections/restricted/${record["id"]}`).pipe(
+          HttpClientRequest.bearerToken(adminToken),
+          HttpClientRequest.bodyJsonUnsafe({ name: "nope" })
+        )
+      )
+      assert.strictEqual(res.status, 403)
     }).pipe(Effect.provide(testLayer))
   )
 })

@@ -59,6 +59,25 @@ export function fieldKind(field: FieldSchema): string {
   return "text"
 }
 
+/**
+ * Picks the field name to display for a relation target (e.g. `name`, `title`).
+ * Prefers the first non-system text field, then any text field, then `null`
+ * (caller falls back to showing the raw relation id).
+ */
+export function relationLabelField(target: CollectionSchema | undefined): string | null {
+  if (!target) return null
+  const candidates = Object.entries(target.fields).filter(([, field]) => {
+    const kind = fieldKind(field)
+    if (kind !== "text" && kind !== "literalText") return false
+    if (isGeneratedField(field) || isTableHiddenField(field)) return false
+    return true
+  })
+  if (candidates.length === 0) return null
+  const nonSystem = candidates.find(([, field]) => !isSystemField(field))
+  const chosen = nonSystem ?? candidates[0]
+  return chosen ? chosen[0] : null
+}
+
 export type FieldEntry = {
   name: string
   kind: string

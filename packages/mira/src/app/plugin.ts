@@ -99,6 +99,16 @@ export interface MiraPlugin<R = never> {
   readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository | CollectionService>
   readonly routes?: ReadonlyArray<HttpRouter.Route<never, R>>
   readonly collections?: ReadonlyArray<AnyCollectionDef>
+  /**
+   * Auth collections whose authenticated tokens are granted `admin: true` on the
+   * request context, bypassing all rule enforcement on the generic
+   * `/api/collections/*` and file routes. Declared by admin plugins (e.g. the
+   * dashboard declares its superadmin collection here). These definitions are
+   * also automatically added to the app's collection set, so a plugin only needs
+   * to list its admin collection once. An app with no such plugin has no admin
+   * bypass and enforces rules for everyone.
+   */
+  readonly adminCollections?: ReadonlyArray<AnyCollectionDef>
 }
 
 interface MiraPluginInstance<R> extends MiraPlugin<R> {

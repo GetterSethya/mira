@@ -48,13 +48,15 @@ function getQueryParam(
 }
 
 export function makeFileServeRoute(
-  collections: ReadonlyArray<AnyCollectionDef>
+  collections: ReadonlyArray<AnyCollectionDef>,
+  adminCollections: ReadonlyArray<string> = []
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   never,
   FileServeServices | HttpServerRequest.HttpServerRequest | HttpRouter.RouteContext
 > {
   const collectionMap = new Map(collections.map((c) => [c.name, c]))
+  const adminSet = new Set(adminCollections)
 
   return Effect.flatMap(HttpRouter.RouteContext, (routeCtx) => {
     const colName = routeCtx.params["collection"]
@@ -78,7 +80,7 @@ export function makeFileServeRoute(
 
     return Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
       Effect.catchCause(
-        serveFile(collection, recordId, filename, req),
+        serveFile(collection, recordId, filename, req, adminSet),
         () =>
           Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
       )
@@ -90,7 +92,8 @@ function serveFile(
   collection: AnyCollectionDef,
   recordId: string,
   filename: string,
-  req: HttpServerRequest.HttpServerRequest
+  req: HttpServerRequest.HttpServerRequest,
+  adminSet: ReadonlySet<string>
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, never, FileServeServices> {
   return Effect.gen(function* () {
     const config = yield* AppConfig
@@ -153,29 +156,33 @@ function serveFile(
         query: {}
       }
 
-      // Enforce the collection's view rule against the specific record
-      const ruleResult = enforcerForAction(collection.schema, "view")
-      if (ruleResult === null) {
-        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
-      }
+      // Admin tokens (declared by an admin plugin, e.g. the dashboard) bypass
+      // the per-collection view rule for protected file downloads.
+      if (!adminSet.has(tokenPayload.col)) {
+        // Enforce the collection's view rule against the specific record
+        const ruleResult = enforcerForAction(collection.schema, "view")
+        if (ruleResult === null) {
+          return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
+        }
 
-      const ruleWhere = yield* resolveCtxPlaceholders(
-        ruleResult,
-        ctx,
-        collection.name,
-        "view"
-      ).pipe(Effect.catchTag("ForbiddenError", () => Effect.succeed(null)))
+        const ruleWhere = yield* resolveCtxPlaceholders(
+          ruleResult,
+          ctx,
+          collection.name,
+          "view"
+        ).pipe(Effect.catchTag("ForbiddenError", () => Effect.succeed(null)))
 
-      if (ruleWhere === null) {
-        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
-      }
+        if (ruleWhere === null) {
+          return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
+        }
 
-      const allowed = yield* repo
-        .viewFilter(collection.name, { where: andWhere(ruleWhere, idClause(recordId)) })
-        .pipe(Effect.orElseSucceed(() => []))
+        const allowed = yield* repo
+          .viewFilter(collection.name, { where: andWhere(ruleWhere, idClause(recordId)) })
+          .pipe(Effect.orElseSucceed(() => []))
 
-      if (allowed.length === 0) {
-        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
+        if (allowed.length === 0) {
+          return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
+        }
       }
     }
 

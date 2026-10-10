@@ -1,5 +1,5 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection, Field } from "@gettersethya/mira-client"
 import { Layer } from "effect"
 import { describe, expect,it } from "vitest"
 
@@ -8,6 +8,7 @@ import { MiraBuilder } from "@/app/builder.js"
 import { defineRule } from "@/app/index.js"
 import { MiraPlugin } from "@/app/plugin.js"
 import { SqliteDatabase } from "@/databases/sqlite.js"
+import { defaultCorsConfig } from "@/http/cors.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { LocalFileStorage } from "@/storage/index.js"
 import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
@@ -106,5 +107,65 @@ describe("MiraBuilder.rules()", () => {
     const rb = defineRule(postsDef, (R) => ({ list: R.public() }))
     const app = fullBuilder().rules([rb]).build()
     expect(app._getConfig().rules).toEqual([rb])
+  })
+})
+
+describe("MiraBuilder.cors()", () => {
+  it("stores cors on builder config", () => {
+    const cors = { allowedOrigins: ["http://localhost:3000"] }
+    const b = fullBuilder().cors(cors)
+    expect(b._getPartialConfig().cors).toEqual(cors)
+  })
+
+  it("defaults cors to defaultCorsConfig when .cors() not called", () => {
+    const app = fullBuilder().build()
+    expect(app._getConfig().cors).toBe(defaultCorsConfig)
+  })
+
+  it("custom cors survives through build", () => {
+    const cors = { allowedOrigins: ["http://localhost:3000"], credentials: true }
+    const app = fullBuilder().cors(cors).build()
+    expect(app._getConfig().cors).toEqual(cors)
+  })
+
+  it("throws on wildcard origin with credentials", () => {
+    expect(() => fullBuilder().cors({ allowedOrigins: ["*"], credentials: true })).toThrow(
+      "credentials: true requires explicit allowedOrigins"
+    )
+  })
+
+  it("throws on omitted origins with credentials", () => {
+    expect(() => fullBuilder().cors({ credentials: true })).toThrow(
+      "credentials: true requires explicit allowedOrigins"
+    )
+  })
+
+  it("allows explicit origin with credentials", () => {
+    const b = fullBuilder().cors({ allowedOrigins: ["http://localhost:3000"], credentials: true })
+    expect(b._getPartialConfig().cors).toBeDefined()
+  })
+})
+
+describe("MiraPlugin.adminCollections", () => {
+  const adminDef = AuthCollection.define("_admin", {})
+
+  it("auto-adds plugin admin collections to the app collection set", () => {
+    const plugin = MiraPlugin.define({ adminCollections: [adminDef] })
+    const app = fullBuilder().build().extend(plugin)
+    expect(app._resolveAdminCollections()).toEqual([adminDef])
+  })
+
+  it("merges admin collections from multiple plugins", () => {
+    const otherDef = AuthCollection.define("_otheradmin", {})
+    const app = fullBuilder()
+      .build()
+      .extend(MiraPlugin.define({ adminCollections: [adminDef] }))
+      .extend(MiraPlugin.define({ adminCollections: [otherDef] }))
+    expect(app._resolveAdminCollections()).toEqual([adminDef, otherDef])
+  })
+
+  it("there is no admin bypass when no plugin declares one", () => {
+    const app = fullBuilder().build()
+    expect(app._resolveAdminCollections()).toEqual([])
   })
 })

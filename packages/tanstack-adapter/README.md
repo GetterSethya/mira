@@ -28,12 +28,31 @@ npm install @gettersethya/mira-tanstack-adapter @tanstack/solid-query
 ```typescript
 import { createMiraClient } from "@gettersethya/mira-client"
 import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/react"
-// import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/svelte"
 // import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/solid"
 import { Posts } from "./collections.js"
 
 const mira     = createMiraClient("/api").withCollections({ posts: Posts })
 const postsApi = collectionAdapter(mira, "posts")
+```
+
+Svelte uses a small factory instead of a pre-built adapter (its v6 option
+types cannot be re-exported from another package's declarations):
+
+```typescript
+import { mutationOptions, queryOptions } from "@tanstack/svelte-query"
+import { createSvelteCollectionAdapter } from "@gettersethya/mira-tanstack-adapter/svelte"
+
+const collectionAdapter = createSvelteCollectionAdapter(queryOptions, mutationOptions)
+const postsApi = collectionAdapter(mira, "posts")
+```
+
+The framework-agnostic factory also lives at the package root for custom setups:
+
+```typescript
+import { queryOptions, mutationOptions } from "@tanstack/react-query"
+import { createCollectionAdapter } from "@gettersethya/mira-tanstack-adapter"
+
+const collectionAdapter = createCollectionAdapter(queryOptions, mutationOptions)
 ```
 
 ## Queries
@@ -94,12 +113,15 @@ function PostActions() {
 
 ## Svelte and Solid
 
-The API is identical across all three frameworks. Only the import path changes.
+React and Solid expose a pre-built `collectionAdapter`. Svelte exposes a
+`createSvelteCollectionAdapter(queryOptions, mutationOptions)` factory instead
+(see Setup above). Svelte v6 reads options through reactive getters:
 
 ```typescript
 // Svelte
-import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/svelte"
+import { createSvelteCollectionAdapter } from "@gettersethya/mira-tanstack-adapter/svelte"
 // use with createQuery / createMutation from @tanstack/svelte-query
+const query = createQuery(() => api.getList({ limit: 10 }).queryOptions)
 
 // Solid
 import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/solid"

@@ -64,6 +64,7 @@ export function defineRule<F extends FieldsMap>(
       ...(result.create !== undefined ? { create: result.create } : {}),
       ...(result.update !== undefined ? { update: result.update } : {}),
       ...(result.delete !== undefined ? { delete: result.delete } : {}),
+      ...(result.manage !== undefined ? { manage: result.manage } : {}),
     }
     return { _tag: "RuleBinding", collectionName: collection.name, ruleMap }
   }

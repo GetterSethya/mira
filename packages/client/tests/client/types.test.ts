@@ -3,7 +3,7 @@ import { Field } from "@gettersethya/mira-collection"
 import { describe, expect, it } from "vitest"
 
 import type { FilterBuilder } from "@/client/collection.js"
-import type { InferCreateInput, InferRecord, RelationKeys,WithExpand } from "@/client/types.js"
+import type { AuthCreateInput, CreateInput, InferCreateInput, InferRecord, RegisterInput, RelationKeys,WithExpand } from "@/client/types.js"
 
 describe("InferRecord", () => {
   it("has correct field types and system fields", () => {
@@ -166,6 +166,38 @@ describe("RelationKeys", () => {
     type Keys = RelationKeys<F>
     const _keys: Keys = "ownerId"
     expect(_keys).toBe("ownerId")
+  })
+})
+
+describe("auth input types", () => {
+  type F = {
+    name: { _tag: "FieldDef"; kind: "text"; required: true }
+  }
+
+  it("CreateInput for auth requires password + passwordConfirm", () => {
+    const _ok: CreateInput<F, "auth"> = { name: "n", password: "p", passwordConfirm: "p" }
+    expect(_ok.name).toBe("n")
+  })
+
+  it("CreateInput for base does not accept credential fields", () => {
+    const _ok: CreateInput<F, "base"> = { name: "n" }
+    expect(_ok.name).toBe("n")
+  })
+
+  it("AuthCreateInput is the auth variant of CreateInput", () => {
+    const _ok: AuthCreateInput<F> = { name: "n", password: "p", passwordConfirm: "p", emailVerified: false }
+    expect(_ok.emailVerified).toBe(false)
+  })
+
+  it("RegisterInput requires email, password, passwordConfirm", () => {
+    const _ok: RegisterInput<F> = { name: "n", email: "a@b.com", password: "p", passwordConfirm: "p" }
+    expect(_ok.email).toBe("a@b.com")
+  })
+
+  it("RegisterInput rejects a missing passwordConfirm", () => {
+    // @ts-expect-error passwordConfirm is required on register input
+    const _bad: RegisterInput<F> = { name: "n", email: "a@b.com", password: "p" }
+    expect(_bad).toBeDefined()
   })
 })
 

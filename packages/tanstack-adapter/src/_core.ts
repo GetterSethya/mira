@@ -34,17 +34,21 @@ export type MutationOptionsShape<TData, TInput> = {
  * Signature for the framework-provided `queryOptions` factory.
  * TanStack Query in each framework exports a `queryOptions` function that accepts
  * a {@link QueryOptionsShape} and returns a framework-specific options object.
+ * The return type is intentionally `unknown`: each framework returns its own
+ * options shape, which callers narrow via `ReturnType` in {@link enrichQuery}.
  */
-export type MakeQueryOptions = <T>(opts: QueryOptionsShape<T>) => QueryOptionsShape<T>
+export type MakeQueryOptions = <T>(opts: QueryOptionsShape<T>) => unknown
 
 /**
  * Signature for the framework-provided `mutationOptions` factory.
  * TanStack Query in each framework exports a `mutationOptions` function that accepts
  * a {@link MutationOptionsShape} and returns a framework-specific options object.
+ * The return type is intentionally `unknown`: each framework returns its own
+ * options shape, which callers narrow via `ReturnType` in {@link enrichMutation}.
  */
 export type MakeMutationOptions = <TData, TInput>(
   opts: MutationOptionsShape<TData, TInput>
-) => MutationOptionsShape<TData, TInput>
+) => unknown
 
 /**
  * A map of human-readable action names to their string key values.
@@ -78,17 +82,24 @@ export type ActionKey = (typeof ActionKeys)[keyof typeof ActionKeys]
  *
  * @template T - The data type returned by the underlying handler.
  * @template H - The handler type, constrained to objects with a zero-arg `raw()` method returning `Promise<T>`.
+ * @template F - The framework `queryOptions` factory. Its return type is preserved
+ *   via `ReturnType`, so framework-specific option fields survive.
  * @param handler - The original handler (e.g. from `client.getList()`).
  * @param key - The query key array to associate with this query.
  * @param makeQueryOptions - Framework-specific `queryOptions` factory.
  * @returns The original handler augmented with `queryKey` and `queryOptions`.
  * @see enrichMutation For the mutation equivalent.
  */
-export function enrichQuery<T, H extends { raw(): Promise<T> }>(
+export function enrichQuery<T, H extends { raw(): Promise<T> }, F extends (opts: QueryOptionsShape<T>) => unknown>(
   handler: H,
   key: QueryKey,
+  makeQueryOptions: F
+): H & { queryKey: QueryKey; queryOptions: ReturnType<F> }
+export function enrichQuery(
+  handler: { raw(): Promise<unknown> },
+  key: QueryKey,
   makeQueryOptions: MakeQueryOptions
-): H & { queryKey: QueryKey; queryOptions: QueryOptionsShape<T> } {
+): { queryKey: QueryKey; queryOptions: unknown } {
   return Object.assign(handler, {
     queryKey: key,
     queryOptions: makeQueryOptions({ queryKey: key, queryFn: () => handler.raw() }),
@@ -105,18 +116,24 @@ export function enrichQuery<T, H extends { raw(): Promise<T> }>(
  * @template TData - The data type returned by the mutation handler.
  * @template TInput - The input data type consumed by the mutation handler.
  * @template H - The handler type, constrained to objects with a single-arg `raw(input)` method returning `Promise<TData>`.
+ * @template F - The framework `mutationOptions` factory. Its return type is preserved
+ *   via `ReturnType`, so framework-specific option fields survive.
  * @param handler - The original handler (e.g. from `client.create()`).
  * @param makeMutationOptions - Framework-specific `mutationOptions` factory.
  * @returns The original handler augmented with `mutationOptions`.
  * @see enrichQuery For the query equivalent.
  */
-export function enrichMutation<TData, TInput, H extends { raw(input: TInput): Promise<TData> }>(
+export function enrichMutation<TData, TInput, H extends { raw(input: TInput): Promise<TData> }, F extends (opts: MutationOptionsShape<TData, TInput>) => unknown>(
   handler: H,
+  makeMutationOptions: F
+): H & { mutationOptions: ReturnType<F> }
+export function enrichMutation(
+  handler: { raw(input: unknown): Promise<unknown> },
   makeMutationOptions: MakeMutationOptions
-): H & { mutationOptions: MutationOptionsShape<TData, TInput> } {
+): { mutationOptions: unknown } {
   return Object.assign(handler, {
     mutationOptions: makeMutationOptions({
-      mutationFn: (input: TInput) => handler.raw(input),
+      mutationFn: (input: unknown) => handler.raw(input),
     }),
   })
 }
@@ -166,14 +183,18 @@ export function enrichMutation<TData, TInput, H extends { raw(input: TInput): Pr
  * @see MakeQueryOptions
  * @see MakeMutationOptions
  */
-export function createCollectionAdapter(
-  makeQueryOptions: MakeQueryOptions,
-  makeMutationOptions: MakeMutationOptions
+export function createCollectionAdapter<
+  FQ extends MakeQueryOptions,
+  FM extends MakeMutationOptions
+>(
+  makeQueryOptions: FQ,
+  makeMutationOptions: FM
 ) {
   return function adaptCollectionClient<F extends FieldsMap>(
     client: CollectionClient<F>,
     name: string
   ) {
+    const registerFn = client.register
     return {
       ...client,
 
@@ -235,6 +256,12 @@ export function createCollectionAdapter(
        * Enriched mutation for deleting records. Call `raw(input)` to execute.
        */
       delete: () => enrichMutation(client.delete(), makeMutationOptions),
+
+      /**
+       * Enriched mutation for registering a new auth-collection record.
+       * Only present when the underlying collection client exposes `register`.
+       */
+      ...(registerFn ? { register: () => enrichMutation(registerFn(), makeMutationOptions) } : {}),
 
       /**
        * Invalidates all cached queries for this collection.

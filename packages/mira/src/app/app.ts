@@ -10,6 +10,7 @@ import type { CronDef } from "@/cron/types.js"
 import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 import { HookService } from "@/hooks/hook-service.js"
+import { makeCorsMiddleware } from "@/http/cors.js"
 import { ipAnnotationMiddleware } from "@/http/ip-middleware.js"
 import { makePortRetryServerLayer } from "@/http/port-retry.js"
 import { makeCollectionRouter } from "@/http/router.js"
@@ -33,10 +34,10 @@ function assertUniqueCronNames(defs: ReadonlyArray<CronDef<any>>) {
   }
 }
 
-export function applyRulesToCollections(
-  collections: ReadonlyArray<AnyCollectionDef>,
+export function applyRulesToCollections<C extends AnyCollectionDef>(
+  collections: ReadonlyArray<C>,
   rules: ReadonlyArray<RuleBinding>
-): Array<AnyCollectionDef> {
+): Array<C> {
   const collectionNames = new Set(collections.map((c) => c.name))
   for (const rb of rules) {
     if (!collectionNames.has(rb.collectionName)) {
@@ -46,11 +47,11 @@ export function applyRulesToCollections(
       )
     }
   }
-  const ruleMap = new Map(rules.map((r) => [r.collectionName, r.ruleMap]))
-  return collections.map((c) => {
+  const ruleMap = new Map<string, RuleMap>(rules.map((r) => [r.collectionName, r.ruleMap]))
+  return collections.map((c): C => {
     const rm = ruleMap.get(c.name)
     if (rm) {
-      return { ...c, schema: { ...c.schema, "x-rules": rm as RuleMap } }
+      return { ...c, schema: { ...c.schema, "x-rules": rm } }
     }
     return c
   })
@@ -115,6 +116,11 @@ export class MiraApp<R = never> {
     return this.#extras
   }
 
+  /** @internal for tests only */
+  _resolveAdminCollections(): ReadonlyArray<AnyCollectionDef> {
+    return this.#getAdminCollections()
+  }
+
   /**
    * Add a plugin to the application. Plugins can register lifecycle hooks,
    * record-lifecycle hooks, custom routes, service layers, and additional
@@ -133,10 +139,18 @@ export class MiraApp<R = never> {
 
   #getAllCollections(): ReadonlyArray<AnyCollectionDef> {
     const configCollections = applyRulesToCollections(this.#config.collections, this.#config.rules ?? [])
-    return [
-      ...(configCollections as ReadonlyArray<AnyCollectionDef>),
-      ...this.#extras.flatMap((p) => p.collections ?? [])
+    const all = [
+      ...configCollections,
+      ...this.#extras.flatMap((p) => p.collections ?? []),
+      ...this.#getAdminCollections()
     ]
+    const byName = new Map<string, AnyCollectionDef>()
+    for (const c of all) {
+      if (!byName.has(c.name)) {
+        byName.set(c.name, c)
+      }
+    }
+    return [...byName.values()]
   }
 
   #getAllPlugins(): ReadonlyArray<MiraPlugin<any>> {
@@ -145,6 +159,10 @@ export class MiraApp<R = never> {
 
   #getAllCrons(): ReadonlyArray<CronDef<any>> {
     return [...this.#config.crons, ...this.#extras.flatMap((p) => p.crons ?? [])]
+  }
+
+  #getAdminCollections(): ReadonlyArray<AnyCollectionDef> {
+    return this.#extras.flatMap((p) => p.adminCollections ?? [])
   }
 
   /**
@@ -228,7 +246,8 @@ export class MiraApp<R = never> {
    */
   buildLayer(options?: ServeOptions) {
     const allCollections = this.#getAllCollections()
-    const collectionRoutes = makeCollectionRouter(allCollections)
+    const adminCollections = this.#getAdminCollections().map((c) => c.name)
+    const collectionRoutes = makeCollectionRouter(allCollections, adminCollections)
     const pluginRoutes = this.#extras.flatMap((p) => p.routes ?? [])
     const routes = [...collectionRoutes, ...pluginRoutes]
 
@@ -246,7 +265,7 @@ export class MiraApp<R = never> {
     ).pipe(Layer.provide(serviceLayer))
 
     return HttpRouter.serve(HttpRouter.addAll(routes), {
-      middleware: (effect) => ipAnnotationMiddleware(effect)
+      middleware: (effect) => ipAnnotationMiddleware(makeCorsMiddleware(this.#config.cors)(effect))
     }).pipe(Layer.provide(serverLayer), Layer.provideMerge(serviceLayer))
   }
 

@@ -42,7 +42,8 @@ const AuthBodySchema = Schema.Struct({
 
 function buildRequestCtx(
   auth: { collection: string; record: RepoRecord } | undefined,
-  req: HttpServerRequest.HttpServerRequest
+  req: HttpServerRequest.HttpServerRequest,
+  isAdmin: boolean
 ): RequestCtx {
   const headers: Record<string, string> = {}
   for (const [k, v] of Object.entries(req.headers)) {
@@ -66,7 +67,8 @@ function buildRequestCtx(
       query[k] = arr
     }
   }
-  return auth ? { auth, headers, query } : { headers, query }
+  if (auth === undefined) return { headers, query }
+  return isAdmin ? { auth, headers, query, admin: true } : { auth, headers, query }
 }
 
 function extractToken(req: HttpServerRequest.HttpServerRequest) {
@@ -105,8 +107,12 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
   }).pipe(Effect.withSpan("http.body.parse", { kind: "internal", attributes: { content_type: "json" } }))
 }
 
-export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef>) {
+export function makeCollectionRouter(
+  collections: ReadonlyArray<AnyCollectionDef>,
+  adminCollections: ReadonlyArray<string> = []
+) {
   const collectionMap = new Map(collections.map((c) => [c.name, c]))
+  const adminSet = new Set(adminCollections)
 
   function collectionRoute(
     operation: string,
@@ -136,7 +142,8 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
       return Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
         Effect.gen(function* () {
           const auth = yield* resolveAuth(req)
-          const ctx = buildRequestCtx(auth ?? undefined, req)
+          const isAdmin = auth !== undefined && adminSet.has(auth.collection)
+          const ctx = buildRequestCtx(auth ?? undefined, req, isAdmin)
           yield* Effect.currentSpan.pipe(
             Effect.tap((span: Tracer.Span) =>
               Effect.sync(() => {
@@ -381,7 +388,7 @@ export function makeCollectionRouter(collections: ReadonlyArray<AnyCollectionDef
     }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation: "me" } }))
   )
 
-  const fileServeRoute = makeFileServeRoute(collections)
+  const fileServeRoute = makeFileServeRoute(collections, adminCollections)
   const fileTokenRoute = makeFileTokenRoute(collections)
   const schemaRoute = requireApiAuth("schema", makeSchemaRoute(collections))
 

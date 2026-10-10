@@ -73,6 +73,23 @@ export const PostsWithAuthors = ViewCollection.define(
 
 Rules for collections are defined server-side using `defineRule()` from `@gettersethya/mira`.
 
+## Type inference
+
+The record and input inference types are exported from `@gettersethya/mira-collection`, so no
+server or client package is required to derive TypeScript types from a collection definition.
+
+```typescript
+import type { InferRecord, InferCreateInput, InferMutationInput } from "@gettersethya/mira-collection"
+import { Posts } from "./collections.js"
+
+type Post    = InferRecord<typeof Posts>         // full record incl. system fields
+type NewPost = InferCreateInput<typeof Posts>    // create input, no system fields
+type Edit    = InferMutationInput<typeof Posts>  // mutation input; file fields are File | Blob
+```
+
+Also exported: `RelationKeys`, `FileKeys`, `WithExpand`, `CollectionKind`, `CreateInput`,
+`UpdateInput`, `AuthCreateInput`, `AuthUpdateInput`, `RegisterInput`, and `AnyAuthCollectionDef`.
+
 ## Field types
 
 ```typescript
@@ -116,7 +133,7 @@ Rules are evaluated server-side on every request. A missing key means **deny all
 
 ```typescript
 Rule.public()                                        // allow all
-R.authId(Users).neq(R.literal(null))                // logged-in users only
+R.authId(Users).neq(R.literal(""))                  // logged-in users only
 R.field("ownerId").eq(R.authId(Users))              // owner-only
 R.field("role").in(R.literal(["admin", "mod"]))     // role check
 R.auth(Users, "role").eq(R.literal("admin"))        // check a field on the auth record

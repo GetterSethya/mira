@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { MutableRef } from "effect"
 import { HttpClientRequest } from "effect/http"
 import { ActionKeys, createCollectionAdapter, enrichMutation, enrichQuery } from "../src/_core.js"
-import type { QueryKey } from "../src/_core.js"
+import type { MutationOptionsShape, QueryKey, QueryOptionsShape } from "../src/_core.js"
 import { makeClientHandler, makeMutationHandler } from "@gettersethya/mira-client"
 import { makeCollectionClient } from "@gettersethya/mira-client"
 import type { ExecuteFn } from "@gettersethya/mira-client"
@@ -35,8 +35,11 @@ function makeTestClient() {
   })
 }
 
-const identity = <T>(opts: T): T => opts
-const adapter = createCollectionAdapter(identity, identity)
+const identityQueryOptions = <T>(opts: QueryOptionsShape<T>): QueryOptionsShape<T> => opts
+const identityMutationOptions = <TData, TInput>(
+  opts: MutationOptionsShape<TData, TInput>
+): MutationOptionsShape<TData, TInput> => opts
+const adapter = createCollectionAdapter(identityQueryOptions, identityMutationOptions)
 
 describe("ActionKeys", () => {
   it("has the correct constant values", () => {
@@ -50,7 +53,7 @@ describe("ActionKeys", () => {
 describe("enrichQuery", () => {
   it("attaches queryKey and queryOptions to handler", async () => {
     const handler = makeClientHandler(Effect.succeed(42))
-    const enriched = enrichQuery(handler, ["col", "getList", {}], identity)
+    const enriched = enrichQuery(handler, ["col", "getList", {}], identityQueryOptions)
     expect(enriched.queryKey).toEqual(["col", "getList", {}])
     expect(enriched.queryOptions.queryKey).toEqual(["col", "getList", {}])
     expect(await enriched.queryOptions.queryFn()).toBe(42)
@@ -62,7 +65,7 @@ describe("enrichMutation", () => {
     const handler = makeMutationHandler((x: string) =>
       Effect.succeed(x.toUpperCase())
     )
-    const enriched = enrichMutation(handler, identity)
+    const enriched = enrichMutation(handler, identityMutationOptions)
     expect(await enriched.mutationOptions.mutationFn("hello")).toBe("HELLO")
   })
 })
@@ -115,12 +118,12 @@ describe("createCollectionAdapter", () => {
 
   it("create — mutationOptions.mutationFn delegates to handler.raw", async () => {
     const result = await adapted.create().mutationOptions.mutationFn({ title: "hi" })
-    expect(result).toMatchObject({ id: "1" })
+    expect(result).toEqual(expect.objectContaining({ id: "1" }))
   })
 
   it("update — mutationOptions.mutationFn delegates to handler.raw", async () => {
     const result = await adapted.update().mutationOptions.mutationFn({ id: "x", data: { title: "new" } })
-    expect(result).toMatchObject({ id: "1" })
+    expect(result).toEqual(expect.objectContaining({ id: "1" }))
   })
 
   it("delete — mutationOptions.mutationFn delegates to handler.raw", async () => {

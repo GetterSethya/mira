@@ -264,6 +264,46 @@ describe("CollectionClient", () => {
     expect(result.token).toBe("test-token")
   })
 
+  it("register → POST to the collection create endpoint", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute = makeTestExecute(captured)
+    const client = makeCollectionClient({
+      collectionName: "users",
+      schema: AuthCollectionDef.schema,
+      fields: AuthCollectionDef.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: true,
+    })
+
+    const register = client.register
+    if (!register) throw new Error("register should be defined when isAuth=true")
+    await register().raw({ name: "New User", email: "a@b.com", password: "secret", passwordConfirm: "secret" })
+    expect(captured[0].method).toBe("POST")
+    expect(captured[0].url).toBe("/api/collections/users")
+  })
+
+  it("register is undefined on non-auth collections", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute = makeTestExecute(captured)
+    const client = makeCollectionClient({
+      collectionName: "tasks",
+      schema: TestCollection.schema,
+      fields: TestCollection.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: false,
+    })
+
+    expect(client.register).toBeUndefined()
+  })
+
   it("create with Blob value → uses FormData body", async () => {
     const captured: Array<{ method: string; url: string; bodyIsFormData: boolean }> = []
     const execute = makeBodyCapturingExecute(captured)

@@ -249,11 +249,38 @@ async function runTests(): Promise<void> {
 
   await test("auth.clear() resets token to null and invalidates isValid()", async () => {
     const c = createMiraClient(BASE, { type: "server" }).withCollections(collectionMap)
-    await c.users.authWithPassword!().raw({ email: "alice@example.com", password: "alice123" })
+    await c.users.authWithPassword().raw({ email: "alice@example.com", password: "alice123" })
     check(c.auth.isValid(), "should be valid before clear")
     c.auth.clear()
     check(!c.auth.isValid(), "should be invalid after clear")
     check(c.auth.token === null, "token should be null after clear")
+  })
+
+  await test("register() creates a user, returns the record, and does not auto-login", async () => {
+    const c = createMiraClient(BASE, { type: "server" }).withCollections(collectionMap)
+    const email = `register-${Date.now()}@example.com`
+    const user = await c.users.register().raw({
+      email,
+      password: "register123",
+      passwordConfirm: "register123",
+      displayName: "Registered User"
+    })
+    check(typeof user.id === "string" && user.id.length > 0, "expected a created user id")
+    check(user.email === email, `expected email ${email}`)
+    check(c.auth.token === null, "register() must not auto-login")
+    const login = await c.users.authWithPassword().raw({ email, password: "register123" })
+    check(typeof login.token === "string" && login.token.length > 0, "expected login after register to succeed")
+  })
+
+  await test("register() with mismatched passwordConfirm → MiraError(422)", async () => {
+    const c = createMiraClient(BASE, { type: "server" }).withCollections(collectionMap)
+    await expectMiraError(422, () =>
+      c.users.register().raw({
+        email: `register-bad-${Date.now()}@example.com`,
+        password: "register123",
+        passwordConfirm: "different"
+      })
+    )
   })
 
   // ── Users ─────────────────────────────────────────────────────────────────

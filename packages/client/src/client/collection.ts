@@ -10,7 +10,7 @@ import { MiraError } from "./errors.js"
 import { makeFileFields } from "./file.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler as makeHandler, makeMutationHandler } from "./handler.js"
-import type { CollectionFileFields, InferMutationInput, InferRecord, RelationKeys, WithExpand } from "./types.js"
+import type { CollectionFileFields, CollectionKind, CreateInput, InferRecord, RegisterInput, RelationKeys, UpdateInput, WithExpand } from "./types.js"
 
 type RequestWithBody = Effect.Effect<HttpClientRequest.HttpClientRequest, HttpBodyError, never>
 
@@ -139,7 +139,7 @@ function buildQueryParams(params: Record<string, string | undefined>): string {
  * @see makeCollectionClient — constructs CollectionClient instances
  * @see ClientHandler — return type of all methods
  */
-export type CollectionClient<F extends FieldsMap> = {
+export type CollectionClient<F extends FieldsMap, K extends CollectionKind = "base"> = {
   /**
    * List records with optional filtering, sorting, cursor pagination, and field selection.
    *
@@ -230,7 +230,7 @@ export type CollectionClient<F extends FieldsMap> = {
    *
    * @returns A mutation ClientHandler — call `.raw(input)` with the record data
    */
-  create(): ClientHandler<InferRecord<F>, InferMutationInput<F>>
+  create(): ClientHandler<InferRecord<F>, CreateInput<F, K>>
 
   /**
    * Update an existing record by ID.
@@ -241,7 +241,7 @@ export type CollectionClient<F extends FieldsMap> = {
    *
    * @returns A mutation ClientHandler — call `.raw({ id, data })`
    */
-  update(): ClientHandler<InferRecord<F>, { id: string; data: Partial<InferMutationInput<F>> }>
+  update(): ClientHandler<InferRecord<F>, UpdateInput<F, K>>
 
   /**
    * Delete a record by ID.
@@ -267,6 +267,25 @@ export type CollectionClient<F extends FieldsMap> = {
   authWithPassword?(): ClientHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>
 
   /**
+   * Register (self-signup) a new user on an auth collection.
+   * Only available on collections defined with `AuthCollection.define()`.
+   *
+   * Wraps the create endpoint (`POST /api/collections/:name`) — open registration
+   * therefore requires the collection's create rule to permit it (e.g. `create: R.public()`).
+   * Does **not** auto-login; call `authWithPassword()` after if needed.
+   *
+   * @example
+   * const user = await mira.users.register().raw({
+   *   email: "user@example.com",
+   *   password: "secret123",
+   *   passwordConfirm: "secret123"
+   * })
+   *
+   * @returns A mutation ClientHandler — call `.raw({ email, password, passwordConfirm, ... })`
+   */
+  register?(): ClientHandler<InferRecord<F>, RegisterInput<F>>
+
+  /**
    * File field client interfaces for the collection.
    * Provides `.url()` and `.asyncUrl()` methods for constructing file download URLs.
    *
@@ -276,7 +295,7 @@ export type CollectionClient<F extends FieldsMap> = {
   fields: CollectionFileFields<F>
 }
 
-type MakeCollectionClientParams<F extends FieldsMap> = {
+type MakeCollectionClientParams<F extends FieldsMap, K extends CollectionKind = "base"> = {
   collectionName: string
   schema: AnyCollectionDef["schema"]
   fields: F
@@ -286,6 +305,7 @@ type MakeCollectionClientParams<F extends FieldsMap> = {
   loggedInRef: MutableRef.MutableRef<boolean> | null
   fileTokenCacheRef: MutableRef.MutableRef<Map<string, { token: string; expiresAt: number }>>
   isAuth: boolean
+  kind?: K
   defaultRetryOptions?: RetryOptions
 }
 
@@ -296,9 +316,9 @@ type MakeCollectionClientParams<F extends FieldsMap> = {
  *
  * @internal Use `createMiraClient().collection(def)` or `withCollections()` instead.
  */
-export function makeCollectionClient<F extends FieldsMap>(
-  params: MakeCollectionClientParams<F>
-): CollectionClient<F> {
+export function makeCollectionClient<F extends FieldsMap, K extends CollectionKind = "base">(
+  params: MakeCollectionClientParams<F, K>
+): CollectionClient<F, K> {
   const { authTokenRef, baseUrl, collectionName, defaultRetryOptions, execute, fields, fileTokenCacheRef, isAuth, loggedInRef, schema } = params
 
   function withRetry<T>(
@@ -373,7 +393,7 @@ export function makeCollectionClient<F extends FieldsMap>(
   }
 
   function create() {
-    return makeMutationHandler<InferRecord<F>, InferMutationInput<F>>((input) => {
+    return makeMutationHandler<InferRecord<F>, CreateInput<F, K>>((input) => {
       const reqEffect: RequestWithBody = hasFileOrBlob(input)
         ? Effect.succeed(HCR.bodyFormData(HCR.post(`/api/collections/${collectionName}`), buildFormData(input)))
         : HCR.bodyJson(HCR.post(`/api/collections/${collectionName}`), input)
@@ -382,7 +402,7 @@ export function makeCollectionClient<F extends FieldsMap>(
   }
 
   function update() {
-    return makeMutationHandler<InferRecord<F>, { id: string; data: Partial<InferMutationInput<F>> }>(({ data, id }) => {
+    return makeMutationHandler<InferRecord<F>, UpdateInput<F, K>>(({ data, id }) => {
       const reqEffect: RequestWithBody = hasFileOrBlob(data)
         ? Effect.succeed(HCR.bodyFormData(HCR.patch(`/api/collections/${collectionName}/${id}`), buildFormData(data)))
         : HCR.bodyJson(HCR.patch(`/api/collections/${collectionName}/${id}`), data)
@@ -416,7 +436,16 @@ export function makeCollectionClient<F extends FieldsMap>(
     )
   }
 
-  const client: CollectionClient<F> = {
+  function register() {
+    return makeMutationHandler<InferRecord<F>, RegisterInput<F>>((input) => {
+      const reqEffect: RequestWithBody = hasFileOrBlob(input)
+        ? Effect.succeed(HCR.bodyFormData(HCR.post(`/api/collections/${collectionName}`), buildFormData(input)))
+        : HCR.bodyJson(HCR.post(`/api/collections/${collectionName}`), input)
+      return withRetry(toExecuteEffect<InferRecord<F>>(reqEffect, execute))
+    })
+  }
+
+  const client: CollectionClient<F, K> = {
     getList,
     getFirstOrNone,
     getFullList,
@@ -424,7 +453,7 @@ export function makeCollectionClient<F extends FieldsMap>(
     create,
     update,
     delete: deleteFn,
-    ...(isAuth ? { authWithPassword } : {}),
+    ...(isAuth ? { authWithPassword, register } : {}),
     fields: fileFields,
   }
   return client

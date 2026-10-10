@@ -67,4 +67,12 @@ export type RuleMap<K extends string = string> = {
   create?: ExprNode<K>
   update?: ExprNode<K>
   delete?: ExprNode<K>
+  /**
+   * Auth-collections-only "manage" rule. Evaluated **in addition to** the
+   * create/update rules. When it matches (and the caller is authenticated) it
+   * grants manager access: directly setting `email`, `emailVerified`, and
+   * changing the password without `oldPassword`. It never bypasses the base
+   * create/update rules and has no effect on list/view/delete.
+   */
+  manage?: ExprNode<K>
 }

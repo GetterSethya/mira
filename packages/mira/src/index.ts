@@ -22,6 +22,8 @@ export { CollectionService, makeCollectionServiceLayer } from "./collection-serv
 export { AppConfig, AppConfigLive } from "./config/index.js"
 export { CryptoService } from "./crypto/index.js"
 export { AuthService, hashPassword, verifyJwt,verifyPassword } from "./http/auth.js"
+export type { CorsConfig } from "./http/cors.js"
+export { defaultCorsConfig, makeCorsMiddleware } from "./http/cors.js"
 export { catchCollectionErrors } from "./http/errors.js"
 export { Repository, RepositoryLive } from "./repository/index.js"
 

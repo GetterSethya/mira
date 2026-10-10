@@ -13,10 +13,11 @@ export function makeCollectionApi(collectionName: string) {
   const base = `${API_BASE}/collections/${collectionName}`
 
   return {
-    listOptions: (params?: { limit?: number; after?: string | number }) => {
+    listOptions: (params?: { limit?: number; after?: string | number; expand?: ReadonlyArray<string> }) => {
       const q = new URLSearchParams()
       if (params?.limit !== undefined) q.set("limit", String(params.limit))
       if (params?.after !== undefined) q.set("after", String(params.after))
+      if (params?.expand !== undefined && params.expand.length > 0) q.set("expand", params.expand.join(","))
       return {
         queryKey: ["collection", collectionName, "list", params] as const,
         queryFn: () => req<ListResult<Record<string, unknown>>>(`${base}?${q}`),

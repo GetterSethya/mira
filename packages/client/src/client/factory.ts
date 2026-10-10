@@ -13,12 +13,12 @@ import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler as makeHandler } from "./handler.js"
 import type { TelemetryClient } from "./telemetry.js"
 import { makeTelemetryClient } from "./telemetry.js"
-import type { AnyAuthCollectionDef, InferRecord } from "./types.js"
+import type { AnyAuthCollectionDef, InferRecord, RegisterInput } from "./types.js"
 
 type CollectionAdapter = <F extends FieldsMap>(client: CollectionClient<F>, name: string) => CollectionClient<F>
 
 type BaseClient<A extends BrowserAuth | ServerAuth = BrowserAuth | ServerAuth> = {
-  collection<C extends AnyCollectionDef>(def: C): CollectionClient<C["fields"]>
+  collection<C extends AnyCollectionDef>(def: C): CollectionClient<C["fields"], C["schema"]["x-collection-kind"]>
   auth: A
   telemetry: TelemetryClient
   withCollections<M extends Record<string, AnyCollectionDef>>(
@@ -43,13 +43,14 @@ type BaseClient<A extends BrowserAuth | ServerAuth = BrowserAuth | ServerAuth> =
 }
 
 type CollectionAccessors<M extends Record<string, AnyCollectionDef>> = {
-  [K in keyof M]: CollectionClient<M[K]["fields"]> &
+  [K in keyof M]: CollectionClient<M[K]["fields"], M[K]["schema"]["x-collection-kind"]> &
     (M[K]["schema"]["x-collection-kind"] extends "auth"
       ? {
           authWithPassword(): ClientHandler<
             { token: string; record: InferRecord<M[K]["fields"]> },
             { email: string; password: string }
           >
+          register(): ClientHandler<InferRecord<M[K]["fields"]>, RegisterInput<M[K]["fields"]>>
         }
       : {})
 }
@@ -111,7 +112,7 @@ function createMiraClientInternal(
   const makeClientHandler = <T>(effect: Effect.Effect<T, MiraError, HttpClient.HttpClient>): ClientHandler<T> =>
     makeHandler(effect)
 
-  function buildCollectionClient<C extends AnyCollectionDef>(def: C): CollectionClient<C["fields"]> {
+  function buildCollectionClient<C extends AnyCollectionDef>(def: C): CollectionClient<C["fields"], C["schema"]["x-collection-kind"]> {
     const isAuth = def.schema["x-collection-kind"] === "auth"
     return makeCollectionClient({
       collectionName: def.name,
@@ -123,6 +124,7 @@ function createMiraClientInternal(
       loggedInRef,
       fileTokenCacheRef,
       isAuth,
+      kind: def.schema["x-collection-kind"],
       ...(defaultRetryOptions !== undefined ? { defaultRetryOptions } : {})
     })
   }

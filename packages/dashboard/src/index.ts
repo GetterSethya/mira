@@ -4,7 +4,7 @@ import { SuperAdminCollection, setRegisterToken, generateRegisterToken } from ".
 import { makeDashboardRouter } from "./router.js"
 
 export const MiraDashboard = MiraPlugin.define({
-  collections: [SuperAdminCollection],
+  adminCollections: [SuperAdminCollection],
 
   routes: makeDashboardRouter([SuperAdminCollection]),
 

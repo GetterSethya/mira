@@ -132,8 +132,11 @@ const url = `${buildFileUrl("posts", postId, "thumb.png")}?token=${fileToken}`
 
 ## Type inference
 
+These types now live in `@gettersethya/mira-collection` and are re-exported here for convenience.
+
 ```typescript
-import type { InferRecord, InferCreateInput } from "@gettersethya/mira-client"
+import type { InferRecord, InferCreateInput } from "@gettersethya/mira-collection"
+// ...or import them from "@gettersethya/mira-client"
 
 type Post        = InferRecord<typeof Posts>        // full record with system fields
 type NewPost     = InferCreateInput<typeof Posts>   // creation input, no system fields
