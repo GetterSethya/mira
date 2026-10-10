@@ -87,10 +87,15 @@ export type ServerAuth = {
 export function makeBrowserAuth(
   execute: ExecuteFn,
   makeClientHandler: <T>(effect: Effect.Effect<T, MiraError, HttpClient.HttpClient>) => ClientHandler<T>,
-  loggedInRef: MutableRef.MutableRef<boolean>
+  loggedInRef: MutableRef.MutableRef<boolean>,
+  /**
+   * Shared per-page-load memo for the session check. Shared with the collection
+   * clients so a successful login / logout can invalidate a stale result (e.g. a
+   * `false` memoized before login) — otherwise a post-login navigation would
+   * re-read the stale `false` and bounce between `/login` and the protected route.
+   */
+  sessionMemoRef: MutableRef.MutableRef<Promise<boolean> | null> = MutableRef.make(null)
 ): BrowserAuth {
-  let sessionPromise: Promise<boolean> | null = null
-
   const checkSession = async (): Promise<boolean> => {
     try {
       const effect = execute<{ collection: string; record: Record<string, unknown> }>(
@@ -109,19 +114,21 @@ export function makeBrowserAuth(
     isLoggedIn: () => MutableRef.get(loggedInRef),
 
     refresh: () => {
-      sessionPromise = checkSession()
-      return sessionPromise
+      const promise = checkSession()
+      MutableRef.set(sessionMemoRef, promise)
+      return promise
     },
 
     ensureSession: () => {
-      if (sessionPromise === null) {
-        sessionPromise = checkSession()
-      }
-      return sessionPromise
+      const memo = MutableRef.get(sessionMemoRef)
+      if (memo !== null) return memo
+      const promise = checkSession()
+      MutableRef.set(sessionMemoRef, promise)
+      return promise
     },
 
     clear: () => {
-      sessionPromise = null
+      MutableRef.set(sessionMemoRef, null)
       const effect = Effect.gen(function* () {
         yield* execute<void>(HCR.post("/api/auth/logout"))
         MutableRef.set(loggedInRef, false)

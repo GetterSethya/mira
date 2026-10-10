@@ -449,6 +449,12 @@ type MakeCollectionClientParams<F extends FieldsMap, K extends CollectionKind = 
   isAuth: boolean
   kind?: K
   defaultRetryOptions?: RetryOptions
+  /**
+   * Shared browser-session memo (see `makeBrowserAuth`). Cleared after a
+   * successful login so a stale `false` result from before login cannot bounce
+   * a freshly-authenticated navigation back to `/login`.
+   */
+  sessionMemoRef?: MutableRef.MutableRef<Promise<boolean> | null> | null
 }
 
 /**
@@ -461,7 +467,7 @@ type MakeCollectionClientParams<F extends FieldsMap, K extends CollectionKind = 
 export function makeCollectionClient<F extends FieldsMap, K extends CollectionKind = "base">(
   params: MakeCollectionClientParams<F, K>
 ): RawCollectionClient<F, K> {
-  const { authTokenRef, baseUrl, collectionName, defaultRetryOptions, execute, fields, fileTokenCacheRef, isAuth, loggedInRef, schema } = params
+  const { authTokenRef, baseUrl, collectionName, defaultRetryOptions, execute, fields, fileTokenCacheRef, isAuth, loggedInRef, schema, sessionMemoRef = null } = params
 
   function withRetry<T>(
     effect: Effect.Effect<T, MiraError, HttpClient.HttpClient>,
@@ -572,6 +578,12 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
           }
           if (loggedInRef !== null) {
             MutableRef.set(loggedInRef, true)
+          }
+          // Drop any memoized session check from before login (e.g. the `false`
+          // that a route guard cached while logged out) so the next
+          // `ensureSession()` re-checks against the server.
+          if (sessionMemoRef !== null) {
+            MutableRef.set(sessionMemoRef, null)
           }
           return res
         }))

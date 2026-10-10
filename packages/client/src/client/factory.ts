@@ -170,6 +170,10 @@ function createMiraClientInternal(
 
   const loggedInRef = type === "browser" ? MutableRef.make(false) : null
 
+  // Shared browser-session memo: written by `BrowserAuth.ensureSession()`, cleared
+  // on login/logout so a stale result can't be reused across an auth transition.
+  const sessionMemoRef = type === "browser" ? MutableRef.make<Promise<boolean> | null>(null) : null
+
   // Browser mode relies on the HttpOnly `mira_token` cookie, which the browser
   // only stores/sends on cross-origin requests when `credentials: "include"`.
   // Server/SSR mode authenticates via a Bearer token and never needs cookies.
@@ -190,6 +194,7 @@ function createMiraClientInternal(
       baseUrl,
       authTokenRef,
       loggedInRef,
+      sessionMemoRef,
       fileTokenCacheRef,
       isAuth,
       kind: def.schema["x-collection-kind"],
@@ -210,8 +215,8 @@ function createMiraClientInternal(
     if (type === "server" && authTokenRef !== null) {
       return makeServerAuth(authTokenRef, fileTokenCacheRef)
     }
-    if (loggedInRef !== null) {
-      return makeBrowserAuth(execute, makeClientHandler, loggedInRef)
+    if (loggedInRef !== null && sessionMemoRef !== null) {
+      return makeBrowserAuth(execute, makeClientHandler, loggedInRef, sessionMemoRef)
     }
     return makeBrowserAuth(execute, makeClientHandler, MutableRef.make(false))
   }
