@@ -13,7 +13,7 @@ import type { ClientHandler, ExecuteFn } from "./handler.js"
  * never reads or writes it directly.
  *
  * Because the cookie is HttpOnly, the client cannot tell on page load whether
- * a session exists. Call `refresh()` once on app startup to re-validate the
+ * a session exists. Use `ensureSession()` (or `refresh()`) to re-validate the
  * cookie against the server and restore `isLoggedIn()` state.
  *
  * `clear()` calls `POST /api/auth/logout` to clear the cookie server-side,
@@ -22,16 +22,34 @@ import type { ClientHandler, ExecuteFn } from "./handler.js"
  * @see ServerAuth — server-side alternative for SSR environments
  */
 export type BrowserAuth = {
-  /** True if the user logged in during this page session or `refresh()` confirmed a valid cookie. */
+  /** True if the user logged in during this page session or a session check confirmed a valid cookie. */
   isLoggedIn(): boolean
   /**
    * Calls `GET /api/auth/me` to check whether a valid `mira_token` cookie exists.
    * Sets the in-memory login flag to match the server's answer.
    * Call this once on app startup to restore login state after a page reload.
    *
+   * Always performs a fresh request (does not dedupe). Prefer `ensureSession()`
+   * in route guards so multiple guards share a single request per page load.
+   *
    * @returns true if a valid session exists, false otherwise
    */
   refresh(): Promise<boolean>
+  /**
+   * Like `refresh()`, but memoized per page load: the first call issues a
+   * single `GET /api/auth/me` and every subsequent call returns the same
+   * in-flight/recently-resolved promise. Safe to call from many async route
+   * guards without triggering duplicate requests.
+   *
+   * @example
+   * // TanStack Router guard
+   * beforeLoad: async () => {
+   *   if (!(await client.auth.ensureSession())) throw redirect({ to: "/login" })
+   * }
+   *
+   * @returns true if a valid session exists, false otherwise
+   */
+  ensureSession(): Promise<boolean>
   /** Calls `POST /api/auth/logout` to clear the server cookie, then resets the login flag. */
   clear(): void
 }
@@ -71,24 +89,39 @@ export function makeBrowserAuth(
   makeClientHandler: <T>(effect: Effect.Effect<T, MiraError, HttpClient.HttpClient>) => ClientHandler<T>,
   loggedInRef: MutableRef.MutableRef<boolean>
 ): BrowserAuth {
+  let sessionPromise: Promise<boolean> | null = null
+
+  const checkSession = async (): Promise<boolean> => {
+    try {
+      const effect = execute<{ collection: string; record: Record<string, unknown> }>(
+        HCR.get("/api/auth/me")
+      )
+      await makeClientHandler(effect).raw()
+      MutableRef.set(loggedInRef, true)
+      return true
+    } catch {
+      MutableRef.set(loggedInRef, false)
+      return false
+    }
+  }
+
   return {
     isLoggedIn: () => MutableRef.get(loggedInRef),
 
-    refresh: async () => {
-      try {
-        const effect = execute<{ collection: string; record: Record<string, unknown> }>(
-          HCR.get("/api/auth/me")
-        )
-        await makeClientHandler(effect).raw()
-        MutableRef.set(loggedInRef, true)
-        return true
-      } catch {
-        MutableRef.set(loggedInRef, false)
-        return false
+    refresh: () => {
+      sessionPromise = checkSession()
+      return sessionPromise
+    },
+
+    ensureSession: () => {
+      if (sessionPromise === null) {
+        sessionPromise = checkSession()
       }
+      return sessionPromise
     },
 
     clear: () => {
+      sessionPromise = null
       const effect = Effect.gen(function* () {
         yield* execute<void>(HCR.post("/api/auth/logout"))
         MutableRef.set(loggedInRef, false)

@@ -171,9 +171,10 @@ export class MiraBuilder<Has extends string = never, R = never> {
 
   /**
    * Set the CORS configuration (optional).
-   * Defaults to `defaultCorsConfig` (permissive: all origins allowed), so a
-   * frontend hosted on another origin works without any configuration.
-   * Pass explicit `allowedOrigins` to lock the API down.
+   * Defaults to `defaultCorsConfig` — every requesting origin is reflected and
+   * credentials are allowed, so a frontend hosted on another origin works
+   * (including cookie sessions) without any configuration. This default is
+   * development-first; pass explicit `allowedOrigins` to lock the API down.
    *
    * @param c - A CorsConfig (see `@/http/cors.js`)
    * @returns A new builder (same phantom type — cors is optional)

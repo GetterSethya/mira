@@ -131,27 +131,29 @@ function getWithOrigin(url: string, origin: string) {
 }
 
 describe("CORS middleware", () => {
-  it.effect("default config — GET with Origin returns Access-Control-Allow-Origin: *", () =>
+  it.effect("default config — GET with Origin reflects it and allows credentials", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* serveWithCors(defaultCorsConfig)
       const res = yield* getWithOrigin("/api/collections/posts", "http://localhost:3000")
       assert.strictEqual(res.status, 200)
-      assert.strictEqual(res.headers["access-control-allow-origin"], "*")
+      assert.strictEqual(res.headers["access-control-allow-origin"], "http://localhost:3000")
+      assert.strictEqual(res.headers["access-control-allow-credentials"], "true")
+      assert.strictEqual(res.headers["vary"], "Origin")
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.effect("default config — GET without Origin still returns *", () =>
+  it.effect("default config — GET without Origin sends no CORS header", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* serveWithCors(defaultCorsConfig)
       const res = yield* HttpClient.get("/api/collections/posts")
       assert.strictEqual(res.status, 200)
-      assert.strictEqual(res.headers["access-control-allow-origin"], "*")
+      assert.strictEqual(res.headers["access-control-allow-origin"], undefined)
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.effect("default config — OPTIONS preflight returns 204 with CORS headers", () =>
+  it.effect("default config — OPTIONS preflight returns 204 with reflected origin + credentials", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* serveWithCors(defaultCorsConfig)
@@ -162,7 +164,8 @@ describe("CORS middleware", () => {
         HttpClient.execute
       )
       assert.strictEqual(res.status, 204)
-      assert.strictEqual(res.headers["access-control-allow-origin"], "*")
+      assert.strictEqual(res.headers["access-control-allow-origin"], "http://localhost:3000")
+      assert.strictEqual(res.headers["access-control-allow-credentials"], "true")
       assert.ok((res.headers["access-control-allow-methods"] ?? "").includes("POST"))
       // Default reflects the requested headers
       assert.ok((res.headers["access-control-allow-headers"] ?? "").includes("authorization"))
@@ -235,7 +238,7 @@ describe("CORS middleware", () => {
       yield* serveWithCors(defaultCorsConfig)
       const res = yield* getWithOrigin("/api/collections/no_such_collection", "http://localhost:3000")
       assert.strictEqual(res.status, 404)
-      assert.strictEqual(res.headers["access-control-allow-origin"], "*")
+      assert.strictEqual(res.headers["access-control-allow-origin"], "http://localhost:3000")
     }).pipe(Effect.provide(testLayer))
   )
 
@@ -249,7 +252,7 @@ describe("CORS middleware", () => {
         HttpClient.execute
       )
       assert.strictEqual(res.status, 403)
-      assert.strictEqual(res.headers["access-control-allow-origin"], "*")
+      assert.strictEqual(res.headers["access-control-allow-origin"], "http://localhost:3000")
     }).pipe(Effect.provide(testLayer))
   )
 

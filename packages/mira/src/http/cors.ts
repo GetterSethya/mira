@@ -9,8 +9,9 @@ import { HttpMiddleware } from "effect/http"
  * the failure path) and answers `OPTIONS` preflights with a `204`.
  *
  * When `cors()` is never called on the builder, the server uses
- * `defaultCorsConfig` (fully permissive), so a separately-hosted frontend
- * works with zero configuration in development.
+ * `defaultCorsConfig`, which reflects every requesting origin and allows
+ * credentials — so a separately-hosted frontend with cookie sessions works
+ * with zero configuration in development.
  *
  * @see defaultCorsConfig — the permissive default
  * @see makeCorsMiddleware — maps this config onto `HttpMiddleware.cors`
@@ -60,13 +61,26 @@ export interface CorsConfig {
 }
 
 /**
- * The default CORS configuration: fully permissive (`*`, default methods,
- * reflected request headers), so a frontend on another origin works with
- * zero configuration.
+ * The default CORS configuration: reflects every requesting origin and sends
+ * `Access-Control-Allow-Credentials: true`, so a frontend on another origin
+ * works with zero configuration **including cookie-based auth**.
+ *
+ * A literal `Access-Control-Allow-Origin: *` cannot be combined with
+ * credentials (browsers reject it), so the default uses a predicate that
+ * accepts any present origin and lets the middleware echo the request's
+ * `Origin` back instead. Requests without an `Origin` header (same-origin,
+ * non-browser clients) simply receive no CORS header.
+ *
+ * This is a development-first default: any website can issue credentialed
+ * requests with the user's cookie. Lock it down with `Mira.builder().cors()`
+ * for production.
  *
  * @see CorsConfig
  */
-export const defaultCorsConfig: CorsConfig = {}
+export const defaultCorsConfig: CorsConfig = {
+  allowedOrigins: (origin) => typeof origin === "string" && origin.length > 0,
+  credentials: true
+}
 
 /**
  * Rejects CORS configurations that browsers refuse to honor: `credentials`

@@ -10,7 +10,7 @@ import type { CronDef } from "@/cron/types.js"
 import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 import { HookService } from "@/hooks/hook-service.js"
-import { makeCorsMiddleware } from "@/http/cors.js"
+import { defaultCorsConfig, makeCorsMiddleware } from "@/http/cors.js"
 import { ipAnnotationMiddleware } from "@/http/ip-middleware.js"
 import { makePortRetryServerLayer } from "@/http/port-retry.js"
 import { makeCollectionRouter } from "@/http/router.js"
@@ -289,9 +289,16 @@ export class MiraApp<R = never> {
     const allPlugins = this.#getAllPlugins()
     const hookServiceLayer = makeHookServiceLayer(allPlugins)
     const fullLayer = this.buildLayer(options)
+    const usingDefaultCors = this.#config.cors === defaultCorsConfig
 
     this.#config.platform.runMain(
       Effect.gen(function* () {
+        if (usingDefaultCors) {
+          yield* Effect.logWarning(
+            "CORS: using the permissive default — every Origin is reflected and credentials are allowed. " +
+              "Configure Mira.builder().cors({ allowedOrigins, credentials }) for production."
+          )
+        }
         const hookService = yield* HookService.pipe(Effect.provide(hookServiceLayer))
         const bootstrapLayer = Layer.effectDiscard(hookService.runBootstrap())
         yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))

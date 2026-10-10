@@ -1,6 +1,6 @@
 import type { AnyCollectionDef, FieldsMap } from "@gettersethya/mira-collection"
 import { Effect, MutableRef } from "effect"
-import { HttpClient, HttpClientRequest as HCR } from "effect/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest as HCR } from "effect/http"
 import type { HttpBodyError } from "effect/http/HttpBody"
 import type { HttpClientError } from "effect/http/HttpClientError"
 
@@ -71,7 +71,11 @@ function catchAllErrors<T>(
   )
 }
 
-function createExecute(baseUrl: string, authTokenRef: MutableRef.MutableRef<string | null> | null): ExecuteFn {
+function createExecute(
+  baseUrl: string,
+  authTokenRef: MutableRef.MutableRef<string | null> | null,
+  sendCredentials: boolean
+): ExecuteFn {
   return <T>(req: HCR.HttpClientRequest) => {
     const raw = Effect.gen(function* () {
       const http = yield* HttpClient.HttpClient
@@ -92,7 +96,10 @@ function createExecute(baseUrl: string, authTokenRef: MutableRef.MutableRef<stri
 
       return (yield* res.json) as T
     })
-    return catchAllErrors(raw)
+    const effect = catchAllErrors(raw)
+    return sendCredentials
+      ? Effect.provideService(effect, FetchHttpClient.RequestInit, { credentials: "include" })
+      : effect
   }
 }
 
@@ -107,7 +114,10 @@ function createMiraClientInternal(
 
   const loggedInRef = type === "browser" ? MutableRef.make(false) : null
 
-  const execute = createExecute(baseUrl, authTokenRef)
+  // Browser mode relies on the HttpOnly `mira_token` cookie, which the browser
+  // only stores/sends on cross-origin requests when `credentials: "include"`.
+  // Server/SSR mode authenticates via a Bearer token and never needs cookies.
+  const execute = createExecute(baseUrl, authTokenRef, type === "browser")
 
   const makeClientHandler = <T>(effect: Effect.Effect<T, MiraError, HttpClient.HttpClient>): ClientHandler<T> =>
     makeHandler(effect)

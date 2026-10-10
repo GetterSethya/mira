@@ -1,7 +1,9 @@
 import { Effect, MutableRef } from "effect"
+import type { HttpClientRequest } from "effect/http"
 import { describe, expect, it } from "vitest"
 
 import { makeBrowserAuth, makeServerAuth } from "@/client/auth.js"
+import { MiraError } from "@/client/errors.js"
 import type { ExecuteFn } from "@/client/handler.js"
 import { makeClientHandler } from "@/client/handler.js"
 
@@ -18,6 +20,80 @@ describe("BrowserAuth", () => {
     const execute: ExecuteFn = <T>() => Effect.succeed(undefined as T)
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
     expect(auth.isLoggedIn()).toBe(true)
+  })
+
+  it("refresh() checks /api/auth/me, sets the flag, and returns true", async () => {
+    const loggedInRef = MutableRef.make(false)
+    let calls = 0
+    const execute: ExecuteFn = <T>() =>
+      Effect.sync(() => {
+        calls++
+        return { collection: "users", record: {} } as T
+      })
+    const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
+
+    expect(await auth.refresh()).toBe(true)
+    expect(calls).toBe(1)
+    expect(auth.isLoggedIn()).toBe(true)
+  })
+
+  it("refresh() returns false and clears the flag when the check fails", async () => {
+    const loggedInRef = MutableRef.make(true)
+    const execute: ExecuteFn = <T>() =>
+      Effect.fail(new MiraError({ status: 401, body: "unauthorized" }))
+    const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
+
+    expect(await auth.refresh()).toBe(false)
+    expect(auth.isLoggedIn()).toBe(false)
+  })
+
+  it("ensureSession() memoizes — concurrent calls share a single check", async () => {
+    const loggedInRef = MutableRef.make(false)
+    let calls = 0
+    const execute: ExecuteFn = <T>() =>
+      Effect.sync(() => {
+        calls++
+        return { collection: "users", record: {} } as T
+      })
+    const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
+
+    const [first, second] = await Promise.all([auth.ensureSession(), auth.ensureSession()])
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    expect(calls).toBe(1)
+    expect(auth.isLoggedIn()).toBe(true)
+  })
+
+  it("ensureSession() reuses the resolved check on later calls", async () => {
+    const loggedInRef = MutableRef.make(false)
+    let calls = 0
+    const execute: ExecuteFn = <T>() =>
+      Effect.sync(() => {
+        calls++
+        return { collection: "users", record: {} } as T
+      })
+    const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
+
+    await auth.ensureSession()
+    await auth.ensureSession()
+    expect(calls).toBe(1)
+  })
+
+  it("clear() resets the memo so ensureSession() re-checks", async () => {
+    const loggedInRef = MutableRef.make(false)
+    let meCalls = 0
+    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+      Effect.sync(() => {
+        if (req.url.includes("/api/auth/me")) meCalls++
+        return { collection: "users", record: {} } as T
+      })
+    const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
+
+    await auth.ensureSession()
+    expect(meCalls).toBe(1)
+    auth.clear()
+    await auth.ensureSession()
+    expect(meCalls).toBe(2)
   })
 })
 
