@@ -1,14 +1,13 @@
-export {
-  ActionKeys,
-  createCollectionAdapter,
-  enrichMutation,
-  enrichQuery,
-} from "./_core.js"
 export type {
   ActionKey,
-  MakeMutationOptions,
-  MakeQueryOptions,
   MutationOptionsShape,
   QueryKey,
-  QueryOptionsShape,
+  QueryOptionsShape
+} from "./_core.js"
+export {
+  ActionKeys,
+  collectionAdapter,
+  createCollectionAdapter,
+  enrichMutation,
+  enrichQuery
 } from "./_core.js"

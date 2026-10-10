@@ -2,7 +2,7 @@
   "name": "@gettersethya/mira-tanstack-adapter",
   "version": "0.1.0-alpha.21",
   "type": "module",
-  "description": "TanStack Query adapters for @gettersethya/mira client SDK",
+  "description": "Framework-agnostic TanStack Query adapter for the @gettersethya/mira client SDK",
   "author": "Getter Sethya",
   "license": "MIT",
   "files": [
@@ -12,18 +12,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./react": {
-      "types": "./dist/react.d.ts",
-      "default": "./dist/react.js"
-    },
-    "./svelte": {
-      "types": "./dist/svelte.d.ts",
-      "default": "./dist/svelte.js"
-    },
-    "./solid": {
-      "types": "./dist/solid.d.ts",
-      "default": "./dist/solid.js"
     }
   },
   "scripts": {
@@ -33,28 +21,10 @@
     "check:pack": "node scripts/check-exports.ts"
   },
   "peerDependencies": {
-    "@gettersethya/mira-client": "*",
-    "@tanstack/react-query": ">=5.0.0",
-    "@tanstack/svelte-query": ">=5.0.0",
-    "@tanstack/solid-query": ">=5.0.0",
-    "effect": "^4.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@tanstack/react-query": {
-      "optional": true
-    },
-    "@tanstack/svelte-query": {
-      "optional": true
-    },
-    "@tanstack/solid-query": {
-      "optional": true
-    }
+    "@gettersethya/mira-client": "*"
   },
   "devDependencies": {
     "@gettersethya/mira-client": "workspace:*",
-    "@tanstack/react-query": "^5.0.0",
-    "@tanstack/solid-query": "^5.0.0",
-    "@tanstack/svelte-query": "^6.0.0",
     "effect": "^4.0.0",
     "typescript": "^6.0.3",
     "vitest": "^5.0.0"

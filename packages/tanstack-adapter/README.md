@@ -4,66 +4,50 @@
 
 > **Early pre-alpha.** Breaking changes may occur without notice.
 
-TanStack Query adapters for [@gettersethya/mira-client](https://www.npmjs.com/package/@gettersethya/mira-client). Wraps collection client methods with `queryOptions` and `mutationOptions`, with structured query keys for fine-grained cache invalidation.
+Framework-agnostic TanStack Query adapter for
+[@gettersethya/mira-client](https://www.npmjs.com/package/@gettersethya/mira-client).
+Wraps a collection client's methods with `queryOptions` and `mutationOptions`,
+with structured query keys for fine-grained cache invalidation.
 
-Supports React, Svelte, and Solid via separate entry points.
+The option objects are plain `{ queryKey, queryFn }` / `{ mutationFn }` shapes,
+so this package has **no runtime dependency on TanStack** — `useQuery` /
+`useMutation` (React, Solid) and `createQuery` / `createMutation` (Svelte) all
+accept them and infer `data`.
 
 ## Installation
 
 ```bash
-# React
-npm install @gettersethya/mira-tanstack-adapter @tanstack/react-query
-
-# Svelte
-npm install @gettersethya/mira-tanstack-adapter @tanstack/svelte-query
-
-# Solid
-npm install @gettersethya/mira-tanstack-adapter @tanstack/solid-query
+npm install @gettersethya/mira-tanstack-adapter
 ```
 
-`@gettersethya/mira-client` is a required peer dependency. Only install the TanStack package for the framework you use.
+`@gettersethya/mira-client` is a required peer dependency. Install whichever
+TanStack Query package your framework uses separately.
 
 ## Setup
 
+Pass `collectionAdapter` to `withCollections` and every accessor is enriched in
+one call:
+
 ```typescript
 import { createMiraClient } from "@gettersethya/mira-client"
-import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/react"
-// import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/solid"
-import { Posts } from "./collections.js"
+import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter"
+import { Posts, Users } from "./collections.js"
 
-const mira     = createMiraClient("/api").withCollections({ posts: Posts })
-const postsApi = collectionAdapter(mira, "posts")
-```
-
-Svelte uses a small factory instead of a pre-built adapter (its v6 option
-types cannot be re-exported from another package's declarations):
-
-```typescript
-import { mutationOptions, queryOptions } from "@tanstack/svelte-query"
-import { createSvelteCollectionAdapter } from "@gettersethya/mira-tanstack-adapter/svelte"
-
-const collectionAdapter = createSvelteCollectionAdapter(queryOptions, mutationOptions)
-const postsApi = collectionAdapter(mira, "posts")
-```
-
-The framework-agnostic factory also lives at the package root for custom setups:
-
-```typescript
-import { queryOptions, mutationOptions } from "@tanstack/react-query"
-import { createCollectionAdapter } from "@gettersethya/mira-tanstack-adapter"
-
-const collectionAdapter = createCollectionAdapter(queryOptions, mutationOptions)
+export const client = createMiraClient("/api").withCollections(
+  { posts: Posts, users: Users },
+  { adapter: collectionAdapter },
+)
 ```
 
 ## Queries
 
 ```tsx
 import { useQuery } from "@tanstack/react-query"
-import { postsApi } from "./setup.js"
+import { client } from "./setup.js"
 
 function PostList() {
   const { data, isLoading } = useQuery(
-    postsApi.getList({
+    client.posts.getList({
       filter: (f) => f.field("published").eq(true),
       limit:  10,
     }).queryOptions
@@ -74,7 +58,7 @@ function PostList() {
 }
 
 function PostDetail({ id }: { id: string }) {
-  const { data } = useQuery(postsApi.getOne(id).queryOptions)
+  const { data } = useQuery(client.posts.getOne(id).queryOptions)
   return <h1>{data?.title}</h1>
 }
 ```
@@ -83,24 +67,24 @@ function PostDetail({ id }: { id: string }) {
 
 ```tsx
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { postsApi } from "./setup.js"
+import { client } from "./setup.js"
 
 function PostActions() {
   const queryClient = useQueryClient()
 
   const create = useMutation({
-    ...postsApi.create().mutationOptions,
-    onSuccess: () => postsApi.invalidateAll(queryClient),
+    ...client.posts.create().mutationOptions,
+    onSuccess: () => client.posts.invalidateAll(queryClient),
   })
 
   const update = useMutation({
-    ...postsApi.update().mutationOptions,
-    onSuccess: (post) => postsApi.invalidateOne(queryClient, post.id),
+    ...client.posts.update().mutationOptions,
+    onSuccess: (post) => client.posts.invalidateOne(queryClient, post.id),
   })
 
   const remove = useMutation({
-    ...postsApi.delete().mutationOptions,
-    onSuccess: () => postsApi.invalidateAll(queryClient),
+    ...client.posts.delete().mutationOptions,
+    onSuccess: () => client.posts.invalidateAll(queryClient),
   })
 
   return (
@@ -111,21 +95,35 @@ function PostActions() {
 }
 ```
 
-## Svelte and Solid
+## Solid and Svelte
 
-React and Solid expose a pre-built `collectionAdapter`. Svelte exposes a
-`createSvelteCollectionAdapter(queryOptions, mutationOptions)` factory instead
-(see Setup above). Svelte v6 reads options through reactive getters:
+The same call shape works everywhere — the adapter is framework-agnostic:
 
 ```typescript
-// Svelte
-import { createSvelteCollectionAdapter } from "@gettersethya/mira-tanstack-adapter/svelte"
-// use with createQuery / createMutation from @tanstack/svelte-query
-const query = createQuery(() => api.getList({ limit: 10 }).queryOptions)
+// Solid — createQuery / createMutation from @tanstack/solid-query
+createQuery(() => client.posts.getList({ limit: 10 }).queryOptions)
 
-// Solid
-import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter/solid"
-// use with createQuery / createMutation from @tanstack/solid-query
+// Svelte — reactive getters from @tanstack/svelte-query
+createQuery(() => client.posts.getList({ limit: 10 }).queryOptions)
+```
+
+## Per-collection usage
+
+If you prefer to adapt a single collection (for example with `createMiraClient().collection(def)`),
+call the adapter directly:
+
+```typescript
+import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter"
+
+const postsApi = collectionAdapter(client.collection(Posts), Posts.name, Posts.schema["x-collection-kind"])
+```
+
+Or build one yourself with the framework-agnostic factory:
+
+```typescript
+import { createCollectionAdapter } from "@gettersethya/mira-tanstack-adapter"
+
+const collectionAdapter = createCollectionAdapter()
 ```
 
 ## Query key structure
@@ -134,7 +132,7 @@ The adapter produces structured query keys for fine-grained cache invalidation:
 
 ```typescript
 // ["posts", "getList",        { limit, filter, sort, order, cursor, select, expand }]
-// ["posts", "getOne",         "post-id"]
+// ["posts", "getOne",         "post-id", {}]
 // ["posts", "getFirstOrNone", { filter, sort, order, select, expand }]
 // ["posts", "getFullList",    { limit, filter, sort, order, select, expand }]
 
@@ -151,8 +149,8 @@ queryClient.invalidateQueries({ queryKey: ["posts", "getOne", "post-id"] })
 The adapter also exposes two helpers:
 
 ```typescript
-postsApi.invalidateAll(queryClient)         // invalidates all posts queries
-postsApi.invalidateOne(queryClient, postId) // invalidates the getOne query for postId
+client.posts.invalidateAll(queryClient)         // invalidates all posts queries
+client.posts.invalidateOne(queryClient, postId) // invalidates the getOne query for postId
 ```
 
 ## More

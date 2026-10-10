@@ -1,5 +1,19 @@
 export type { BrowserAuth, ServerAuth } from "./auth.js"
-export type { CollectionClient, FilterBuilder, RetryOptions } from "./collection.js"
+export type {
+  AdaptedAuthByKind,
+  AdaptedCollectionClient,
+  AdaptedCommon,
+  AdaptedMutationOptions,
+  AdaptedQueryOptions,
+  AuthByKind,
+  CollectionClient,
+  FilterBuilder,
+  GetListOptions,
+  GetOneOptions,
+  QueryKey,
+  RawCollectionClient,
+  RetryOptions
+} from "./collection.js"
 export { makeCollectionClient } from "./collection.js"
 export { MiraError } from "./errors.js"
 export { createMiraClient } from "./factory.js"

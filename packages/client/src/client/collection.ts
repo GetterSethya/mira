@@ -61,7 +61,7 @@ function buildFormData(input: object): FormData {
  */
 export type RetryOptions = { schedule?: Schedule.Schedule<unknown, MiraError, never> }
 
-type GetListOptions<F extends FieldsMap, E extends ReadonlyArray<string>> = {
+export type GetListOptions<F extends FieldsMap, E extends ReadonlyArray<string>> = {
   filter?: (f: FilterBuilder<F>) => FilterNode
   sort?: keyof F & string
   order?: "asc" | "desc"
@@ -72,7 +72,7 @@ type GetListOptions<F extends FieldsMap, E extends ReadonlyArray<string>> = {
   retryOptions?: RetryOptions
 }
 
-type GetOneOptions<F extends FieldsMap, E extends ReadonlyArray<string>> = {
+export type GetOneOptions<F extends FieldsMap, E extends ReadonlyArray<string>> = {
   select?: ReadonlyArray<keyof F & string>
   expand?: E
   retryOptions?: RetryOptions
@@ -139,7 +139,7 @@ function buildQueryParams(params: Record<string, string | undefined>): string {
  * @see makeCollectionClient — constructs CollectionClient instances
  * @see ClientHandler — return type of all methods
  */
-export type CollectionClient<F extends FieldsMap, K extends CollectionKind = "base"> = {
+export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = "base"> = {
   /**
    * List records with optional filtering, sorting, cursor pagination, and field selection.
    *
@@ -295,6 +295,149 @@ export type CollectionClient<F extends FieldsMap, K extends CollectionKind = "ba
   fields: CollectionFileFields<F>
 }
 
+/**
+ * Client interface for a single collection, providing typed CRUD operations.
+ * Created via `makeCollectionClient()` or automatically via `createMiraClient()`.
+ *
+ * For auth collections (`K = "auth"`) the `authWithPassword`/`register` methods
+ * are guaranteed present; for other kinds they are absent.
+ *
+ * @typeParam F - The FieldsMap type of the collection
+ * @typeParam K - The collection kind (`"base" | "auth" | "view"`)
+ */
+export type CollectionClient<F extends FieldsMap, K extends CollectionKind = "base"> = RawCollectionClient<F, K> &
+  AuthByKind<F>[K]
+
+/**
+ * The auth methods guaranteed for each collection kind. For `"base"` collections
+ * there are none; for `"auth"` collections `authWithPassword`/`register` are
+ * required (they are always built at runtime for auth collections).
+ *
+ * Expressed as a lookup map indexed by `K` rather than a `K extends "auth" ? … : {}`
+ * conditional so that adapters can branch on a generic `K` without assertions.
+ */
+export type AuthByKind<F extends FieldsMap> = {
+  [P in CollectionKind]: P extends "auth"
+    ? {
+        authWithPassword(): ClientHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>
+        register(): ClientHandler<InferRecord<F>, RegisterInput<F>>
+      }
+    : {}
+}
+
+export type AdaptedAuthByKind<F extends FieldsMap> = {
+  [P in CollectionKind]: P extends "auth"
+    ? {
+        authWithPassword(): ClientHandler<
+          { token: string; record: InferRecord<F> },
+          { email: string; password: string }
+        >
+        register(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, RegisterInput<F>>>
+      }
+    : {}
+}
+
+/**
+ * A readonly array of values used as a TanStack Query key.
+ *
+ * @see AdaptedCollectionClient — carries `queryKey` on every query handler
+ */
+export type QueryKey = ReadonlyArray<unknown>
+
+/**
+ * The structural shape of a TanStack Query `queryOptions` object, as produced
+ * by any framework adapter. The client package cannot depend on TanStack, so
+ * the option objects are typed structurally; TanStack's `useQuery` accepts this
+ * shape and infers `data` from `queryFn`'s return type.
+ */
+export type AdaptedQueryOptions<T> = {
+  queryKey: QueryKey
+  queryFn: () => Promise<T>
+}
+
+/**
+ * The structural shape of a TanStack Query `mutationOptions` object.
+ *
+ * @see AdaptedCollectionClient — carries `mutationOptions` on every mutation handler
+ */
+export type AdaptedMutationOptions<TData, TInput> = {
+  mutationFn: (input: TInput) => Promise<TData>
+}
+
+/**
+ * A query handler (`getList` / `getOne` / `getFirstOrNone` / `getFullList`)
+ * augmented with the query key and `queryOptions`. `queryFn` is the handler's
+ * own `raw` function, so the option type is derived from the handler directly
+ * (no re-instantiation of the result type).
+ */
+type EnrichedQueryHandler<H extends { raw(): Promise<unknown> }> = H & {
+  queryKey: QueryKey
+  queryOptions: { queryKey: QueryKey; queryFn: H["raw"] }
+}
+
+/**
+ * A mutation handler (`create` / `update` / `delete` / `register`) augmented
+ * with `mutationOptions`. `mutationFn` is the handler's own `raw` function.
+ */
+type EnrichedMutationHandler<H extends { raw(input: never): Promise<unknown> }> = H & {
+  mutationOptions: { mutationFn: H["raw"] }
+}
+
+/**
+ * A {@link CollectionClient} whose query handlers also expose `queryKey` /
+ * `queryOptions` and whose mutation handlers also expose `mutationOptions`,
+ * plus `invalidateAll` / `invalidateOne` query-cache helpers.
+ *
+ * Produced at runtime by an adapter (e.g. `collectionAdapter` from
+ * `@gettersethya/mira-tanstack-adapter`) and surfaced through
+ * `withCollections(map, { adapter })`.
+ *
+ * @typeParam F - The collection's `FieldsMap`
+ * @typeParam K - The collection kind (`"base" | "auth" | "view"`)
+ */
+export type AdaptedCollectionClient<F extends FieldsMap, K extends CollectionKind = "base"> = AdaptedCommon<F, K> &
+  AdaptedAuthByKind<F>[K]
+
+/**
+ * The kind-independent members of {@link AdaptedCollectionClient}. Split out so
+ * the adapter body can annotate the object it builds and spread the per-kind
+ * extras on top (yielding exactly this type).
+ */
+export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"> = Omit<
+  RawCollectionClient<F, K>,
+  | "getList"
+  | "getOne"
+  | "getFirstOrNone"
+  | "getFullList"
+  | "create"
+  | "update"
+  | "delete"
+  | "register"
+  | "authWithPassword"
+> & {
+  getList<E extends ReadonlyArray<RelationKeys<F>> = []>(
+    options?: GetListOptions<F, E>
+  ): EnrichedQueryHandler<ClientHandler<{ items: Array<WithExpand<F, E>>; nextCursor: number | null }>>
+  getOne<E extends ReadonlyArray<RelationKeys<F>> = []>(
+    id: string,
+    options?: GetOneOptions<F, E>
+  ): EnrichedQueryHandler<ClientHandler<WithExpand<F, E>>>
+  getFirstOrNone<E extends ReadonlyArray<RelationKeys<F>> = []>(
+    filter: (f: FilterBuilder<F>) => FilterNode,
+    options?: Omit<GetListOptions<F, E>, "filter" | "limit" | "cursor">
+  ): EnrichedQueryHandler<ClientHandler<Option.Option<WithExpand<F, E>>>>
+  getFullList<E extends ReadonlyArray<RelationKeys<F>> = []>(
+    options?: Omit<GetListOptions<F, E>, "limit" | "cursor"> & { limit?: number }
+  ): EnrichedQueryHandler<ClientHandler<Array<WithExpand<F, E>>>>
+  create(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, CreateInput<F, K>>>
+  update(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, UpdateInput<F, K>>>
+  delete(): EnrichedMutationHandler<ClientHandler<void, string>>
+  invalidateAll(queryClient: { invalidateQueries(opts: { queryKey: QueryKey }): unknown }): unknown
+  invalidateOne(queryClient: { invalidateQueries(opts: { queryKey: QueryKey }): unknown }, id: string): unknown
+}
+
+
+
 type MakeCollectionClientParams<F extends FieldsMap, K extends CollectionKind = "base"> = {
   collectionName: string
   schema: AnyCollectionDef["schema"]
@@ -318,7 +461,7 @@ type MakeCollectionClientParams<F extends FieldsMap, K extends CollectionKind = 
  */
 export function makeCollectionClient<F extends FieldsMap, K extends CollectionKind = "base">(
   params: MakeCollectionClientParams<F, K>
-): CollectionClient<F, K> {
+): RawCollectionClient<F, K> {
   const { authTokenRef, baseUrl, collectionName, defaultRetryOptions, execute, fields, fileTokenCacheRef, isAuth, loggedInRef, schema } = params
 
   function withRetry<T>(
@@ -445,7 +588,7 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     })
   }
 
-  const client: CollectionClient<F, K> = {
+  const client: RawCollectionClient<F, K> = {
     getList,
     getFirstOrNone,
     getFullList,

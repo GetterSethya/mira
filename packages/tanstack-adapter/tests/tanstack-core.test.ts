@@ -1,15 +1,11 @@
-import { describe, expect, it } from "vitest"
-import { Effect } from "effect"
-import { MutableRef } from "effect"
-import { HttpClientRequest } from "effect/http"
-import { ActionKeys, createCollectionAdapter, enrichMutation, enrichQuery } from "../src/_core.js"
-import type { MutationOptionsShape, QueryKey, QueryOptionsShape } from "../src/_core.js"
-import { makeClientHandler, makeMutationHandler } from "@gettersethya/mira-client"
-import { makeCollectionClient } from "@gettersethya/mira-client"
 import type { ExecuteFn } from "@gettersethya/mira-client"
-import { MiraError } from "@gettersethya/mira-client"
-import { BaseCollection } from "@gettersethya/mira-client"
-import { Field } from "@gettersethya/mira-client"
+import { BaseCollection, Field, makeClientHandler, makeCollectionClient, makeMutationHandler } from "@gettersethya/mira-client"
+import { Effect, MutableRef } from "effect"
+import type { HttpClientRequest } from "effect/http"
+import { describe, expect, it } from "vitest"
+
+import type { QueryKey } from "../src/_core.js"
+import { ActionKeys, collectionAdapter, createCollectionAdapter, enrichMutation, enrichQuery } from "../src/_core.js"
 
 const Posts = BaseCollection.define("posts", { title: Field.text() })
 
@@ -35,12 +31,6 @@ function makeTestClient() {
   })
 }
 
-const identityQueryOptions = <T>(opts: QueryOptionsShape<T>): QueryOptionsShape<T> => opts
-const identityMutationOptions = <TData, TInput>(
-  opts: MutationOptionsShape<TData, TInput>
-): MutationOptionsShape<TData, TInput> => opts
-const adapter = createCollectionAdapter(identityQueryOptions, identityMutationOptions)
-
 describe("ActionKeys", () => {
   it("has the correct constant values", () => {
     expect(ActionKeys.GetList).toBe("getList")
@@ -51,9 +41,9 @@ describe("ActionKeys", () => {
 })
 
 describe("enrichQuery", () => {
-  it("attaches queryKey and queryOptions to handler", async () => {
+  it("attaches queryKey and structural queryOptions to handler", async () => {
     const handler = makeClientHandler(Effect.succeed(42))
-    const enriched = enrichQuery(handler, ["col", "getList", {}], identityQueryOptions)
+    const enriched = enrichQuery(handler, ["col", "getList", {}])
     expect(enriched.queryKey).toEqual(["col", "getList", {}])
     expect(enriched.queryOptions.queryKey).toEqual(["col", "getList", {}])
     expect(await enriched.queryOptions.queryFn()).toBe(42)
@@ -61,18 +51,16 @@ describe("enrichQuery", () => {
 })
 
 describe("enrichMutation", () => {
-  it("attaches mutationOptions to handler", async () => {
-    const handler = makeMutationHandler((x: string) =>
-      Effect.succeed(x.toUpperCase())
-    )
-    const enriched = enrichMutation(handler, identityMutationOptions)
+  it("attaches structural mutationOptions to handler", async () => {
+    const handler = makeMutationHandler((x: string) => Effect.succeed(x.toUpperCase()))
+    const enriched = enrichMutation(handler)
     expect(await enriched.mutationOptions.mutationFn("hello")).toBe("HELLO")
   })
 })
 
-describe("createCollectionAdapter", () => {
+describe("createCollectionAdapter / collectionAdapter", () => {
   const client = makeTestClient()
-  const adapted = adapter(client, "posts")
+  const adapted = createCollectionAdapter()(client, "posts", "base")
 
   it("getList — query key shape [name, GetList, options]", () => {
     const handler = adapted.getList({ limit: 5 })
@@ -147,7 +135,7 @@ describe("createCollectionAdapter", () => {
 
   it("non-overridden fields pass through from original client", () => {
     const original = makeTestClient()
-    const wrapped = adapter(original, "posts")
+    const wrapped = collectionAdapter(original, "posts", "base")
     expect(wrapped.fields).toBe(original.fields)
   })
 })
