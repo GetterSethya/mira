@@ -79,7 +79,7 @@ describe("BrowserAuth", () => {
     expect(calls).toBe(1)
   })
 
-  it("clear() resets the memo so ensureSession() re-checks", async () => {
+  it("clear() pins the memo to false so ensureSession() short-circuits without a re-check", async () => {
     const loggedInRef = MutableRef.make(false)
     let meCalls = 0
     const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
@@ -92,8 +92,10 @@ describe("BrowserAuth", () => {
     await auth.ensureSession()
     expect(meCalls).toBe(1)
     auth.clear()
-    await auth.ensureSession()
-    expect(meCalls).toBe(2)
+    // Post-logout the memo is pinned to `false` (the logout POST is async and
+    // the cookie may still be valid), so no new `/api/auth/me` request is made.
+    expect(await auth.ensureSession()).toBe(false)
+    expect(meCalls).toBe(1)
   })
 })
 

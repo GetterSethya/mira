@@ -20,28 +20,30 @@ const UserCollection: AnyCollectionDef = {
   },
 }
 
-// Regression: after a successful login the client must not reuse a session
-// check that was memoized while logged out, otherwise a route guard bounces
-// between `/login` and the protected route ("too many redirects") until a hard
-// refresh resets module state.
-describe("BrowserAuth session restore across login", () => {
+// Regression coverage for the login/logout redirect loops:
+// - after login, a session check memoized *while logged out* must not be reused;
+// - after logout, a session check must not re-authenticate from a cookie that is
+//   still valid because the logout request is fire-and-forget.
+describe("BrowserAuth session lifecycle", () => {
   function makeHarness() {
     const loggedInRef = MutableRef.make(false)
     const sessionMemoRef = MutableRef.make<Promise<boolean> | null>(null)
+    // Models the server-side cookie: stays valid until the logout POST lands.
+    const cookieValid = MutableRef.make(false)
 
     const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
       Effect.gen(function* () {
         if (req.url.includes("auth-with-password")) {
+          MutableRef.set(cookieValid, true)
           return { token: "tok", record: { id: "u1", created: "", updated: "", name: "Budi" } } as T
         }
         if (req.url.includes("/api/auth/logout")) {
-          // Async like the real network call — `clear()` must not depend on this
-          // completing before it flips the logged-in flag.
           yield* Effect.sleep("20 millis")
+          MutableRef.set(cookieValid, false)
           return undefined as T
         }
         if (req.url.includes("/api/auth/me")) {
-          if (!MutableRef.get(loggedInRef)) {
+          if (!MutableRef.get(cookieValid)) {
             return yield* Effect.fail(new MiraError({ status: 401, body: "unauthorized" }))
           }
           return { collection: "users", record: { id: "u1" } } as T
@@ -64,7 +66,7 @@ describe("BrowserAuth session restore across login", () => {
       isAuth: true,
     })
 
-    return { auth, users, sessionMemoRef, loggedInRef }
+    return { auth, users, cookieValid }
   }
 
   it("clears the memoized session after login so ensureSession() returns true", async () => {
@@ -72,20 +74,17 @@ describe("BrowserAuth session restore across login", () => {
 
     // Logged out: a guard caches a failed check.
     expect(await auth.ensureSession()).toBe(false)
-    expect(auth.isLoggedIn()).toBe(false)
 
     const authWithPassword = users.authWithPassword
     if (!authWithPassword) throw new Error("expected authWithPassword on an auth collection")
-    const result = await authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
-    expect(result.token).toBe("tok")
+    await authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
     expect(auth.isLoggedIn()).toBe(true)
 
-    // The stale `false` must be gone — otherwise this returns false and the
-    // guarded route redirects back to /login.
+    // Must be true — the stale `false` must be gone.
     expect(await auth.ensureSession()).toBe(true)
   })
 
-  it("clear() flips isLoggedIn() to false synchronously (no logout redirect bounce)", async () => {
+  it("clear() flips isLoggedIn() to false synchronously", async () => {
     const { auth, users } = makeHarness()
 
     const authWithPassword = users.authWithPassword
@@ -94,14 +93,11 @@ describe("BrowserAuth session restore across login", () => {
     expect(auth.isLoggedIn()).toBe(true)
 
     auth.clear()
-    // Must be false immediately — before the logout POST settles — so a route
-    // guard running right after `clear()` (e.g. navigate to /login) does not see
-    // a logged-in user and redirect back to the protected route.
     expect(auth.isLoggedIn()).toBe(false)
   })
 
-  it("logout clears the memo so ensureSession() reports logged out again", async () => {
-    const { auth, users, loggedInRef } = makeHarness()
+  it("ensureSession() is false right after logout even though the cookie is still valid", async () => {
+    const { auth, users, cookieValid } = makeHarness()
 
     const authWithPassword = users.authWithPassword
     if (!authWithPassword) throw new Error("expected authWithPassword on an auth collection")
@@ -109,11 +105,9 @@ describe("BrowserAuth session restore across login", () => {
     expect(await auth.ensureSession()).toBe(true)
 
     auth.clear()
-    // The logout POST is fire-and-forget; reflect the server-side cookie being
-    // gone so the next check fails deterministically.
-    await Promise.resolve()
-    MutableRef.set(loggedInRef, false)
+    // The logout POST has not landed yet — the cookie is still valid server-side.
+    expect(MutableRef.get(cookieValid)).toBe(true)
+    // A guard running during the transition must NOT re-authenticate.
     expect(await auth.ensureSession()).toBe(false)
-    expect(auth.isLoggedIn()).toBe(false)
   })
 })

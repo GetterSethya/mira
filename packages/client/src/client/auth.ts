@@ -132,9 +132,13 @@ export function makeBrowserAuth(
       // `clear()` (e.g. `navigate({ to: "/login" })`) does not still see the user
       // as logged in and bounce back to the protected route.
       MutableRef.set(loggedInRef, false)
-      MutableRef.set(sessionMemoRef, null)
-      // The server cookie is cleared in the background; `isLoggedIn()` is
-      // already false and the next `ensureSession()` re-checks the server.
+      // Pin the session memo to a resolved `false` rather than `null`. The logout
+      // POST is fire-and-forget, so the cookie may still be valid for a moment;
+      // if a guard re-ran `ensureSession()` in that window it would get a `200`
+      // and re-authenticate, bouncing the user back to the protected route.
+      // A pinned `false` short-circuits every check until the next login, which
+      // resets the memo (see `authWithPassword`).
+      MutableRef.set(sessionMemoRef, Promise.resolve(false))
       const effect = execute<void>(HCR.post("/api/auth/logout"))
       void makeClientHandler(effect).raw()
     },
