@@ -129,6 +129,19 @@ describe("defineRule", () => {
     expect(rb.ruleMap.update).toBeDefined()
     expect(rb.ruleMap.delete).toBeDefined()
   })
+
+  it("base collection rejects the auth-only `manage` rule", () => {
+    // `manage` is auth-collections-only. On a base collection the callback's
+    // return type is `BaseRuleMap`, whose `manage` key is `never`, so supplying
+    // it is a compile error. `@ts-expect-error` fails the build if it stops
+    // erroring, guarding the regression.
+    // @ts-expect-error `manage` is not allowed on base collections
+    defineRule(Posts, (R) => ({
+      list: R.public(),
+      manage: R.public(),
+    }))
+    expect(true).toBe(true)
+  })
 })
 
 describe("applyRulesToCollections", () => {

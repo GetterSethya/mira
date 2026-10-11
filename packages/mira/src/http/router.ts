@@ -5,7 +5,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 
 import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
-import { makeRowDecoder } from "@/collection-service/decode.js"
+import { toPublicRecord } from "@/collection-service/decode.js"
 import { ValidationError } from "@/collection-service/errors.js"
 import { AppConfig } from "@/config/index.js"
 import type { CryptoService } from "@/crypto/index.js"
@@ -323,14 +323,7 @@ export function makeCollectionRouter(
         Effect.mapError(() => HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
       )
       const dialect = yield* Dialect
-      const decode = makeRowDecoder(col.schema, dialect.storesBooleanAsInteger)
-      const decodedRow = yield* decode(fullRow)
-      const publicRow = Object.fromEntries(
-        Object.entries(decodedRow).filter(([k]) => {
-          const prop = col.schema.properties[k]
-          return prop !== undefined && !prop["x-hidden"] && k !== "password"
-        })
-      )
+      const publicRow = yield* toPublicRecord(col.schema, dialect.storesBooleanAsInteger, fullRow)
       return HttpServerResponse.jsonUnsafe({ token, record: publicRow }, { status: 200 }).pipe(
         HttpServerResponse.setCookieUnsafe("mira_token", token, {
           httpOnly: true,
@@ -373,14 +366,19 @@ export function makeCollectionRouter(
         return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
       }
       // `auth.record` is the full stored row (used as `ctx.auth` for rule
-      // placeholders). Strip hidden fields before serialising it to the client
-      // so credentials like `password` never leave the server.
+      // placeholders), so it is in storage form: booleans are `0`/`1` and hidden
+      // fields (e.g. `password`) are present. Decode it the same way list/view do
+      // and strip hidden fields before serialising to the client.
       const meCollection = collectionMap.get(auth.collection)
-      const publicRecord: RepoRecord = {}
-      for (const [k, v] of Object.entries(auth.record)) {
-        if (meCollection?.schema.properties[k]?.["x-hidden"] === true) continue
-        publicRecord[k] = v
+      if (meCollection === undefined) {
+        return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
       }
+      const dialect = yield* Dialect
+      const publicRecord = yield* toPublicRecord(
+        meCollection.schema,
+        dialect.storesBooleanAsInteger,
+        auth.record
+      )
       return HttpServerResponse.jsonUnsafe(
         { collection: auth.collection, record: publicRecord },
         { status: 200 }

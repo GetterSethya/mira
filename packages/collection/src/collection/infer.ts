@@ -2,13 +2,13 @@ import type { AnyCollectionDef, FieldDef, FieldsMap, InferFieldValue } from "./t
 
 /**
  * Narrows `AnyCollectionDef` to auth collections only.
- * Used to constrain the typed `me()` overload on the Mira client so that only
- * auth collection definitions are accepted at compile time.
+ * Used to constrain auth-only client methods (e.g. the per-collection `me()`)
+ * so that only auth collection definitions are accepted at compile time.
  *
  * @example
- * // Only auth collections satisfy this constraint:
- * const mira = createMiraClient("/")
- * const result = await mira.me(MyAuthCollection).raw()
+ * // Only auth collections expose an auth tail:
+ * const client = createMiraClient("/").withCollections({ users: UsersAuth })
+ * const result = await client.users.me().raw()
  */
 export type AnyAuthCollectionDef = AnyCollectionDef & {
   schema: { "x-collection-kind": "auth" }

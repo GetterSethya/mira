@@ -76,3 +76,16 @@ export type RuleMap<K extends string = string> = {
    */
   manage?: ExprNode<K>
 }
+
+/**
+ * Rule map for non-auth (`base`) collections: the full CRUD action set **without**
+ * `manage`. `manage` is auth-collections-only, so it is typed `never` here to make
+ * it a compile error rather than silently dropped at runtime.
+ *
+ * `manage?: never` (rather than simply omitting the key) is required: TypeScript
+ * skips excess-property checks on an object literal returned from a callback, so an
+ * omitted key would not produce an error, but a `never`-typed key does.
+ */
+export type BaseRuleMap<K extends string = string> = Omit<RuleMap<K>, "manage"> & {
+  manage?: never
+}

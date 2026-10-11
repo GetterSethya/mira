@@ -286,6 +286,22 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
   register?(): ClientHandler<InferRecord<F>, RegisterInput<F>>
 
   /**
+   * Fetch the currently authenticated user for this auth collection from
+   * `GET /api/auth/me`. Only available on collections defined with
+   * `AuthCollection.define()`.
+   *
+   * The response envelope is `{ collection, record }`; the client unwraps it and
+   * resolves to the record directly. If the session token belongs to a different
+   * collection, the call rejects with a 401 `MiraError`.
+   *
+   * @example
+   * const me = await mira.users.me().raw()
+   *
+   * @returns A query ClientHandler — call `.raw()`
+   */
+  me?(): ClientHandler<InferRecord<F>>
+
+  /**
    * File field client interfaces for the collection.
    * Provides `.url()` and `.asyncUrl()` methods for constructing file download URLs.
    *
@@ -321,6 +337,7 @@ export type AuthByKind<F extends FieldsMap> = {
     ? {
         authWithPassword(): ClientHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>
         register(): ClientHandler<InferRecord<F>, RegisterInput<F>>
+        me(): ClientHandler<InferRecord<F>>
       }
     : {}
 }
@@ -332,6 +349,7 @@ export type AdaptedAuthByKind<F extends FieldsMap> = {
           ClientHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>
         >
         register(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, RegisterInput<F>>>
+        me(): EnrichedQueryHandler<ClientHandler<InferRecord<F>>>
       }
     : {}
 }
@@ -413,6 +431,7 @@ export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"
   | "delete"
   | "register"
   | "authWithPassword"
+  | "me"
 > & {
   getList<E extends ReadonlyArray<RelationKeys<F>> = []>(
     options?: GetListOptions<F, E>
@@ -599,6 +618,22 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     })
   }
 
+  function me() {
+    const effect = execute<{ collection: string; record: InferRecord<F> }>(HCR.get("/api/auth/me")).pipe(
+      Effect.flatMap((envelope) =>
+        envelope.collection === collectionName
+          ? Effect.succeed(envelope.record)
+          : Effect.fail(
+              new MiraError({
+                status: 401,
+                body: { error: "collection_mismatch", expected: collectionName, actual: envelope.collection },
+              })
+            )
+      )
+    )
+    return makeHandler(effect)
+  }
+
   const client: RawCollectionClient<F, K> = {
     getList,
     getFirstOrNone,
@@ -607,7 +642,7 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     create,
     update,
     delete: deleteFn,
-    ...(isAuth ? { authWithPassword, register } : {}),
+    ...(isAuth ? { authWithPassword, register, me } : {}),
     fields: fileFields,
   }
   return client

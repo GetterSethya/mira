@@ -14,7 +14,7 @@ import { FileStorage } from "@/storage/storage.js"
 
 import type { CursorPage, RequestCtx } from "./context.js"
 import type { RowDecoder, RowEncoder } from "./decode.js"
-import { makeRowDecoder, makeRowEncoder } from "./decode.js"
+import { makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
 import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
@@ -249,12 +249,7 @@ export function makeCollectionServiceLayer(
       // callers — matching the list/view response contract.
       const stripHidden = (collection: AnyCollectionDef, record: RepoRecord, admin: boolean): RepoRecord => {
         if (admin) return record
-        const out: RepoRecord = {}
-        for (const [k, v] of Object.entries(record)) {
-          if (collection.schema.properties[k]?.["x-hidden"] === true) continue
-          out[k] = v
-        }
-        return out
+        return stripHiddenFields(collection.schema, record)
       }
 
       const isAuthCollection = (collection: AnyCollectionDef) =>

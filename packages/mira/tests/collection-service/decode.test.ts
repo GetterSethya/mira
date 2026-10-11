@@ -1,13 +1,17 @@
 import { describe, it } from "@effect/vitest"
-import { BaseCollection, Field } from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection, Field } from "@gettersethya/mira-client"
 import { Effect } from "effect"
 import { expect } from "vitest"
 
-import { makeRowDecoder, makeRowEncoder } from "@/collection-service/decode.js"
+import { makeRowDecoder, makeRowEncoder, stripHiddenFields, toPublicRecord } from "@/collection-service/decode.js"
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text(),
   published: Field.boolean({ default: false })
+})
+
+const Users = AuthCollection.define("users", {
+  name: Field.text()
 })
 
 describe("makeRowDecoder", () => {
@@ -43,4 +47,44 @@ describe("makeRowEncoder", () => {
     expect(result).toBe(record)
     expect(result["published"]).toBe(true)
   })
+})
+
+describe("stripHiddenFields", () => {
+  it("drops x-hidden fields and any key with no schema property", () => {
+    const result = stripHiddenFields(Users.schema, {
+      id: "1",
+      email: "a@b.com",
+      password: "hashed",
+      seqId: 5,
+      unknown: "x"
+    })
+    expect(result).toEqual({ id: "1", email: "a@b.com" })
+  })
+})
+
+describe("toPublicRecord", () => {
+  it.effect("decodes booleans and strips hidden fields", () =>
+    Effect.gen(function* () {
+      const result = yield* toPublicRecord(Users.schema, true, {
+        id: "1",
+        email: "a@b.com",
+        emailVerified: 1,
+        password: "hashed",
+        seqId: 5
+      })
+      expect(result).toEqual({ id: "1", email: "a@b.com", emailVerified: true })
+    })
+  )
+
+  it.effect("leaves booleans untouched when storesBooleanAsInteger is false", () =>
+    Effect.gen(function* () {
+      const result = yield* toPublicRecord(Users.schema, false, {
+        id: "1",
+        email: "a@b.com",
+        emailVerified: false,
+        password: "hashed"
+      })
+      expect(result).toEqual({ id: "1", email: "a@b.com", emailVerified: false })
+    })
+  )
 })

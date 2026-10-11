@@ -13,7 +13,7 @@ import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler as makeHandler } from "./handler.js"
 import type { TelemetryClient } from "./telemetry.js"
 import { makeTelemetryClient } from "./telemetry.js"
-import type { AnyAuthCollectionDef, CollectionKind, InferRecord } from "./types.js"
+import type { CollectionKind } from "./types.js"
 
 /**
  * Wraps a {@link CollectionClient} to add framework query/mutation metadata.
@@ -65,21 +65,6 @@ type BaseClient<A extends BrowserAuth | ServerAuth = BrowserAuth | ServerAuth> =
     map: M,
     opts?: { adapter?: undefined }
   ): BaseClient<A> & CollectionAccessors<M>
-  /**
-   * Fetches the currently authenticated user from `GET /api/auth/me`.
-   *
-   * Pass an auth collection definition to get a typed response:
-   * @example
-   * const result = await mira.me(MyAuthCollection).raw()
-   * // result.record is typed as InferRecord<MyAuthCollection["fields"]>
-   *
-   * Or call with no args for an untyped response (backward compat):
-   * @example
-   * const result = await mira.me().raw()
-   * // result.record is Record<string, unknown>
-   */
-  me<C extends AnyAuthCollectionDef>(def: C): ClientHandler<{ collection: string; record: InferRecord<C["fields"]> }>
-  me(): ClientHandler<{ collection: string; record: Record<string, unknown> }>
 }
 
 type CollectionAccessors<M extends Record<string, AnyCollectionDef>> = {
@@ -259,14 +244,6 @@ function createMiraClientInternal(
       auth: makeAuth(),
       telemetry: makeTelemetryClient(execute),
       withCollections,
-      me: (<C extends AnyAuthCollectionDef>(_def?: C) => {
-        return makeClientHandler(
-          execute<{
-            collection: string
-            record: C extends AnyAuthCollectionDef ? InferRecord<C["fields"]> : Record<string, unknown>
-          }>(HCR.get("/api/auth/me"))
-        )
-      }) as BaseClient["me"]
     }
   }
 

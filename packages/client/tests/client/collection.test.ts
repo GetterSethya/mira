@@ -304,6 +304,71 @@ describe("CollectionClient", () => {
     expect(client.register).toBeUndefined()
   })
 
+  it("me → GET /api/auth/me and unwraps the envelope to the record", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+      Effect.sync(() => {
+        captured.push({ method: req.method, url: req.url })
+        return { collection: "users", record: { id: "1", created: "", updated: "", name: "Budi" } } as T
+      })
+    const client = makeCollectionClient({
+      collectionName: "users",
+      schema: AuthCollectionDef.schema,
+      fields: AuthCollectionDef.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: true,
+    })
+
+    const me = client.me
+    if (!me) throw new Error("me should be defined when isAuth=true")
+    const record = await me().raw()
+    expect(captured[0].method).toBe("GET")
+    expect(captured[0].url).toBe("/api/auth/me")
+    expect(record).toEqual({ id: "1", created: "", updated: "", name: "Budi" })
+  })
+
+  it("me → rejects with 401 MiraError when the token belongs to another collection", async () => {
+    const execute: ExecuteFn = <T>(_req: HttpClientRequest.HttpClientRequest) =>
+      Effect.succeed({ collection: "_superadmin", record: { id: "1", created: "", updated: "" } } as T)
+    const client = makeCollectionClient({
+      collectionName: "users",
+      schema: AuthCollectionDef.schema,
+      fields: AuthCollectionDef.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: true,
+    })
+
+    const me = client.me
+    if (!me) throw new Error("me should be defined when isAuth=true")
+    await expect(me().raw()).rejects.toMatchObject({ status: 401 })
+  })
+
+  it("me is undefined on non-auth collections", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute = makeTestExecute(captured)
+    const client = makeCollectionClient({
+      collectionName: "tasks",
+      schema: TestCollection.schema,
+      fields: TestCollection.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: false,
+    })
+
+    expect(client.me).toBeUndefined()
+  })
+
   it("create with Blob value → uses FormData body", async () => {
     const captured: Array<{ method: string; url: string; bodyIsFormData: boolean }> = []
     const execute = makeBodyCapturingExecute(captured)

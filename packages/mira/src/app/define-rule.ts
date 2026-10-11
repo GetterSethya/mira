@@ -1,4 +1,4 @@
-import type { FieldDef,FieldsMap, RuleMap } from "@gettersethya/mira-client"
+import type { BaseRuleMap,FieldDef,FieldsMap, RuleMap } from "@gettersethya/mira-client"
 import type { FieldOperand,RuleBuilder } from "@gettersethya/mira-client"
 import { makeRuleBuilder, toChainable } from "@gettersethya/mira-client"
 
@@ -41,7 +41,7 @@ export function defineRule<F extends FieldsMap>(
 
 export function defineRule<F extends FieldsMap>(
   collection: { name: string; fields: F; schema: { "x-collection-kind": "base" } },
-  cb: (R: RuleBuilder<F & BaseSystemFieldDefs>) => RuleMap
+  cb: (R: RuleBuilder<F & BaseSystemFieldDefs>) => BaseRuleMap
 ): RuleBinding
 
 export function defineRule<F extends FieldsMap>(

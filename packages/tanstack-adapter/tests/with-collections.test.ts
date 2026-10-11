@@ -37,6 +37,13 @@ describe("withCollections({ adapter })", () => {
     expect(typeof Mira.User.register().mutationOptions.mutationFn).toBe("function")
   })
 
+  it("enriches the auth me() query with queryKey/queryOptions", () => {
+    const handler = Mira.User.me()
+    expect(handler.queryKey).toEqual(["users", ActionKeys.Me])
+    expect(handler.queryOptions.queryKey).toEqual(handler.queryKey)
+    expect(typeof handler.queryOptions.queryFn).toBe("function")
+  })
+
   it("getOne query key uses def.name and the record id", () => {
     expect(Mira.Todo.getOne("abc").queryKey).toEqual(["todos", ActionKeys.GetOne, "abc", {}])
   })

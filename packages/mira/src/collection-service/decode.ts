@@ -46,3 +46,36 @@ export function makeRowEncoder(colSchema: CollectionSchema, storesBooleanAsInteg
     return result
   }
 }
+
+/**
+ * Drops `x-hidden` properties (and any key with no schema property, so computed
+ * or joined columns never leak) from a record. This is the allowlist counterpart
+ * to `CollectionService`'s admin check: auth passwords, `seqId`, and other
+ * server-managed columns are removed before a record is serialised to a client.
+ */
+export function stripHiddenFields(colSchema: CollectionSchema, record: RepoRecord): RepoRecord {
+  const out: RepoRecord = {}
+  for (const [k, v] of Object.entries(record)) {
+    const prop = colSchema.properties[k]
+    if (prop === undefined || prop["x-hidden"] === true) continue
+    out[k] = v
+  }
+  return out
+}
+
+/**
+ * Converts a stored row into the shape returned by public read endpoints: boolean
+ * columns are decoded from their storage representation (`0`/`1` on SQLite) and
+ * hidden fields are stripped. Used by `/api/auth/me` and the login route, which
+ * read the auth row directly rather than through `CollectionService` (which would
+ * apply the collection's `view` rule).
+ */
+export function toPublicRecord(
+  colSchema: CollectionSchema,
+  storesBooleanAsInteger: boolean,
+  record: RepoRecord
+): Effect.Effect<RepoRecord> {
+  return makeRowDecoder(colSchema, storesBooleanAsInteger)(record).pipe(
+    Effect.map((decoded) => stripHiddenFields(colSchema, decoded))
+  )
+}

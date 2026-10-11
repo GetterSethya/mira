@@ -501,6 +501,7 @@ describe("makeCollectionRouter", () => {
       assert.ok(typeof body["record"] === "object" && body["record"] !== null)
       const record = body["record"] as Record<string, unknown>
       assert.strictEqual(record["email"], "meuser@example.com")
+      assert.strictEqual(record["emailVerified"], false, "emailVerified must be decoded to a boolean, not 0/1")
       assert.ok(!("password" in record), "password must not appear in /api/auth/me response")
     }).pipe(Effect.provide(testLayer))
   )

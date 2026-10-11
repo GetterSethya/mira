@@ -53,6 +53,7 @@ export const ActionKeys = {
   GetOne:         "getOne",
   GetFirstOrNone: "getFirstOrNone",
   GetFullList:    "getFullList",
+  Me:             "me",
 } as const
 
 /**
@@ -162,6 +163,7 @@ export function createCollectionAdapter() {
       auth: (authClient) => ({
         authWithPassword: () => enrichMutation(authClient.authWithPassword()),
         register: () => enrichMutation(authClient.register()),
+        me: () => enrichQuery(authClient.me(), [name, ActionKeys.Me]),
       }),
     }
     const authExtras = kindAuthAdapters[kind](client, name)

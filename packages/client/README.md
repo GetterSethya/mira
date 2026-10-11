@@ -89,6 +89,10 @@ await mira.auth.refresh()   // hits GET /api/auth/me
 mira.auth.isLoggedIn()      // boolean — synchronous, reflects last known state
 mira.auth.clear()           // POST /api/auth/logout, then resets the flag
 
+// Fetch the current user for a specific auth collection (unwraps the envelope)
+const me = await mira.users.me().raw()
+// → InferRecord<typeof Users.fields>; rejects with 401 if the token is for another collection
+
 // Server: manage the token manually
 mira.auth.setToken(token)
 mira.auth.token             // string | null
