@@ -74,30 +74,51 @@ function buildFormData(input: object): FormData {
  */
 export type RetryOptions = { schedule?: Schedule.Schedule<unknown, MiraError, never> }
 
-export type GetListOptions<
-  F extends FieldsMap,
-  E extends ReadonlyArray<string>,
-  S extends ReadonlyArray<string> | undefined = undefined
-> = {
+/**
+ * Options accepted by `getList` / `getFirstOrNone` / `getFullList`.
+ *
+ * The `select` / `expand` properties are declared with their *constraint*
+ * (`ReadonlyArray<SelectableKeys<F>>` / `ReadonlyArray<RelationKeys<F>>`)
+ * rather than a bare type parameter. This is deliberate: a bare type parameter
+ * is displayed by editors as its default (`undefined` / `[]`), which hides the
+ * selectable/expandable keys on hover. The literal keys are instead recovered
+ * from the options object via {@link SelectOf} / {@link ExpandOf}, so the result
+ * type still narrows to exactly what was requested.
+ */
+export type GetListOptions<F extends FieldsMap> = {
   filter?: (f: FilterBuilder<F>) => FilterNode
   sort?: keyof F & string
   order?: "asc" | "desc"
   cursor?: number | null
   limit?: number
-  select?: S
-  expand?: E
+  select?: ReadonlyArray<SelectableKeys<F>>
+  expand?: ReadonlyArray<RelationKeys<F>>
   retryOptions?: RetryOptions
 }
 
-export type GetOneOptions<
-  F extends FieldsMap,
-  E extends ReadonlyArray<string>,
-  S extends ReadonlyArray<string> | undefined = undefined
-> = {
-  select?: S
-  expand?: E
+/** Options accepted by `getOne`. See {@link GetListOptions} for the `select`/`expand` rationale. */
+export type GetOneOptions<F extends FieldsMap> = {
+  select?: ReadonlyArray<SelectableKeys<F>>
+  expand?: ReadonlyArray<RelationKeys<F>>
   retryOptions?: RetryOptions
 }
+
+/** Options for `getFirstOrNone` (no `filter`/`limit`/`cursor` — the filter is a separate argument and the limit is `1`). */
+type FirstOrNoneOptions<F extends FieldsMap> = Omit<GetListOptions<F>, "filter" | "limit" | "cursor">
+
+/** Options for `getFullList` (no `cursor`; `limit` is the internal page size). */
+type FullListOptions<F extends FieldsMap> = Omit<GetListOptions<F>, "limit" | "cursor"> & { limit?: number }
+
+/**
+ * Recovers the literal `select` keys from an inferred options object, or
+ * `undefined` when `select` was not supplied. The `extends ReadonlyArray<string>`
+ * guard is rejected for the optional `select?` of the *un-inferred* default
+ * object, so "no select" correctly yields `undefined`.
+ */
+type SelectOf<O> = O extends { select: infer S extends ReadonlyArray<string> } ? S : undefined
+
+/** Recovers the literal `expand` keys from an inferred options object, or `[]` when `expand` was not supplied. */
+type ExpandOf<O> = O extends { expand: infer E extends ReadonlyArray<string> } ? E : []
 
 /**
  * Typed filter builder used inside `CollectionClient` callback methods.
@@ -185,9 +206,9 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    * @param options.retryOptions - Optional retry schedule
    * @returns ClientHandler for the paginated result
    */
-  getList<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
-    options?: GetListOptions<F, E, S>
-  ): ClientHandler<{ items: Array<WithSelect<F, S, E>>; nextCursor: number | null }>
+  getList<const O extends GetListOptions<F> = GetListOptions<F>>(
+    options?: O
+  ): ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: number | null }>
 
   /**
    * Get the first record matching a filter, or `Option.none()` if none match.
@@ -203,10 +224,10 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    * @param options.retryOptions - Optional retry schedule
    * @returns ClientHandler resolving to Option of the record (None if no match)
    */
-  getFirstOrNone<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
+  getFirstOrNone<const O extends FirstOrNoneOptions<F> = FirstOrNoneOptions<F>>(
     filter: (f: FilterBuilder<F>) => FilterNode,
-    options?: Omit<GetListOptions<F, E, S>, "filter" | "limit" | "cursor">
-  ): ClientHandler<Option.Option<WithSelect<F, S, E>>>
+    options?: O
+  ): ClientHandler<Option.Option<WithSelect<F, SelectOf<O>, ExpandOf<O>>>>
 
   /**
    * Fetch all records matching the filter, automatically following pagination.
@@ -224,9 +245,9 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    * @param options.retryOptions - Optional retry schedule
    * @returns ClientHandler resolving to a flat array of records
    */
-  getFullList<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
-    options?: Omit<GetListOptions<F, E, S>, "limit" | "cursor"> & { limit?: number }
-  ): ClientHandler<Array<WithSelect<F, S, E>>>
+  getFullList<const O extends FullListOptions<F> = FullListOptions<F>>(
+    options?: O
+  ): ClientHandler<Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>>
 
   /**
    * Get a single record by its `id`.
@@ -238,10 +259,10 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    * @param options.retryOptions - Optional retry schedule
    * @returns ClientHandler resolving to the record
    */
-  getOne<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
+  getOne<const O extends GetOneOptions<F> = GetOneOptions<F>>(
     id: string,
-    options?: GetOneOptions<F, E, S>
-  ): ClientHandler<WithSelect<F, S, E>>
+    options?: O
+  ): ClientHandler<WithSelect<F, SelectOf<O>, ExpandOf<O>>>
 
   /**
    * Create a new record.
@@ -454,20 +475,20 @@ export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"
   | "authWithPassword"
   | "me"
 > & {
-  getList<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
-    options?: GetListOptions<F, E, S>
-  ): EnrichedQueryHandler<ClientHandler<{ items: Array<WithSelect<F, S, E>>; nextCursor: number | null }>>
-  getOne<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
+  getList<const O extends GetListOptions<F> = GetListOptions<F>>(
+    options?: O
+  ): EnrichedQueryHandler<ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: number | null }>>
+  getOne<const O extends GetOneOptions<F> = GetOneOptions<F>>(
     id: string,
-    options?: GetOneOptions<F, E, S>
-  ): EnrichedQueryHandler<ClientHandler<WithSelect<F, S, E>>>
-  getFirstOrNone<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
+    options?: O
+  ): EnrichedQueryHandler<ClientHandler<WithSelect<F, SelectOf<O>, ExpandOf<O>>>>
+  getFirstOrNone<const O extends FirstOrNoneOptions<F> = FirstOrNoneOptions<F>>(
     filter: (f: FilterBuilder<F>) => FilterNode,
-    options?: Omit<GetListOptions<F, E, S>, "filter" | "limit" | "cursor">
-  ): EnrichedQueryHandler<ClientHandler<Option.Option<WithSelect<F, S, E>>>>
-  getFullList<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
-    options?: Omit<GetListOptions<F, E, S>, "limit" | "cursor"> & { limit?: number }
-  ): EnrichedQueryHandler<ClientHandler<Array<WithSelect<F, S, E>>>>
+    options?: O
+  ): EnrichedQueryHandler<ClientHandler<Option.Option<WithSelect<F, SelectOf<O>, ExpandOf<O>>>>>
+  getFullList<const O extends FullListOptions<F> = FullListOptions<F>>(
+    options?: O
+  ): EnrichedQueryHandler<ClientHandler<Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>>>
   create(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, CreateInput<F, K>>>
   update(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, UpdateInput<F, K>>>
   delete(): EnrichedMutationHandler<ClientHandler<void, string>>
@@ -526,55 +547,68 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     makeHandler
   )
 
-  function getList<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
-    options?: GetListOptions<F, E, S>
-  ): ClientHandler<{ items: Array<WithSelect<F, S, E>>; nextCursor: number | null }> {
-    const filterNode = options?.filter?.(makeFilterBuilder<F>())
+  /**
+   * Shared query implementation for `getList` / `getFirstOrNone` / `getFullList`.
+   *
+   * Kept generic over the inferred options object `O` so the result narrows to
+   * exactly the `select`/`expand` literals supplied. `filter` and `limit` are
+   * accepted as separate override arguments (rather than merged into `options`)
+   * so `getFirstOrNone`/`getFullList` can force them without the excess-property
+   * check that would fire against the narrower `O`.
+   */
+  function listHandler<const O extends GetListOptions<F> = GetListOptions<F>>(
+    options?: O,
+    overrides?: { filter?: (f: FilterBuilder<F>) => FilterNode; limit?: number }
+  ): ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: number | null }> {
+    const filterNode = (overrides?.filter ?? options?.filter)?.(makeFilterBuilder<F>())
+    const limit = overrides?.limit ?? options?.limit
     const queryParams = buildQueryParams({
       ...(filterNode ? { filter: Schema.encodeSync(Schema.fromJsonString(FilterNodeSchema))(filterNode) } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
       ...(options?.order ? { order: options.order } : {}),
       ...(options?.cursor != null ? { after: String(options.cursor) } : {}),
-      ...(options?.limit ? { limit: String(options.limit) } : {}),
+      ...(limit ? { limit: String(limit) } : {}),
       ...(options?.select ? { select: options.select.join(",") } : {}),
       ...(options?.expand ? { expand: options.expand.join(",") } : {}),
     })
 
-    const effect = execute<{ items: Array<WithSelect<F, S, E>>; nextCursor: number | null }>(
+    const effect = execute<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: number | null }>(
       HCR.get(`/api/collections/${collectionName}${queryParams}`)
     )
     return makeHandler(withRetry(effect, options))
   }
 
-  function getFirstOrNone<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
+  const getList = listHandler
+
+  function getFirstOrNone<const O extends FirstOrNoneOptions<F> = FirstOrNoneOptions<F>>(
     filter: (f: FilterBuilder<F>) => FilterNode,
-    options?: Omit<GetListOptions<F, E, S>, "filter" | "limit" | "cursor">
-  ): ClientHandler<Option.Option<WithSelect<F, S, E>>> {
-    const effect = getList<E, S>({ ...options, filter, limit: 1 })
+    options?: O
+  ): ClientHandler<Option.Option<WithSelect<F, SelectOf<O>, ExpandOf<O>>>> {
+    const effect = listHandler<O>(options, { filter, limit: 1 })
       .toEffect()
       .pipe(Effect.map(({ items }) => Option.fromNullishOr(items[0] ?? null)))
     return makeHandler(effect)
   }
 
-  function getFullList<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
-    options?: Omit<GetListOptions<F, E, S>, "limit" | "cursor"> & { limit?: number }
-  ): ClientHandler<Array<WithSelect<F, S, E>>> {
-    const effect = getList<E, S>({ ...options, limit: options?.limit ?? 1000 })
+  function getFullList<const O extends FullListOptions<F> = FullListOptions<F>>(
+    options?: O
+  ): ClientHandler<Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>> {
+    const effect = listHandler<O>(options, { limit: options?.limit ?? 1000 })
       .toEffect()
       .pipe(Effect.map(({ items }) => items))
     return makeHandler(effect)
   }
 
-  function getOne<E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
+  function getOne<const O extends GetOneOptions<F> = GetOneOptions<F>>(
     id: string,
-    options?: GetOneOptions<F, E, S>
-  ): ClientHandler<WithSelect<F, S, E>> {
+    options?: O
+  ): ClientHandler<WithSelect<F, SelectOf<O>, ExpandOf<O>>> {
     const queryParams = buildQueryParams({
       ...(options?.select ? { select: options.select.join(",") } : {}),
       ...(options?.expand ? { expand: options.expand.join(",") } : {}),
     })
 
-    const effect = execute<WithSelect<F, S, E>>(
+    const effect = execute<WithSelect<F, SelectOf<O>, ExpandOf<O>>>(
       HCR.get(`/api/collections/${collectionName}/${id}${queryParams}`)
     )
     return makeHandler(withRetry(effect, options))

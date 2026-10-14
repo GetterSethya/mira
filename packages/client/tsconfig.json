@@ -9,7 +9,7 @@
     "baseUrl":                    ".",
     "paths": {
       "@/*": ["src/*"],
-      "@gettersethya/mira-collection": ["../collection/dist/src/index.d.ts"]
+      "@gettersethya/mira-collection": ["../collection/dist/index.d.ts"]
     },
     "strict":                     true,
     "exactOptionalPropertyTypes": true,

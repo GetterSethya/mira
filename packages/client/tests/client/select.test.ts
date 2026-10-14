@@ -2,7 +2,8 @@ import { AuthCollection, BaseCollection, Field, ViewCollection } from "@getterse
 import { describe, expect, expectTypeOf, it } from "vitest"
 
 import { createMiraClient } from "@/client/factory.js"
-import type { InferRecord, SelectableKeys, WithExpand, WithSelect } from "@/client/types.js"
+import type { GetListOptions, GetOneOptions } from "@/client/collection.js"
+import type { InferRecord, RelationKeys, SelectableKeys, WithExpand, WithSelect } from "@/client/types.js"
 import type { Option } from "effect"
 
 const Authors = BaseCollection.define("authors", {
@@ -54,6 +55,27 @@ const emptySelectedPostHandler = mira.posts.getOne("abc", { select: [] })
 type EmptySelectedPost = Awaited<ReturnType<typeof emptySelectedPostHandler.raw>>
 const selectedSummaryHandler = mira.summaries.getOne("abc", { select: ["title"] })
 type SelectedSummary = Awaited<ReturnType<typeof selectedSummaryHandler.raw>>
+
+describe("option property types", () => {
+  it("select/expand expose their constraints, not bare type params", () => {
+    // Regression: the option properties used to be typed as the method's type
+    // parameters (`select?: S`, `expand?: E`), so editors showed their defaults
+    // (`select?: undefined`, `expand?: []`) on hover instead of the usable keys.
+    expectTypeOf<GetListOptions<PostFields>["select"]>().toEqualTypeOf<
+      ReadonlyArray<SelectableKeys<PostFields>> | undefined
+    >()
+    expectTypeOf<GetOneOptions<PostFields>["select"]>().toEqualTypeOf<
+      ReadonlyArray<SelectableKeys<PostFields>> | undefined
+    >()
+    expectTypeOf<GetListOptions<PostFields>["expand"]>().toEqualTypeOf<
+      ReadonlyArray<RelationKeys<PostFields>> | undefined
+    >()
+    expectTypeOf<GetOneOptions<PostFields>["expand"]>().toEqualTypeOf<
+      ReadonlyArray<RelationKeys<PostFields>> | undefined
+    >()
+    expect(true).toBe(true)
+  })
+})
 
 describe("SelectableKeys", () => {
   it("excludes hidden fields on base collections", () => {
