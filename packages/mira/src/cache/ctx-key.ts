@@ -7,7 +7,7 @@ import { enforcerForAction } from "@/rule/enforcer.js"
 /**
  * Derives the portion of a cache key that captures everything a collection's
  * row-level access rule for `action` could depend on in `ctx`: the admin flag,
- * the authenticated identity, and only the specific request query/header keys
+ * the authenticated identity, and only the specific request query/header/body keys
  * the compiled rule actually references.
  *
  * Two requests that produce the same tag are guaranteed to be authorized
@@ -48,6 +48,11 @@ export function buildCtxCacheTag(
       ? `h:${refs.headerKeys.map((key) => `${key}=${String(ctx.headers[key] ?? "")}`).join(",")}`
       : ""
 
-  const parts = [authPart, queryPart, headerPart].filter((p) => p.length > 0)
+  const bodyPart =
+    refs.bodyKeys.length > 0
+      ? `b:${refs.bodyKeys.map((key) => `${key}=${String(ctx.body?.[key] ?? "")}`).join(",")}`
+      : ""
+
+  const parts = [authPart, queryPart, headerPart, bodyPart].filter((p) => p.length > 0)
   return parts.length > 0 ? parts.join("|") : "public"
 }

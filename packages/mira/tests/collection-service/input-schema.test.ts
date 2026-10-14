@@ -412,6 +412,119 @@ describe("error callback", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Explicit null for optional fields (clearing a field) — issue #14
+// ---------------------------------------------------------------------------
+
+describe("null acceptance for optional fields", () => {
+  it.effect("optional text — null accepted on create and update", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { title: Field.text({ required: false }) })
+      const onCreate = yield* createDecode(col, { title: null }).pipe(Effect.result)
+      expect(Result.isSuccess(onCreate)).toBe(true)
+      const onUpdate = yield* updateDecode(col, { title: null }).pipe(Effect.result)
+      expect(Result.isSuccess(onUpdate)).toBe(true)
+    })
+  )
+
+  it.effect("optional file — null accepted on create and update", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { avatar: Field.file({ required: false }) })
+      const onUpdate = yield* updateDecode(col, { avatar: null }).pipe(Effect.result)
+      expect(Result.isSuccess(onUpdate)).toBe(true)
+      const onCreate = yield* createDecode(col, { avatar: null }).pipe(Effect.result)
+      expect(Result.isSuccess(onCreate)).toBe(true)
+    })
+  )
+
+  it.effect("optional relation — null accepted on update", () =>
+    Effect.gen(function* () {
+      const users = BaseCollection.define("users", { name: Field.text() })
+      const col = BaseCollection.define("t", { author: Field.relation(users, { required: false }) })
+      const result = yield* updateDecode(col, { author: null }).pipe(Effect.result)
+      expect(Result.isSuccess(result)).toBe(true)
+    })
+  )
+
+  it.effect("optional date — null accepted on update", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { at: Field.date({ required: false }) })
+      const result = yield* updateDecode(col, { at: null }).pipe(Effect.result)
+      expect(Result.isSuccess(result)).toBe(true)
+    })
+  )
+
+  it.effect("optional boolean — null accepted on update", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { active: Field.boolean({ required: false }) })
+      const result = yield* updateDecode(col, { active: null }).pipe(Effect.result)
+      expect(Result.isSuccess(result)).toBe(true)
+    })
+  )
+
+  it.effect("optional literalText — null accepted on update", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { role: Field.literalText({ literal: ["admin", "agent"], required: false }) })
+      const result = yield* updateDecode(col, { role: null }).pipe(Effect.result)
+      expect(Result.isSuccess(result)).toBe(true)
+    })
+  )
+
+  it.effect("optional number — null accepted on update", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { score: Field.number({ required: false }) })
+      const result = yield* updateDecode(col, { score: null }).pipe(Effect.result)
+      expect(Result.isSuccess(result)).toBe(true)
+    })
+  )
+
+  it.effect("required text — null rejected on create and update", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { title: Field.text() })
+      const onCreate = yield* createDecode(col, { title: null }).pipe(Effect.result)
+      expect(Result.isFailure(onCreate)).toBe(true)
+      const onUpdate = yield* updateDecode(col, { title: null }).pipe(Effect.result)
+      expect(Result.isFailure(onUpdate)).toBe(true)
+    })
+  )
+
+  it.effect("required file — null rejected on create and update", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { avatar: Field.file() })
+      const onCreate = yield* createDecode(col, { avatar: null }).pipe(Effect.result)
+      expect(Result.isFailure(onCreate)).toBe(true)
+      const onUpdate = yield* updateDecode(col, { avatar: null }).pipe(Effect.result)
+      expect(Result.isFailure(onUpdate)).toBe(true)
+    })
+  )
+
+  it.effect("optional field missing — still accepted (missing key contract preserved)", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { title: Field.text({ required: false }) })
+      const onCreate = yield* createDecode(col, {}).pipe(Effect.result)
+      expect(Result.isSuccess(onCreate)).toBe(true)
+      const onUpdate = yield* updateDecode(col, {}).pipe(Effect.result)
+      expect(Result.isSuccess(onUpdate)).toBe(true)
+    })
+  )
+
+  it.effect("non-required system field (auth emailVerified) — null rejected, not sent to a NOT NULL column", () =>
+    Effect.gen(function* () {
+      const col = AuthCollection.define("users", {})
+      const onCreate = yield* createDecode(col, {
+        email: "a@b.com",
+        password: "pw",
+        emailVerified: null
+      }).pipe(Effect.result)
+      expect(Result.isFailure(onCreate)).toBe(true)
+      const onUpdate = yield* updateDecode(col, { emailVerified: null }).pipe(Effect.result)
+      expect(Result.isFailure(onUpdate)).toBe(true)
+      const omitted = yield* updateDecode(col, {}).pipe(Effect.result)
+      expect(Result.isSuccess(omitted)).toBe(true)
+    })
+  )
+})
+
+// ---------------------------------------------------------------------------
 // AuthCollection input schema — regression for email/password being blocked
 // ---------------------------------------------------------------------------
 

@@ -34,8 +34,10 @@ export type {
   InferRecord,
   RegisterInput,
   RelationKeys,
+  SelectableKeys,
   UpdateInput,
-  WithExpand
+  WithExpand,
+  WithSelect
 } from "./infer.js"
 export type { AnyCollectionDef, CollectionSchema, FieldDef, FieldsMap, LiteralTextConstraintKind } from "./types.js"
 export type { ViewCollectionBuilder } from "./view.js"

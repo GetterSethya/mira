@@ -5,6 +5,8 @@ export type RequestCtx = {
   auth?: { collection: string; record: RepoRecord }
   headers: Record<string, string>
   query: Record<string, string | ReadonlyArray<string>>
+  /** Decoded request body for create/update rule evaluation. Absent for bodiless actions. */
+  body?: RepoRecord
   /** When true, skip all rule enforcement (validation still applies). Used by admin/dashboard routes. */
   admin?: boolean
 }

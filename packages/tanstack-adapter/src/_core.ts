@@ -11,7 +11,8 @@ import type {
   FilterNode,
   GetListOptions,
   GetOneOptions,
-  RelationKeys
+  RelationKeys,
+  SelectableKeys
 } from "@gettersethya/mira-client"
 
 /**
@@ -171,20 +172,20 @@ export function createCollectionAdapter() {
     const common: AdaptedCommon<F, K> = {
       fields: client.fields,
 
-      getList: <E extends ReadonlyArray<RelationKeys<F>> = []>(options?: GetListOptions<F, E>) =>
-        enrichQuery(client.getList<E>(options), [name, ActionKeys.GetList, options ?? {}]),
+      getList: <E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(options?: GetListOptions<F, E, S>) =>
+        enrichQuery(client.getList<E, S>(options), [name, ActionKeys.GetList, options ?? {}]),
 
-      getOne: <E extends ReadonlyArray<RelationKeys<F>> = []>(id: string, options?: GetOneOptions<F, E>) =>
-        enrichQuery(client.getOne<E>(id, options), [name, ActionKeys.GetOne, id, options ?? {}]),
+      getOne: <E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(id: string, options?: GetOneOptions<F, E, S>) =>
+        enrichQuery(client.getOne<E, S>(id, options), [name, ActionKeys.GetOne, id, options ?? {}]),
 
-      getFirstOrNone: <E extends ReadonlyArray<RelationKeys<F>> = []>(
+      getFirstOrNone: <E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
         filter: (f: FilterBuilder<F>) => FilterNode,
-        options?: Omit<GetListOptions<F, E>, "filter" | "limit" | "cursor">
-      ) => enrichQuery(client.getFirstOrNone<E>(filter, options), [name, ActionKeys.GetFirstOrNone, options ?? {}]),
+        options?: Omit<GetListOptions<F, E, S>, "filter" | "limit" | "cursor">
+      ) => enrichQuery(client.getFirstOrNone<E, S>(filter, options), [name, ActionKeys.GetFirstOrNone, options ?? {}]),
 
-      getFullList: <E extends ReadonlyArray<RelationKeys<F>> = []>(
-        options?: Omit<GetListOptions<F, E>, "limit" | "cursor"> & { limit?: number }
-      ) => enrichQuery(client.getFullList<E>(options), [name, ActionKeys.GetFullList, options ?? {}]),
+      getFullList: <E extends ReadonlyArray<RelationKeys<F>> = [], S extends ReadonlyArray<SelectableKeys<F>> | undefined = undefined>(
+        options?: Omit<GetListOptions<F, E, S>, "limit" | "cursor"> & { limit?: number }
+      ) => enrichQuery(client.getFullList<E, S>(options), [name, ActionKeys.GetFullList, options ?? {}]),
 
       create: () => enrichMutation(client.create()),
       update: () => enrichMutation(client.update()),

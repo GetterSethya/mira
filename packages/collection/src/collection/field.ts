@@ -22,6 +22,12 @@ type BaseFieldOptions = {
   indexed?: boolean
   /** Default value for the field when creating a record. */
   default?: unknown
+  /**
+   * Whether the field is hidden from API responses (`x-hidden`).
+   * Hidden fields are stripped from list/view responses and rejected
+   * in `select` options at the type level.
+   */
+  hidden?: boolean
 }
 
 // Generic over D so the caller's specific field type (kind literal, required literal, etc.) is preserved.

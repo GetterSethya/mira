@@ -4,6 +4,7 @@ import type { Layer } from "effect"
 import type { CronDef } from "@/cron/types.js"
 import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
+import type { MigrateOptions } from "@/migrator/types.js"
 import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
 
 import { MiraApp } from "./app.js"
@@ -12,9 +13,9 @@ import type { MiraDatabase, MiraPlatform, MiraStorage, PlatformServices } from "
 
 /**
  * Configuration object for `MiraApp`. Constructed by `MiraBuilder` after all
- * required steps are called. `telemetry` and `cors` are defaulted when unset —
- * `telemetry` to `ConsoleTelemetryLayer`, `cors` to `defaultCorsConfig`
- * (permissive).
+ * required steps are called. `telemetry`, `cors`, and `migrations` are defaulted
+ * when unset — `telemetry` to `ConsoleTelemetryLayer`, `cors` to `defaultCorsConfig`
+ * (permissive), `migrations` to `{}` (additive-only auto-migration).
  *
  * @see MiraBuilder — builds this config
  */
@@ -27,6 +28,7 @@ export interface MiraAppConfig {
   crons: ReadonlyArray<CronDef<any>>
   telemetry: Layer.Layer<never, never, PlatformServices>
   cors: CorsConfig
+  migrations?: MigrateOptions
 }
 
 function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfig {
@@ -55,6 +57,9 @@ function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfi
  *
  * Optional step: `.cors(c)` — CORS configuration (defaults to permissive,
  * so a separately-hosted frontend works with zero config)
+ *
+ * Optional step: `.migrations(m)` — schema-migration options (e.g.
+ * `allowDestructive: true` to permit drop-column/drop-table steps)
  *
  * @example
  * const app = Mira.builder()
@@ -187,6 +192,26 @@ export class MiraBuilder<Has extends string = never, R = never> {
   }
 
   /**
+   * Set schema-migration options (optional).
+   *
+   * Auto-migration runs on boot and only applies additive changes by default.
+   * Destructive steps (`dropTable`, `dropColumn`, `alterColumn`) are skipped
+   * with a warning unless `allowDestructive: true` is set here.
+   *
+   * @param m - A `MigrateOptions` object (`allowDestructive`, `logLevel`)
+   * @returns A new builder (same phantom type — migrations is optional)
+   *
+   * @example
+   * Mira.builder()
+   *   // ... required steps
+   *   .migrations({ allowDestructive: true, logLevel: 3 })
+   *   .build()
+   */
+  migrations(m: MigrateOptions): MiraBuilder<Has, R> {
+    return new MiraBuilder({ ...this.#config, migrations: m })
+  }
+
+  /**
    * Build the MiraApp from the accumulated configuration.
    * Only compiles when all required steps (platform, database, storage, collections)
    * have been called. If telemetry was not set, defaults to ConsoleTelemetryLayer.
@@ -210,7 +235,8 @@ export class MiraBuilder<Has extends string = never, R = never> {
       rules: config.rules ?? [],
       crons: config.crons ?? [],
       telemetry: config.telemetry ?? ConsoleTelemetryLayer,
-      cors: config.cors ?? defaultCorsConfig
+      cors: config.cors ?? defaultCorsConfig,
+      migrations: config.migrations ?? {}
     })
   }
 }

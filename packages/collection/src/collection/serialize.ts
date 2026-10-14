@@ -157,5 +157,9 @@ function fieldToProperty(field: FieldDef): JsonSchemaProperty {
       }
   }
   })()
-  return field.viewOnly ? { ...base, "x-view-only": true } : base
+  return {
+    ...base,
+    ...(field.hidden === true ? { "x-hidden": true } : {}),
+    ...(field.viewOnly ? { "x-view-only": true } : {})
+  }
 }

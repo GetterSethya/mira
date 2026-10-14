@@ -273,4 +273,25 @@ describe("serialize", () => {
     expect(schema.properties.id).not.toHaveProperty("x-view-only")
     expect(schema.properties.seqId).not.toHaveProperty("x-view-only")
   })
+
+  it("hidden field produces x-hidden in serialized property", () => {
+    const schema = toJSONSchema("base", "posts", {
+      title: Field.text(),
+      secret: Field.text({ hidden: true })
+    }, {})
+
+    expect(schema.properties.secret).toEqual({ type: "string", "x-hidden": true })
+    expect(schema.properties.title).not.toHaveProperty("x-hidden")
+  })
+
+  it("hidden flag survives .view() alongside x-view-only", () => {
+    const schema = toJSONSchema("view", "v", {
+      id: Field.text().view(),
+      seqId: Field.integer().view(),
+      secret: Field.text({ hidden: true }).view()
+    }, { viewQuery: "SELECT id, seqId, secret FROM posts" })
+
+    expect(schema.properties.secret["x-hidden"]).toBe(true)
+    expect(schema.properties.secret["x-view-only"]).toBe(true)
+  })
 })

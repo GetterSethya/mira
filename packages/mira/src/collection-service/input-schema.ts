@@ -125,15 +125,27 @@ export function buildInputSchemas(colDef: AnyCollectionDef): InputSchemas {
 
     const base = propertyToSchema(prop, fieldDef)
 
+    // A field whose key may be omitted may only also accept an explicit `null`
+    // when its column is DDL-nullable. Non-required, non-system columns are
+    // nullable (see `schemaToColumns`), so `null` can clear them. `x-system`
+    // columns (e.g. auth `emailVerified`) are NOT NULL even when non-required,
+    // so an explicit `null` must still be rejected there rather than reaching
+    // the database as a NOT NULL violation.
+    const clearsWithNull = !required.has(key) && prop["x-system"] !== true
+    const optionalField = (nullable: boolean) =>
+      nullable ? Schema.optional(Schema.NullOr(base)) : Schema.optional(base)
+
     if (required.has(key)) {
       const requiredMsg = errorFn?.("required")
       createFields[key] = requiredMsg !== undefined
         ? base.pipe(Schema.annotateKey({ messageMissingKey: requiredMsg }))
         : base
     } else {
-      createFields[key] = Schema.optional(base)
+      createFields[key] = optionalField(clearsWithNull)
     }
-    updateFields[key] = Schema.optional(base)
+    // Required fields stay non-nullable when present (null is rejected) but may be
+    // omitted on update, matching the partial-patch contract.
+    updateFields[key] = optionalField(required.has(key) ? false : clearsWithNull)
   }
 
   return {

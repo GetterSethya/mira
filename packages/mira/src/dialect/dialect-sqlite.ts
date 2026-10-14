@@ -4,7 +4,10 @@ import type { DialectType } from "./dialect.js"
  * SQLite dialect implementation.
  * - Identifiers are double-quoted.
  * - Booleans are stored as INTEGER (0/1).
- * - `dropColumn` and `alterColumn` emit comment stubs — SQLite requires table recreation for these.
+ * - `dropColumn` uses the native `ALTER TABLE … DROP COLUMN` (SQLite 3.35+).
+ * - `alterColumn` emits a comment stub — SQLite has no `ALTER COLUMN`; changing a
+ *   column's type/nullability requires a full table recreation, which the migrator
+ *   does not yet implement.
  */
 export const sqliteDialect: DialectType = {
   storesBooleanAsInteger: true,
@@ -73,7 +76,11 @@ export const sqliteDialect: DialectType = {
       }
 
       case "dropColumn":
-        return [`-- dropColumn for ${step.column} requires table recreation`]
+        // SQLite 3.35+ supports native column drops and preserves the table's
+        // remaining columns and indexes (unlike the drop-and-recreate workaround).
+        return [
+          `ALTER TABLE ${sqliteDialect.quoteIdentifier(step.table)} DROP COLUMN ${sqliteDialect.quoteIdentifier(step.column)}`
+        ]
 
       case "renameColumn":
         return [

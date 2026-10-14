@@ -72,6 +72,8 @@ export type FieldDef = {
   mimeTypes?: Array<string>
   viewOnly?: boolean
   protected?: boolean
+  /** When true, the field is hidden from API responses and rejected in `select` options. */
+  hidden?: boolean
   literal?: ReadonlyArray<string>
   _literal?: ReadonlyArray<string>
   _target?: AnyCollectionDef

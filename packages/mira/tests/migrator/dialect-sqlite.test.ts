@@ -38,6 +38,12 @@ describe("sqliteDialect", () => {
     expect(sql).toEqual(['ALTER TABLE "posts" ADD COLUMN "score" INTEGER DEFAULT 0'])
   })
 
+  it("DROP COLUMN uses native ALTER TABLE DROP COLUMN", () => {
+    const step: MigrationStep = { kind: "dropColumn", table: "posts", column: "obsolete" }
+    const sql = dialect.translate(step)
+    expect(sql).toEqual(['ALTER TABLE "posts" DROP COLUMN "obsolete"'])
+  })
+
   it("CREATE INDEX non-unique", () => {
     const step: MigrationStep = { kind: "createIndex", table: "posts", fields: ["status"], unique: false }
     const sql = dialect.translate(step)

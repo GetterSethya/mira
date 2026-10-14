@@ -45,8 +45,8 @@ function stableViewKey(
   select: ReadonlyArray<string> | null | undefined,
   expand: ReadonlyArray<string> | null | undefined
 ): string {
-  const selectPart = select != null ? [...select].sort().join(",") : ""
-  const expandPart = expand != null ? [...expand].sort().join(",") : ""
+  const selectPart = select == null ? "*" : [...select].sort().join(",")
+  const expandPart = expand == null ? "*" : [...expand].sort().join(",")
   return `${col}:${id}:${selectPart}|${expandPart}`
 }
 
@@ -60,8 +60,8 @@ function stableListKey(
 ): string {
   const filterPart = filter !== undefined ? serializeFilterNode(filter) : ""
   const sortPart = sort !== undefined ? `${sort.field}:${sort.direction}` : ""
-  const selectPart = select != null ? [...select].sort().join(",") : ""
-  const expandPart = expand != null ? [...expand].sort().join(",") : ""
+  const selectPart = select == null ? "*" : [...select].sort().join(",")
+  const expandPart = expand == null ? "*" : [...expand].sort().join(",")
   return `${cursor ?? ""}|${perPage}|${filterPart}|${sortPart}|${selectPart}|${expandPart}`
 }
 

@@ -146,6 +146,30 @@ describe("MiraBuilder.cors()", () => {
   })
 })
 
+describe("MiraBuilder.migrations()", () => {
+  it("stores migrations on builder config", () => {
+    const b = fullBuilder().migrations({ allowDestructive: true })
+    expect(b._getPartialConfig().migrations).toEqual({ allowDestructive: true })
+  })
+
+  it("defaults migrations to {} when .migrations() not called", () => {
+    const app = fullBuilder().build()
+    expect(app._getConfig().migrations).toEqual({})
+  })
+
+  it("custom migrations survive through build", () => {
+    const app = fullBuilder().migrations({ allowDestructive: true, logLevel: 2 }).build()
+    expect(app._getConfig().migrations).toEqual({ allowDestructive: true, logLevel: 2 })
+  })
+
+  it("returns a new builder (immutable)", () => {
+    const b0 = fullBuilder()
+    const b1 = b0.migrations({ allowDestructive: true })
+    expect(b0).not.toBe(b1)
+    expect(b0._getPartialConfig().migrations).toBeUndefined()
+  })
+})
+
 describe("MiraPlugin.adminCollections", () => {
   const adminDef = AuthCollection.define("_admin", {})
 

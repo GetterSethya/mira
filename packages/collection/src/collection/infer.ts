@@ -145,6 +145,63 @@ export type WithExpand<
       }
 )
 
+/**
+ * Extracts the field names that may appear in a `select` option.
+ * Fields marked `hidden: true` (serialized as `x-hidden`) are excluded —
+ * passing one in `select` is a compile error.
+ *
+ * @example
+ * // For { title: Field.text(), secret: Field.text({ hidden: true }) }
+ * // SelectableKeys resolves to: "title"
+ *
+ * @see WithSelect — uses S (constrained to SelectableKeys) to narrow the result
+ */
+export type SelectableKeys<F extends FieldsMap> = {
+  [K in keyof F]: F[K] extends { hidden: true } ? never : K
+}[keyof F] & string
+
+/**
+ * Narrows `InferRecord<F>` to the shape the server returns when `select` is
+ * passed: the selected fields plus the system fields (`id`/`created`/`updated`),
+ * the local id column of each expanded relation, and `expand` when requested.
+ *
+ * When `S` is `undefined` (no `select` passed) this resolves to the current
+ * full type (`WithExpand<F, E>`). An empty select (`select: []`) narrows to
+ * the system fields (+ expanded ids) only, matching the runtime.
+ *
+ * `seqId` is stripped from responses at runtime, so it never appears here even
+ * when selected (it is excluded from `InferRecord` already).
+ *
+ * @example
+ * // WithSelect<PostFields, ["title"], []> resolves to:
+ * // Pick<InferRecord<PostFields>, "id" | "created" | "updated" | "title">
+ *
+ * @see InferRecord — the base record type
+ * @see WithExpand — the no-select result shape
+ * @see SelectableKeys — constrains S to non-hidden keys
+ */
+export type WithSelect<
+  F extends FieldsMap,
+  S extends ReadonlyArray<string> | undefined,
+  E extends ReadonlyArray<string>
+> = [S] extends [undefined]
+  ? WithExpand<F, E>
+  : Pick<
+      InferRecord<F>,
+      Extract<Exclude<S, undefined>[number] | E[number] | "id" | "created" | "updated", keyof InferRecord<F>>
+    > & (
+      [E] extends [[]]
+        ? {}
+        : {
+            expand: {
+              [K in E[number] & RelationKeys<F>]:
+                F[K] extends { _target: infer Target extends AnyCollectionDef }
+                  ? InferRecord<Target["fields"]>
+                  : Record<string, unknown>
+            }
+          }
+    )
+
 /** The collection kinds understood by the client. Mirrors `CollectionSchema["x-collection-kind"]`. */
 export type CollectionKind = "base" | "auth" | "view"
 

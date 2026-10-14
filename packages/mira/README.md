@@ -65,7 +65,25 @@ On first boot, Mira auto-generates a `jwt_secret`, runs schema migrations, and c
 | `.crons(c)` | No | Array of `CronDef` — scheduled tasks using Effect `Schedule` |
 | `.telemetry(layer)` | No | Custom Effect telemetry layer |
 | `.cors(c)` | No | CORS config. Defaults to permissive (`*`), so a separately-hosted frontend works with zero config |
+| `.migrations(m)` | No | Schema-migration options (`allowDestructive`, `logLevel`). Defaults to additive-only |
 | `.extend(plugin)` | No | Register a `MiraPlugin` (lifecycle hooks, routes, crons, layers) |
+
+## Migrations
+
+On boot, Mira auto-migrates collection schemas. Additive changes (new tables,
+new columns, new indexes) apply automatically. Destructive steps (`dropTable`,
+`dropColumn`, `alterColumn`) are skipped with a warning unless explicitly allowed:
+
+```typescript
+Mira.builder()
+  // ... required steps
+  .migrations({ allowDestructive: true })
+  .build()
+```
+
+`dropColumn` runs as native `ALTER TABLE … DROP COLUMN` (SQLite 3.35+).
+`alterColumn` (changing a column's type/nullability) is not executable yet —
+the SQLite dialect still emits a no-op stub for it.
 
 ## Platforms
 

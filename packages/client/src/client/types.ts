@@ -14,8 +14,10 @@ export type {
   InferRecord,
   RegisterInput,
   RelationKeys,
+  SelectableKeys,
   UpdateInput,
-  WithExpand
+  WithExpand,
+  WithSelect
 } from "@gettersethya/mira-collection"
 
 /**

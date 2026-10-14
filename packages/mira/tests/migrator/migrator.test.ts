@@ -263,4 +263,72 @@ describe("migrator", () => {
       const rows = yield* sql<{ title: string; published: number }>`SELECT title, published FROM base`
       expect(rows[0].published).toBe(1)
     }).pipe(Effect.provide(testLayer)))
+
+  it.effect("skips dropColumn without allowDestructive", () =>
+    Effect.gen(function* () {
+      const migrator = yield* Migrator
+
+      const v1: CollectionSchema = {
+        "x-collection-kind": "base",
+        type: "object",
+        properties: {
+          seqId: { type: "integer", "x-kind": "seqId", "x-system": true },
+          title: { type: "string" },
+          obsolete: { type: "string" }
+        },
+        required: ["title"]
+      }
+
+      const v2: CollectionSchema = {
+        "x-collection-kind": "base",
+        type: "object",
+        properties: {
+          seqId: { type: "integer", "x-kind": "seqId", "x-system": true },
+          title: { type: "string" }
+        },
+        required: ["title"]
+      }
+
+      yield* migrator.migrate([{ name: "base", schema: v1 }])
+      yield* migrator.migrate([{ name: "base", schema: v2 }])
+
+      const sql = yield* SqlClient.SqlClient
+      const cols = yield* sql<{ name: string }>`PRAGMA table_info(base)`
+      expect(cols.map((c) => c.name)).toContain("obsolete")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("drops column with allowDestructive: true", () =>
+    Effect.gen(function* () {
+      const migrator = yield* Migrator
+
+      const v1: CollectionSchema = {
+        "x-collection-kind": "base",
+        type: "object",
+        properties: {
+          seqId: { type: "integer", "x-kind": "seqId", "x-system": true },
+          title: { type: "string" },
+          obsolete: { type: "string" }
+        },
+        required: ["title"]
+      }
+
+      const v2: CollectionSchema = {
+        "x-collection-kind": "base",
+        type: "object",
+        properties: {
+          seqId: { type: "integer", "x-kind": "seqId", "x-system": true },
+          title: { type: "string" }
+        },
+        required: ["title"]
+      }
+
+      yield* migrator.migrate([{ name: "base", schema: v1 }])
+      yield* migrator.migrate([{ name: "base", schema: v2 }], { allowDestructive: true })
+
+      const sql = yield* SqlClient.SqlClient
+      const cols = yield* sql<{ name: string }>`PRAGMA table_info(base)`
+      const names = cols.map((c) => c.name)
+      expect(names).not.toContain("obsolete")
+      expect(names).toContain("title")
+    }).pipe(Effect.provide(testLayer)))
 })

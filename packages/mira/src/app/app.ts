@@ -182,7 +182,7 @@ export class MiraApp<R = never> {
    * )
    */
   buildServiceLayer() {
-    const { database, platform, storage, telemetry } = this.#config
+    const { database, migrations: migrateOptions, platform, storage, telemetry } = this.#config
     const allCollections = this.#getAllCollections()
     const allPlugins = this.#getAllPlugins()
     const allCronDefs = this.#getAllCrons()
@@ -209,7 +209,7 @@ export class MiraApp<R = never> {
     const autoMigrateLayer = Layer.effectDiscard(
       Effect.gen(function* () {
         const migrator = yield* Migrator
-        yield* migrator.migrate(schemas)
+        yield* migrator.migrate(schemas, migrateOptions)
       }).pipe(Effect.orDie)
     ).pipe(Layer.provide(fullMid))
 

@@ -208,6 +208,21 @@ export function makeCollectionServiceLayer(
       const dialect = yield* Dialect
       const authService = yield* AuthService
 
+      // One-time dev warning: a `@request_body_` reference in a list/view/delete
+      // rule can never match a submitted value — bodiless actions carry no body,
+      // so the reference always resolves to null. Warn once per collection/action
+      // here at layer-build time, never per request.
+      for (const col of allCollections) {
+        for (const action of ["list", "view", "delete"] as const) {
+          const compiled = enforcerForAction(col.schema, action)
+          if (compiled !== null && compiled.sql.includes("@request_body_")) {
+            yield* Effect.logWarning(
+              `Collection "${col.name}" ${action} rule references @request_body_* but ${action} requests carry no body — the reference always resolves to null`
+            )
+          }
+        }
+      }
+
       // Passwords on auth collections are hashed here, at the single write
       // chokepoint, so every caller (HTTP router, dashboard, plugins) stores a
       // hash rather than a plaintext value. On update, an empty password is
@@ -475,7 +490,8 @@ export function makeCollectionServiceLayer(
           )
 
           if (!ctx.admin) {
-            const ruleWhere = yield* compileRule(collection, "create", ctx)
+            const ctxWithBody: RequestCtx = { ...ctx, body: cleaned }
+            const ruleWhere = yield* compileRule(collection, "create", ctxWithBody)
 
             // Pre-check: evaluate the create rule against the payload (no table needed).
             const payloadBound = resolveFieldRefs(ruleWhere, cleaned)
@@ -487,7 +503,7 @@ export function makeCollectionServiceLayer(
             }
           }
 
-          const canManage = yield* canManagePayload(collection, cleaned, ctx)
+          const canManage = yield* canManagePayload(collection, cleaned, { ...ctx, body: cleaned })
           yield* enforceCreateCredentials(collection, data, cleaned, canManage, ctx)
 
           const row = yield* repo.create(
@@ -527,8 +543,13 @@ export function makeCollectionServiceLayer(
             return yield* new NotFoundError({ collection: collection.name, id })
           }
 
+          // The rule sees the effective post-write value: a body key present in
+          // the patch resolves to the patch value, otherwise to the stored
+          // record's value, otherwise to null.
+          const ctxWithBody: RequestCtx = { ...ctx, body: { ...existing.value, ...cleaned } }
+
           if (!ctx.admin) {
-            const ruleWhere = yield* compileRule(collection, "update", ctx)
+            const ruleWhere = yield* compileRule(collection, "update", ctxWithBody)
 
             // Rule check against this specific row
             const combined = andWhere(ruleWhere, idClause(id))
@@ -538,7 +559,7 @@ export function makeCollectionServiceLayer(
             }
           }
 
-          const canManage = yield* canManageRecord(collection, id, ctx)
+          const canManage = yield* canManageRecord(collection, id, ctxWithBody)
           yield* enforceUpdateCredentials(collection, data, cleaned, existing.value, canManage, ctx)
 
           const updated = yield* repo.update(

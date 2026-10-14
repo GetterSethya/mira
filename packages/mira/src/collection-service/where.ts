@@ -35,13 +35,25 @@ const CTX_PLACEHOLDER_PATTERN = String.raw`@auth_(\w+)|@request_(\w+)_(\w+)`
  * The replacement is done in a single left-to-right pass so that the param array stays
  * in the same order as the `?` placeholders in the resulting SQL.
  *
- * Returns `ForbiddenError` if the rule references auth but `ctx.auth` is absent.
+ * Request sources resolve explicitly: `"query"` reads `ctx.query`, `"header"` reads
+ * `ctx.headers`, and `"body"` reads `ctx.body` (absent for bodiless actions, in which
+ * case the value resolves to `null`). Array values take element `[0]`, mirroring query.
+ *
+ * Returns `ForbiddenError` if the rule references auth but `ctx.auth` is absent, or if
+ * the rule references an unknown request source (fail closed).
  */
 export function resolveCtxPlaceholders(result: EnforceResult, ctx: RequestCtx, collection: string, action: string) {
   return Effect.gen(function* () {
     const needsAuth = /@auth_\w+/.test(result.sql)
     if (needsAuth && ctx.auth === undefined) {
       return yield* new ForbiddenError({ collection, action })
+    }
+
+    for (const match of result.sql.matchAll(new RegExp(CTX_PLACEHOLDER_PATTERN, "g"))) {
+      const reqSource = match[2]
+      if (reqSource !== undefined && reqSource !== "query" && reqSource !== "header" && reqSource !== "body") {
+        return yield* new ForbiddenError({ collection, action })
+      }
     }
 
     const resolved: Array<unknown> = []
@@ -61,8 +73,13 @@ export function resolveCtxPlaceholders(result: EnforceResult, ctx: RequestCtx, c
         resolved.push(ctx.auth?.collection ?? null)
       } else if (authField !== undefined) {
         resolved.push(ctx.auth?.record[authField] ?? null)
-      } else if (reqSource !== undefined && reqKey !== undefined) {
-        const val = reqSource === "query" ? ctx.query[reqKey] : ctx.headers[reqKey]
+      } else if (reqSource === "query" && reqKey !== undefined) {
+        const val = ctx.query[reqKey]
+        resolved.push(Array.isArray(val) ? val[0] : (val ?? null))
+      } else if (reqSource === "header" && reqKey !== undefined) {
+        resolved.push(ctx.headers[reqKey] ?? null)
+      } else if (reqSource === "body" && reqKey !== undefined) {
+        const val = ctx.body?.[reqKey]
         resolved.push(Array.isArray(val) ? val[0] : (val ?? null))
       }
       return "?"
@@ -77,6 +94,7 @@ export type CtxRefs = {
   authFields: ReadonlyArray<string>
   queryKeys: ReadonlyArray<string>
   headerKeys: ReadonlyArray<string>
+  bodyKeys: ReadonlyArray<string>
 }
 
 /**
@@ -88,6 +106,7 @@ export function extractCtxRefs(sql: string): CtxRefs {
   const authFields = new Set<string>()
   const queryKeys = new Set<string>()
   const headerKeys = new Set<string>()
+  const bodyKeys = new Set<string>()
 
   for (const match of sql.matchAll(new RegExp(CTX_PLACEHOLDER_PATTERN, "g"))) {
     const [, authField, reqSource, reqKey] = match
@@ -96,6 +115,8 @@ export function extractCtxRefs(sql: string): CtxRefs {
     } else if (reqSource !== undefined && reqKey !== undefined) {
       if (reqSource === "query") {
         queryKeys.add(reqKey)
+      } else if (reqSource === "body") {
+        bodyKeys.add(reqKey)
       } else {
         headerKeys.add(reqKey)
       }
@@ -105,7 +126,8 @@ export function extractCtxRefs(sql: string): CtxRefs {
   return {
     authFields: [...authFields].sort(),
     queryKeys: [...queryKeys].sort(),
-    headerKeys: [...headerKeys].sort()
+    headerKeys: [...headerKeys].sort(),
+    bodyKeys: [...bodyKeys].sort()
   }
 }
 
