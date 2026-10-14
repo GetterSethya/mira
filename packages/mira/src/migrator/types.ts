@@ -18,6 +18,25 @@ export type ColumnDef = {
   xKind?: string
 }
 
+/** An index on a table: the fields it covers and whether it is unique. Dialects derive the SQL name from these. */
+export type IndexShape = {
+  fields: Array<string>
+  unique: boolean
+}
+
+/** The physical shape of a table: its columns and its indexes. */
+export type TableShape = {
+  columns: Array<ColumnDef>
+  indexes: Array<IndexShape>
+}
+
+/** What a table looks like now and what it should look like once a plan has run. */
+export type TableShapes = {
+  /** `null` when the table does not exist yet. */
+  stored: TableShape | null
+  desired: TableShape
+}
+
 /**
  * A single DDL operation produced by the schema differ.
  * Each variant maps 1:1 to a SQL statement via the active `Dialect`.
@@ -29,9 +48,9 @@ export type MigrationStep =
   | { kind: "addColumn"; table: string; column: ColumnDef }
   | { kind: "dropColumn"; table: string; column: string }
   | { kind: "renameColumn"; table: string; from: string; to: string }
-  | { kind: "alterColumn"; table: string; column: ColumnDef }
+  | { kind: "alterColumn"; table: string; from: ColumnDef; to: ColumnDef }
   | { kind: "createIndex"; table: string; fields: Array<string>; unique: boolean }
-  | { kind: "dropIndex"; table: string; indexName: string }
+  | { kind: "dropIndex"; table: string; fields: Array<string>; unique: boolean }
   | { kind: "createSystemTable"; table: string; columns: Array<ColumnDef> }
   | { kind: "createView";        view: string; query: string }
   | { kind: "dropView";          view: string }

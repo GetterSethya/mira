@@ -2,11 +2,26 @@ import type { CollectionSchema } from "@gettersethya/mira-client"
 import { Context, Effect, Layer, References, Schema } from "effect"
 import { SqlClient, SqlError } from "effect/sql"
 
-import type { DialectType } from "@/dialect/dialect.js"
+import type { DialectType, TranslatePlanContext } from "@/dialect/dialect.js"
 import { Dialect } from "@/dialect/dialect.js"
 
-import { computePlan, diffSchemas } from "./schema-diff.js"
-import type { ColumnDef, MigrateOptions, MigrationPlan, MigrationStep, NamedSchema } from "./types.js"
+import type { MigrationError } from "./errors.js"
+import { InvalidMigrationStatementError } from "./errors.js"
+import {
+  computePlan,
+  diffSchemas,
+  isDestructiveStep,
+  schemaToColumns,
+  schemaToIndexEntries
+} from "./schema-diff.js"
+import type {
+  ColumnDef,
+  MigrateOptions,
+  MigrationPlan,
+  MigrationStep,
+  NamedSchema,
+  TableShapes
+} from "./types.js"
 import { toEffectLogLevel } from "./types.js"
 
 const parseJsonSchema = Schema.fromJsonString(Schema.Unknown)
@@ -71,13 +86,97 @@ export const SYSTEM_TABLE_STEPS: Array<MigrationStep> = [
 export class Migrator extends Context.Service<
   Migrator,
   {
-    readonly migrate: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<void, SqlError.SqlError>
-    readonly plan: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<MigrationPlan, SqlError.SqlError>
+    readonly migrate: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<void, MigrationError>
+    readonly plan: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<MigrationPlan, MigrationError>
     readonly status: (
       schemas: Array<NamedSchema>
     ) => Effect.Effect<Array<{ name: string; status: "current" | "ahead" | "behind" }>, SqlError.SqlError>
   }
 >()("Migrator") {}
+
+/** The stored and desired shape of every physical collection a plan may touch. */
+function buildPlanContext(
+  schemas: Array<NamedSchema>,
+  stored: Record<string, CollectionSchema>
+): TranslatePlanContext {
+  const tables = new Map<string, TableShapes>()
+  for (const { name, schema } of schemas) {
+    if (schema["x-collection-kind"] === "view") continue
+    const storedSchema = stored[name]
+    tables.set(name, {
+      stored:
+        storedSchema === undefined
+          ? null
+          : { columns: schemaToColumns(storedSchema), indexes: schemaToIndexEntries(storedSchema) },
+      desired: { columns: schemaToColumns(schema), indexes: schemaToIndexEntries(schema) }
+    })
+  }
+  return { tables }
+}
+
+/** A statement is only worth executing when it contains SQL, not just comments or whitespace. */
+function isExecutable(statement: string) {
+  const withoutComments = statement.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "")
+  return withoutComments.trim().length > 0
+}
+
+/**
+ * Renders a plan and rejects anything that could not be executed.
+ *
+ * Both the dialect check and the statement check happen before the transaction
+ * opens: an impossible plan must not reach the driver, and must not roll back a
+ * transaction it never needed.
+ */
+function renderPlan(
+  dialect: DialectType,
+  steps: ReadonlyArray<MigrationStep>,
+  ctx: TranslatePlanContext
+) {
+  return Effect.gen(function* () {
+    const translated = yield* dialect.translatePlan(steps, ctx)
+    for (const statement of translated.statements) {
+      if (!isExecutable(statement)) {
+        return yield* Effect.fail(new InvalidMigrationStatementError({ statement }))
+      }
+    }
+    return translated
+  })
+}
+
+/** Executes rendered statements in order, naming the statement that fails. */
+function runStatements(sql: SqlClient.SqlClient, statements: ReadonlyArray<string>) {
+  return Effect.gen(function* () {
+    for (const statement of statements) {
+      yield* Effect.logDebug(`SQL: ${statement}`)
+      yield* sql.unsafe(statement).pipe(
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            yield* Effect.logError(`Failed SQL: ${statement}`)
+            return yield* Effect.failCause(cause)
+          })
+        )
+      )
+    }
+  })
+}
+
+/**
+ * Runs the statements a dialect needs to restore connection-level state it mutated.
+ *
+ * Runs whether or not the transaction committed — a rollback skips any reset the plan
+ * appended at its own end. A failure here is logged, never propagated: the migration
+ * has already succeeded or failed on its own terms.
+ */
+function runCleanup(sql: SqlClient.SqlClient, statements: ReadonlyArray<string>) {
+  return Effect.forEach(
+    statements,
+    (statement) =>
+      sql.unsafe(statement).pipe(
+        Effect.catchCause(() => Effect.logWarning(`Migration cleanup statement failed: ${statement}`))
+      ),
+    { discard: true }
+  )
+}
 
 function migrateImplWith(
   sql: SqlClient.SqlClient,
@@ -87,12 +186,10 @@ function migrateImplWith(
 ) {
   return Effect.gen(function* () {
     yield* Effect.logDebug("Creating system tables if not exist")
-    for (const step of SYSTEM_TABLE_STEPS) {
-      for (const stmt of dialect.translate(step)) {
-        yield* Effect.logDebug(`SQL: ${stmt}`)
-        yield* sql.unsafe(stmt)
-      }
-    }
+    yield* runStatements(
+      sql,
+      SYSTEM_TABLE_STEPS.flatMap((step) => dialect.translate(step))
+    )
 
     yield* Effect.logInfo(`Migrating ${schemas.length} collections...`)
     const storedRows = yield* sql<{ name: string; schema: string }>`SELECT name, schema FROM _collections`
@@ -114,50 +211,48 @@ function migrateImplWith(
       yield* Effect.logWarning(
         "Destructive steps detected but allowDestructive is false — skipping. Re-run with allowDestructive: true to proceed."
       )
-      for (const step of plan.steps) {
-        if (step.kind === "dropTable" || step.kind === "dropColumn" || step.kind === "alterColumn") {
-          const tableLabel = "table" in step ? step.table : "unknown"
-          yield* Effect.logWarning(`  Destructive step: ${step.kind} on ${tableLabel}`)
-        }
+      for (const step of plan.steps.filter(isDestructiveStep)) {
+        const tableLabel = "table" in step ? step.table : "unknown"
+        yield* Effect.logWarning(`  Destructive step: ${step.kind} on ${tableLabel}`)
       }
       return
     }
 
-    yield* Effect.logDebug("Starting transaction")
-    yield* sql`BEGIN TRANSACTION`
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i]
+      yield* Effect.logInfo(
+        `Step [${i + 1}/${plan.steps.length}]: ${step.kind} on ${"table" in step ? step.table : ""}`
+      )
+    }
 
-    yield* Effect.catch(
-      Effect.gen(function* () {
-        for (let i = 0; i < plan.steps.length; i++) {
-          const step = plan.steps[i]
-          yield* Effect.logInfo(
-            `Step [${i + 1}/${plan.steps.length}]: ${step.kind} on ${"table" in step ? step.table : ""}`
-          )
-          const stepJson = yield* Schema.encodeEffect(parseJsonSchema)(step).pipe(
+    const { statements, cleanup } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
+
+    const transaction = Effect.gen(function* () {
+      yield* Effect.logDebug("Starting transaction")
+      yield* sql`BEGIN TRANSACTION`
+
+      yield* Effect.catch(
+        Effect.gen(function* () {
+          const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
             Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
           )
-          yield* Effect.logDebug(`Step details: ${stepJson}`)
-          for (const stmt of dialect.translate(step)) {
-            yield* Effect.logDebug(`SQL: ${stmt}`)
-            yield* sql.unsafe(stmt)
-          }
-          yield* Effect.logDebug(`Step ${i + 1} applied successfully`)
-        }
-        const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
-          Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
-        )
-        const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-        const migrationName = schemas.map((s) => s.name).join(", ")
-        yield* sql`INSERT INTO ${sql("_migrations")} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
-        yield* sql`COMMIT`
-      }),
-      (e: SqlError.SqlError) =>
-        Effect.gen(function* () {
-          yield* sql`ROLLBACK`
-          yield* Effect.logError(`Migration failed at step: ${String(e)}`)
-          return yield* e
-        })
-    )
+          yield* Effect.logDebug(`Steps: ${stepsJson}`)
+          yield* runStatements(sql, statements)
+          const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          const migrationName = schemas.map((s) => s.name).join(", ")
+          yield* sql`INSERT INTO ${sql("_migrations")} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
+          yield* sql`COMMIT`
+        }),
+        (e: SqlError.SqlError) =>
+          Effect.gen(function* () {
+            yield* sql`ROLLBACK`
+            yield* Effect.logError(`Migration failed: ${String(e)}`)
+            return yield* e
+          })
+      )
+    })
+
+    yield* transaction.pipe(Effect.ensuring(runCleanup(sql, cleanup)))
 
     for (const { name, schema } of schemas) {
       yield* Effect.logDebug(`Writing schema for ${name}`)
@@ -189,6 +284,9 @@ function planImplWith(
       storedRecord[row.name] = yield* decodeStoredSchema(row.schema)
     }
     const plan = computePlan(schemas, storedRecord, options)
+    // Render (and reject) the plan here too, so a dry run surfaces an impossible plan
+    // instead of leaving it to the next boot.
+    yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
 
     yield* Effect.logInfo(`Plan: ${plan.steps.length} steps`)
     const planJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(

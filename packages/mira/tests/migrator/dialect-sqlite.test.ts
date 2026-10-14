@@ -73,8 +73,8 @@ describe("sqliteDialect", () => {
     expect(sql).toEqual([`DROP VIEW IF EXISTS "active_posts"`])
   })
 
-  it("DROP INDEX", () => {
-    const step: MigrationStep = { kind: "dropIndex", table: "posts", indexName: "idx_posts_status" }
+  it("DROP INDEX derives the name from the dialect's indexName", () => {
+    const step: MigrationStep = { kind: "dropIndex", table: "posts", fields: ["status"], unique: false }
     const sql = dialect.translate(step)
     expect(sql).toEqual(['DROP INDEX IF EXISTS "idx_posts_status"'])
   })

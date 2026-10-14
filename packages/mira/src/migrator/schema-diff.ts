@@ -1,6 +1,6 @@
 import type { CollectionSchema, JsonSchemaProperty } from "@gettersethya/mira-client"
 
-import type { ColumnDef, MigrationPlan, MigrationStep, NamedSchema } from "./types.js"
+import type { ColumnDef, IndexShape, MigrationPlan, MigrationStep, NamedSchema } from "./types.js"
 
 function jsonKeysDiffer(a: unknown, b: unknown) {
   if (a === b) return false
@@ -50,12 +50,19 @@ export function schemaToColumns(schema: CollectionSchema) {
     })
 }
 
-/** Extracts index entries from a schema's `x-indexes`, adding a deterministic name to each. */
-export function schemaToIndexEntries(schema: CollectionSchema) {
-  return (schema["x-indexes"] ?? []).map((idx) => ({
-    ...idx,
-    name: `idx_${schema["x-collection-kind"]}_${idx.fields.join("_")}`
-  }))
+/** Extracts the index shapes from a schema's `x-indexes`. */
+export function schemaToIndexEntries(schema: CollectionSchema): Array<IndexShape> {
+  return (schema["x-indexes"] ?? []).map((idx) => ({ fields: idx.fields, unique: idx.unique }))
+}
+
+/**
+ * Identity of an index within a table, used to compare stored against desired.
+ *
+ * Dialects derive the SQL name from the same two inputs, so nothing here needs to
+ * agree with a dialect's naming scheme.
+ */
+function indexKey(idx: IndexShape) {
+  return `${idx.unique ? "unique" : "index"}:${idx.fields.join("\u0000")}`
 }
 
 function diffViewSchemas(
@@ -107,7 +114,7 @@ export function diffSchemas(name: string, stored: CollectionSchema | null, desir
       if (!sc) {
         steps.push({ kind: "addColumn", table: name, column: dc })
       } else if (sc.type !== dc.type || sc.nullable !== dc.nullable || jsonKeysDiffer(sc.default, dc.default)) {
-        steps.push({ kind: "alterColumn", table: name, column: dc })
+        steps.push({ kind: "alterColumn", table: name, from: sc, to: dc })
       }
     }
 
@@ -119,22 +126,65 @@ export function diffSchemas(name: string, stored: CollectionSchema | null, desir
 
     const storedIndexes = schemaToIndexEntries(stored)
     const desiredIndexes = schemaToIndexEntries(desired)
-    const storedIdxMap = new Map(storedIndexes.map((i) => [i.name, i]))
-    const desiredIdxMap = new Map(desiredIndexes.map((i) => [i.name, i]))
+    const storedKeys = new Set(storedIndexes.map(indexKey))
+    const desiredKeys = new Set(desiredIndexes.map(indexKey))
 
     for (const di of desiredIndexes) {
-      if (!storedIdxMap.has(di.name)) {
+      if (!storedKeys.has(indexKey(di))) {
         steps.push({ kind: "createIndex", table: name, fields: di.fields, unique: di.unique })
       }
     }
     for (const si of storedIndexes) {
-      if (!desiredIdxMap.has(si.name)) {
-        steps.push({ kind: "dropIndex", table: name, indexName: si.name })
+      if (!desiredKeys.has(indexKey(si))) {
+        steps.push({ kind: "dropIndex", table: name, fields: si.fields, unique: si.unique })
       }
     }
   }
 
   return steps
+}
+
+/**
+ * Order in which a whole plan's steps are emitted.
+ *
+ * What blocks a change goes first, what depends on the result goes last: SQLite
+ * refuses to drop a column that is still indexed, and a view cannot be created
+ * before the columns it selects exist. Ordering globally — instead of per
+ * collection, in declaration order — makes a plan independent of how the
+ * collections happen to be listed.
+ */
+const STEP_PRIORITY: Record<MigrationStep["kind"], number> = {
+  dropView: 0,
+  dropIndex: 1,
+  createTable: 2,
+  dropTable: 2,
+  renameTable: 2,
+  createSystemTable: 2,
+  addColumn: 2,
+  alterColumn: 2,
+  dropColumn: 2,
+  renameColumn: 2,
+  createIndex: 3,
+  createView: 4
+}
+
+/**
+ * Whether a step can lose or rewrite data that is already stored.
+ *
+ * Relaxing `NOT NULL` and changing a default cannot, so they do not require
+ * `allowDestructive` — demanding it would skip the whole plan, since a plan is
+ * applied all-or-nothing.
+ */
+export function isDestructiveStep(step: MigrationStep): boolean {
+  switch (step.kind) {
+    case "dropTable":
+    case "dropColumn":
+      return true
+    case "alterColumn":
+      return step.from.type !== step.to.type || (step.from.nullable && !step.to.nullable)
+    default:
+      return false
+  }
 }
 
 /**
@@ -147,32 +197,24 @@ export function computePlan(
   options?: { allowDestructive?: boolean }
 ): MigrationPlan {
   const steps: Array<MigrationStep> = []
-  let destructive = false
 
   for (const { name, schema } of schemas) {
-    const storedSchema = stored[name] ?? null
-    const diffSteps = diffSchemas(name, storedSchema, schema)
-    for (const step of diffSteps) {
-      if (step.kind === "dropTable" || step.kind === "dropColumn" || step.kind === "alterColumn") {
-        destructive = true
-      }
-    }
-    steps.push(...diffSteps)
+    steps.push(...diffSchemas(name, stored[name] ?? null, schema))
   }
 
   if (options?.allowDestructive) {
     const desiredNames = new Set(schemas.map((s) => s.name))
     for (const name of Object.keys(stored)) {
-      if (!desiredNames.has(name)) {
-        if (stored[name]["x-collection-kind"] === "view") {
-          steps.push({ kind: "dropView", view: name })
-        } else {
-          steps.push({ kind: "dropTable", table: name })
-          destructive = true
-        }
-      }
+      if (desiredNames.has(name)) continue
+      steps.push(
+        stored[name]["x-collection-kind"] === "view"
+          ? { kind: "dropView", view: name }
+          : { kind: "dropTable", table: name }
+      )
     }
   }
 
-  return { steps, destructive }
+  steps.sort((a, b) => STEP_PRIORITY[a.kind] - STEP_PRIORITY[b.kind])
+
+  return { steps, destructive: steps.some(isDestructiveStep) }
 }
