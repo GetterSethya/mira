@@ -105,6 +105,16 @@ export function makeCachedCollectionServiceLayer(
 
       return CollectionService.of({
         list: (collection, cursor, perPage, ctx, filter, sort, select, expand) => {
+          // Reads that expand a relation are not cached.
+          if (expand != null && expand.length > 0) {
+            return svc.list(collection, cursor, perPage, ctx, filter, sort, select, expand).pipe(
+              Effect.withSpan("cache.list", {
+                kind: "internal",
+                attributes: { collection: collection.name, "cache.bypass": true },
+              })
+            )
+          }
+
           const ctxTag = buildCtxCacheTag(collection, "list", ctx)
           const key = `${collection.name}:${stableListKey(cursor, perPage, filter, sort, select, expand)}::${ctxTag}`
           return Effect.gen(function* () {
@@ -128,6 +138,16 @@ export function makeCachedCollectionServiceLayer(
         },
 
         view: (collection, id, ctx, select, expand) => {
+          // Reads that expand a relation are not cached.
+          if (expand != null && expand.length > 0) {
+            return svc.view(collection, id, ctx, select, expand).pipe(
+              Effect.withSpan("cache.view", {
+                kind: "internal",
+                attributes: { collection: collection.name, "cache.bypass": true },
+              })
+            )
+          }
+
           const ctxTag = buildCtxCacheTag(collection, "view", ctx)
           const key = `${stableViewKey(collection.name, id, select, expand)}::${ctxTag}`
           return Effect.gen(function* () {

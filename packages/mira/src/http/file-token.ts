@@ -3,11 +3,10 @@ import { Effect, Redacted, Schema } from "effect"
 import type { HttpRouter} from "effect/http";
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 
-import { idClause } from "@/collection-service/where.js"
 import { AppConfig } from "@/config/index.js"
 import { Repository } from "@/repository/repository.js"
 
-import { signFileToken, verifyJwt } from "./auth.js"
+import { authenticateSession, signFileToken } from "./auth.js"
 
 const TokenRequestSchema = Schema.Struct({
   collection: Schema.String
@@ -50,26 +49,18 @@ function issueToken(
     const config = yield* AppConfig
     const jwtSecret = Redacted.value(config.jwtSecret)
 
-    // Require auth token from Bearer header or mira_token cookie
-    const rawToken = extractToken(req)
-    if (rawToken === null) {
-      return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
-    }
-
-    const authPayload = yield* verifyJwt(rawToken, jwtSecret).pipe(
-      Effect.orElseSucceed(() => null)
+    // Single fail-closed session check, shared with `resolveAuth` /
+    // `requireApiAuth`: session typ + jti deny-list + record existence +
+    // `pwf` credential binding + generation. A file token (no `typ: "session"`)
+    // is rejected here, so it cannot be chained to mint further tokens.
+    const auth = yield* authenticateSession(extractToken(req), (name) =>
+      collectionMap.get(name)?.schema["x-collection-kind"] === "auth"
     )
-    if (authPayload === null) {
+    if (auth === undefined) {
       return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
     }
-
-    // Verify the auth user still exists
-    const repo = yield* Repository
-    const authRows = yield* repo
-      .viewFilter(authPayload.col, { where: idClause(authPayload.sub) })
-      .pipe(Effect.orElseSucceed(() => []))
-
-    if (authRows.length === 0) {
+    const sub = auth.record["id"]
+    if (typeof sub !== "string") {
       return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
     }
 
@@ -93,7 +84,7 @@ function issueToken(
     }
 
     const fileToken = yield* signFileToken(
-      { sub: authPayload.sub, col: authPayload.col, filecol: body.collection },
+      { sub, col: auth.collection, filecol: body.collection },
       jwtSecret
     ).pipe(Effect.orDie)
 

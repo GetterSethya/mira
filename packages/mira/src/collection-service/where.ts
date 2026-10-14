@@ -1,7 +1,6 @@
-import type { CollectionSchema } from "@gettersethya/mira-client"
 import { Effect } from "effect"
 
-import type { RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
+import type { RepoRecord, WhereClause } from "@/repository/types.js"
 import type { EnforceResult } from "@/rule/enforcer.js"
 
 import type { RequestCtx } from "./context.js"
@@ -154,15 +153,4 @@ export function resolveFieldRefs(clause: WhereClause, record: RepoRecord): Where
   })
 
   return { sql: newSql, params: resolved }
-}
-
-export function buildUserSort(
-  query: RequestCtx["query"],
-  schema: CollectionSchema
-): SortOrder | null {
-  const sortField = typeof query["sort"] === "string" ? query["sort"] : null
-  if (sortField === null || !schema.properties[sortField]) return null
-  const rawOrder = typeof query["order"] === "string" ? query["order"] : null
-  const direction = rawOrder === "desc" ? "desc" : "asc"
-  return { field: sortField, direction }
 }

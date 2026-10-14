@@ -52,8 +52,23 @@ export class ReadOnlyError extends Data.TaggedError("ReadOnlyError")<{
 }> {}
 
 /**
+ * Error raised when a request payload exceeds a server-imposed size limit
+ * (a request-level body budget, or a per-file / per-field cap).
+ *
+ * The server returns HTTP 413 when this error propagates to the HTTP layer.
+ *
+ * @example
+ * new PayloadTooLargeError({ limit: 2_097_152, detail: "File exceeds 2097152 bytes" })
+ */
+export class PayloadTooLargeError extends Data.TaggedError("PayloadTooLargeError")<{
+  limit: number
+  detail: string
+}> {}
+
+/**
  * Union of all errors that can be raised by CollectionService operations.
- * Includes NotFoundError, ForbiddenError, ValidationError, ReadOnlyError, and SqlError.
+ * Includes NotFoundError, ForbiddenError, ValidationError, ReadOnlyError,
+ * PayloadTooLargeError, and SqlError.
  *
  * @see CollectionService — all methods fail with CollectionError
  */
@@ -62,4 +77,5 @@ export type CollectionError =
   | ForbiddenError
   | ValidationError
   | ReadOnlyError
+  | PayloadTooLargeError
   | SqlError.SqlError

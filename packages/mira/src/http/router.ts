@@ -6,7 +6,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { toPublicRecord } from "@/collection-service/decode.js"
-import { ValidationError } from "@/collection-service/errors.js"
+import { PayloadTooLargeError, ValidationError } from "@/collection-service/errors.js"
 import { AppConfig } from "@/config/index.js"
 import type { CryptoService } from "@/crypto/index.js"
 import { Dialect } from "@/dialect/dialect.js"
@@ -16,7 +16,7 @@ import type { FileStorage } from "@/storage/storage.js"
 import type { ThumbnailService } from "@/thumbnail/types.js"
 
 import type { AuthService} from "./auth.js";
-import { signJwt, verifyAnyJwt, verifyJwt, verifyPassword } from "./auth.js"
+import { authenticateSession, computePwf, signJwt, verifyJwt, verifyPassword } from "./auth.js"
 import { catchCollectionErrors } from "./errors.js"
 import { makeFileServeRoute } from "./file-serve.js"
 import { makeFileTokenRoute } from "./file-token.js"
@@ -24,6 +24,7 @@ import { processMultipartUpload } from "./files.js"
 import { parseExpandParam, parseFilterParam, parsePaginationParam, parseSelectParam, parseSortParam } from "./params.js"
 import { makeSchemaRoute } from "./schema.js"
 import { telemetryLogsRoute, telemetrySpansRoute } from "./telemetry-routes.js"
+import { TokenStore } from "./token-store.js"
 
 type Ms =
   | CollectionService
@@ -39,6 +40,16 @@ const AuthBodySchema = Schema.Struct({
   email: Schema.String,
   password: Schema.String
 })
+
+/**
+ * Maximum size of a non-multipart (JSON) request body, enforced from the
+ * declared `Content-Length` before the body is read. Multipart bodies use the
+ * richer budget in `processMultipartUpload`.
+ *
+ * 32 MiB is comfortably above normal record payloads while still bounding what a
+ * single request can buffer into memory.
+ */
+const MAX_JSON_BODY_BYTES = 32 * 1024 * 1024
 
 function buildRequestCtx(
   auth: { collection: string; record: RepoRecord } | undefined,
@@ -88,6 +99,14 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
     )
   }
   return Effect.gen(function* () {
+    // Reject an over-size JSON body from the declared length, before reading it.
+    const declared = Number(req.headers["content-length"] ?? "")
+    if (Number.isFinite(declared) && declared > MAX_JSON_BODY_BYTES) {
+      return yield* new PayloadTooLargeError({
+        limit: MAX_JSON_BODY_BYTES,
+        detail: `Request body exceeds ${MAX_JSON_BODY_BYTES} bytes`
+      })
+    }
     const parsed = yield* req.json.pipe(
       Effect.mapError(
         (e) =>
@@ -113,6 +132,10 @@ export function makeCollectionRouter(
 ) {
   const collectionMap = new Map(collections.map((c) => [c.name, c]))
   const adminSet = new Set(adminCollections)
+  const authNames = new Set(
+    collections.filter((c) => c.schema["x-collection-kind"] === "auth").map((c) => c.name)
+  )
+  const isAuthCol = (name: string) => authNames.has(name)
 
   function collectionRoute(
     operation: string,
@@ -186,31 +209,23 @@ export function makeCollectionRouter(
 
       if (token === null) {
         yield* annotate("auth.result", "anonymous")
-        return yield* Effect.void
+        return undefined
       }
-      const config = yield* AppConfig
-      const jwtSecret = Redacted.value(config.jwtSecret)
-      const payload = yield* verifyJwt(token, jwtSecret).pipe(Effect.orElseSucceed(() => undefined))
-      if (payload === undefined) {
+
+      // Single fail-closed auth decision shared with `requireApiAuth` and the
+      // file-token mint route: session typ + jti deny-list + record existence +
+      // `pwf` credential binding + generation check.
+      const auth = yield* authenticateSession(token, isAuthCol).pipe(
+        Effect.withSpan("http.session-auth", { kind: "internal" })
+      )
+      if (auth === undefined) {
         yield* annotate("auth.result", "invalid_token")
         return undefined
       }
-      const targetCol = collectionMap.get(payload.col)
-      if (targetCol === undefined || targetCol.schema["x-collection-kind"] !== "auth") {
-        yield* annotate("auth.result", "invalid_token")
-        return undefined
-      }
-      const repo = yield* Repository
-      const rows = yield* repo
-        .viewFilter(payload.col, { where: { sql: "t.id = ?", params: [payload.sub] } })
-        .pipe(Effect.orElseSucceed(() => []))
-      if (rows.length === 0) {
-        yield* annotate("auth.result", "invalid_token")
-        return undefined
-      }
+
       yield* annotate("auth.result", "authenticated")
-      yield* annotate("auth.collection", payload.col)
-      return { collection: payload.col, record: rows[0] }
+      yield* annotate("auth.collection", auth.collection)
+      return { collection: auth.collection, record: auth.record }
     }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))
   }
 
@@ -319,7 +334,13 @@ export function makeCollectionRouter(
       }
       const config = yield* AppConfig
       const jwtSecret = Redacted.value(config.jwtSecret)
-      const token = yield* signJwt({ sub: rid, col: col.name }, jwtSecret).pipe(
+      const store = yield* TokenStore
+      // Bind the token to the credential hash and record the current generation.
+      const pwf = yield* computePwf(storedHash, jwtSecret).pipe(
+        Effect.mapError(() => HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
+      )
+      const gen = yield* store.currentGeneration(col.name, rid).pipe(Effect.orElseSucceed(() => 0))
+      const token = yield* signJwt({ sub: rid, col: col.name }, jwtSecret, { pwf, gen }).pipe(
         Effect.mapError(() => HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
       )
       const dialect = yield* Dialect
@@ -335,8 +356,8 @@ export function makeCollectionRouter(
     })
   )
 
-  const logoutRoute = Effect.succeed(
-    HttpServerResponse.empty({ status: 204 }).pipe(
+  const logoutRoute = Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) => {
+    const clearCookie = HttpServerResponse.empty({ status: 204 }).pipe(
       HttpServerResponse.setCookieUnsafe("mira_token", "", {
         httpOnly: true,
         sameSite: "strict",
@@ -344,7 +365,53 @@ export function makeCollectionRouter(
         maxAge: Duration.zero,
       })
     )
-  )
+    const token = extractToken(req)
+    if (token === null) {
+      return Effect.succeed(clearCookie)
+    }
+    return Effect.gen(function* () {
+      const config = yield* AppConfig
+      const jwtSecret = Redacted.value(config.jwtSecret)
+      const payload = yield* verifyJwt(token, jwtSecret).pipe(Effect.orElseSucceed(() => undefined))
+      if (payload !== undefined && payload.jti !== null) {
+        const expiresAtMs =
+          payload.exp !== null ? payload.exp * 1000 : Date.now() + 72 * 60 * 60 * 1000
+        const store = yield* TokenStore
+        // Best-effort: a store failure must not stop the cookie from clearing.
+        yield* store.revoke(payload.jti, expiresAtMs).pipe(Effect.orElseSucceed(() => undefined))
+      }
+      return clearCookie
+    })
+  })
+
+  /**
+   * "Log out everywhere": bump the per-user generation so every token minted
+   * before this call (on any instance) is rejected by the `gen` check, then
+   * clear the presented cookie.
+   */
+  const logoutAllRoute = Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) => {
+    const clearCookie = HttpServerResponse.empty({ status: 204 }).pipe(
+      HttpServerResponse.setCookieUnsafe("mira_token", "", {
+        httpOnly: true,
+        sameSite: "strict",
+        path: "/",
+        maxAge: Duration.zero,
+      })
+    )
+    return Effect.gen(function* () {
+      const auth = yield* authenticateSession(extractToken(req), isAuthCol)
+      if (auth === undefined) {
+        return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
+      }
+      const userId = auth.record["id"]
+      if (typeof userId !== "string") {
+        return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
+      }
+      const store = yield* TokenStore
+      yield* store.bumpGeneration(auth.collection, userId).pipe(Effect.orElseSucceed(() => undefined))
+      return clearCookie
+    }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation: "logout_all" } }))
+  })
 
   const meRoute = Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
     Effect.gen(function* () {
@@ -401,49 +468,52 @@ export function makeCollectionRouter(
           Effect.ignore
         )
 
-      const authCol = yield* Effect.gen(function* () {
+      const gate = yield* Effect.gen(function* () {
         if (token === null) {
           yield* annotate("auth.result", "anonymous")
-          return null
+          return "unauthorized" as const
         }
 
-        const config = yield* AppConfig
-        const jwtSecret = Redacted.value(config.jwtSecret)
-        const result = yield* verifyAnyJwt(token, jwtSecret).pipe(Effect.orElseSucceed(() => undefined))
-
-        if (result === undefined) {
+        // Same fail-closed session decision as `resolveAuth`: a file token, a
+        // revoked token, a token for a deleted user, a stale `pwf`, or a
+        // pre-`logout-all` generation all land here as `undefined` → 401.
+        const auth = yield* authenticateSession(token, isAuthCol).pipe(
+          Effect.withSpan("http.session-auth", { kind: "internal" })
+        )
+        if (auth === undefined) {
           yield* annotate("auth.result", "invalid_token")
-          return null
+          return "unauthorized" as const
+        }
+
+        // Privileged endpoints are admin-only.
+        if (!adminSet.has(auth.collection)) {
+          yield* annotate("auth.result", "forbidden")
+          return "forbidden" as const
         }
 
         yield* annotate("auth.result", "authenticated")
-
-        const col = result.payload["col"]
-        if (typeof col === "string") {
-          yield* annotate("auth.collection", col)
-        }
-
-        return typeof col === "string" ? col : ""
-      }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))
-
-      if (authCol !== null) {
+        yield* annotate("auth.collection", auth.collection)
         yield* Effect.currentSpan.pipe(
           Effect.tap((span) =>
             Effect.sync(() => {
-              span.attribute("auth.collection", authCol)
               const parent = span.parent
               if (Option.isSome(parent) && parent.value._tag === "Span") {
-                parent.value.attribute("auth.collection", authCol)
+                parent.value.attribute("auth.collection", auth.collection)
               }
             })
           ),
           Effect.ignore
         )
-      }
+        return "ok" as const
+      }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))
 
-      if (authCol === null) {
+      if (gate === "forbidden") {
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
+      }
+      if (gate === "unauthorized") {
         return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
       }
+
       return yield* effect.pipe(
         Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })))
       )
@@ -461,6 +531,7 @@ export function makeCollectionRouter(
     HttpRouter.route("DELETE", "/api/collections/:name/:id", deleteRoute),
     HttpRouter.route("POST", "/api/collections/:name/auth-with-password", authRoute),
     HttpRouter.route("POST", "/api/auth/logout", logoutRoute),
+    HttpRouter.route("POST", "/api/auth/logout-all", logoutAllRoute),
     HttpRouter.route("GET", "/api/auth/me", meRoute),
     HttpRouter.route("GET", "/api/files/:collection/:id/:filename", fileServeRoute),
     HttpRouter.route("POST", "/api/files/token", fileTokenRoute),

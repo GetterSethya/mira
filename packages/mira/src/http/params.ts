@@ -39,7 +39,9 @@ export function parseSortParam(
   schema: CollectionSchema
 ): SortOrder | null {
   const sortField = typeof query["sort"] === "string" ? query["sort"] : null
-  if (sortField === null || !schema.properties[sortField]) return null
+  // `Object.hasOwn` so keys inherited from `Object.prototype` are treated as
+  // unknown and ignored.
+  if (sortField === null || !Object.hasOwn(schema.properties, sortField)) return null
   const rawOrder = typeof query["order"] === "string" ? query["order"] : null
   const direction = rawOrder === "desc" ? "desc" : "asc"
   return { field: sortField, direction }

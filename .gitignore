@@ -21,3 +21,9 @@ Thumbs.db
 AGENTS.md
 .gaps/
 .handovers/
+
+# Security test scratch (disk-backed FileStorage fixtures)
+packages/mira/tests/security/.tmp/
+
+# Local design/audit notes (not tracked)
+.docs/

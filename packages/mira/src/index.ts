@@ -25,6 +25,7 @@ export { AuthService, hashPassword, verifyJwt,verifyPassword } from "./http/auth
 export type { CorsConfig } from "./http/cors.js"
 export { defaultCorsConfig, makeCorsMiddleware } from "./http/cors.js"
 export { catchCollectionErrors } from "./http/errors.js"
+export { TokenStore, TokenStoreLive } from "./http/token-store.js"
 export { Repository, RepositoryLive } from "./repository/index.js"
 
 // Telemetry (sqlite logger)

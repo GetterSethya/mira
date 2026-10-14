@@ -79,7 +79,16 @@ function buildJoins(sql: SqlClient.SqlClient, expand?: ReadonlyArray<ExpandDef>)
   let result = sql.literal("")
   for (const e of expand) {
     const alias = `_e_${e.localField}`
-    result = sql`${result} LEFT JOIN ${sql(e.targetTable)} ${sql(alias)} ON ${sql(alias)}.${sql("id")} = t.${sql(e.localField)}`
+    const on = e.onClause
+    if (on !== undefined) {
+      // The onClause rule SQL is bound with `Statement.literal` so its params
+      // appear before the WHERE params in textual order. Its column references
+      // use the compile-time alias `t`; they are rebound to the join alias here.
+      const scoped = on.sql.replace(/\bt\./g, `${alias}.`)
+      result = sql`${result} LEFT JOIN ${sql(e.targetTable)} ${sql(alias)} ON ${sql(alias)}.${sql("id")} = t.${sql(e.localField)} AND (${literal(scoped, on.params)})`
+    } else {
+      result = sql`${result} LEFT JOIN ${sql(e.targetTable)} ${sql(alias)} ON ${sql(alias)}.${sql("id")} = t.${sql(e.localField)}`
+    }
   }
   return result
 }
@@ -89,13 +98,16 @@ function reshapeExpand(row: RepoRecord, expand?: ReadonlyArray<ExpandDef>): Repo
   const expandObj: Record<string, RepoRecord> = {}
   for (const e of expand) {
     const nested: RepoRecord = {}
+    // A left join that does not match yields NULL for every target column; a
+    // matched row always has a non-null primary key, so the relation is only
+    // materialised when a row actually matched.
     let hasValue = false
     for (const col of e.targetColumns) {
       const flatKey = `__e_${e.localField}__${col}`
       const val = row[flatKey]
       if (val !== undefined) {
         nested[col] = val
-        hasValue = true
+        if (val !== null) hasValue = true
       }
       delete row[flatKey]
     }

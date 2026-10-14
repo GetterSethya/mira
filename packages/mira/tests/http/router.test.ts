@@ -542,10 +542,15 @@ describe("makeCollectionRouter", () => {
   it.effect("GET /api/_schema — passes system annotations through instead of stripping them", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* seedUser("schemaadmin@example.com", "secret")
-      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+      yield* seedUser("schemaadmin@example.com", "secret", "_superadmin")
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(
+          HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS, ADMIN_COLLECTIONS))
+        ),
+        HttpServer.serveEffect()
+      )
       const loginRes = yield* HttpClient.execute(
-        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+        HttpClientRequest.post("/api/collections/_superadmin/auth-with-password").pipe(
           HttpClientRequest.bodyJsonUnsafe({ email: "schemaadmin@example.com", password: "secret" })
         )
       )

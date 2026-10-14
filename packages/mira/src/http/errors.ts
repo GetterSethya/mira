@@ -14,6 +14,7 @@ import type { FileStorageError } from "@/storage/storage.js"
  * | `ForbiddenError` | 403 |
  * | `ValidationError` | 422 |
  * | `ReadOnlyError` | 405 |
+ * | `PayloadTooLargeError` | 413 |
  * | `FileStorageError` | 502 |
  * | `SqlError` | 500 |
  *
@@ -54,6 +55,13 @@ export const catchCollectionErrors = <A, R>(
     ReadOnlyError: () =>
       Effect.fail(
         HttpServerResponse.jsonUnsafe({ error: "read_only" }, { status: 405 as const })
+      ),
+    PayloadTooLargeError: (e) =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "payload_too_large", detail: e.detail, limit: e.limit },
+          { status: 413 as const }
+        )
       ),
     FileStorageError: (e) =>
       Effect.fail(

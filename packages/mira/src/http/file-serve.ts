@@ -39,6 +39,30 @@ function mimeFromKey(key: string): string {
   return MIME_MAP[ext] ?? "application/octet-stream"
 }
 
+/**
+ * A served `filename` arrives as a single, percent-decoded route segment. It is
+ * only a plain filename when it contains no separator, parent reference (`..`)
+ * or NUL byte.
+ */
+function isSafeFilenameSegment(filename: string): boolean {
+  return (
+    filename.length > 0 &&
+    !filename.includes("/") &&
+    !filename.includes("\\") &&
+    !filename.includes("..") &&
+    !filename.includes("\u0000")
+  )
+}
+
+/**
+ * Reduce a filename to a conservative ASCII token for the
+ * `content-disposition` header.
+ */
+function dispositionFilename(filename: string): string {
+  const cleaned = filename.replace(/[^A-Za-z0-9._-]/g, "_")
+  return cleaned.length > 0 ? cleaned : "file"
+}
+
 function getQueryParam(
   req: HttpServerRequest.HttpServerRequest,
   name: string
@@ -64,6 +88,12 @@ export function makeFileServeRoute(
     const filename = routeCtx.params["filename"]
 
     if (colName === undefined || recordId === undefined || filename === undefined) {
+      return Effect.succeed(
+        HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
+      )
+    }
+    // Reject unsafe filename segments before touching storage or the DB.
+    if (!isSafeFilenameSegment(filename)) {
       return Effect.succeed(
         HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
       )
@@ -233,7 +263,11 @@ function serveFile(
 
     return HttpServerResponse.uint8Array(bytes, {
       status: 200,
-      headers: { "content-type": mimeType }
+      headers: {
+        "content-type": mimeType,
+        "x-content-type-options": "nosniff",
+        "content-disposition": `attachment; filename="${dispositionFilename(filename)}"`
+      }
     })
   }).pipe(Effect.orDie)
 }

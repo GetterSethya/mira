@@ -15,6 +15,7 @@ import { ipAnnotationMiddleware } from "@/http/ip-middleware.js"
 import { makePortRetryServerLayer } from "@/http/port-retry.js"
 import { makeCollectionRouter } from "@/http/router.js"
 import { HttpServerFactory } from "@/http/server-factory.js"
+import { TokenStoreLive } from "@/http/token-store.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 import type { NamedSchema } from "@/migrator/types.js"
 import { RepositoryLive } from "@/repository/repository.js"
@@ -197,8 +198,10 @@ export class MiraApp<R = never> {
       Layer.provideMerge(platform.layer)
     )
 
-    // Mid: Repository + Migrator + AppConfig, wired on foundation
-    const mid = Layer.mergeAll(RepositoryLive, MigratorLive, AppConfigLive).pipe(Layer.provideMerge(foundation))
+    // Mid: Repository + Migrator + AppConfig + durable TokenStore, wired on foundation
+    const mid = Layer.mergeAll(RepositoryLive, MigratorLive, AppConfigLive, TokenStoreLive).pipe(
+      Layer.provideMerge(foundation)
+    )
 
     // Extras: plugin layers run after mid so they can depend on AppConfig + platform services
     const extrasProvided = extrasLayer.pipe(Layer.provide(mid))

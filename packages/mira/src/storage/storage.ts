@@ -1,5 +1,5 @@
 import { FileSystem, Path } from "effect"
-import { Context, Data, Effect, Layer, Sink, Stream } from "effect"
+import { Context, Data, Effect, Layer, Result, Stream } from "effect"
 
 /**
  * Error raised when a file storage operation fails (disk I/O, permission issues, etc.).
@@ -20,6 +20,17 @@ export class FileStorageError extends Data.TaggedError("FileStorageError")<{
 export class FileStorageNotFound extends Data.TaggedError("FileStorageNotFound")<{
   key: string
 }> {}
+
+/**
+ * Structural guard for the platform error surfaced by `FileSystem`/`Path`
+ * operations. Used to remap only the file sink's own errors while leaving the
+ * caller's stream errors (`E`) untouched — `Effect.catchTag` cannot narrow a
+ * generic error channel, so we discriminate on the `_tag` string here.
+ */
+const isPlatformError = (
+  u: unknown
+): u is { readonly _tag: "PlatformError"; readonly message: string } =>
+  typeof u === "object" && u !== null && "_tag" in u && u._tag === "PlatformError"
 
 /**
  * File storage abstraction tag.
@@ -87,25 +98,55 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
       const pathSvc = yield* Path.Path
       const root = config["directory"] ?? "./uploads"
 
+      /**
+       * Resolve `key` against the storage `root` and return the contained
+       * absolute path, or `undefined` when the key is not contained. Both sides
+       * are fully resolved first so `.`, `..`, redundant separators and mixed
+       * (`/` vs `\`) separators are normalised.
+       */
+      const containedPath = (key: string): string | undefined => {
+        const rootAbs = pathSvc.resolve(root)
+        const target = pathSvc.resolve(pathSvc.join(root, key))
+        const rel = pathSvc.relative(rootAbs, target)
+        if (rel.startsWith("..") || pathSvc.isAbsolute(rel)) {
+          return undefined
+        }
+        return target
+      }
+
       return FileStorage.of({
         upload: <E>(key: string, stream: Stream.Stream<Uint8Array, E>, _mimeType: string) =>
           Effect.gen(function* () {
-            const fullPath = pathSvc.join(root, key)
+            const fullPath = containedPath(key)
+            if (fullPath === undefined) {
+              return yield* new FileStorageError({ reason: `Refusing to write outside storage root: ${key}` })
+            }
             yield* fs.makeDirectory(pathSvc.dirname(fullPath), { recursive: true }).pipe(
               Effect.catchTag("PlatformError", (e) => Effect.fail(new FileStorageError({ reason: e.message })))
             )
-            // Map PlatformError at the sink level so generic E is not involved
-            const mappedSink = Sink.mapError(
-              fs.sink(fullPath),
-              (e) => new FileStorageError({ reason: e.message ?? String(e) })
-            )
-            yield* Stream.run(stream, mappedSink)
+            // `Sink.mapError` (and `catchTag` over the generic stream error `E`)
+            // cannot be used here: mapping at the sink rewrites errors coming
+            // from the *upstream* stream too, which would turn the upload
+            // size-limit `ValidationError` into a `FileStorageError` (502).
+            // Instead run, then remap only the sink's own `PlatformError`,
+            // passing every upstream error through untouched.
+            const outcome = yield* Effect.result(Stream.run(stream, fs.sink(fullPath)))
+            if (Result.isFailure(outcome)) {
+              const error = outcome.failure
+              if (isPlatformError(error)) {
+                return yield* new FileStorageError({ reason: error.message })
+              }
+              return yield* Effect.fail(error)
+            }
             return key
           }),
 
         delete: (key: string) =>
           Effect.gen(function* () {
-            const fullPath = pathSvc.join(root, key)
+            const fullPath = containedPath(key)
+            if (fullPath === undefined) {
+              return yield* new FileStorageError({ reason: `Refusing to delete outside storage root: ${key}` })
+            }
             yield* fs.remove(fullPath, { force: true }).pipe(
               Effect.catchTag("PlatformError", (e) => Effect.fail(new FileStorageError({ reason: e.message })))
             )
@@ -115,7 +156,10 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
 
         read: (key: string) =>
           Effect.gen(function* () {
-            const fullPath = pathSvc.join(root, key)
+            const fullPath = containedPath(key)
+            if (fullPath === undefined) {
+              return yield* new FileStorageNotFound({ key })
+            }
             const present = yield* fs.exists(fullPath).pipe(
               Effect.catchTag("PlatformError", () => Effect.succeed(false))
             )
@@ -127,7 +171,10 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
 
         exists: (key: string) =>
           Effect.gen(function* () {
-            const fullPath = pathSvc.join(root, key)
+            const fullPath = containedPath(key)
+            if (fullPath === undefined) {
+              return yield* new FileStorageError({ reason: `Refusing to probe outside storage root: ${key}` })
+            }
             return yield* fs.exists(fullPath).pipe(
               Effect.catchTag("PlatformError", () => Effect.succeed(false))
             )
@@ -135,7 +182,10 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
 
         list: (prefix: string) =>
           Effect.gen(function* () {
-            const prefixPath = pathSvc.join(root, prefix)
+            const prefixPath = containedPath(prefix)
+            if (prefixPath === undefined) {
+              return yield* new FileStorageError({ reason: `Refusing to list outside storage root: ${prefix}` })
+            }
             const entries = yield* fs.readDirectory(prefixPath, { recursive: true }).pipe(
               Effect.catchTag("PlatformError", () => Effect.succeed<Array<string>>([]))
             )
@@ -150,7 +200,7 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
             )
             return fileEntries.map((entry) =>
               pathSvc.join(prefix, entry).split(pathSvc.sep).join("/")
-            ) as ReadonlyArray<string>
+            )
           })
       })
     })

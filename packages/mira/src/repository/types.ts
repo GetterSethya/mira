@@ -25,6 +25,12 @@ export type ExpandDef = {
   localField: string
   targetTable: string
   targetColumns: ReadonlyArray<string>
+  /**
+   * Optional row-level restriction for the join. When present, the JOIN matches
+   * the target row only if this clause holds (compiled against the join alias).
+   * Absent means an unrestricted join (admin, or a target with no view rule).
+   */
+  onClause?: WhereClause
 }
 
 /** Options for list() — where is optional (omit for public collections). */
