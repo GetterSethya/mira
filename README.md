@@ -1047,6 +1047,7 @@ The `crons` filter on cron hooks works like `collections` on record hooks — om
 The `@gettersethya/mira-dashboard` package is a ready-made plugin that adds an admin UI at `/_dashboard/`. It includes:
 
 - Collection browser with record list, create, edit, and delete
+- Per-collection **Connect** sheet: SDK snippets, raw `fetch`/`curl` calls, and a generated `mira.generated.ts`
 - Logs and span viewer (works best with `makeSqliteTelemetryLayer`)
 - App config display
 - Superadmin account management
@@ -1083,6 +1084,16 @@ The dashboard also exposes cron management endpoints:
 |---|---|---|
 | `GET` | `/_dashboard/api/crons` | List all registered cron jobs with their current state |
 | `POST` | `/_dashboard/api/crons/:name/run` | Trigger immediate execution of a cron job |
+
+### Connect sheet
+
+Every collection page (`/_dashboard/collections/<name>`) has a **Connect** button next to *New record*. It opens a sheet with three tabs, all generated from the live schema served by `GET /api/_schema`:
+
+- **SDK** — `createMiraClient(...).withCollections(collections)` usage for the collection (browser cookie and server token variants), the `@gettersethya/mira-tanstack-adapter` form, and the auth operations (`authWithPassword`, `register`, `me`) when the collection is an auth collection.
+- **fetch** — the exact HTTP calls, switchable between `fetch` and `curl`, including the `filter` query param's JSON `FilterNode` AST.
+- **Types** — a generated `mira.generated.ts` file containing `BaseCollection` / `AuthCollection` / `ViewCollection` definitions plus `InferRecord` and `CreateInput`/`UpdateInput` aliases, ready to copy or download. Switch between *This collection* (which pulls in relation targets so the file compiles) and *All collections*.
+
+Snippet content is tailored to the collection kind: `view` collections show read-only calls only, `base` collections show full CRUD, and collections with `Field.file()` fields gain a multipart upload example. The base URL defaults to the configured `application_url` and is editable in the sheet.
 
 ---
 

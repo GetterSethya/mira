@@ -7,6 +7,12 @@ import { makeClientHandler } from "./handler.js"
 export type ApiFieldSchema = {
   type?: string
   format?: string
+  /** JSON Schema default. Only emitted for boolean fields today. */
+  default?: unknown
+  minLength?: number
+  maxLength?: number
+  minimum?: number
+  maximum?: number
   "x-kind"?: string
   "x-system"?: boolean
   "x-hidden"?: boolean
@@ -16,6 +22,9 @@ export type ApiFieldSchema = {
   "x-collection"?: string
   "x-field"?: string
   "x-protected"?: boolean
+  "x-literal"?: ReadonlyArray<string>
+  "x-maxSize"?: number
+  "x-mimeTypes"?: ReadonlyArray<string>
 }
 
 export type ApiCollectionSchema = {
