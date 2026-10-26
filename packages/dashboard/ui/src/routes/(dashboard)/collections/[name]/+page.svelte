@@ -7,6 +7,7 @@
   import RecordTable, { type BulkAction, type BulkActionContext } from "$lib/components/RecordTable.svelte"
   import RecordForm from "$lib/components/RecordForm.svelte"
   import TableSkeleton from "$lib/components/TableSkeleton.svelte"
+  import ConnectSheet from "$lib/components/ConnectSheet.svelte"
   import { Button } from "$lib/components/ui/button/index.js"
   import * as Sheet from "$lib/components/ui/sheet/index.js"
   import { toast } from "svelte-sonner"
@@ -14,7 +15,13 @@
   import { Spinner } from "$lib/components/ui/spinner"
   import { recordFormStore } from "$lib/stores/record-form-store.svelte"
   import { SvelteSet } from "svelte/reactivity"
-  import { IconRefresh, IconTrash, IconDownload } from "@tabler/icons-svelte"
+  import { IconRefresh, IconTrash, IconDownload, IconPlugConnected } from "@tabler/icons-svelte"
+
+  type ConnectTab = "sdk" | "fetch" | "types"
+
+  function isConnectTab(value: string | null): value is ConnectTab {
+    return value === "sdk" || value === "fetch" || value === "types"
+  }
 
   const schemaQuery = createQuery(() => ({ queryKey: ["schema"], queryFn: () => mira.telemetry.getSchema().raw() }))
 
@@ -22,6 +29,8 @@
   const cursor = $derived(Number(page.url.searchParams.get("cursor") || "0"))
   const showSheet = $derived(page.url.searchParams.get("open") !== null)
   const id = $derived(page.url.searchParams.get("id"))
+  const connectParam = $derived(page.url.searchParams.get("connect"))
+  const connectTab = $derived(isConnectTab(connectParam) ? connectParam : "sdk")
   const schema = $derived(schemaQuery.data?.find((s) => s.name === name) ?? null)
   const api = $derived(makeCollectionApi(name))
   const columnCount = $derived(schema ? Object.keys(schema.fields).length + 1 : 5)
@@ -93,6 +102,24 @@
     const searchParams = page.url.searchParams
     searchParams.set("open", "true")
     searchParams.set("id", recordId)
+    goto(`${page.url.pathname}?${searchParams.toString()}`)
+  }
+
+  function openConnect() {
+    const searchParams = page.url.searchParams
+    searchParams.set("connect", "sdk")
+    goto(`${page.url.pathname}?${searchParams.toString()}`)
+  }
+
+  function changeConnectTab(tab: ConnectTab) {
+    const searchParams = page.url.searchParams
+    searchParams.set("connect", tab)
+    goto(`${page.url.pathname}?${searchParams.toString()}`)
+  }
+
+  function closeConnectSheet() {
+    const searchParams = page.url.searchParams
+    searchParams.delete("connect")
     goto(`${page.url.pathname}?${searchParams.toString()}`)
   }
 
@@ -209,18 +236,24 @@
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-bold font-mono">{name}</h1>
-    {#if schema}
-      <Button
-        onclick={() => {
-          const searchParams = page.url.searchParams
-          searchParams.set("open", "true")
-          searchParams.delete("id")
-          goto(`${page.url.pathname}?${searchParams.toString()}`)
-        }}
-      >
-        New record
-      </Button>
-    {/if}
+    <div class="flex items-center gap-2">
+      {#if schema}
+        <Button variant="outline" onclick={openConnect}>
+          <IconPlugConnected />
+          Connect
+        </Button>
+        <Button
+          onclick={() => {
+            const searchParams = page.url.searchParams
+            searchParams.set("open", "true")
+            searchParams.delete("id")
+            goto(`${page.url.pathname}?${searchParams.toString()}`)
+          }}
+        >
+          New record
+        </Button>
+      {/if}
+    </div>
   </div>
 
   {#if schemaQuery.isLoading}
@@ -282,3 +315,14 @@
     </Sheet.Footer>
   </Sheet.Content>
 </Sheet.Root>
+
+{#if schema !== null}
+  <ConnectSheet
+    open={connectParam !== null}
+    tab={connectTab}
+    {schema}
+    allSchemas={schemaQuery.data ?? []}
+    onTabChange={changeConnectTab}
+    onClose={closeConnectSheet}
+  />
+{/if}
