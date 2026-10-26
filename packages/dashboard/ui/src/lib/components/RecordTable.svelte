@@ -27,14 +27,12 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js"
   import * as Tooltip from "$lib/components/ui/tooltip/index.js"
   import type { CollectionSchema } from "$lib/dashboard-api.js"
-  import { isGeneratedField, isTableHiddenField, isSystemField, fieldKind, relationLabelField } from "$lib/schema.js"
+  import { isGeneratedField, isTableHiddenField, isSystemField, fieldKind, relationLabelField, stripHiddenValues } from "$lib/schema.js"
   import {
     getCoreRowModel,
     type ColumnDef,
     type Row,
-    type RowSelectionState,
-    type Table as TanStackTable,
-    type Updater
+    type Table as TanStackTable
   } from "@tanstack/table-core"
   import { createSvelteTable, renderSnippet, FlexRender } from "$lib/components/ui/data-table"
   import { cn } from "$lib/utils"
@@ -107,30 +105,39 @@
   )
   const someSelected = $derived(selectedCount > 0 && !allSelected)
 
-  const rowSelection = $derived.by((): RowSelectionState => {
-    const state: RowSelectionState = {}
-    for (const id of selectedIds) state[id] = true
-    return state
-  })
-
   function findSelectedRecords(): Record<string, unknown>[] {
     return records.filter((r) => selectedIds.has(recordId(r)))
   }
 
-  function handleRowSelectionChange(updater: Updater<RowSelectionState>) {
+  function isRowSelected(row: Record<string, unknown>): boolean {
+    return selectedIds.has(recordId(row))
+  }
+
+  /**
+   * Selection lives entirely in `selectedIds` (reactive Svelte state), never in
+   * TanStack's internal row-selection state. `createSvelteTable` stores
+   * `options.state` as a plain snapshot in its merged table state, so
+   * `row.getIsSelected()` is not reactive — cells that read it never re-render
+   * when the selection changes (the header, which reads the `$derived` above,
+   * would update while every row stayed stale). Cells therefore read
+   * `selectedIds` directly and toggling writes back to it.
+   */
+  function applySelection(next: SvelteSet<string>) {
+    selectedIds = next
+    onSelectionChange?.(new Set(next))
+  }
+
+  function toggleRow(id: string) {
     if (bulkRunning) return
-    const next = typeof updater === "function" ? updater(rowSelection) : updater
-    const ids = new SvelteSet<string>()
-    for (const [id, selected] of Object.entries(next)) {
-      if (selected) ids.add(id)
-    }
-    selectedIds = ids
-    onSelectionChange?.(new Set(ids))
+    const next = new SvelteSet(selectedIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    applySelection(next)
   }
 
   function toggleAllSelection() {
     if (bulkRunning) return
-    table.toggleAllRowsSelected(!allSelected)
+    applySelection(allSelected ? new SvelteSet() : new SvelteSet(records.map(recordId)))
   }
 
   function makeCtx(): BulkActionContext {
@@ -252,12 +259,7 @@
       return columns
     },
     getRowId: (row) => recordId(row),
-    enableRowSelection: true,
-    getCoreRowModel: getCoreRowModel(),
-    get state() {
-      return { rowSelection }
-    },
-    onRowSelectionChange: (updater) => handleRowSelectionChange(updater)
+    getCoreRowModel: getCoreRowModel()
   })
 
   /** Moves the element to <body> so no ancestor can become its containing block. */
@@ -279,7 +281,8 @@
   }
 
   function copyJson(record: Record<string, unknown>) {
-    navigator.clipboard.writeText(JSON.stringify(record, null, 2))
+    // Strip `x-hidden` columns (auth password hashes) before copying.
+    navigator.clipboard.writeText(JSON.stringify(stripHiddenValues(schema, record), null, 2))
     toast.success("Copied to clipboard")
   }
 
@@ -330,7 +333,7 @@
       {#each table.getRowModel().rows as row (row.id)}
         <Table.Row
           class="cursor-pointer hover:bg-muted/50"
-          data-state={row.getIsSelected() ? "selected" : undefined}
+          data-state={isRowSelected(row.original) ? "selected" : undefined}
           onclick={() => onEdit(recordId(row.original))}
         >
           {#each row.getVisibleCells() as cell (cell.id)}
@@ -456,8 +459,8 @@
 
 {#snippet SelectCell({ row }: { row: Row<Record<string, unknown>> })}
   <Checkbox
-    checked={row.getIsSelected()}
-    onCheckedChange={() => row.toggleSelected()}
+    checked={isRowSelected(row.original)}
+    onCheckedChange={() => toggleRow(recordId(row.original))}
     disabled={bulkRunning}
     aria-label="Select row"
   />

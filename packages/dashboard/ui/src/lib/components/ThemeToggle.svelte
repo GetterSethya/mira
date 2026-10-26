@@ -15,7 +15,7 @@
 <Button
   onclick={(e: any) => {
     toggleMode()
-    onclick(e)
+    onclick?.(e)
   }}
   class={cn("ml-auto", className)}
   {variant}

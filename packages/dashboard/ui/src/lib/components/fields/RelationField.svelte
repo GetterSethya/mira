@@ -2,8 +2,10 @@
   import { createQuery } from "@tanstack/svelte-query"
   import { useFieldContext } from "$lib/form-context.js"
   import * as Field from "$lib/components/ui/field/index.js"
+  import * as InputGroup from "$lib/components/ui/input-group/index.js"
   import * as Select from "$lib/components/ui/select/index.js"
   import { makeCollectionApi } from "$lib/collection-client.js"
+  import { IconLink } from "@tabler/icons-svelte"
 
   const field = useFieldContext<string | null>()
   const { label, collectionName }: { label: string; collectionName: string } = $props()
@@ -14,12 +16,6 @@
     const systemFields = new Set(["id", "seqId", "created", "updated", "password"])
     return Object.entries(record).find(([k]) => !systemFields.has(k))?.[1] ?? record["id"]
   }
-
-  const selected = $derived(
-    field.state.value
-      ? { value: field.state.value, label: field.state.value }
-      : undefined
-  )
 </script>
 
 <Field.Field>
@@ -29,14 +25,21 @@
     value={field.state.value ?? ""}
     onValueChange={(v) => field.handleChange(v || null)}
   >
-    <Select.Trigger class="w-full">
-      {#if query.data}
-        {@const rec = query.data.items.find((r) => r["id"] === field.state.value)}
-        {rec ? String(firstNonSystemKey(rec)) : "Select…"}
-      {:else}
-        Select…
-      {/if}
-    </Select.Trigger>
+    <InputGroup.Root>
+      <InputGroup.Addon>
+        <IconLink />
+      </InputGroup.Addon>
+      <Select.Trigger
+        class="w-full flex-1 justify-between rounded-none border-0 bg-transparent ps-1.5 pe-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent"
+      >
+        {#if query.data}
+          {@const rec = query.data.items.find((r) => r["id"] === field.state.value)}
+          {rec ? String(firstNonSystemKey(rec)) : "Select…"}
+        {:else}
+          Select…
+        {/if}
+      </Select.Trigger>
+    </InputGroup.Root>
     <Select.Content>
       {#if query.isLoading}
         <Select.Item value="" disabled>Loading…</Select.Item>

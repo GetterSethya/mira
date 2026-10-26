@@ -14,7 +14,7 @@ import {
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
 
 const UserCollection = AuthCollection.define("users", {
-  name: Field.text({ required: true, minLength: 1 }),
+  name: Field.text({ required: true, minLength: 1 })
 })
 
 type UserCollection = InferRecord<typeof UserCollection.fields>
@@ -61,6 +61,7 @@ const postCollectionRules = defineRule(PostCollection, (R) => ({
 
 Mira.builder()
   .platform(NodePlatform) // NodePlatform, BunPlatform, DenoPlatform, CloudflarePlatform,....
+  .migrations({ allowDestructive: false })
   .database(SqliteDatabase({ filename: process.env["DB_PATH"] ?? "mira.db" })) // PostgresDatabase, SqliteDatabase, MySqlDatabase, D1Database, TursoDatabase....
   .storage(LocalFileStorage({ directory: process.env["UPLOAD_DIR"] ?? "./uploads" })) // LocalfileStorage, S3Storage,
   .collections([

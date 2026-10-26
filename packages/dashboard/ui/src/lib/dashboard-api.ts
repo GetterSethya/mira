@@ -64,6 +64,18 @@ export interface CronApiState {
   lastError: string | null
 }
 
+export interface AppConfigResponse {
+  /** Resolved at boot — may differ from `values.application_url` if the port was taken. */
+  appName: string
+  applicationUrl: string
+  port: number
+  /** Persisted `_config` values, minus internal keys. */
+  values: Record<string, string>
+  editable: string[]
+  readOnly: string[]
+  secret: string[]
+}
+
 export const dashboardApi = {
   bootstrapStatus: (): DashboardEffect<{ bootstrapped: boolean }> => execute(HCR.get("/bootstrap-status")),
 
@@ -75,7 +87,10 @@ export const dashboardApi = {
   ): DashboardEffect<{ id: string; email: string }> =>
     executeWithBody(HCR.bodyJson(HCR.post("/register"), { email, password, name, token })),
 
-  config: (): DashboardEffect<{ config: Record<string, unknown>; keys: string[] }> => execute(HCR.get("/config")),
+  config: (): DashboardEffect<AppConfigResponse> => execute(HCR.get("/config")),
+
+  updateConfig: (values: Record<string, string>): DashboardEffect<AppConfigResponse> =>
+    executeWithBody(HCR.bodyJson(HCR.put("/config"), { values })),
 
   crons: {
     getAll: (): DashboardEffect<CronApiState[]> => execute(HCR.get("/crons")),

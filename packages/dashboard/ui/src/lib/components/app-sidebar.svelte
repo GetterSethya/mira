@@ -64,6 +64,10 @@
           {
             title: "cron",
             url: resolve("/crons")
+          },
+          {
+            title: "settings",
+            url: resolve("/settings")
           }
         ],
         icon: IconServer

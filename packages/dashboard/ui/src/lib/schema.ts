@@ -84,6 +84,8 @@ export type FieldEntry = {
   label: string
   readOnly: boolean
   collectionName: string | null
+  /** JSON Schema `format` (e.g. `email`, `date-time`), used to pick the field icon. */
+  format: string | null
 }
 
 function label(name: string): string {
@@ -106,6 +108,7 @@ export function fieldEntries(schema: CollectionSchema): FieldEntry[] {
       label: label(name),
       readOnly: false,
       collectionName: field["x-collection"] ?? null,
+      format: field.format ?? null,
     }))
 }
 
@@ -137,6 +140,26 @@ export function buildDefaultValues(
 
 export function hasFileField(schema: CollectionSchema): boolean {
   return Object.values(schema.fields).some((f) => f["x-kind"] === "file")
+}
+
+/**
+ * Client mirror of the server's `stripHiddenFields`. Admin callers legitimately
+ * receive `x-hidden` columns (auth password hashes) — `makeCollectionRouter`
+ * deliberately skips hidden-field stripping for plugin-declared admin
+ * collections — so anything the dashboard serialises for a human (JSON export,
+ * "Copy JSON") must drop them explicitly.
+ */
+export function stripHiddenValues(
+  schema: CollectionSchema,
+  record: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(record)) {
+    const field = schema.fields[key]
+    if (field === undefined || isHiddenField(field)) continue
+    out[key] = value
+  }
+  return out
 }
 
 export function toFormData(values: Record<string, unknown>): FormData {

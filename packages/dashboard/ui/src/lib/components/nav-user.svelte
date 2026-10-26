@@ -6,7 +6,7 @@
   import { clearLoggedIn } from "$lib/auth.js"
   import { goto } from "$app/navigation"
   import { resolve } from "$app/paths"
-  import { IconDotsVertical, IconLogout, IconUser } from "@tabler/icons-svelte"
+  import { IconDotsVertical, IconLogout, IconSettings, IconUser } from "@tabler/icons-svelte"
   import { IconSize } from "$lib/constants"
 
   const meQuery = createQuery(() => ({
@@ -32,11 +32,11 @@
           <Avatar.Image src="" alt={meQuery.data?.name ?? ""} />
           <Avatar.Fallback>{meQuery.data?.name?.substring(0, 2) ?? ""}</Avatar.Fallback>
         </Avatar.Root>
-        <div class="flex flex-col text-left">
+        <div class="flex min-w-0 flex-1 flex-col text-left">
           <span class="truncate text-md font-bold">{meQuery.data?.name || ""}</span>
           <span class="truncate text-sm text-foreground/70">{meQuery.data?.email || ""}</span>
         </div>
-        <IconDotsVertical size={IconSize} />
+        <IconDotsVertical size={IconSize} class="ml-auto shrink-0" />
       </button>
     {/snippet}
   </DropdownMenu.Trigger>
@@ -60,9 +60,20 @@
     </DropdownMenu.Item>
     <DropdownMenu.Separator />
 
-    <DropdownMenu.Item onclick={logout} class="cursor-pointer">
+    <DropdownMenu.Item
+      onclick={() => goto(resolve("/settings/account"))}
+      class="cursor-pointer"
+    >
       <IconUser />
       <span class="leading-none">Account</span>
+    </DropdownMenu.Item>
+
+    <DropdownMenu.Item
+      onclick={() => goto(resolve("/settings/app"))}
+      class="cursor-pointer"
+    >
+      <IconSettings />
+      <span class="leading-none">App settings</span>
     </DropdownMenu.Item>
     <DropdownMenu.Separator />
     <DropdownMenu.Item onclick={logout} class="cursor-pointer">

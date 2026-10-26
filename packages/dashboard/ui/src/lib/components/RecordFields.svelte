@@ -13,7 +13,7 @@
   const entries = $derived(fieldEntries(schema))
 </script>
 
-{#each entries as { name, kind, label, collectionName } (name)}
+{#each entries as { name, kind, label, collectionName, format } (name)}
   <form.AppField {name}>
     {#snippet children(field)}
       {#if kind === "relation" && collectionName}
@@ -31,7 +31,7 @@
       {:else if kind === "json"}
         <field.JsonField {label} />
       {:else}
-        <field.TextField {label} />
+        <field.TextField {label} {format} />
       {/if}
     {/snippet}
   </form.AppField>

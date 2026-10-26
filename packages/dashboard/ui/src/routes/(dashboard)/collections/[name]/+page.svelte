@@ -3,6 +3,7 @@
   import { page } from "$app/state"
   import { mira } from "$lib/mira.js"
   import { makeCollectionApi } from "$lib/collection-client.js"
+  import { stripHiddenValues } from "$lib/schema.js"
   import RecordTable, { type BulkAction, type BulkActionContext } from "$lib/components/RecordTable.svelte"
   import RecordForm from "$lib/components/RecordForm.svelte"
   import TableSkeleton from "$lib/components/TableSkeleton.svelte"
@@ -152,7 +153,12 @@
   }
 
   function bulkJson(ctx: BulkActionContext) {
-    const json = JSON.stringify(ctx.selectedRecords, null, 2)
+    // Admin requests come back with `x-hidden` columns (auth password hashes) —
+    // never write those into a file the operator will download.
+    const records = schema
+      ? ctx.selectedRecords.map((record) => stripHiddenValues(schema, record))
+      : ctx.selectedRecords
+    const json = JSON.stringify(records, null, 2)
     const filename = `${name}-${ctx.selectedRecords.length}-${timestamp()}.json`
     const url = URL.createObjectURL(new Blob([json], { type: "application/json" }))
     const anchor = document.createElement("a")
