@@ -126,15 +126,30 @@ describe("sdkSections", () => {
     expect(requiredBlock(sections, "upload").code).toContain("cover: file")
   })
 
-  it("adds login, register, and me for auth collections", () => {
+  it("adds register, login, and me first for auth collections", () => {
     const sections = sdkSections(options(users))
     const ids = blocks(sections).map((candidate) => candidate.id)
 
-    expect(ids).toContain("login")
     expect(ids).toContain("register")
+    expect(ids).toContain("login")
     expect(ids).toContain("me")
-    expect(requiredBlock(sections, "login").code).toContain("authWithPassword().raw")
     expect(requiredBlock(sections, "register").code).toContain("passwordConfirm")
+    expect(requiredBlock(sections, "register").code).toContain("does not log in")
+    expect(requiredBlock(sections, "login").code).toContain("authWithPassword().raw")
+    expect(requiredBlock(sections, "login").code).toContain("mira_token cookie")
+
+    // Auth operations come before CRUD so they are visible without scrolling.
+    expect(ids.indexOf("register")).toBeLessThan(ids.indexOf("login"))
+    expect(ids.indexOf("login")).toBeLessThan(ids.indexOf("create"))
+    expect(ids.indexOf("me")).toBeLessThan(ids.indexOf("list"))
+  })
+
+  it("does not add auth blocks for base collections", () => {
+    const ids = blocks(sdkSections(options(posts))).map((candidate) => candidate.id)
+
+    expect(ids).not.toContain("register")
+    expect(ids).not.toContain("login")
+    expect(ids).not.toContain("me")
   })
 
   it("keeps view collections read-only", () => {
@@ -166,13 +181,24 @@ describe("fetchSections", () => {
     expect(ids).not.toContain("upload")
   })
 
-  it("adds read, write, and auth sections for auth collections", () => {
+  it("adds read, auth, and write sections for auth collections", () => {
     const sections = fetchSections(options(users))
     const ids = blocks(sections).map((candidate) => candidate.id)
 
-    expect(sections.map((section) => section.id)).toEqual(["read", "write", "auth"])
+    expect(sections.map((section) => section.id)).toEqual(["read", "auth", "write"])
+    expect(ids).toContain("register")
     expect(ids).toContain("login")
     expect(ids).toContain("me")
+  })
+
+  it("shows register as a create with credentials and no auto-login", () => {
+    const register = requiredBlock(fetchSections(options(users)), "register")
+
+    expect(register.code).toContain("does not log in automatically")
+    expect(register.code).toContain('method: "POST"')
+    expect(register.code).toContain('email: "user@example.com"')
+    expect(register.code).toContain("passwordConfirm")
+    expect(register.code).not.toContain("auth-with-password")
   })
 
   it("adds an upload block under write when a file field exists", () => {
@@ -239,10 +265,23 @@ describe("curlSections", () => {
   it("mirrors the fetch sections with bash blocks", () => {
     const sections = curlSections(options(users))
 
-    expect(sections.map((section) => section.id)).toEqual(["read", "write", "auth"])
+    expect(sections.map((section) => section.id)).toEqual(["read", "auth", "write"])
     for (const candidate of blocks(sections)) {
       expect(candidate.language).toBe("bash")
     }
+  })
+
+  it("shows register and login for auth collections", () => {
+    const sections = curlSections(options(users))
+
+    const register = requiredBlock(sections, "register")
+    expect(register.code).toContain("does not log in automatically")
+    expect(register.code).toContain("passwordConfirm")
+    expect(register.code).not.toContain("authorization")
+
+    const login = requiredBlock(sections, "login")
+    expect(login.code).toContain("auth-with-password")
+    expect(login.code).not.toContain("authorization")
   })
 
   it("keeps view collections read-only", () => {

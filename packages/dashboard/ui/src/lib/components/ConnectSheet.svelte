@@ -128,7 +128,11 @@
 {/snippet}
 
 <Sheet.Root open={open} onOpenChange={(value) => !value && onClose()}>
-  <Sheet.Content side="right" class="w-full overflow-y-auto sm:max-w-2xl" showCloseButton={false}>
+  <Sheet.Content
+    side="right"
+    class="data-[side=right]:w-full data-[side=right]:sm:max-w-4xl data-[side=right]:2xl:max-w-5xl overflow-y-auto"
+    showCloseButton={false}
+  >
     <Sheet.Header class="bg-card sticky top-0 z-30 border-b">
       <Sheet.Title>Connect to {schema.name}</Sheet.Title>
       <Sheet.Description>

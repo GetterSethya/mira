@@ -68,14 +68,49 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
         "",
         `export const mira = createMiraClient(${JSON.stringify(baseUrl)}).withCollections(collections)`
       ].join("\n")
-    },
-    {
-      id: "list",
-      label: "list",
-      language: "ts",
-      code: sdkListCode(schema)
     }
   ]
+
+  if (auth) {
+    plain.push(
+      {
+        id: "register",
+        label: "register",
+        language: "ts",
+        code: [
+          "// register() creates the account. It does not log in automatically.",
+          `const user = await ${access}.register().raw(${tsObject(createBody(schema), 0)})`
+        ].join("\n")
+      },
+      {
+        id: "login",
+        label: "login",
+        language: "ts",
+        code: [
+          `const { token, record } = await ${access}.authWithPassword().raw({`,
+          '  email: "user@example.com",',
+          '  password: "secret123"',
+          "})",
+          "",
+          "// Browser: the server sets an HttpOnly mira_token cookie.",
+          "// Server: call mira.auth.setToken(token)."
+        ].join("\n")
+      },
+      {
+        id: "me",
+        label: "me",
+        language: "ts",
+        code: `const me = await ${access}.me().raw()`
+      }
+    )
+  }
+
+  plain.push({
+    id: "list",
+    label: "list",
+    language: "ts",
+    code: sdkListCode(schema)
+  })
 
   if (writable) {
     plain.push({
@@ -133,32 +168,6 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
         `  data: { ${formatKey(file.name)}: file }`,
         "})"
       ].join("\n")
-    })
-  }
-
-  if (auth) {
-    plain.push({
-      id: "login",
-      label: "login",
-      language: "ts",
-      code: [
-        `const { token, record } = await ${access}.authWithPassword().raw({`,
-        '  email: "user@example.com",',
-        '  password: "secret123"',
-        "})"
-      ].join("\n")
-    })
-    plain.push({
-      id: "register",
-      label: "register",
-      language: "ts",
-      code: `const user = await ${access}.register().raw(${tsObject(createBody(schema), 0)})`
-    })
-    plain.push({
-      id: "me",
-      label: "me",
-      language: "ts",
-      code: `const me = await ${access}.me().raw()`
     })
   }
 
@@ -251,8 +260,9 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
     {
       id: "plain",
       heading: "Plain client",
-      description:
-        "Browser client with cookie-based auth. Import the generated collection map, then call typed methods.",
+      description: auth
+        ? "Browser client with cookie-based auth. register() creates the account (it does not log in); authWithPassword() logs in and the server sets an HttpOnly cookie."
+        : "Browser client with cookie-based auth. Import the generated collection map, then call typed methods.",
       blocks: plain
     },
     {
@@ -327,6 +337,35 @@ export function fetchSections(options: SnippetOptions): ReadonlyArray<SnippetSec
     }
   ]
 
+  if (auth) {
+    sections.push({
+      id: "auth",
+      heading: "Authentication",
+      description:
+        "Register an account, log in, and fetch the current user. The browser keeps the session cookie.",
+      blocks: [
+        {
+          id: "register",
+          label: "register",
+          language: "ts",
+          code: fetchRegisterCode(schema, collectionUrl)
+        },
+        {
+          id: "login",
+          label: "login",
+          language: "ts",
+          code: fetchLoginCode(collectionUrl)
+        },
+        {
+          id: "me",
+          label: "me",
+          language: "ts",
+          code: fetchMeCode(baseUrl)
+        }
+      ]
+    })
+  }
+
   if (writable) {
     const writeBlocks: Array<SnippetBlock> = [
       {
@@ -363,28 +402,6 @@ export function fetchSections(options: SnippetOptions): ReadonlyArray<SnippetSec
       heading: "Write",
       description: "Write records over HTTP. JSON bodies carry the required fields.",
       blocks: writeBlocks
-    })
-  }
-
-  if (auth) {
-    sections.push({
-      id: "auth",
-      heading: "Authentication",
-      description: "Log in and fetch the current user. The browser keeps the session cookie.",
-      blocks: [
-        {
-          id: "login",
-          label: "login",
-          language: "ts",
-          code: fetchLoginCode(collectionUrl)
-        },
-        {
-          id: "me",
-          label: "me",
-          language: "ts",
-          code: fetchMeCode(baseUrl)
-        }
-      ]
     })
   }
 
@@ -443,6 +460,46 @@ export function curlSections(options: SnippetOptions): ReadonlyArray<SnippetSect
     }
   ]
 
+  if (auth) {
+    sections.push({
+      id: "auth",
+      heading: "Authentication",
+      description:
+        "Register an account, exchange credentials for a JWT, then send it as a Bearer token.",
+      blocks: [
+        {
+          id: "register",
+          label: "register",
+          language: "bash",
+          code: [
+            "# register = a create on an auth collection; it does not log in automatically",
+            curlJson("POST", collectionUrl, createBody(schema), false)
+          ].join("\n")
+        },
+        {
+          id: "login",
+          label: "login",
+          language: "bash",
+          code: curlJson(
+            "POST",
+            `${collectionUrl}/auth-with-password`,
+            [
+              ["email", "user@example.com"],
+              ["password", "secret123"]
+            ],
+            false
+          )
+        },
+        {
+          id: "me",
+          label: "me",
+          language: "bash",
+          code: curlGet(joinUrl(baseUrl, "/api/auth/me"), true)
+        }
+      ]
+    })
+  }
+
   if (writable) {
     const writeBlocks: Array<SnippetBlock> = [
       {
@@ -484,36 +541,6 @@ export function curlSections(options: SnippetOptions): ReadonlyArray<SnippetSect
       heading: "Write",
       description: "JSON writes; upload a file with multipart/form-data.",
       blocks: writeBlocks
-    })
-  }
-
-  if (auth) {
-    sections.push({
-      id: "auth",
-      heading: "Authentication",
-      description: "Exchange credentials for a JWT, then send it as a Bearer token.",
-      blocks: [
-        {
-          id: "login",
-          label: "login",
-          language: "bash",
-          code: curlJson(
-            "POST",
-            `${collectionUrl}/auth-with-password`,
-            [
-              ["email", "user@example.com"],
-              ["password", "secret123"]
-            ],
-            false
-          )
-        },
-        {
-          id: "me",
-          label: "me",
-          language: "bash",
-          code: curlGet(joinUrl(baseUrl, "/api/auth/me"), true)
-        }
-      ]
     })
   }
 
@@ -624,6 +651,16 @@ function fetchUploadCode(schema: ApiCollectionSchema, collectionUrl: string): st
     "})",
     ERROR_LINE,
     "const record = await res.json()"
+  ].join("\n")
+}
+
+function fetchRegisterCode(
+  schema: ApiCollectionSchema,
+  collectionUrl: string
+): string {
+  return [
+    "// register = a create on an auth collection; it does not log in automatically",
+    fetchJsonWrite("POST", collectionUrl, createBody(schema))
   ].join("\n")
 }
 
