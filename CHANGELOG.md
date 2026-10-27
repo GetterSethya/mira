@@ -14,6 +14,17 @@ recorded here — that release is the first one published by CI.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.34] - 2026-10-27
+
+### Changed
+
+- **npm:** alpha releases now also move the `latest` dist-tag onto the new version. While the
+  project is pre-1.0 the npm package page (which renders `latest`) shows the newest build, and
+  `npm i @gettersethya/mira` resolves to it. Stable releases take `latest` back by publishing
+  with `--tag latest`.
+- **CI:** `actions/checkout@v7`, `actions/setup-node@v7`, `actions/upload-artifact@v7` and
+  `actions/download-artifact@v8`. `pnpm/action-setup` stays on v4 because v6 requires pnpm 11+.
+
 ## [0.1.0-alpha.33] - 2026-10-27
 
 First release published by CI from a `v*` tag, with npm trusted publishing (OIDC) and
@@ -81,5 +92,6 @@ build provenance for all five packages.
 - npm publishing uses short-lived OIDC credentials bound to the `npm_alpha` / `npm_stable`
   GitHub environments, with provenance attestations and no long-lived token in the repository.
 
-[Unreleased]: https://github.com/GetterSethya/mira/compare/v0.1.0-alpha.33...HEAD
+[Unreleased]: https://github.com/GetterSethya/mira/compare/v0.1.0-alpha.34...HEAD
+[0.1.0-alpha.34]: https://github.com/GetterSethya/mira/releases/tag/v0.1.0-alpha.34
 [0.1.0-alpha.33]: https://github.com/GetterSethya/mira/releases/tag/v0.1.0-alpha.33
