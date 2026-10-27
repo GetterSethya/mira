@@ -1,7 +1,9 @@
 name: Publish
 
 # Tag-driven releases:
-#   v0.1.0-alpha.33  -> npm dist-tag `alpha`
+#   v0.1.0-alpha.33  -> npm dist-tag `alpha`, and `latest` is moved onto it too
+#                       (pre-1.0 policy: the package page should show the newest
+#                       build; stable releases take `latest` back)
 #   v0.1.0           -> npm dist-tag `latest`
 #
 # Authentication uses npm Trusted Publishing (OIDC). No npm token exists in this
@@ -12,8 +14,8 @@ name: Publish
 #   organization/user  GetterSethya
 #   repository         mira
 #   workflow filename  publish.yml
-#   environment        npm_alpha   (no reviewers)
-#                      npm_stable  (required reviewers)
+#   environment        npm_alpha   (no reviewers, allow npm publish AND npm dist-tag)
+#                      npm_stable  (required reviewers, allow npm publish)
 
 on:
   push:
@@ -153,6 +155,11 @@ jobs:
           name: npm-tarballs
           path: ${{ runner.temp }}/npm-pack
 
+      # `npm dist-tag` over OIDC needs npm >= 11.21 (12.x recommended); the npm
+      # bundled with the runner may be older.
+      - name: Upgrade npm
+        run: npm install --global npm@12
+
       - name: Publish to npm
         env:
           VERSION: ${{ needs.verify.outputs.version }}
@@ -161,6 +168,24 @@ jobs:
           set -euo pipefail
           node "$GITHUB_WORKSPACE/scripts/publish-tarballs.ts" \
             "$RUNNER_TEMP/npm-pack" "$VERSION" "$DIST_TAG"
+
+      # Pre-1.0 policy: an alpha is also the newest build, so the package page
+      # (which renders the `latest` tag) should show it. Stable releases take
+      # `latest` back automatically because they publish with --tag latest.
+      - name: Point latest at the new alpha
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          for name in \
+            "@gettersethya/mira-collection" \
+            "@gettersethya/mira-client" \
+            "@gettersethya/mira" \
+            "@gettersethya/mira-tanstack-adapter" \
+            "@gettersethya/mira-dashboard"
+          do
+            npm dist-tag add "${name}@${VERSION}" latest
+          done
 
   publish_stable:
     name: Publish stable

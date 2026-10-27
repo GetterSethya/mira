@@ -1456,7 +1456,7 @@ Releases are tag-driven and published by `.github/workflows/publish.yml`. Nothin
 
 | Git tag | npm dist-tag | Notes |
 |---|---|---|
-| `v0.1.0-alpha.33` | `alpha` | pre-release; never moves `latest` |
+| `v0.1.0-alpha.33` | `alpha` **and** `latest` | pre-release. While the project is pre-1.0 the newest alpha also becomes `latest`, so the npm package page shows it. |
 | `v0.1.0` | `latest` | stable; requires approval on the `npm_stable` environment |
 
 ```bash
@@ -1475,7 +1475,7 @@ What the workflow does, in order:
 1. **Verify** — every publishable manifest must share one version, and the tag must be `v<version>`.
 2. **Build, typecheck, test** — `pnpm install --frozen-lockfile`, `pnpm build`, `pnpm build:ui`, `pnpm -r typecheck`, `pnpm -r test`.
 3. **Pack** — `pnpm pack` per package (rewrites `workspace:*` to exact versions) and uploads the tarballs as an artifact.
-4. **Publish** — `npm publish` of the exact tarballs in dependency order (`collection → client → mira → adapter → dashboard`), skipping versions that already exist.
+4. **Publish** — `npm publish` of the exact tarballs in dependency order (`collection → client → mira → adapter → dashboard`), skipping versions that already exist. Alpha releases then move the `latest` dist-tag onto the new version.
 5. **Release** — a GitHub Release with generated notes (marked pre-release for alpha).
 
 ### One-time npm setup
@@ -1490,6 +1490,8 @@ For each of the five packages on npmjs.com → **Settings → Trusted publisher*
 | Repository | `mira` |
 | Workflow filename | `publish.yml` |
 | Environment | `npm_alpha` (no reviewers) / `npm_stable` (required reviewers) |
+
+When creating each entry, tick **Allow npm publish**. On the `npm_alpha` entry also tick **Allow npm dist-tag**, because the alpha job moves `latest` onto the freshly published version; the `npm_stable` entry needs publish only (it passes `--tag latest` at publish time).
 
 Then set **Publishing access** to *Require two-factor authentication and disallow tokens*. Each package's `repository` field must stay pointed at this repo — npm rejects the publish otherwise.
 
