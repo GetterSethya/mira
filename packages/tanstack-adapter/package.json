@@ -5,6 +5,11 @@
   "description": "Framework-agnostic TanStack Query adapter for the @gettersethya/mira client SDK",
   "author": "Getter Sethya",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GetterSethya/mira.git",
+    "directory": "packages/tanstack-adapter"
+  },
   "files": [
     "dist"
   ],

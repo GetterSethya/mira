@@ -5,6 +5,11 @@
   "description": "Self-hosted backend in TypeScript using Effect",
   "author": "Getter Sethya",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GetterSethya/mira.git",
+    "directory": "packages/mira"
+  },
   "files": [
     "dist"
   ],

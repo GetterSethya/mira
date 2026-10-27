@@ -1,13 +1,17 @@
 {
   "name": "mira-workspace",
   "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.25.0",
   "scripts": {
     "build":          "pnpm --filter @gettersethya/mira-collection build && pnpm --filter @gettersethya/mira-client build && pnpm --filter @gettersethya/mira build && pnpm --filter @gettersethya/mira-tanstack-adapter build && pnpm --filter @gettersethya/mira-dashboard build",
     "build:ui":       "pnpm --filter @gettersethya/mira-dashboard build:ui",
     "typecheck":      "pnpm -r typecheck",
     "test":           "pnpm -r test",
     "lint":           "pnpm -r lint",
-    "publish:alpha":  "node scripts/bump-alpha.mjs && pnpm build && pnpm -r publish --tag alpha && node scripts/retag-latest.mjs"
+    "release:alpha":  "node scripts/release.ts alpha",
+    "release:stable": "node scripts/release.ts stable",
+    "release:info":   "node scripts/release.ts info"
   },
   "devDependencies": {
     "typescript": "^6.0.3"

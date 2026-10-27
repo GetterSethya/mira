@@ -1447,3 +1447,50 @@ pnpm --filter @gettersethya/mira-tanstack-adapter build
 ```
 
 > Build order matters: `@gettersethya/mira-collection` and `@gettersethya/mira-client` must be built before running typecheck or tests in `@gettersethya/mira` or `@gettersethya/mira-tanstack-adapter`.
+
+---
+
+## Releasing
+
+Releases are tag-driven and published by `.github/workflows/publish.yml`. Nothing is published from a laptop.
+
+| Git tag | npm dist-tag | Notes |
+|---|---|---|
+| `v0.1.0-alpha.33` | `alpha` | pre-release; never moves `latest` |
+| `v0.1.0` | `latest` | stable; requires approval on the `npm_stable` environment |
+
+```bash
+# Bump all five manifests, commit, and create the tag (does not push)
+pnpm release:alpha     # 0.1.0-alpha.32 -> 0.1.0-alpha.33
+pnpm release:stable    # 0.1.0-alpha.32 -> 0.1.0
+
+# Publish by pushing the tag
+git push origin HEAD --follow-tags
+```
+
+`pnpm release:info v0.1.0-alpha.33` validates a tag against the manifests without changing anything. The workflow runs the same check first and refuses to build if the tag and the package versions disagree.
+
+What the workflow does, in order:
+
+1. **Verify** — every publishable manifest must share one version, and the tag must be `v<version>`.
+2. **Build, typecheck, test** — `pnpm install --frozen-lockfile`, `pnpm build`, `pnpm build:ui`, `pnpm -r typecheck`, `pnpm -r test`.
+3. **Pack** — `pnpm pack` per package (rewrites `workspace:*` to exact versions) and uploads the tarballs as an artifact.
+4. **Publish** — `npm publish` of the exact tarballs in dependency order (`collection → client → mira → adapter → dashboard`), skipping versions that already exist.
+5. **Release** — a GitHub Release with generated notes (marked pre-release for alpha).
+
+### One-time npm setup
+
+Authentication uses **npm Trusted Publishing (OIDC)**, so there is no `NPM_TOKEN` in this repository. Short-lived credentials are exchanged per run and npm attaches provenance attestations automatically.
+
+For each of the five packages on npmjs.com → **Settings → Trusted publisher**, add **two** GitHub Actions entries:
+
+| Field | Value |
+|---|---|
+| Organization or user | `GetterSethya` |
+| Repository | `mira` |
+| Workflow filename | `publish.yml` |
+| Environment | `npm_alpha` (no reviewers) / `npm_stable` (required reviewers) |
+
+Then set **Publishing access** to *Require two-factor authentication and disallow tokens*. Each package's `repository` field must stay pointed at this repo — npm rejects the publish otherwise.
+
+Finally, add a **tag protection rule** for `v*` in the repository settings so only maintainers can create release tags. The `build` job needs no secrets; publish jobs only request `id-token: write`.

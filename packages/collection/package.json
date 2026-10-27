@@ -5,6 +5,11 @@
   "description": "Collection definitions, filter DSL, and rule builder for Mira",
   "author": "Getter Sethya",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GetterSethya/mira.git",
+    "directory": "packages/collection"
+  },
   "files": [
     "dist"
   ],

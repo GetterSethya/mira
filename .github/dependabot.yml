@@ -1,0 +1,11 @@
+version: 2
+
+updates:
+  # Keeps the release workflow's actions pinned to current, patched versions.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"

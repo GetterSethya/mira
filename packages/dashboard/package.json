@@ -5,8 +5,14 @@
   "description": "Admin dashboard plugin for Mira",
   "author": "Getter Sethya",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GetterSethya/mira.git",
+    "directory": "packages/dashboard"
+  },
   "files": [
-    "dist"
+    "dist",
+    "ui/dist"
   ],
   "exports": {
     ".": {
