@@ -58,6 +58,7 @@ export interface MiraDatabase {
  * Must provide a Layer with FileStorage, requiring FileSystem and Path.
  *
  * @see LocalFileStorage — local disk implementation
+ * @see S3CompatibleStorage — S3-compatible implementation
  * @see MiraBuilder.storage — where MiraStorage is used
  */
 export interface MiraStorage {

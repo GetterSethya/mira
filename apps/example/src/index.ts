@@ -9,9 +9,11 @@ import {
   makeSqliteTelemetryLayer,
   Mira,
   NodePlatform,
+  S3CompatibleStorage,
   SqliteDatabase
 } from "@gettersethya/mira"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
+import { Config } from "effect"
 
 const UserCollection = AuthCollection.define("users", {
   name: Field.text({ required: true, minLength: 1 })
@@ -63,6 +65,15 @@ Mira.builder()
   .platform(NodePlatform) // NodePlatform, BunPlatform, DenoPlatform, CloudflarePlatform,....
   .migrations({ allowDestructive: false })
   .database(SqliteDatabase({ filename: process.env["DB_PATH"] ?? "mira.db" })) // PostgresDatabase, SqliteDatabase, MySqlDatabase, D1Database, TursoDatabase....
+  // .storage(
+  //   S3CompatibleStorage({
+  //     accessKey: Config.Redacted("RUST_FS_ACCESS_KEY"),
+  //     bucketName: Config.String("RUST_FS_BUCKET_NAME"),
+  //     endpoint: Config.String("RUST_FS_BASE_URL"),
+  //     regionName: Config.String("RUST_FS_REGION"),
+  //     secret: Config.Redacted("RUST_FS_SECRET")
+  //   })
+  // ) // LocalfileStorage, S3Storage,
   .storage(LocalFileStorage({ directory: process.env["UPLOAD_DIR"] ?? "./uploads" })) // LocalfileStorage, S3Storage,
   .collections([
     //

@@ -1,6 +1,7 @@
 import type { ApiCollectionSchema, ApiFieldSchema } from "@gettersethya/mira-client"
 
 import { pascalCase } from "./codegen.js"
+import { installCommand, type PackageManager } from "./package-manager.js"
 
 export type SnippetLanguage = "ts" | "bash" | "json"
 
@@ -23,6 +24,8 @@ export type SnippetOptions = {
   readonly schema: ApiCollectionSchema
   readonly allSchemas: ReadonlyArray<ApiCollectionSchema>
   readonly baseUrl: string
+  /** Package manager used for install commands. Defaults to `"pnpm"`. */
+  readonly packageManager?: PackageManager
 }
 
 type FieldInfo = {
@@ -53,7 +56,8 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
   const writable = schema.kind !== "view"
   const auth = schema.kind === "auth"
   const access = accessor(schema.name)
-  const install = installBlock()
+  const manager = options.packageManager ?? "pnpm"
+  const install = installBlock(manager)
 
   const plain: Array<SnippetBlock> = [
     install,
@@ -214,7 +218,10 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
       id: "adapter-install",
       label: "install",
       language: "bash",
-      code: "pnpm add @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"
+      code: installCommand(manager, [
+        "@gettersethya/mira-tanstack-adapter",
+        "@tanstack/svelte-query"
+      ])
     },
     {
       id: "adapter-setup",
@@ -547,12 +554,12 @@ export function curlSections(options: SnippetOptions): ReadonlyArray<SnippetSect
   return sections
 }
 
-function installBlock(): SnippetBlock {
+function installBlock(manager: PackageManager): SnippetBlock {
   return {
     id: "install",
     label: "install",
     language: "bash",
-    code: "pnpm add @gettersethya/mira-client"
+    code: installCommand(manager, ["@gettersethya/mira-client"])
   }
 }
 

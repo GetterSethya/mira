@@ -1,2 +1,5 @@
 export { LocalFileStorage } from "./local-preset.js"
+export { S3CompatibleStorage } from "./s3-preset.js"
+export type { S3CompatibleStorageConfig, S3ConfigValue } from "./s3-storage.js"
+export { makeS3FileStorageLayer } from "./s3-storage.js"
 export { FileStorage, FileStorageError, FileStorageNotFound, makeFileStorageLayer } from "./storage.js"

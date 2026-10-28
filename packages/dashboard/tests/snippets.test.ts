@@ -4,6 +4,7 @@ import type { ApiCollectionSchema } from "@gettersethya/mira-client"
 
 import type { SnippetBlock, SnippetSection } from "../src/snippets.js"
 import { curlSections, fetchSections, sdkSections } from "../src/snippets.js"
+import type { PackageManager } from "../src/package-manager.js"
 
 const users: ApiCollectionSchema = {
   name: "users",
@@ -56,6 +57,10 @@ const baseUrl = "https://mira.example.com:9000"
 
 function options(schema: ApiCollectionSchema) {
   return { schema, allSchemas: all, baseUrl }
+}
+
+function optionsWithManager(schema: ApiCollectionSchema, packageManager: PackageManager) {
+  return { schema, allSchemas: all, baseUrl, packageManager }
 }
 
 function blocks(sections: ReadonlyArray<SnippetSection>): ReadonlyArray<SnippetBlock> {
@@ -164,6 +169,46 @@ describe("sdkSections", () => {
     expect(ids).not.toContain("delete")
     expect(ids).not.toContain("upload")
     expect(ids).not.toContain("adapter-mutation")
+  })
+})
+
+describe("sdkSections install commands", () => {
+  const packets: ReadonlyArray<readonly [PackageManager, string, string]> = [
+    [
+      "pnpm",
+      "pnpm add @gettersethya/mira-client",
+      "pnpm add @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"
+    ],
+    [
+      "npm",
+      "npm install @gettersethya/mira-client",
+      "npm install @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"
+    ],
+    [
+      "yarn",
+      "yarn add @gettersethya/mira-client",
+      "yarn add @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"
+    ],
+    [
+      "bun",
+      "bun add @gettersethya/mira-client",
+      "bun add @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"
+    ]
+  ]
+
+  it("uses the selected package manager for every install block", () => {
+    for (const [packageManager, clientInstall, adapterInstall] of packets) {
+      const sections = sdkSections(optionsWithManager(posts, packageManager))
+
+      expect(requiredBlock(sections, "install").code).toBe(clientInstall)
+      expect(requiredBlock(sections, "adapter-install").code).toBe(adapterInstall)
+    }
+  })
+
+  it("defaults to pnpm when no package manager is passed", () => {
+    expect(requiredBlock(sdkSections(options(posts)), "install").code).toBe(
+      "pnpm add @gettersethya/mira-client"
+    )
   })
 })
 

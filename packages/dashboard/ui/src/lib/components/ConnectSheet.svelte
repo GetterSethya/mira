@@ -2,14 +2,21 @@
   import { createQuery } from "@tanstack/svelte-query"
   import type { ApiCollectionSchema } from "@gettersethya/mira-client"
   import { IconCopy, IconDownload } from "@tabler/icons-svelte"
+  import { onMount } from "svelte"
   import { toast } from "svelte-sonner"
   import { run, dashboardApi } from "$lib/dashboard-api.js"
   import { Button } from "$lib/components/ui/button/index.js"
   import { Input } from "$lib/components/ui/input/index.js"
+  import * as Select from "$lib/components/ui/select/index.js"
   import * as Sheet from "$lib/components/ui/sheet/index.js"
   import * as Tabs from "$lib/components/ui/tabs/index.js"
   import CodeBlock from "$lib/components/CodeBlock.svelte"
   import { generateCollectionFile, resolveSubset } from "../../../../src/codegen.js"
+  import {
+    isPackageManager,
+    PACKAGE_MANAGERS,
+    type PackageManager
+  } from "../../../../src/package-manager.js"
   import {
     curlSections,
     fetchSections,
@@ -20,6 +27,8 @@
   type ConnectTab = "sdk" | "fetch" | "types"
   type FetchMode = "fetch" | "curl"
   type TypesScope = "current" | "all"
+
+  const PACKAGE_MANAGER_STORAGE_KEY = "mira.dashboard.package-manager"
 
   let {
     open,
@@ -50,7 +59,24 @@
   let baseUrl = $state("")
   let fetchMode = $state<FetchMode>("fetch")
   let typesScope = $state<TypesScope>("current")
+  let packageManager = $state<PackageManager>("pnpm")
+  let packageManagerHydrated = $state(false)
   let generatedAt = $state(new Date().toISOString())
+
+  // Restore the last chosen package manager once mounted (the SPA runs without
+  // SSR, so `localStorage` is available here).
+  onMount(() => {
+    const stored = window.localStorage.getItem(PACKAGE_MANAGER_STORAGE_KEY)
+    if (isPackageManager(stored)) packageManager = stored
+    packageManagerHydrated = true
+  })
+
+  // Persist every change after the initial restore, so the choice survives
+  // reopening the sheet and reloading the dashboard.
+  $effect(() => {
+    if (!packageManagerHydrated) return
+    window.localStorage.setItem(PACKAGE_MANAGER_STORAGE_KEY, packageManager)
+  })
 
   function configuredApplicationUrl(): string | undefined {
     const data = configQuery.data
@@ -73,7 +99,7 @@
     if (open) generatedAt = new Date().toISOString()
   })
 
-  const sdkTabSections = $derived(sdkSections({ schema, allSchemas, baseUrl }))
+  const sdkTabSections = $derived(sdkSections({ schema, allSchemas, baseUrl, packageManager }))
   const fetchTabSections = $derived(
     fetchMode === "fetch"
       ? fetchSections({ schema, allSchemas, baseUrl })
@@ -119,7 +145,33 @@
               code={block.code}
               language={block.language}
               label={`${section.heading} · ${block.label}`}
-            />
+            >
+              {#snippet headerExtra()}
+                {#if block.label === "install"}
+                  <Select.Root
+                    type="single"
+                    value={packageManager}
+                    onValueChange={(value) => {
+                      if (isPackageManager(value)) packageManager = value
+                    }}
+                  >
+                    <Select.Trigger
+                      size="sm"
+                      class="w-20"
+                      aria-label="Package manager"
+                      title="Package manager"
+                    >
+                      {packageManager}
+                    </Select.Trigger>
+                    <Select.Content>
+                      {#each PACKAGE_MANAGERS as manager (manager)}
+                        <Select.Item value={manager}>{manager}</Select.Item>
+                      {/each}
+                    </Select.Content>
+                  </Select.Root>
+                {/if}
+              {/snippet}
+            </CodeBlock>
           {/each}
         </div>
       </section>

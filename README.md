@@ -144,7 +144,7 @@ Mira.builder()
 |---|---|---|
 | `.platform(p)` | yes | Runtime environment. Currently `NodePlatform`. |
 | `.database(d)` | yes | SQL backend. Currently `SqliteDatabase({ filename })`. |
-| `.storage(s)` | yes | File storage. Currently `LocalFileStorage({ directory })`. |
+| `.storage(s)` | yes | File storage. `LocalFileStorage({ directory })` for local disk, or `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for S3-compatible buckets (AWS S3, MinIO, R2, LocalStack). |
 | `.collections(c)` | yes | Array of collection definitions. |
 | `.rules(r)` | no | Array of `RuleBinding` from `defineRule(collection, cb)`. Collections without rules deny all actions. |
 | `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
@@ -153,6 +153,54 @@ Mira.builder()
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
 | `.extend(plugin)` | — | Called on `MiraApp` after `.build()`. Registers a `MiraPlugin`. |
 | `.serve(opts?)` | — | Starts the HTTP server. Optional `{ port, maxPortAttempts }` overrides `AppConfig`. If the port is already in use, the server automatically retries on the next available port (up to `maxPortAttempts`, default 10). |
+
+### Storage
+
+`.storage()` accepts one of two presets:
+
+```typescript
+.storage(LocalFileStorage({ directory: "./uploads" }))    // local disk
+
+.storage(S3CompatibleStorage({                            // AWS S3 / MinIO / R2 / LocalStack
+  endpoint: "http://localhost:9000",
+  bucketName: "mira-uploads",
+  regionName: "us-east-1",
+  accessKey: "minioadmin",
+  secret: "minioadmin",
+}))
+```
+
+`S3CompatibleStorage` signs requests with `files-sdk`'s `s3Fetch` adapter, so no `@aws-sdk/*` package is needed. The bucket must already exist. `forcePathStyle` defaults to `true` (what MinIO and LocalStack need); pass `forcePathStyle: false` for virtual-host addressing. Files are still served through Mira's `/api/files/...` route — `publicBaseUrl` only changes the direct URL returned by `FileStorage.url()`, which is useful for a CDN or custom domain (private buckets have no public URL).
+
+Every option accepts either a plain value or an Effect `Config`, resolved once when the layer is built with the active `ConfigProvider`, so missing variables fail at startup:
+
+```typescript
+import { Config } from "effect"
+
+.storage(S3CompatibleStorage({
+  endpoint: Config.String("S3_ENDPOINT"),
+  bucketName: Config.String("S3_BUCKET_NAME"),
+  regionName: Config.String("S3_REGION_NAME").pipe(Config.withDefault("us-east-1")),
+  accessKey: Config.Redacted("S3_ACCESS_KEY"),
+  secret: Config.Redacted("S3_SECRET"),
+}))
+```
+
+Plain strings and `Redacted.make(...)` values still work for `accessKey` / `secret`.
+
+For a local S3-compatible server, the repo ships `docker-compose.rustfs.yml`:
+
+```bash
+docker compose -f docker-compose.rustfs.yml up -d
+```
+
+RustFS serves the S3 API on `http://localhost:9000` (console on `:9001`) with `miraadmin` / `miraadmin-secret` by default — override with `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY`. The opt-in E2E test creates the `mira-e2e` bucket and exercises the full multipart upload → file-serving → record-delete path:
+
+```bash
+MIRA_S3_E2E=1 pnpm --filter @gettersethya/mira exec vitest run tests/storage/s3-rustfs.e2e.test.ts
+```
+
+Endpoint, bucket and credentials can be overridden with `MIRA_S3_ENDPOINT`, `MIRA_S3_BUCKET`, `MIRA_S3_REGION`, `MIRA_S3_ACCESS_KEY` and `MIRA_S3_SECRET_KEY`.
 
 ### CORS
 
