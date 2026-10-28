@@ -8,11 +8,44 @@ Every package in the workspace is versioned in lockstep: `@gettersethya/mira-col
 `@gettersethya/mira-client`, `@gettersethya/mira`, `@gettersethya/mira-tanstack-adapter`
 and `@gettersethya/mira-dashboard` always share one version.
 
-Pre-releases are published under the `alpha` npm dist-tag and never move `latest`;
-stable releases are published under `latest`. Entries before `0.1.0-alpha.33` are not
-recorded here — that release is the first one published by CI.
+Pre-releases are published under the `alpha` npm dist-tag; while the project is pre-1.0
+the `latest` tag also tracks the newest alpha. Stable releases publish under `latest`.
+Entries before `0.1.0-alpha.33` are not recorded here — that release is the first one
+published by CI.
 
 ## [Unreleased]
+
+## [0.1.0-alpha.35] - 2026-10-28
+
+### Added
+
+- **Storage: S3-compatible backend.** `S3CompatibleStorage(...)` and
+  `makeS3FileStorageLayer(...)` back `FileStorage` with any S3-compatible bucket (AWS S3,
+  MinIO, RustFS, LocalStack, Cloudflare R2, Backblaze B2). Requests are signed by
+  `files-sdk`'s zero-peer `s3Fetch` adapter, so no `@aws-sdk/*` package is installed.
+  Path-style addressing is the default; `url()` supports path-style, virtual-host and
+  `publicBaseUrl` links. The adapter-agnostic `makeFileStorageFromFiles` core keeps
+  `upload` stream errors (such as the upload-size limit) in their original error channel.
+- **Storage: `Config`-based options.** Every `S3CompatibleStorage` field accepts a plain
+  value or an Effect `Config` (`Config.String`, `Config.Redacted`, `Config.withDefault`, …).
+  Values are resolved once when the layer is built with the active `ConfigProvider`, so a
+  missing variable fails at startup instead of on the first upload. `accessKey` / `secret`
+  also accept `Redacted` values.
+- **Testing: RustFS end-to-end suite.** `docker-compose.rustfs.yml` starts RustFS on
+  `:9000` (console `:9001`). The opt-in `MIRA_S3_E2E=1` test
+  (`packages/mira/tests/storage/s3-rustfs.e2e.test.ts`) covers the full path: multipart
+  upload → object stored in RustFS → `GET /api/files/...` streaming → prefix listing →
+  record delete removing the object, plus a direct `FileStorage` roundtrip and `url()`.
+- **Dashboard: package-manager selector.** The Connect sheet's install blocks have a
+  `pnpm` / `npm` / `yarn` / `bun` dropdown that rewrites both install snippets. The choice
+  is persisted in `localStorage` (`mira.dashboard.package-manager`).
+- **Example app:** `apps/example` documents switching from `LocalFileStorage` to
+  `S3CompatibleStorage`.
+
+### Changed
+
+- **Dependencies:** `@gettersethya/mira` now depends on `files-sdk@^3.1.2` for the S3
+  adapter; local-disk deployments are unaffected but install the package.
 
 ## [0.1.0-alpha.34] - 2026-10-27
 
