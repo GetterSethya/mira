@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%sveltekit.assets%/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#fafafa" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // Runs before first paint so the stored theme is applied without a flash.
+      (() => {
+        try {
+          const stored = localStorage.getItem('mira-theme');
+          const theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+          document.documentElement.dataset.theme = theme;
+          document
+            .querySelector('meta[name="theme-color"]')
+            ?.setAttribute('content', theme === 'dark' ? '#08080a' : '#fafafa');
+        } catch {
+          document.documentElement.dataset.theme = 'light';
+        }
+
+        try {
+          if (sessionStorage.getItem('mira-notice-prealpha-v1') === '1') {
+            document.documentElement.dataset.announcement = 'dismissed';
+          }
+        } catch {
+          // Storage unavailable; show the notice.
+        }
+      })();
+    </script>
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>
