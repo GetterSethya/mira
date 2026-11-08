@@ -6,6 +6,8 @@
 
 Collection definitions, filter DSL, and access rule builder for [Mira](https://github.com/gettersethya/mira). Shared between server and client — isomorphic, no runtime dependencies beyond `effect`.
 
+**Documentation:** https://gettersethya.github.io/mira/docs/collections/
+
 ## Installation
 
 ```bash
@@ -111,6 +113,25 @@ Bytes.fromGB(n)
 Bytes.fromTB(n)
 ```
 
+Every field also accepts `name` (override the column name), `required`, `default`,
+`hidden` (strip from non-admin responses and reject in `select`), `unique`, `indexed`,
+and `error` (a callback that maps a constraint kind to a custom validation message).
+A field is required unless `required: false` or a `default` is set. `Field.date` stores
+the provided string as-is; it does not parse or validate ISO 8601. `Field.file({ protected: true })`
+requires a short-lived file token to download.
+
+## Relations
+
+`Field.relation(Target, { field })` stores another collection's field value, defaulting to
+the target's `id`. Only the target collection name and target field are serialized. `expand`
+joins the target's `id`; a relation declared with a different target field stores and
+validates that value, but is not expanded by the current join.
+
+```typescript
+author: Field.relation(Users)                     // stores users.id
+ownerEmail: Field.relation(Users, { field: "email" })
+```
+
 ## Indexes
 
 ```typescript
@@ -130,6 +151,10 @@ Field.text({ indexed: true })  // non-unique index
 ## Rules
 
 Rules are evaluated server-side on every request. A missing key means **deny all** for that action.
+
+`manage` is available on auth collections only and is additive: it never bypasses the
+base create/update rule, but a matching manager may set `email`/`emailVerified` and
+change a password without `oldPassword`. It has no effect on `list`, `view`, or `delete`.
 
 ```typescript
 Rule.public()                                        // allow all

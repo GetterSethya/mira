@@ -4,7 +4,9 @@
 
 > **Early pre-alpha.** Breaking changes may occur without notice.
 
-Admin dashboard plugin for [Mira](https://github.com/gettersethya/mira). A SvelteKit SPA at `/_dashboard/` providing collection CRUD, log/span viewer, config display, superadmin management, and cron job monitoring.
+Admin dashboard plugin for [Mira](https://github.com/gettersethya/mira). A SvelteKit SPA at `/_dashboard/` providing collection CRUD, log/span viewer, config display, superadmin management, cron job monitoring, and per-collection SDK/HTTP/type generation.
+
+**Documentation:** https://gettersethya.github.io/mira/docs/dashboard/
 
 ## Installation
 
@@ -14,7 +16,7 @@ npm install @gettersethya/mira-dashboard
 pnpm add @gettersethya/mira-dashboard
 ```
 
-`@gettersethya/mira` is a required peer dependency.
+`@gettersethya/mira` and `effect@^4` are required peer dependencies. The dashboard is Node-only: it hashes passwords and reads the SPA bundle from `ui/dist`.
 
 ## Usage
 
@@ -44,8 +46,9 @@ Open that URL to create the first superadmin account. Once registered, subsequen
 ## Features
 
 - **Collection browser** — list, create, edit, and delete records with a record editor
+- **Connect sheet** — per-collection SDK snippets, raw `fetch`/`curl` calls, and a generated `mira.generated.ts` TypeScript file
 - **Logs and span viewer** — works best with `makeSqliteTelemetryLayer` from `@gettersethya/mira`
-- **App config display** — view the current `AppConfig` from the `_config` table
+- **App config display** — view and edit the current `AppConfig` from the `_config` table
 - **Superadmin management** — create, list, and delete superadmin accounts
 - **Cron job monitoring** — list all registered cron jobs with their current status and trigger manual runs
 
@@ -58,9 +61,30 @@ The dashboard exposes two cron endpoints:
 | `GET` | `/_dashboard/api/crons` | List all cron jobs with name, status, last run info |
 | `POST` | `/_dashboard/api/crons/:name/run` | Trigger immediate execution of a cron job by name |
 
+`GET /_dashboard/api/config` returns the config snapshot, and
+`PUT /_dashboard/api/config` updates the allowlisted keys. Running process values
+stay unchanged until restart.
+
+## Connect sheet
+
+Every collection page has a **Connect** action. It generates copyable output from the
+live `GET /api/_schema` payload:
+
+- **SDK** — `createMiraClient(...).withCollections(...)` usage, plus
+  `authWithPassword`, `register`, and `me` for auth collections.
+- **fetch** — the exact HTTP calls, switchable between `fetch` and `curl`, including
+  the JSON `filter` query parameter.
+- **Types** — a client-only `mira.generated.ts` module with
+  `BaseCollection`/`AuthCollection`/`ViewCollection`, `Record`/`Create`/`Update`
+  aliases, and a `collections` map. Server rules and indexes are intentionally omitted.
+
+View collections get read-only snippets; file fields get a multipart example.
+
 ## Superadmin collection
 
-The dashboard registers a `SuperAdminCollection` under the name `_superadmins` — an `AuthCollection` with deny-all rules. This collection is separate from your app's own user collection and is only accessible via the dashboard UI.
+The dashboard registers a `SuperAdminCollection` under the name `_superadmin` — an `AuthCollection` with deny-all rules. This collection is separate from your app's own user collection and is only accessible via the dashboard UI. A `_superadmin` token receives `ctx.admin = true` on generic collection and protected-file routes, so treat it as a root credential.
+
+The registration token gates `POST /_dashboard/api/register`, but it does not close the generic `POST /api/collections/_superadmin` route. Because the create rule is public, that route can create a superadmin directly unless you override the rule or keep the route unreachable during first boot. Treat first boot as a trusted window.
 
 ## Audit hooks
 

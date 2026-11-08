@@ -9,6 +9,8 @@ Framework-agnostic TanStack Query adapter for
 Wraps a collection client's methods with `queryOptions` and `mutationOptions`,
 with structured query keys for fine-grained cache invalidation.
 
+**Documentation:** https://gettersethya.github.io/mira/docs/client-sdk/
+
 The option objects are plain `{ queryKey, queryFn }` / `{ mutationFn }` shapes,
 so this package has **no runtime dependency on TanStack** — `useQuery` /
 `useMutation` (React, Solid) and `createQuery` / `createMutation` (Svelte) all
@@ -95,6 +97,9 @@ function PostActions() {
 }
 ```
 
+Auth collections also expose enriched `register()` / `authWithPassword()` mutations and
+a `me()` query. Registering does not log the user in; call `authWithPassword()` afterwards.
+
 ## Solid and Svelte
 
 The same call shape works everywhere — the adapter is framework-agnostic:
@@ -132,9 +137,10 @@ The adapter produces structured query keys for fine-grained cache invalidation:
 
 ```typescript
 // ["posts", "getList",        { limit, filter, sort, order, cursor, select, expand }]
-// ["posts", "getOne",         "post-id", {}]
-// ["posts", "getFirstOrNone", { filter, sort, order, select, expand }]
+// ["posts", "getOne",         "post-id", { select, expand }]
+// ["posts", "getFirstOrNone", { sort, order, select, expand }]
 // ["posts", "getFullList",    { limit, filter, sort, order, select, expand }]
+// ["posts", "me"]
 
 // Invalidate all queries for a collection
 queryClient.invalidateQueries({ queryKey: ["posts"] })
@@ -145,6 +151,9 @@ queryClient.invalidateQueries({ queryKey: ["posts", "getList"] })
 // Invalidate a specific record
 queryClient.invalidateQueries({ queryKey: ["posts", "getOne", "post-id"] })
 ```
+
+The v1 `getFirstOrNone` key does not include its filter argument. Use `getList`
+with a filter when the filter must be part of the cache identity.
 
 The adapter also exposes two helpers:
 

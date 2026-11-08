@@ -6,6 +6,8 @@
 
 Type-safe client SDK for [Mira](https://github.com/gettersethya/mira). Works in the browser and Node.js (SSR). Every operation returns a handler with both a Promise interface (`.raw()`) and an Effect interface (`.toEffect()`).
 
+**Documentation:** https://gettersethya.github.io/mira/docs/client-sdk/
+
 ## Installation
 
 ```bash
@@ -45,12 +47,12 @@ const { items, nextCursor } = await mira.posts.getList({
 // Single record by id
 const post = await mira.posts.getOne("post-id").raw()
 
-// First match or nothing (returns Option<T>)
-const latest = await mira.posts.getFirstOrNone({
-  filter: (f) => f.field("published").eq(true),
-  sort:   "created",
-  order:  "desc",
-}).raw()
+// First match or nothing (returns Option<T>).
+// The filter is a separate, mandatory argument; the limit is forced to 1.
+const latest = await mira.posts.getFirstOrNone(
+  (f) => f.field("published").eq(true),
+  { sort: "created", order: "desc" },
+).raw()
 
 // All records as a flat array (no pagination)
 const all = await mira.posts.getFullList({ limit: 5000 }).raw()
@@ -78,13 +80,23 @@ await mira.posts.delete().raw("post-id")
 ## Authentication
 
 ```typescript
+// Register — wraps the collection create endpoint and does not auto-login.
+// Open signup requires the auth collection's create rule to allow it.
+const user = await mira.users.register().raw({
+  email:           "user@example.com",
+  password:        "password123",
+  passwordConfirm: "password123",
+})
+
 // Login — the server sets an HttpOnly cookie (browser) or returns a token (server)
 const { token, record } = await mira.users.authWithPassword().raw({
   email:    "user@example.com",
   password: "password123",
 })
 
-// Browser: restore session state from the persisted cookie on app startup
+// Browser: restore session state from the persisted cookie on app startup.
+// ensureSession() is memoized per page load; refresh() always checks again.
+const hasSession = await mira.auth.ensureSession()
 await mira.auth.refresh()   // hits GET /api/auth/me
 mira.auth.isLoggedIn()      // boolean — synchronous, reflects last known state
 mira.auth.clear()           // POST /api/auth/logout, then resets the flag
@@ -96,8 +108,8 @@ const me = await mira.users.me().raw()
 // Server: manage the token manually
 mira.auth.setToken(token)
 mira.auth.token             // string | null
-mira.auth.isValid()         // boolean — checks the JWT exp claim
-mira.auth.clear()
+mira.auth.isValid()         // boolean — checks the JWT exp claim, not the signature
+mira.auth.clear()           // drops the local token; call /api/auth/logout to revoke it
 ```
 
 ## Effect-based usage

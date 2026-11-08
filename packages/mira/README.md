@@ -6,6 +6,8 @@
 
 Self-hosted backend in TypeScript using [Effect v4](https://effect.website). Define collections, get a full REST API with auth, file storage, access rules, and schema migrations — all with zero config.
 
+**Documentation:** https://gettersethya.github.io/mira/docs/
+
 ## Installation
 
 ```bash
@@ -71,8 +73,10 @@ On first boot, Mira auto-generates a `jwt_secret`, runs schema migrations, and c
 ## Migrations
 
 On boot, Mira auto-migrates collection schemas. Additive changes (new tables,
-new columns, new indexes) apply automatically. Destructive steps (`dropTable`,
-`dropColumn`, `alterColumn`) are skipped with a warning unless explicitly allowed:
+new columns, new indexes) apply automatically. Destructive changes — `dropTable`,
+`dropColumn`, and an `alterColumn` that changes the type or makes a column
+`NOT NULL` — are skipped with a warning unless explicitly allowed. Relaxing
+nullability and changing a default are treated as non-destructive:
 
 ```typescript
 Mira.builder()
@@ -81,9 +85,14 @@ Mira.builder()
   .build()
 ```
 
-`dropColumn` runs as native `ALTER TABLE … DROP COLUMN` (SQLite 3.35+).
-`alterColumn` (changing a column's type/nullability) is not executable yet —
-the SQLite dialect still emits a no-op stub for it.
+SQLite can execute `dropColumn` natively, but it cannot `ALTER COLUMN`. When a
+column's type, nullability, or default changes, the SQLite dialect rebuilds the
+affected table: create a scratch table, copy rows with `INSERT … SELECT`, transfer
+`sqlite_sequence`, drop and rename the table, then recreate indexes. A column
+becoming `NOT NULL` with a default is copied through `COALESCE(column, default)`.
+The rebuild also subsumes that table's add/drop/index steps. The whole plan is
+rendered and validated before the migration transaction opens, and the
+`PRAGMA legacy_alter_table` cleanup runs on both commit and rollback paths.
 
 ## Platforms
 
@@ -105,10 +114,22 @@ SqliteDatabase({ filename: ":memory:" })  // in-memory for tests
 ## Storage
 
 ```typescript
-import { LocalFileStorage } from "@gettersethya/mira"
+import { LocalFileStorage, S3CompatibleStorage } from "@gettersethya/mira"
 
 LocalFileStorage({ directory: "./uploads" })
+
+// S3-compatible buckets (AWS S3, MinIO, R2, LocalStack); the bucket must exist.
+S3CompatibleStorage({
+  endpoint: "http://localhost:9000",
+  bucketName: "mira-uploads",
+  regionName: "us-east-1",
+  accessKey: "minioadmin",
+  secret: "minioadmin",
+})
 ```
+
+S3 options accept plain values or Effect `Config` values; see the root README for the
+full configuration and `publicBaseUrl`/path-style notes.
 
 ## CORS
 
@@ -140,10 +161,13 @@ Each collection gets a full set of REST endpoints:
 | `DELETE` | `/api/collections/:collection/:id` | Delete |
 | `POST` | `/api/collections/:collection/auth-with-password` | Login (auth collections only) |
 | `GET` | `/api/auth/me` | Current authenticated record |
-| `POST` | `/api/auth/logout` | Logout |
+| `POST` | `/api/auth/logout` | Revoke the presented token and clear the cookie |
+| `POST` | `/api/auth/logout-all` | Revoke every session for the current user |
 | `POST` | `/api/files/token` | Request protected file token |
 | `GET` | `/api/files/:collection/:id/:filename` | Serve file |
-| `GET` | `/api/_schema` | Schema introspection |
+| `GET` | `/api/_schema` | Schema introspection (admin collection session required) |
+| `GET` | `/api/_telemetry/logs` | Read persisted logs (admin collection session required) |
+| `GET` | `/api/_telemetry/spans` | Read persisted spans (admin collection session required) |
 
 ## Cron jobs
 
@@ -169,7 +193,7 @@ const app = Mira.builder()
   .serve()
 ```
 
-Cron names must be globally unique. Use `CronService.getAll()` to inspect state and `CronService.runNow(name)` to trigger immediate execution. Plugins can declare crons via `crons` and hook into `onCronStart`/`onCronExecute`/`onCronSuccess`/`onCronError`/`onCronFinished`.
+Cron names must be globally unique; each definition gets a scoped fiber and the first tick is skipped. Use `CronService.getAll()` to inspect state and `CronService.runNow(name)` to trigger immediate execution; `runNow` forks the run and returns before the handler finishes. Last-run snapshots persist in `_config` under `cron_state`, while live status starts at standby on every boot. Plugins can declare crons via `crons` and hook into `onCronStart`/`onCronExecute`/`onCronSuccess`/`onCronError`/`onCronFinished`.
 
 See the [Mira root README](https://github.com/gettersethya/mira#cron-jobs) for full cron documentation.
 

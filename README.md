@@ -8,6 +8,8 @@ Mira is a self-hosted backend framework in TypeScript built on [Effect v4](https
 
 Your collections are TypeScript files. Your rules are composable expressions evaluated server-side on every request.
 
+**Documentation:** https://gettersethya.github.io/mira/docs/
+
 ---
 
 ## Packages
@@ -283,9 +285,13 @@ Additional endpoints:
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/collections/users/auth-with-password` | Login with `{ email, password }`, returns `{ token, record }` |
-| `POST` | `/api/auth/logout` | Clears the server-side session |
+| `GET` | `/api/auth/me` | Returns `{ collection, record }` for the current session |
+| `POST` | `/api/auth/logout` | Revokes the presented token and clears the cookie |
+| `POST` | `/api/auth/logout-all` | Revokes every session for the current user |
 
-Inside auth collection rules defined with `defineRule(Users, (R) => ...)`, `R.selfId()` is a chainable operand referring to the record's own `id` (e.g. `R.selfId().eq(R.authId(Users))`).
+Registration is an ordinary create against the auth collection, so open signup requires the collection's `create` rule to allow it. The client exposes `register()` as a convenience wrapper; it does not log the user in.
+
+Inside auth collection rules defined with `defineRule(Users, (R) => ...)`, `R.selfId()` is a chainable operand referring to the record's own `id` (e.g. `R.selfId().eq(R.authId(Users))`). `manage` is an additive auth-only rule that lets a matching manager change `email`, `emailVerified`, or a password without `oldPassword`; it never bypasses the base create/update rule.
 
 ### ViewCollection
 
@@ -321,7 +327,7 @@ The `VIEW` is created in SQLite during auto-migration. If the SQL body or field 
 
 ## Field types
 
-All field builders return a `FieldDef` with a `.view()` method for use in `ViewCollection`. Every field inherits these base options:
+All field builders except `Field.seqId` return a `FieldDef` with a `.view()` method for use in `ViewCollection`. Every field inherits these base options:
 
 | Option | Type | Default | Description |
 |---|---|---|---|
@@ -330,6 +336,7 @@ All field builders return a `FieldDef` with a `.view()` method for use in `ViewC
 | `unique` | `boolean` | `false` | Creates a unique index on this field |
 | `indexed` | `boolean` | `false` | Creates a non-unique index on this field |
 | `name` | `string` | key name | Alternative column name in the database |
+| `hidden` | `boolean` | `false` | Strip from non-admin responses and reject in `select` for ordinary callers |
 | `error` | `(kind) => string \| undefined` | — | Callback for custom validation error messages |
 
 ### `Field.text(opts?)`
@@ -404,7 +411,7 @@ Field.boolean({ default: true })
 
 ### `Field.date(opts?)`
 
-Date/time stored as an ISO 8601 string (`TEXT` in SQLite). The server stores values verbatim — no parsing or transformation is applied. Use ISO 8601 strings in your client code.
+Date/time stored as `TEXT` in SQLite. The server stores the provided string verbatim — no parsing or validation is applied. Use ISO 8601 strings by convention.
 
 ```typescript
 Field.date()
@@ -512,8 +519,10 @@ const postsRules = defineRule(Posts, (R) => ({
 ```
 
 - **BaseCollection**: accepts rules for `list`, `view`, `create`, `update`, `delete`.
-- **AuthCollection**: accepts rules for `list`, `view`, `create`, `update`, `delete`. `R.selfId()` is a chainable operand representing the authenticated record's own `id`.
+- **AuthCollection**: accepts rules for `list`, `view`, `create`, `update`, `delete`, plus the additive `manage` rule. `R.selfId()` is a chainable operand representing the authenticated record's own `id`.
 - **ViewCollection**: accepts rules for `list` and `view` only (`create`, `update`, `delete` are disallowed since views are read-only).
+
+`manage` is auth-only and additive: it never bypasses the base create/update rule, but a matching manager may set `email`/`emailVerified` and change a password without `oldPassword`. It has no effect on `list`, `view`, or `delete`.
 
 ### Allow / deny shorthands
 
@@ -601,6 +610,9 @@ Rule.request("header", "x-api-key").eq(R.literal("secret"))
 
 // Check a query param
 Rule.request("query", "preview").eq(R.literal("true"))
+
+// Check a field in the create/update payload (null in list/view/delete)
+Rule.request("body", "tenantId").eq(R.literal("tenant-a"))
 ```
 
 ### Subqueries
@@ -666,12 +678,13 @@ f.not(f.field("archived").eq(true))
 
 Plugins are the extension point for Mira. A plugin can:
 
-- Run code at server lifecycle events (bootstrap, serve, terminate)
+- Run bootstrap code during server startup
 - Intercept and modify record operations before they execute
 - React to record operations after they complete (fire-and-forget)
 - Register additional HTTP routes
 - Add extra Effect service layers
 - Register additional collections
+- Declare lifecycle, cron, and layer hooks for the host app
 
 Plugins are created with `MiraPlugin.define()` and registered with `app.extend()` before `.serve()`.
 
@@ -681,8 +694,6 @@ import { Effect } from "effect"
 
 const myPlugin = MiraPlugin.define({
   onBootstrap: () => Effect.log("Server is starting..."),
-  onServe:     () => Effect.log("Server is ready"),
-  onTerminate: () => Effect.log("Server is shutting down"),
 
   onRecordCreateSuccess: {
     handler: (ctx) => Effect.log(`Created ${String(ctx.result["id"])} in ${ctx.collection.name}`)
@@ -691,6 +702,8 @@ const myPlugin = MiraPlugin.define({
 
 app.extend(myPlugin).serve()
 ```
+
+`onServe` and `onTerminate` exist on the plugin interface, but the current `serve()` launch flow does not reach them. Use `onBootstrap` for startup work and your platform's shutdown signal for cleanup.
 
 ### Wrapping a plain Effect Layer
 
@@ -717,22 +730,20 @@ app.extend(MiraPlugin.fromLayer(backgroundJobLayer)).serve()
 
 ### Lifecycle hooks
 
-These hooks fire at server lifecycle moments and **block** the server from continuing until they complete.
+`serve()` runs `onBootstrap` during layer startup, after the socket binds and before requests are handled. `onServe` and `onTerminate` are declared on the plugin interface but are **not reached by the current `serve()` flow**; put required cleanup on your platform's shutdown signal instead.
 
 ```typescript
 MiraPlugin.define({
-  // Runs before the HTTP server starts accepting connections.
-  // Has access to AppConfig and CollectionService via Effect context.
+  // Runs during layer startup, after the socket binds and before requests
+  // are handled. Has access to AppConfig and CollectionService.
   onBootstrap: () =>
     Effect.gen(function* () {
       const cfg = yield* AppConfig
       yield* Effect.log(`Starting on port ${cfg.port}`)
     }),
 
-  // Runs after the HTTP server is listening.
+  // Declared for completeness, but not invoked by serve() today.
   onServe: () => Effect.log("Server is ready"),
-
-  // Runs on shutdown.
   onTerminate: () => Effect.log("Shutting down"),
 })
 ```
@@ -764,7 +775,7 @@ Every CRUD operation fires up to four hook slots per plugin. Hooks within the sa
 | `onRecordViewSuccess` | After successful view | no (fire-and-forget) | no |
 | `onRecordViewError` | After a failed view | no (fire-and-forget) | no |
 
-**Blocking hooks** (pre and execute) receive a context object, may modify it, and must return it. The returned context is passed to the next plugin's hook and eventually drives the operation. **Fire-and-forget hooks** (success and error) run in a daemon fiber — errors are logged but do not affect the HTTP response.
+**Blocking hooks** (pre and execute) receive a context object, may modify it, and must return it. The returned context is passed to the next plugin's hook. Only the fields the decorator forwards can change the operation: list hooks can rewrite `limit`, `filter`, `sort`, `select`, and `expand`; view hooks can rewrite `select` and `expand`; create and update forward rewritten `data`. Rewrites to `cursor`, `id`, and `auth` are not forwarded. **Fire-and-forget hooks** (success and error) run in a detach fiber — errors are logged but do not affect the HTTP response.
 
 #### Context types
 
@@ -1051,7 +1062,7 @@ The `CronService` tag exposes methods for runtime interaction:
 | `getAll()` | `Effect<CronState[]>` | Returns the current state of every registered cron |
 | `runNow(name)` | `Effect<void, CronNotFoundError>` | Manually trigger a cron run outside its schedule |
 
-`CronState` includes `name`, `status` (`"standby"` / `"running"`), `lastRunAt`, `lastStatus`, `lastDurationMs`, and `lastError`.
+`CronState` includes `name`, `status` (`"standby"` / `"running"`), `lastRunAt`, `lastStatus`, `lastDurationMs`, and `lastError`. After each run, success or error, the last-run snapshot is persisted in `_config` under `cron_state`; `status` is never persisted, so every boot starts at standby. `runNow(name)` forks the run and returns before the handler finishes.
 
 ### Cron hooks in plugins
 
@@ -1124,7 +1135,7 @@ On first boot the dashboard prints a one-time registration URL to stdout:
 
 Open that URL to create the first superadmin account. Once an account exists, subsequent boots print the regular login URL instead.
 
-The dashboard registers a `SuperAdminCollection` (an `AuthCollection` with deny-all rules) under the name `_superadmins`. This collection is separate from your app's own user collection.
+The dashboard registers a `SuperAdminCollection` (an `AuthCollection` with deny-all rules) under the name `_superadmin`. This collection is separate from your app's own user collection. The registration token gates `POST /_dashboard/api/register`, but it does not close the generic `POST /api/collections/_superadmin` route; because the create rule is public, that route can create a superadmin directly unless you override the rule or keep the route unreachable during first boot. Treat first boot as a trusted window.
 
 The dashboard also exposes cron management endpoints:
 
@@ -1189,29 +1200,28 @@ The telemetry layer writes to two collections in a dedicated SQLite database (se
 - **`logs`** — structured log entries from `Effect.log()`. Fields: `seqId`, `level`, `message`, `traceId?`, `spanId?`, `created`, `updated`.
 - **`spans`** — completed Effect spans. Fields: `seqId`, `name`, `traceId`, `spanId`, `parentSpanId?`, `kind`, `durationMs`, `status`, `error?`, `attributes`, `created`, `updated`.
 
-The telemetry endpoints (`GET /api/_telemetry/logs` and `GET /api/_telemetry/spans`) support cursor-based pagination via `?after=<seqId>&limit=<n>` and return `{ ...items, total, limit, nextCursor }`. The dashboard's log/span viewer uses this to provide fast, continuous pagination.
+The telemetry endpoints (`GET /api/_telemetry/logs` and `GET /api/_telemetry/spans`) require a session from a plugin-declared admin collection and support cursor-based pagination via `?after=<seqId>&limit=<n>`. Logs return `{ logs, total, limit, nextCursor }`; spans return `{ spans, total, limit, nextCursor }`. Spans also accept `traceId`, and a bad telemetry filter is a `400`, not a `422`. The dashboard's log/span viewer uses these routes for continuous pagination.
 
 ---
 
 ## Schema introspection
 
-`GET /api/_schema` returns all collection schemas registered with the server. Requires a valid `Authorization: Bearer <token>` header.
+`GET /api/_schema` returns an array of collection schemas. It requires a session from a plugin-declared admin collection; without an admin plugin the admin set is empty, so every authenticated session receives `403`, and missing or invalid tokens receive `401`.
 
 ```json
-{
-  "collections": [
-    {
-      "name": "posts",
-      "kind": "base",
-      "fields": { ... },
-      "required": [ ... ],
-      "indexes": [ ... ]
-    }
-  ]
-}
+[
+  {
+    "name": "posts",
+    "kind": "base",
+    "fields": { ... },
+    "required": [ ... ],
+    "indexes": [ ... ],
+    "viewQuery": null
+  }
+]
 ```
 
-The response preserves metadata annotations (`x-system`, `x-hidden`, `x-generated`, `x-kind`) so UI dashboards and code generators can accurately distinguish read-only/generated system fields, write-only password fields, and hidden fields.
+Each entry exposes `name`, `kind`, `fields`, `required`, `indexes`, and `viewQuery`. Field annotations (`x-system`, `x-hidden`, `x-generated`, `x-kind`) are preserved inside `fields` so UI dashboards and code generators can distinguish read-only/generated system fields, write-only password fields, and hidden fields.
 
 ---
 
@@ -1224,7 +1234,7 @@ import { Posts, Users } from "./collections.js"
 const mira = createMiraClient("/").withCollections({ posts: Posts, users: Users })
 ```
 
-For browser clients, the server sets an HttpOnly `mira_token` cookie on successful login. The browser sends it automatically on every same-origin request — the client never reads or writes the token directly. Call `mira.auth.refresh()` once on app startup to restore login state after a page reload.
+For browser clients, the server sets an HttpOnly `mira_token` cookie on successful login. The browser sends it automatically on every same-origin request — the client never reads or writes the token directly. Call `mira.auth.ensureSession()` from route guards (it is memoized per page load) or `mira.auth.refresh()` for a fresh check on app startup.
 
 ### Queries
 
@@ -1248,12 +1258,12 @@ const { items, nextCursor } = await mira.posts.getList({
 // Single record by id — throws if not found
 const post = await mira.posts.getOne("post-id").raw()
 
-// First match or nothing — returns Option<Post> (never throws 404)
-const latest = await mira.posts.getFirstOrNone({
-  filter: (f) => f.field("published").eq(true),
-  sort:   "created",
-  order:  "desc",
-}).raw()
+// First match or nothing — returns Option<Post> (never throws 404).
+// The filter is a separate argument and is mandatory; the limit is forced to 1.
+const latest = await mira.posts.getFirstOrNone(
+  (f) => f.field("published").eq(true),
+  { sort: "created", order: "desc" },
+).raw()
 
 // All records as a flat array — fetches all pages internally
 const all = await mira.posts.getFullList({ limit: 5000 }).raw()
@@ -1286,14 +1296,25 @@ await mira.posts.delete().raw("post-id")
 ### Authentication
 
 ```typescript
+// Register — wraps the collection create endpoint and does not auto-login.
+// Open signup requires the auth collection's create rule to allow it.
+const user = await mira.users.register().raw({
+  email:           "user@example.com",
+  password:        "password123",
+  passwordConfirm: "password123",
+})
+
 // Login — server sets an HttpOnly cookie; browser sends it on every subsequent request
-const { record } = await mira.users.authWithPassword().raw({
+const { token, record } = await mira.users.authWithPassword().raw({
   email:    "user@example.com",
   password: "password123",
 })
 
 // On app startup (e.g. in onMount / useEffect) — restore session from persisted cookie
 const loggedIn = await mira.auth.refresh()
+
+// In route guards, prefer the per-page-load memoized check
+const hasSession = await mira.auth.ensureSession()
 
 // Check login state (synchronous — reflects last known state)
 mira.auth.isLoggedIn()   // boolean
@@ -1421,13 +1442,14 @@ To adapt a single collection instead, call the adapter directly:
 
 ### Query key structure
 
-The adapter uses a structured three-part key format. This lets you invalidate at any granularity.
+The adapter uses structured query keys. This lets you invalidate at any granularity.
 
 ```typescript
 // ["posts", "getList",        { limit, filter, sort, order, cursor, select, expand }]
-// ["posts", "getOne",         "post-id"]
-// ["posts", "getFirstOrNone", { filter, sort, order, select, expand }]
+// ["posts", "getOne",         "post-id", { select, expand }]
+// ["posts", "getFirstOrNone", { sort, order, select, expand }]
 // ["posts", "getFullList",    { limit, filter, sort, order, select, expand }]
+// ["posts", "me"]
 
 // Invalidate all queries for "posts"
 queryClient.invalidateQueries({ queryKey: ["posts"] })
@@ -1438,6 +1460,8 @@ queryClient.invalidateQueries({ queryKey: ["posts", "getList"] })
 // Invalidate a specific record
 queryClient.invalidateQueries({ queryKey: ["posts", "getOne", "post-id"] })
 ```
+
+The v1 key for `getFirstOrNone` does not include its filter argument. Use `getList` with a filter when the filter must be part of the cache identity.
 
 `postsApi.invalidateAll(queryClient)` is a shortcut for invalidating all queries under `["posts"]`.
 `postsApi.invalidateOne(queryClient, id)` is a shortcut for invalidating `["posts", "getOne", id]`.
