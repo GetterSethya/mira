@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { reveal } from '$lib/reveal';
+
   const steps = [
     {
       index: '01',
@@ -20,14 +22,14 @@
 
 <section id="how-it-works" class="section">
   <div class="container">
-    <div class="section-head">
+    <div class="section-head" use:reveal>
       <p class="eyebrow">How it works</p>
       <h2>From collections to a listening server.</h2>
     </div>
 
     <ol class="steps">
-      {#each steps as step}
-        <li>
+      {#each steps as step, index}
+        <li use:reveal={index * 65}>
           <span class="num">{step.index}</span>
           <h3>{step.title}</h3>
           <p>{step.body}</p>

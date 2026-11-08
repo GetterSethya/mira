@@ -24,6 +24,7 @@
           <h3>Learn</h3>
           <a href="#quickstart">Quickstart</a>
           <a href="#faq">FAQ</a>
+          <a href="https://github.com/GetterSethya/mira" target="_blank" rel="noreferrer">GitHub</a>
         </div>
       </nav>
     </div>

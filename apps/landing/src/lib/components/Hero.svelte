@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { reveal } from '$lib/reveal';
   import DitherCanvas from './DitherCanvas.svelte';
 </script>
 
@@ -8,7 +9,7 @@
   </div>
 
   <div class="container inner">
-    <div class="copy">
+    <div class="copy" use:reveal>
       <p class="eyebrow">TypeScript on Effect v4</p>
       <h1>A backend you define and&nbsp;run.</h1>
       <p class="lede">
@@ -16,7 +17,7 @@
         uploads and rules built from them.
       </p>
       <div class="actions">
-        <a class="btn btn-primary" href="#quickstart">Open the quickstart</a>
+        <a class="btn btn-primary" href="#quickstart">Quickstart</a>
         <a class="btn btn-secondary" href="#how-it-works">How it works</a>
       </div>
       <ul class="spec" aria-label="Core capabilities">
@@ -108,7 +109,7 @@
 
   .lede {
     max-width: 48ch;
-    color: color-mix(in srgb, var(--hero-fg) 68%, transparent);
+    color: color-mix(in srgb, var(--hero-fg) 92%, transparent);
     font-size: var(--text-base);
     line-height: 1.7;
   }
@@ -120,13 +121,14 @@
   }
 
   .actions .btn-secondary {
-    border-color: color-mix(in srgb, var(--hero-fg) 32%, transparent);
+    border-color: color-mix(in srgb, var(--hero-fg) 55%, transparent);
+    background: color-mix(in srgb, var(--hero-bg) 90%, transparent);
     color: var(--hero-fg);
   }
 
   .actions .btn-secondary:hover {
     border-color: var(--hero-fg);
-    background: color-mix(in srgb, var(--hero-fg) 6%, transparent);
+    background: var(--hero-bg);
   }
 
   .spec {

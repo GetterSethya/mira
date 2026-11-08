@@ -86,19 +86,16 @@
     width: 32px;
     height: 32px;
     padding: 0;
-    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
     color: inherit;
     cursor: pointer;
-    transition:
-      background-color var(--motion-fast) var(--ease),
-      border-color var(--motion-fast) var(--ease);
+    transition: background-color var(--motion-fast) var(--ease);
   }
 
   .close:hover {
-    border-color: currentColor;
-    background: color-mix(in srgb, currentColor 10%, transparent);
+    background: color-mix(in srgb, currentColor 12%, transparent);
   }
 
   .close:focus-visible {

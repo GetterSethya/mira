@@ -1,11 +1,30 @@
 export type QuickstartSample = {
   key: string;
   label: string;
-  lang: 'ts' | 'bash' | 'json';
+  lang: 'ts' | 'tsx' | 'bash' | 'json' | 'svelte' | 'vue';
   code: string;
 };
 
 export const quickstartSamples: ReadonlyArray<QuickstartSample> = [
+  {
+    key: 'install',
+    label: 'terminal',
+    lang: 'bash',
+    code: [
+      '# server + Effect v4 peer dependency',
+      'npm install @gettersethya/mira effect@^4',
+      '',
+      '# collection definitions + client SDK',
+      'npm install @gettersethya/mira-collection @gettersethya/mira-client',
+      '',
+      '# optional admin dashboard',
+      'npm install @gettersethya/mira-dashboard',
+      '',
+      '# TanStack adapter (frontend)',
+      'npm install @gettersethya/mira-tanstack-adapter',
+      'npm install @tanstack/react-query   # or @tanstack/svelte-query / @tanstack/vue-query'
+    ].join('\n')
+  },
   {
     key: 'collections',
     label: 'collections.ts',
@@ -179,6 +198,102 @@ export const quickstartSamples: ReadonlyArray<QuickstartSample> = [
       '})',
       '',
       'const latest = await mira.posts.getFirstOrNone((f) => f.field("slug").eq("shipping-mira")).raw()'
+    ].join('\n')
+  },
+  {
+    key: 'react',
+    label: 'PostList.tsx',
+    lang: 'tsx',
+    code: [
+      'import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"',
+      'import { createMiraClient } from "@gettersethya/mira-client"',
+      'import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter"',
+      'import { Posts } from "./collections.js"',
+      '',
+      'const mira = createMiraClient("/").withCollections(',
+      '  { posts: Posts },',
+      '  { adapter: collectionAdapter },',
+      ')',
+      '',
+      'export function PostList() {',
+      '  const queryClient = useQueryClient()',
+      '  const posts = useQuery(',
+      '    mira.posts.getList({',
+      '      filter: (f) => f.field("published").eq(true),',
+      '      sort: "title",',
+      '      limit: 10,',
+      '    }).queryOptions,',
+      '  )',
+      '  const create = useMutation({',
+      '    ...mira.posts.create().mutationOptions,',
+      '    onSuccess: () => mira.posts.invalidateAll(queryClient),',
+      '  })',
+      '',
+      '  if (posts.isLoading) return <p>Loading…</p>',
+      '  return (',
+      '    <button onClick={() => create.mutate({ title: "Hello Mira" })}>',
+      '      {posts.data?.items.length ?? 0} posts',
+      '    </button>',
+      '  )',
+      '}'
+    ].join('\n')
+  },
+  {
+    key: 'svelte',
+    label: 'PostList.svelte',
+    lang: 'svelte',
+    code: [
+      '<script lang="ts">',
+      '  import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query"',
+      '  import { createMiraClient } from "@gettersethya/mira-client"',
+      '  import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter"',
+      '  import { Posts } from "./collections.js"',
+      '',
+      '  const mira = createMiraClient("/").withCollections(',
+      '    { posts: Posts },',
+      '    { adapter: collectionAdapter },',
+      '  )',
+      '  const queryClient = useQueryClient()',
+      '  const posts = createQuery(() => mira.posts.getList({ limit: 10 }).queryOptions)',
+      '  const create = createMutation(() => ({',
+      '    ...mira.posts.create().mutationOptions,',
+      '    onSuccess: () => mira.posts.invalidateAll(queryClient),',
+      '  }))',
+      '</script>',
+      '',
+      '<button onclick={() => $create.mutate({ title: "Hello Mira" })}>',
+      '  {$posts.data?.items.length ?? 0} posts',
+      '</button>'
+    ].join('\n')
+  },
+  {
+    key: 'vue',
+    label: 'PostList.vue',
+    lang: 'vue',
+    code: [
+      '<script setup lang="ts">',
+      'import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query"',
+      'import { createMiraClient } from "@gettersethya/mira-client"',
+      'import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter"',
+      'import { Posts } from "./collections.js"',
+      '',
+      'const mira = createMiraClient("/").withCollections(',
+      '  { posts: Posts },',
+      '  { adapter: collectionAdapter },',
+      ')',
+      'const queryClient = useQueryClient()',
+      'const { data: posts } = useQuery(mira.posts.getList({ limit: 10 }).queryOptions)',
+      'const create = useMutation({',
+      '  ...mira.posts.create().mutationOptions,',
+      '  onSuccess: () => mira.posts.invalidateAll(queryClient),',
+      '})',
+      '</script>',
+      '',
+      '<template>',
+      '  <button @click="create.mutate({ title: \'Hello Mira\' })">',
+      '    {{ posts?.items.length ?? 0 }} posts',
+      '  </button>',
+      '</template>'
     ].join('\n')
   },
   {

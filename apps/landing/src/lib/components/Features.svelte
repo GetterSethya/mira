@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { reveal } from '$lib/reveal';
+
   const features = [
     {
       index: '01',
@@ -41,7 +43,7 @@
 
 <section id="features" class="section">
   <div class="container">
-    <div class="section-head">
+    <div class="section-head" use:reveal>
       <p class="eyebrow">What it replaces</p>
       <h2>Write collections in TypeScript; the API follows.</h2>
       <p class="lede">
@@ -51,8 +53,8 @@
     </div>
 
     <div class="grid">
-      {#each features as feature}
-        <article class="card">
+      {#each features as feature, index}
+        <article class="card" use:reveal={index * 55}>
           <div class="meta">
             <span>{feature.index}</span>
             <span>{feature.domain}</span>

@@ -1,5 +1,9 @@
-<section class="cta">
-  <div class="container inner">
+<script lang="ts">
+  import { reveal } from '$lib/reveal';
+</script>
+
+<section id="cta" class="cta">
+  <div class="container inner" use:reveal>
     <div class="copy">
       <h2>Start with one collection.</h2>
       <p>
@@ -7,7 +11,7 @@
         First boot seeds _config and runs migrations.
       </p>
     </div>
-    <a class="btn btn-invert" href="#quickstart">Open the quickstart</a>
+    <a class="btn btn-invert" href="#quickstart">Quickstart</a>
   </div>
 </section>
 

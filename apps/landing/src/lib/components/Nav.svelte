@@ -1,15 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { toggleTheme } from '$lib/theme';
+  import { fly } from 'svelte/transition';
+  import { resolve } from '$app/paths';
+  import GitHubLink from './GitHubLink.svelte';
+  import ThemeToggle from './ThemeToggle.svelte';
 
   let open = $state(false);
   let solid = $state(false);
+  let showCta = $state(false);
 
   const links = [
     { href: '#features', label: 'Features' },
     { href: '#how-it-works', label: 'How it works' },
     { href: '#quickstart', label: 'Quickstart' },
-    { href: '#faq', label: 'FAQ' }
+    { href: '#faq', label: 'FAQ' },
+    { href: resolve('/docs/'), label: 'Docs' }
   ];
 
   function close() {
@@ -18,13 +23,24 @@
 
   onMount(() => {
     const onScroll = () => {
+      if (window.innerWidth > 767) open = false;
+
       solid = window.scrollY > 24;
+      const hero = document.querySelector('#top');
+      const cta = document.querySelector('#cta');
+      const pastHero = hero ? hero.getBoundingClientRect().bottom <= 0 : false;
+      const ctaVisible = cta ? cta.getBoundingClientRect().top < window.innerHeight : false;
+      showCta = pastHero && !ctaVisible;
     };
 
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
 
-    return () => window.removeEventListener('scroll', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
   });
 </script>
 
@@ -47,25 +63,11 @@
     </nav>
 
     <div class="actions">
-      <button
-        class="theme"
-        type="button"
-        aria-label="Toggle light and dark theme"
-        title="Toggle light and dark theme"
-        onclick={toggleTheme}
-      >
-        <svg class="icon sun" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="4" />
-          <path
-            d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.42-1.42"
-          />
-        </svg>
-        <svg class="icon moon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M20 14.5A8 8 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
-        </svg>
-        <span class="theme-label" aria-hidden="true">Theme</span>
-      </button>
-      <a class="btn desk-cta" href="#quickstart">Open the quickstart</a>
+      <GitHubLink />
+      <ThemeToggle />
+      <span class="cta-slot" class:visible={showCta} inert={!showCta} aria-hidden={!showCta}>
+        <a class="btn desk-cta" href="#quickstart" tabindex={showCta ? 0 : -1}>Quickstart</a>
+      </span>
       <button
         class="toggle"
         type="button"
@@ -80,14 +82,20 @@
     </div>
   </div>
 
-  <div id="mobile-menu" class="mobile" hidden={!open}>
-    <nav aria-label="Mobile">
-      {#each links as link}
-        <a href={link.href} onclick={close}>{link.label}</a>
-      {/each}
-      <a class="btn mobile-cta" href="#quickstart" onclick={close}>Open the quickstart</a>
-    </nav>
-  </div>
+  {#if open}
+    <div
+      id="mobile-menu"
+      class="mobile"
+      transition:fly={{ y: -8, duration: 180 }}
+    >
+      <nav aria-label="Mobile">
+        {#each links as link}
+          <a href={link.href} onclick={close}>{link.label}</a>
+        {/each}
+        <a class="btn mobile-cta" href="#quickstart" onclick={close}>Quickstart</a>
+      </nav>
+    </div>
+  {/if}
 </header>
 
 <style>
@@ -195,77 +203,36 @@
     gap: 8px;
   }
 
-  .theme {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 9px;
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0 14px;
-    border: 1px solid var(--nav-chip-border);
-    border-radius: var(--radius-sm);
-    background: var(--nav-chip-bg);
-    color: var(--nav-fg);
-    font-size: var(--text-xs);
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    line-height: 1;
-    cursor: pointer;
+  .cta-slot {
+    display: block;
+    max-width: 0;
+    margin-left: -8px;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateX(6px);
+    pointer-events: none;
     transition:
-      background-color var(--motion-fast) var(--ease),
-      border-color var(--motion-fast) var(--ease),
-      color var(--motion-fast) var(--ease);
+      max-width 240ms var(--ease),
+      margin-left 240ms var(--ease),
+      opacity 160ms var(--ease),
+      transform 240ms var(--ease);
   }
 
-  .theme:hover {
-    border-color: color-mix(in srgb, var(--nav-fg) 68%, transparent);
-    background: var(--nav-chip-bg-hover);
-    color: var(--nav-fg);
+  .cta-slot.visible {
+    max-width: 180px;
+    margin-left: 0;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
   }
 
-  .theme:active {
-    background: color-mix(in srgb, var(--nav-hole) 74%, var(--nav-fg));
-  }
-
-  .theme:focus-visible {
-    outline: 2px solid var(--nav-fg);
-    outline-offset: 2px;
-  }
-
-  .theme-label {
-    display: none;
-    line-height: 1;
-  }
-
-  .icon {
-    width: 19px;
-    height: 19px;
-    flex: none;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .icon.moon {
-    display: block;
-  }
-
-  .icon.sun {
-    display: none;
-  }
-
-  :global(html[data-theme='dark']) .icon.sun {
-    display: block;
-  }
-
-  :global(html[data-theme='dark']) .icon.moon {
-    display: none;
+  .cta-slot .desk-cta {
+    white-space: nowrap;
   }
 
   .desk-cta {
+    min-height: 36px;
+    padding: 0 14px;
     border-color: var(--nav-cta-bg);
     background: var(--nav-cta-bg);
     color: var(--nav-cta-fg);
@@ -308,10 +275,17 @@
   }
 
   .mobile {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    z-index: 50;
     display: flex;
     flex-direction: column;
     gap: 2px;
+    max-height: calc(100svh - 100px);
     padding: 8px var(--gutter) 20px;
+    overflow-y: auto;
     border-top: 1px solid var(--nav-line);
     background: var(--hero-bg);
   }
@@ -319,6 +293,8 @@
   .nav.solid .mobile {
     background: var(--surface);
   }
+
+
 
   .mobile a {
     display: flex;
@@ -338,26 +314,16 @@
     color: var(--nav-cta-fg);
   }
 
-  /* Icon-only square below the point where the nav starts to crowd; the
-     hit target stays 44×44 so it is still easy to find and tap. */
-  @media (max-width: 899px) {
-    .theme {
-      width: 44px;
-      min-width: 44px;
-      padding: 0;
-      gap: 0;
-    }
-  }
-
-  @media (min-width: 900px) {
-    .theme-label {
-      display: inline;
+  @media (min-width: 768px) {
+    .mobile {
+      display: none;
     }
   }
 
   @media (max-width: 767px) {
     .links,
-    .desk-cta {
+    .desk-cta,
+    .cta-slot {
       display: none;
     }
 

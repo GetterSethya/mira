@@ -27,3 +27,6 @@ packages/mira/tests/security/.tmp/
 
 # Local design/audit notes (not tracked)
 .docs/
+
+# EGM artifacts (not tracked)
+.egm/

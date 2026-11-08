@@ -1,0 +1,13 @@
+apps/landing
+.references
+packages/dashboard/ui
+packages/*/scripts
+.ideas
+.plans
+.handovers
+.gaps
+.council
+.patterns
+.claude
+.egm
+.docs

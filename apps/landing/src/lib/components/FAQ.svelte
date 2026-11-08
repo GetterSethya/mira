@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { reveal } from '$lib/reveal';
+
   const items = [
     {
       question: 'Who is Mira for?',
@@ -30,14 +32,14 @@
 
 <section id="faq" class="section">
   <div class="container layout">
-    <div class="section-head">
+    <div class="section-head" use:reveal>
       <p class="eyebrow">FAQ</p>
       <h2>What to know before you install.</h2>
     </div>
 
     <div class="list">
-      {#each items as item}
-        <details>
+      {#each items as item, index}
+        <details use:reveal={index * 35}>
           <summary>{item.question}</summary>
           <p>{item.answer}</p>
         </details>
@@ -97,6 +99,27 @@
     color: var(--muted);
     font-size: var(--text-sm);
     line-height: 1.75;
+  }
+
+  details[open] p {
+    animation: faq-in 220ms var(--ease);
+  }
+
+  @keyframes faq-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    details[open] p {
+      animation: none;
+    }
   }
 
   @media (max-width: 767px) {

@@ -7,13 +7,15 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:docs": "node scripts/check-docs.ts"
   },
   "devDependencies": {
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@sveltejs/adapter-static": "^3.0.0",
     "@sveltejs/kit": "^2.61.1",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^25.7.0",
     "svelte": "^5.55.10",
     "svelte-check": "^4.0.0",
@@ -21,6 +23,10 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
-    "shiki": "^4.5.0"
+    "@fontsource-variable/inter": "^5.3.0",
+    "markdown-it": "^15.0.3",
+    "markdown-it-anchor": "^10.1.0",
+    "shiki": "^4.5.0",
+    "simple-icons": "^16.37.0"
   }
 }
