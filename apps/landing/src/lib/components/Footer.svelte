@@ -2,15 +2,7 @@
   <div class="container">
     <div class="top">
       <div class="brand">
-        <a class="wordmark" href="#top">
-          <svg viewBox="0 0 8 8" aria-hidden="true">
-            <rect width="8" height="8" fill="var(--ink)" />
-            <rect x="2" y="2" width="2" height="2" fill="var(--surface)" />
-            <rect x="6" y="2" width="2" height="2" fill="var(--surface)" />
-            <rect x="2" y="6" width="2" height="2" fill="var(--surface)" />
-          </svg>
-          mira
-        </a>
+        <a class="wordmark" href="#top">mira</a>
         <p>Collections in, REST out. One TypeScript process on Effect v4.</p>
       </div>
 

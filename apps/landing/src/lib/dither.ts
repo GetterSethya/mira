@@ -13,6 +13,11 @@ const THRESHOLD = BAYER.map((row) => row.map((value) => (value + 0.5) / 64));
 
 const DARK = 10;
 const LIGHT = 245;
+const POINTER_RADIUS = 0.18;
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
 
 function hash(x: number, y: number, seed: number): number {
   let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(seed, 1442695041);
@@ -96,17 +101,63 @@ export function mountDither(canvas: HTMLCanvasElement): () => void {
   let last = 0;
   let clock = 3.2;
 
+  let pointerTargetX = 0.5;
+  let pointerTargetY = 0.5;
+  let pointerX = 0.5;
+  let pointerY = 0.5;
+  let pointerStrength = 0;
+  let pointerActive = false;
+
   function paint(time: number) {
     if (!image) return;
 
     const aspect = rows / columns;
+    const pointerV = pointerY * aspect;
 
     for (let cy = 0; cy < coarseRows; cy += 1) {
       const v = (cy / Math.max(1, coarseRows - 1)) * aspect;
       const rowOffset = cy * coarseColumns;
 
       for (let cx = 0; cx < coarseColumns; cx += 1) {
-        coarse[rowOffset + cx] = field(cx / Math.max(1, coarseColumns - 1), v, time);
+        const u = cx / Math.max(1, coarseColumns - 1);
+        let sampleU = u;
+        let sampleV = v;
+        let distance = 0;
+        let lens = 0;
+
+        if (pointerStrength > 0.002) {
+          const dx = u - pointerX;
+          const dy = v - pointerV;
+          distance = Math.hypot(dx, dy);
+          const falloff = smooth(clamp01(1 - distance / POINTER_RADIUS));
+
+          if (falloff > 0) {
+            // A soft magnetic lens: swirl the field around the cursor and pull
+            // it slightly inward, then bias the threshold near the centre.
+            const angle = falloff * 0.62;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            const rotatedX = dx * cos - dy * sin;
+            const rotatedY = dx * sin + dy * cos;
+            const scale = 1 - falloff * 0.1;
+
+            sampleU = pointerX + rotatedX * scale;
+            sampleV = pointerV + rotatedY * scale;
+            lens = falloff * pointerStrength;
+          }
+        }
+
+        let value = field(sampleU, sampleV, time);
+
+        if (lens > 0) {
+          const ripple = Math.sin(distance * 52 - time * 2.6);
+          value += lens * (0.14 + ripple * 0.055);
+        }
+
+        if (value < 0) value = 0;
+        else if (value > 1) value = 1;
+
+        coarse[rowOffset + cx] = value;
       }
     }
 
@@ -169,6 +220,16 @@ export function mountDither(canvas: HTMLCanvasElement): () => void {
     paint(clock);
   }
 
+  function advancePointer(delta: number) {
+    const follow = Math.min(1, delta * 14);
+    pointerX += (pointerTargetX - pointerX) * follow;
+    pointerY += (pointerTargetY - pointerY) * follow;
+
+    const targetStrength = pointerActive ? 1 : 0;
+    pointerStrength += (targetStrength - pointerStrength) * Math.min(1, delta * 10);
+    if (pointerStrength < 0.001) pointerStrength = 0;
+  }
+
   function tick(now: number) {
     if (!running) return;
     frame = requestAnimationFrame(tick);
@@ -178,6 +239,7 @@ export function mountDither(canvas: HTMLCanvasElement): () => void {
 
     const delta = Math.min(0.08, (now - last) / 1000);
     last = now;
+    advancePointer(delta);
     clock += delta;
     paint(clock);
   }
@@ -211,17 +273,44 @@ export function mountDither(canvas: HTMLCanvasElement): () => void {
     else if (onScreen) start();
   }
 
+  function handlePointerMove(event: PointerEvent) {
+    if (event.pointerType === 'touch') return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+
+    if (x < 0 || x > 1 || y < 0 || y > 1) {
+      pointerActive = false;
+      return;
+    }
+
+    pointerActive = true;
+    pointerTargetX = x;
+    pointerTargetY = y;
+  }
+
+  function handlePointerLeave() {
+    pointerActive = false;
+  }
+
   measure();
   start();
 
   intersection.observe(canvas);
   resizeObserver.observe(canvas);
   document.addEventListener('visibilitychange', handleVisibility);
+  window.addEventListener('pointermove', handlePointerMove, { passive: true });
+  document.addEventListener('pointerleave', handlePointerLeave);
+  window.addEventListener('blur', handlePointerLeave);
 
   return () => {
     stop();
     intersection.disconnect();
     resizeObserver.disconnect();
     document.removeEventListener('visibilitychange', handleVisibility);
+    window.removeEventListener('pointermove', handlePointerMove);
+    document.removeEventListener('pointerleave', handlePointerLeave);
+    window.removeEventListener('blur', handlePointerLeave);
   };
 }

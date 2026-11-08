@@ -46,15 +46,7 @@
 
 <header class="nav" class:solid>
   <div class="container inner">
-    <a class="wordmark" href="#top" onclick={close}>
-      <svg viewBox="0 0 8 8" aria-hidden="true">
-        <rect class="mark" width="8" height="8" />
-        <rect x="2" y="2" width="2" height="2" />
-        <rect x="6" y="2" width="2" height="2" />
-        <rect x="2" y="6" width="2" height="2" />
-      </svg>
-      mira
-    </a>
+    <a class="wordmark" href="#top" onclick={close}>mira</a>
 
     <nav class="links" aria-label="Primary">
       {#each links as link}
@@ -170,14 +162,6 @@
 
   .wordmark {
     color: var(--nav-fg);
-  }
-
-  .wordmark svg .mark {
-    fill: currentColor;
-  }
-
-  .wordmark svg rect:not(.mark) {
-    fill: var(--nav-hole);
   }
 
   .links {
