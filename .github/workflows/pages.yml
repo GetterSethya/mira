@@ -1,0 +1,79 @@
+name: Landing Pages
+
+# Deploy the static landing site to GitHub Pages whenever the landing app (or
+# its workspace setup) changes on main. The site uses SvelteKit's relative paths,
+# so the same build works at the root of a custom domain and under the default
+# project URL (https://<user>.github.io/mira/).
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/landing/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  build:
+    name: Build landing site
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck landing
+        run: pnpm --filter @gettersethya/mira-landing check
+
+      - name: Build landing
+        run: pnpm --filter @gettersethya/mira-landing build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: apps/landing/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5
