@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte"
-  const { children }: { children: Snippet } = $props()
+
+  const { children, ...rest }: { children: Snippet; [key: string]: unknown } = $props()
 </script>
 
-<p class="text-sm text-destructive">{@render children()}</p>
+<p role="alert" class="text-sm text-destructive" {...rest}>{@render children()}</p>

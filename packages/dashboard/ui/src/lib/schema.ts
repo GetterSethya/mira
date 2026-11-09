@@ -86,10 +86,13 @@ export type FieldEntry = {
   collectionName: string | null
   /** JSON Schema `format` (e.g. `email`, `date-time`), used to pick the field icon. */
   format: string | null
+  required: boolean
 }
 
 function label(name: string): string {
-  return name.charAt(0).toUpperCase() + name.slice(1)
+  if (name === "id") return "ID"
+  const spaced = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ")
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
 /**
@@ -109,6 +112,7 @@ export function fieldEntries(schema: CollectionSchema): FieldEntry[] {
       readOnly: false,
       collectionName: field["x-collection"] ?? null,
       format: field.format ?? null,
+      required: schema.required?.includes(name) === true || field["x-required"] === true,
     }))
 }
 

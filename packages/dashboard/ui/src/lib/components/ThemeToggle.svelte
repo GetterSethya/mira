@@ -13,7 +13,7 @@
 </script>
 
 <Button
-  onclick={(e: any) => {
+  onclick={(e) => {
     toggleMode()
     onclick?.(e)
   }}

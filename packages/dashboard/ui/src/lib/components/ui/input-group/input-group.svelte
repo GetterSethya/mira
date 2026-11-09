@@ -15,7 +15,7 @@
 	data-slot="input-group"
 	role="group"
 	class={cn(
-		"group/input-group border-input bg-input/20 dark:bg-input/30 relative flex h-7 w-full min-w-0 items-center rounded-md border transition-colors outline-none",
+		"group/input-group border-input bg-input/20 dark:bg-input/30 relative flex h-[2.875rem] w-full sm:h-9 min-w-0 items-center rounded-md border transition-colors outline-none",
 		"has-[>textarea]:h-auto",
 
 		// Aligned addons.

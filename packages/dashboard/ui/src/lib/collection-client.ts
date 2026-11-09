@@ -1,6 +1,17 @@
+import type { FilterNode } from "@gettersethya/mira-client"
+
 const API_BASE = "/api"
 
 export type ListResult<T> = { items: T[]; nextCursor: number | null }
+
+export type ListOptions = {
+  limit?: number
+  after?: string | number
+  expand?: ReadonlyArray<string>
+  filter?: FilterNode
+  sort?: string
+  order?: "asc" | "desc"
+}
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { ...init })
@@ -13,11 +24,16 @@ export function makeCollectionApi(collectionName: string) {
   const base = `${API_BASE}/collections/${collectionName}`
 
   return {
-    listOptions: (params?: { limit?: number; after?: string | number; expand?: ReadonlyArray<string> }) => {
+    listOptions: (params?: ListOptions) => {
       const q = new URLSearchParams()
       if (params?.limit !== undefined) q.set("limit", String(params.limit))
       if (params?.after !== undefined) q.set("after", String(params.after))
       if (params?.expand !== undefined && params.expand.length > 0) q.set("expand", params.expand.join(","))
+      if (params?.filter !== undefined) q.set("filter", JSON.stringify(params.filter))
+      if (params?.sort !== undefined) {
+        q.set("sort", params.sort)
+        q.set("order", params.order ?? "asc")
+      }
       return {
         queryKey: ["collection", collectionName, "list", params] as const,
         queryFn: () => req<ListResult<Record<string, unknown>>>(`${base}?${q}`),

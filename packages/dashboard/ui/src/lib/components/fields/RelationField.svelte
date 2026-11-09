@@ -8,7 +8,11 @@
   import { IconLink } from "@tabler/icons-svelte"
 
   const field = useFieldContext<string | null>()
-  const { label, collectionName }: { label: string; collectionName: string } = $props()
+  const { label, collectionName, required = false }: { label: string; collectionName: string; required?: boolean } = $props()
+  const uid = $props.id()
+  const inputId = `${uid}-input`
+  const errorId = `${uid}-error`
+  const invalid = $derived(field.state.meta.errors.length > 0)
 
   const query = createQuery(() => makeCollectionApi(collectionName).listOptions({ limit: 50 }))
 
@@ -18,8 +22,8 @@
   }
 </script>
 
-<Field.Field>
-  <Field.Label>{label}</Field.Label>
+<Field.Field data-invalid={invalid || undefined}>
+  <Field.Label for={inputId}>{label}</Field.Label>
   <Select.Root
     type="single"
     value={field.state.value ?? ""}
@@ -30,7 +34,11 @@
         <IconLink />
       </InputGroup.Addon>
       <Select.Trigger
-        class="w-full flex-1 justify-between rounded-none border-0 bg-transparent ps-1.5 pe-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent"
+        id={inputId}
+        aria-invalid={invalid}
+        aria-describedby={invalid ? errorId : undefined}
+        aria-required={required}
+        class="h-full w-full flex-1 justify-between rounded-none border-0 bg-transparent ps-1.5 pe-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent"
       >
         {#if query.data}
           {@const rec = query.data.items.find((r) => r["id"] === field.state.value)}
@@ -52,4 +60,7 @@
       {/if}
     </Select.Content>
   </Select.Root>
+  {#if invalid}
+    <Field.Error id={errorId}>{field.state.meta.errors[0]}</Field.Error>
+  {/if}
 </Field.Field>

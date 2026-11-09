@@ -66,6 +66,7 @@
 			<Button
 				variant="ghost"
 				size="icon-xs"
+				class="size-11 sm:size-9"
 				aria-label="Copy code"
 				title="Copy code"
 				disabled={loading}

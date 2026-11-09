@@ -6,72 +6,72 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-	--background: oklch(1 0 0);
-	--foreground: oklch(0.145 0 0);
-	--card: oklch(1 0 0);
-	--card-foreground: oklch(0.145 0 0);
-	--popover: oklch(1 0 0);
-	--popover-foreground: oklch(0.145 0 0);
-	--primary: oklch(0.488 0.243 264.376);
-	--primary-foreground: oklch(0.97 0.014 254.604);
-	--secondary: oklch(0.967 0.001 286.375);
-	--secondary-foreground: oklch(0.21 0.006 285.885);
-	--muted: oklch(0.97 0 0);
-	--muted-foreground: oklch(0.556 0 0);
-	--accent: oklch(0.488 0.243 264.376);
-	--accent-foreground: oklch(0.97 0.014 254.604);
-	--destructive: oklch(0.577 0.245 27.325);
-	--border: oklch(0.922 0 0);
-	--input: oklch(0.922 0 0);
-	--ring: oklch(0.708 0 0);
-	--chart-1: oklch(0.809 0.105 251.813);
-	--chart-2: oklch(0.623 0.214 259.815);
-	--chart-3: oklch(0.546 0.245 262.881);
-	--chart-4: oklch(0.488 0.243 264.376);
-	--chart-5: oklch(0.424 0.199 265.638);
-	--radius: 0rem;
-	--sidebar: oklch(0.985 0 0);
-	--sidebar-foreground: oklch(0.145 0 0);
-	--sidebar-primary: oklch(0.546 0.245 262.881);
-	--sidebar-primary-foreground: oklch(0.97 0.014 254.604);
-	--sidebar-accent: oklch(0.97 0 0);
-	--sidebar-accent-foreground: oklch(0.205 0 0);
-	--sidebar-border: oklch(0.922 0 0);
-	--sidebar-ring: oklch(0.708 0 0);
+	--background: #fafafa;
+	--foreground: #1c1c1f;
+	--card: #ffffff;
+	--card-foreground: #1c1c1f;
+	--popover: #ffffff;
+	--popover-foreground: #1c1c1f;
+	--primary: #0a0a0a;
+	--primary-foreground: #fafafa;
+	--secondary: #f4f4f5;
+	--secondary-foreground: #1c1c1f;
+	--muted: #f4f4f5;
+	--muted-foreground: #6b6b73;
+	--accent: #ededed;
+	--accent-foreground: #0a0a0a;
+	--destructive: #b91c1c;
+	--border: #e4e4e7;
+	--input: #cfcfd4;
+	--ring: #0a0a0a;
+	--chart-1: #0a0a0a;
+	--chart-2: #6b6b73;
+	--chart-3: #cfcfd4;
+	--chart-4: #a1a1aa;
+	--chart-5: #1c1c1f;
+	--radius: 0.125rem;
+	--sidebar: #fafafa;
+	--sidebar-foreground: #1c1c1f;
+	--sidebar-primary: #0a0a0a;
+	--sidebar-primary-foreground: #fafafa;
+	--sidebar-accent: #ededed;
+	--sidebar-accent-foreground: #0a0a0a;
+	--sidebar-border: #e4e4e7;
+	--sidebar-ring: #0a0a0a;
 }
 
 .dark {
-	--background: oklch(0.145 0 0);
-	--foreground: oklch(0.985 0 0);
-	--card: oklch(0.205 0 0);
-	--card-foreground: oklch(0.985 0 0);
-	--popover: oklch(0.205 0 0);
-	--popover-foreground: oklch(0.985 0 0);
-	--primary: oklch(0.424 0.199 265.638);
-	--primary-foreground: oklch(0.97 0.014 254.604);
-	--secondary: oklch(0.274 0.006 286.033);
-	--secondary-foreground: oklch(0.985 0 0);
-	--muted: oklch(0.269 0 0);
-	--muted-foreground: oklch(0.708 0 0);
-	--accent: oklch(0.424 0.199 265.638);
-	--accent-foreground: oklch(0.97 0.014 254.604);
-	--destructive: oklch(0.704 0.191 22.216);
-	--border: oklch(1 0 0 / 10%);
-	--input: oklch(1 0 0 / 15%);
-	--ring: oklch(0.556 0 0);
-	--chart-1: oklch(0.809 0.105 251.813);
-	--chart-2: oklch(0.623 0.214 259.815);
-	--chart-3: oklch(0.546 0.245 262.881);
-	--chart-4: oklch(0.488 0.243 264.376);
-	--chart-5: oklch(0.424 0.199 265.638);
-	--sidebar: oklch(0.205 0 0);
-	--sidebar-foreground: oklch(0.985 0 0);
-	--sidebar-primary: oklch(0.623 0.214 259.815);
-	--sidebar-primary-foreground: oklch(0.97 0.014 254.604);
-	--sidebar-accent: oklch(0.269 0 0);
-	--sidebar-accent-foreground: oklch(0.985 0 0);
-	--sidebar-border: oklch(1 0 0 / 10%);
-	--sidebar-ring: oklch(0.556 0 0);
+	--background: #08080a;
+	--foreground: #d6d6da;
+	--card: #0e0e11;
+	--card-foreground: #d6d6da;
+	--popover: #0e0e11;
+	--popover-foreground: #d6d6da;
+	--primary: #f4f4f5;
+	--primary-foreground: #08080a;
+	--secondary: #1c1c1f;
+	--secondary-foreground: #f4f4f5;
+	--muted: #1c1c1f;
+	--muted-foreground: #8b8b95;
+	--accent: #1c1c1f;
+	--accent-foreground: #f4f4f5;
+	--destructive: #f87171;
+	--border: #222227;
+	--input: #34343b;
+	--ring: #f4f4f5;
+	--chart-1: #f4f4f5;
+	--chart-2: #8b8b95;
+	--chart-3: #34343b;
+	--chart-4: #a1a1aa;
+	--chart-5: #d6d6da;
+	--sidebar: #0a0a0a;
+	--sidebar-foreground: #d6d6da;
+	--sidebar-primary: #f4f4f5;
+	--sidebar-primary-foreground: #08080a;
+	--sidebar-accent: #1c1c1f;
+	--sidebar-accent-foreground: #f4f4f5;
+	--sidebar-border: #222227;
+	--sidebar-ring: #f4f4f5;
 }
 
 @theme inline {
@@ -149,4 +149,43 @@ html.dark .shiki span {
 	font-style: var(--shiki-dark-font-style) !important;
 	font-weight: var(--shiki-dark-font-weight) !important;
 	text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+/* Visible focus is a product requirement, not a browser default. The stock
+   shadcn rings are 30% alpha; this outline keeps the full-strength token.
+   Composite inputs outline the whole group, not the inner control. */
+:where(a, button, [role="button"], [tabindex]):focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+
+:where(input, textarea, select):focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+
+[data-slot="input-group"] :where(input, textarea, select, button):focus-visible {
+	outline: none;
+}
+
+[data-slot="input-group"]:focus-within {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+
+/* Phone/tablet targets: nav rows and the primary record actions need a real
+   44px floor before the desktop breakpoint. */
+@media (max-width: 1279px) {
+	[data-slot="sidebar-menu-button"] {
+		min-height: 2.75rem;
+	}
+}
+
+/* Location is carried by the neutral pill, a weight change and aria-current. */
+[data-slot="sidebar-menu-button"][data-active="true"] {
+	font-weight: 600;
+}
+
+.tabular {
+	font-variant-numeric: tabular-nums;
 }

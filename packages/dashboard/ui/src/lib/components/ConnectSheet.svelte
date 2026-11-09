@@ -157,7 +157,7 @@
                   >
                     <Select.Trigger
                       size="sm"
-                      class="w-20"
+                      class="!h-11 w-20 sm:!h-9"
                       aria-label="Package manager"
                       title="Package manager"
                     >
@@ -183,7 +183,6 @@
   <Sheet.Content
     side="right"
     class="data-[side=right]:w-full data-[side=right]:sm:max-w-4xl data-[side=right]:2xl:max-w-5xl overflow-y-auto"
-    showCloseButton={false}
   >
     <Sheet.Header class="bg-card sticky top-0 z-30 border-b">
       <Sheet.Title>Connect to {schema.name}</Sheet.Title>
@@ -197,7 +196,7 @@
         <label class="text-xs font-medium" for="connect-base-url">Base URL</label>
         <Input
           id="connect-base-url"
-          class="font-mono"
+          class="h-11 font-mono sm:h-9"
           bind:value={baseUrl}
           placeholder="https://example.com"
         />
@@ -209,7 +208,7 @@
           if (isConnectTab(value)) onTabChange(value)
         }}
       >
-        <Tabs.List class="w-full">
+        <Tabs.List class="h-[3.0625rem] w-fit sm:h-10">
           <Tabs.Trigger value="sdk">SDK</Tabs.Trigger>
           <Tabs.Trigger value="fetch">fetch</Tabs.Trigger>
           <Tabs.Trigger value="types">Types</Tabs.Trigger>
@@ -227,6 +226,7 @@
           >
             <Button
               size="xs"
+              class="h-11 px-3 sm:h-9"
               variant={fetchMode === "fetch" ? "secondary" : "ghost"}
               aria-pressed={fetchMode === "fetch"}
               onclick={() => (fetchMode = "fetch")}
@@ -235,6 +235,7 @@
             </Button>
             <Button
               size="xs"
+              class="h-11 px-3 sm:h-9"
               variant={fetchMode === "curl" ? "secondary" : "ghost"}
               aria-pressed={fetchMode === "curl"}
               onclick={() => (fetchMode = "curl")}
@@ -254,6 +255,7 @@
             >
               <Button
                 size="xs"
+                class="h-11 px-3 sm:h-9"
                 variant={typesScope === "current" ? "secondary" : "ghost"}
                 aria-pressed={typesScope === "current"}
                 onclick={() => (typesScope = "current")}
@@ -262,6 +264,7 @@
               </Button>
               <Button
                 size="xs"
+                class="h-11 px-3 sm:h-9"
                 variant={typesScope === "all" ? "secondary" : "ghost"}
                 aria-pressed={typesScope === "all"}
                 onclick={() => (typesScope = "all")}
@@ -270,11 +273,11 @@
               </Button>
             </div>
             <div class="flex items-center gap-1">
-              <Button variant="outline" size="xs" onclick={copyGeneratedFile}>
+              <Button variant="outline" size="xs" class="h-11 px-3 sm:h-9" onclick={copyGeneratedFile}>
                 <IconCopy />
                 Copy
               </Button>
-              <Button variant="outline" size="xs" onclick={downloadGeneratedFile}>
+              <Button variant="outline" size="xs" class="h-11 px-3 sm:h-9" onclick={downloadGeneratedFile}>
                 <IconDownload />
                 Download
               </Button>
@@ -286,7 +289,7 @@
     </div>
 
     <Sheet.Footer class="bg-card sticky bottom-0 z-30 border-t">
-      <Button class="w-full" variant="outline" onclick={onClose}>Close</Button>
+      <Button class="h-11 w-full" variant="outline" onclick={onClose}>Close</Button>
     </Sheet.Footer>
   </Sheet.Content>
 </Sheet.Root>

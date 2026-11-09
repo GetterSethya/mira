@@ -13,25 +13,29 @@
   const entries = $derived(fieldEntries(schema))
 </script>
 
-{#each entries as { name, kind, label, collectionName, format } (name)}
+<p class="text-muted-foreground text-xs">Fields marked * are required.</p>
+{#each entries as { name, kind, label, collectionName, format, required } (name)}
+  {@const isRequired = required && !(record !== null && kind === "password")}
+  {@const displayLabel = isRequired ? `${label} *` : label}
+  {@const multiline = ["body", "content", "description", "bio", "message", "notes"].includes(name)}
   <form.AppField {name}>
     {#snippet children(field)}
       {#if kind === "relation" && collectionName}
-        <field.RelationField {label} {collectionName} />
+        <field.RelationField label={displayLabel} {collectionName} required={isRequired} />
       {:else if kind === "file"}
-        <field.FileField {label} />
+        <field.FileField label={displayLabel} required={isRequired} />
       {:else if kind === "password"}
-        <field.PasswordField {label} />
+        <field.PasswordField label={displayLabel} required={isRequired} />
       {:else if kind === "bool"}
-        <field.BoolField {label} />
+        <field.BoolField label={displayLabel} required={isRequired} />
       {:else if kind === "number"}
-        <field.NumberField {label} />
+        <field.NumberField label={displayLabel} required={isRequired} />
       {:else if kind === "date"}
-        <field.DateField {label} />
+        <field.DateField label={displayLabel} required={isRequired} />
       {:else if kind === "json"}
-        <field.JsonField {label} />
+        <field.JsonField label={displayLabel} required={isRequired} />
       {:else}
-        <field.TextField {label} {format} />
+        <field.TextField label={displayLabel} {format} required={isRequired} {multiline} />
       {/if}
     {/snippet}
   </form.AppField>
