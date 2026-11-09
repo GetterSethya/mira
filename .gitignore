@@ -30,3 +30,6 @@ packages/mira/tests/security/.tmp/
 
 # EGM artifacts (not tracked)
 .egm/
+
+# Council review artifacts (not tracked)
+.council/

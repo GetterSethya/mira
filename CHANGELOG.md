@@ -10,10 +10,50 @@ and `@gettersethya/mira-dashboard` always share one version.
 
 Pre-releases are published under the `alpha` npm dist-tag; while the project is pre-1.0
 the `latest` tag also tracks the newest alpha. Stable releases publish under `latest`.
-Entries before `0.1.0-alpha.33` are not recorded here — that release is the first one
+Entries before `0.1.0-alpha.33` are not recorded here - that release is the first one
 published by CI.
 
 ## [Unreleased]
+
+## [0.1.0-alpha.36] - 2026-11-09
+
+### Added
+
+- **Dashboard: inline collection filter builder.** The collection records page now filters
+  in a bar directly above the table instead of a modal. Condition chips show field, operator
+  and value; `and` / `or` pills toggle connectors backed by Mira's `Filter.and` /
+  `Filter.or` DSL. Operators and value editors adapt to the collection schema (text,
+  number, date, boolean, relation, and `x-literal` values), new conditions inherit the last
+  connector, and the active search is shown as a `search` chip grouped with the condition
+  expression.
+- **Dashboard: anchored condition editor.** Editing a chip or adding a condition opens a
+  viewport-clamped popover with Field / Operator / Value labels, focus/select of the value,
+  Enter-to-apply, Escape close, and focus return. It is fully keyboard and phone operable.
+- **Dashboard: schema inspector dialog.** The collection schema now opens from a `Schema`
+  button beside `Connect`, with fixed header/footer, an independently scrollable field list,
+  per-field icons, type labels and required/hidden annotations.
+- **Dashboard: responsive record list.** Identity-first rows, copyable short IDs, ISO
+  timestamps, text status labels, mobile card rows and a sticky, capped table header.
+- **Dashboard: accessible form feedback.** Field labels are associated with controls,
+  required fields expose `aria-required`, errors use alert semantics, and composite inputs
+  focus as one group.
+
+### Changed
+
+- **Dashboard: landing-aligned palette.** Dashboard colours now mirror the landing project's
+  black-and-white tokens (`#fafafa` / `#08080a` grounds, ink/primary, neutral borders and
+  muted text) instead of the previous teal-tinted palette.
+- **Dashboard: shell and navigation.** Breadcrumb alignment, active navigation state,
+  compact mobile drawer and full-width phone navigation.
+- **Dashboard: Connect and collections index.** Fitted Connect tabs and control sizes,
+  fixed index action widths and a schema/operations footer.
+
+### Fixed
+
+- **Dashboard:** removed page-level horizontal overflow at tablet widths, fixed modal
+  scrolling and clipped dialog actions, and removed the duplicate Clear Filters trigger.
+- **Dashboard:** focus now outlines the whole input group rather than the inner input, so
+  password fields no longer draw an overlapping inner rectangle.
 
 ## [0.1.0-alpha.35] - 2026-10-28
 
@@ -125,6 +165,8 @@ build provenance for all five packages.
 - npm publishing uses short-lived OIDC credentials bound to the `npm_alpha` / `npm_stable`
   GitHub environments, with provenance attestations and no long-lived token in the repository.
 
-[Unreleased]: https://github.com/GetterSethya/mira/compare/v0.1.0-alpha.34...HEAD
+[Unreleased]: https://github.com/GetterSethya/mira/compare/v0.1.0-alpha.36...HEAD
+[0.1.0-alpha.36]: https://github.com/GetterSethya/mira/releases/tag/v0.1.0-alpha.36
+[0.1.0-alpha.35]: https://github.com/GetterSethya/mira/releases/tag/v0.1.0-alpha.35
 [0.1.0-alpha.34]: https://github.com/GetterSethya/mira/releases/tag/v0.1.0-alpha.34
 [0.1.0-alpha.33]: https://github.com/GetterSethya/mira/releases/tag/v0.1.0-alpha.33
