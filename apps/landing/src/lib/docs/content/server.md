@@ -1,4 +1,4 @@
-Mira assembles a server from four required builder steps and a few optional ones. Durable state lives in SQLite: collection definitions, configuration, and optionally logs and spans. This page covers the builder, config, storage, migrations, telemetry, and thumbnails; [email](../email/), [plugins](../plugins/), [HTTP API](../http-api/), and the [dashboard](../dashboard/) have their own pages.
+Mira assembles a server from four required builder steps and a few optional ones. Durable state lives in SQLite: collection definitions, configuration, and optionally logs and spans. Node and Bun are both supported; [Bun](../bun/) has its own runtime page. This page covers the builder, config, storage, migrations, telemetry, and thumbnails; [email](../email/), [plugins](../plugins/), [HTTP API](../http-api/), and the [dashboard](../dashboard/) have their own pages.
 
 ## What lives where
 
@@ -43,6 +43,8 @@ const app = Mira.builder()
 
 app.serve()
 ```
+
+For Bun, import `BunPlatform` and `BunSqliteDatabase` from `@gettersethya/mira/bun` and pass them to the same `.platform(...)` and `.database(...)` steps. The rest of the builder is unchanged.
 
 `serve()` accepts optional `port` and `maxPortAttempts` (default 10). On a busy port it retries upward and reports the bound port to `AppConfig`, keeping `applicationUrl` accurate.
 
@@ -124,6 +126,8 @@ import { makeSqliteTelemetryLayer } from "@gettersethya/mira"
 .telemetry(makeSqliteTelemetryLayer({ dbPath: "mira-logs.db", logConsole: true }))
 ```
 
+This layer is Node-only in the Bun cut because it imports the Node SQLite driver. On Bun, use the default console telemetry or a custom layer; the SQLite telemetry and `logCleanupCronDef` are not available.
+
 It opens a separate SQLite database, migrates `logs` and `spans` at layer construction, and re-provides the connection as `TelemetrySqlClient` for the admin telemetry routes. Spans go onto an unbounded queue drained by a scoped fiber, so completion never blocks on I/O. Log writes are fire-and-forget. `dbPath` defaults to `"mira-logs.db"`; `logConsole` echoes to stdout and `pretty` affects only that echo.
 
 `logCleanupCronDef` is a daily `0 0 * * *` job deleting `logs` and `spans` older than `AppConfig.logRetentionDays`; add it to `.crons([...])`. It requires `TelemetrySqlClient`, so use it only with `makeSqliteTelemetryLayer`; the default console telemetry does not provide the table client. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
@@ -132,4 +136,4 @@ It opens a separate SQLite database, migrates `logs` and `spans` at layer constr
 
 `ThumbnailServicePhotonLive` is wired into the foundation layer and supports JPEG, PNG, and WebP through `@cf-wasm/photon`. The file-serving route accepts a `thumb` spec in `WxH[tbf]` form: `t` is cover, `b` is contain, `f` is fill, and no suffix defaults to cover. A `0` axis scales proportionally; `0x0` returns the source size. Results are cached best-effort at `_thumbs/<filename>/<spec>`, and a resize failure falls back to the original. The app hardcodes the Photon layer; `ThumbnailServiceNoopLive` exists internally for tests and is not a public builder option.
 
-`NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. A different runtime needs one preset satisfying `MiraPlatform`: a layer for those services plus a `runMain`. Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic; the Photon thumbnail backend and SQLite telemetry remain environment-specific. For hook ordering and cron state see [plugins](../plugins/); for routes and status codes see the [HTTP API](../http-api/); for the admin UI see the [dashboard](../dashboard/).
+`NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. `BunPlatform` does the same with native Bun filesystem, path, HTTP server, and runtime; it reuses the Node-compatible crypto, password, and SMTP layers. `BunSqliteDatabase` pairs Bun SQLite with the same dialect. Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic; Photon works under both runtimes, while SQLite telemetry remains Node-only in this cut. For hook ordering and cron state see [plugins](../plugins/); for routes and status codes see the [HTTP API](../http-api/); for the admin UI see the [dashboard](../dashboard/).

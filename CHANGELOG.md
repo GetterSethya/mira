@@ -34,6 +34,12 @@ published by CI.
   class, collection, and recipient. Daily caps bound cost. `429` responses
   carry `retryAfterSeconds` and `Retry-After`. The builder accepts `.rateLimits({ store,
   emailPolicies })`.
+- **Bun runtime.** `BunPlatform` and `BunSqliteDatabase` backed by
+  `@effect/platform-bun` and `@effect/sql-sqlite-bun`, plus the
+  `@gettersethya/mira/bun` package entry and a root `bun` export condition. Bun uses native
+  filesystem, path, HTTP server, runtime, and SQLite; crypto, password hashing, SMTP, and
+  thumbnails reuse the Node-compatible implementations. A Bun smoke app exercises
+  migrations, HTTP CRUD, thumbnails, and the rate-limit store.
 
 ### Changed
 

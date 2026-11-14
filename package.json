@@ -8,6 +8,8 @@
     "build:ui":       "pnpm --filter @gettersethya/mira-dashboard build:ui",
     "typecheck":      "pnpm -r typecheck",
     "test":           "pnpm -r test",
+    "bun:smoke":      "bun run apps/example-bun/src/smoke.ts",
+    "pack:smoke":     "node scripts/pack-smoke.mjs",
     "lint":           "pnpm -r lint",
     "release:alpha":  "node scripts/release.ts alpha",
     "release:stable": "node scripts/release.ts stable",
@@ -17,6 +19,9 @@
     "typescript": "^6.0.3"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"],
+    "overrides": {
+      "@effect/platform-node-shared": "4.0.0"
+    }
   }
 }

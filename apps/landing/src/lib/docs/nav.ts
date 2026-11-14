@@ -129,6 +129,22 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     ]
   },
   {
+    slug: "bun",
+    title: "Bun runtime",
+    group: "Operate",
+    summary: "Run Mira on Bun with the native platform preset, Bun SQLite, and the Bun package entry.",
+    contracts: [
+      "packages/mira/src/platforms/EGM.md",
+      "packages/mira/src/databases/EGM.md",
+      "packages/mira/src/app/EGM.md"
+    ],
+    sourceFolders: [
+      "packages/mira/src/platforms",
+      "packages/mira/src/databases",
+      "packages/mira/src/http"
+    ]
+  },
+  {
     slug: "server",
     title: "Server and operations",
     group: "Operate",

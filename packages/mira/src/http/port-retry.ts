@@ -1,20 +1,47 @@
 import type { Context } from "effect"
-import { Effect, Exit, Layer, Scope } from "effect"
+import { Cause, Effect, Exit, Layer, Scope } from "effect"
 import type { Etag, HttpPlatform, HttpServer } from "effect/http"
-import type { ServeError } from "effect/http/HttpServerError"
+import { ServeError } from "effect/http/HttpServerError"
 
 import type { HttpServerFactory } from "./server-factory.js"
 
 const DEFAULT_MAX_ATTEMPTS = 10
 
-const isAddressInUse = (error: ServeError): boolean => {
-  const cause: unknown = error.cause
-  return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "code" in cause &&
-    cause.code === "EADDRINUSE"
-  )
+const isAddressInUseValue = (value: unknown, depth = 0): boolean => {
+  if (depth > 4 || typeof value !== "object" || value === null) return false
+  const record = value as { readonly code?: unknown; readonly message?: unknown; readonly cause?: unknown }
+  if (record.code === "EADDRINUSE") return true
+  if (typeof record.message === "string" && record.message.includes("EADDRINUSE")) return true
+  if (record.cause !== undefined && record.cause !== value) {
+    return isAddressInUseValue(record.cause, depth + 1)
+  }
+  return false
+}
+
+/**
+ * Bun.serve throws a synchronous bind error as a defect rather than failing
+ * with a typed `ServeError`. Normalize both shapes so port retry works on Node
+ * and Bun.
+ */
+const serveErrorFromCause = (cause: Cause.Cause<unknown>): ServeError | null => {
+  for (const reason of cause.reasons) {
+    if (Cause.isFailReason(reason)) {
+      const error: unknown = reason.error
+      const isServeError =
+        error instanceof ServeError ||
+        (typeof error === "object" &&
+          error !== null &&
+          "_tag" in error &&
+          (error as { readonly _tag?: unknown })._tag === "ServeError")
+      if (isServeError && isAddressInUseValue((error as ServeError).cause)) {
+        return error as ServeError
+      }
+    }
+    if (Cause.isDieReason(reason) && isAddressInUseValue(reason.defect)) {
+      return new ServeError({ cause: reason.defect })
+    }
+  }
+  return null
 }
 
 /**
@@ -49,10 +76,14 @@ export const makePortRetryServerLayer = (
           return yield* Layer.buildWithScope(factory.makeLayer(candidate), scope).pipe(
             Effect.tap(() => Scope.addFinalizer(outerScope, Scope.close(scope, Exit.void))),
             Effect.map((context): readonly [number, ServerContext] => [candidate, context]),
-            Effect.catchTag("ServeError", (error) =>
-              Effect.gen(function* () {
+            Effect.catchCause((cause) => {
+              const error = serveErrorFromCause(cause)
+              if (error === null) {
+                return Effect.failCause(cause)
+              }
+              return Effect.gen(function* () {
                 yield* Scope.close(scope, Exit.fail(error))
-                if (isAddressInUse(error) && remaining > 0) {
+                if (isAddressInUseValue(error.cause) && remaining > 0) {
                   yield* Effect.logWarning(
                     `Port ${candidate} is already in use — trying port ${candidate + 1}...`
                   )
@@ -60,7 +91,7 @@ export const makePortRetryServerLayer = (
                 }
                 return yield* Effect.fail(error)
               })
-            )
+            })
           )
         })
 

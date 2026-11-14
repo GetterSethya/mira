@@ -35,7 +35,7 @@ A plugin may also contribute `layer` (merged after the app's mid layer, so it ca
 
 Each action has four stages. For create they are `onRecordCreate` (pre), `onRecordCreateExecute`, `onRecordCreateSuccess`, and `onRecordCreateError`; update and delete have the same four names.
 
-Every record hook accepts an optional `collections` allowlist; cron hooks use a `crons` allowlist. Omit it to run for all collections or crons. The `onCollection(collections, handler)` and `onCollectionSuccess(collections, handler)` helpers build the same record objects. Hooks require Effect in the host app; install `effect@^4`.
+Every record hook accepts an optional `collections` allowlist; cron hooks use a `crons` allowlist. Omit it to run for all collections or crons. The `onCollection(collections, handler)` and `onCollectionSuccess(collections, handler)` helpers build the same record objects. Hooks require Effect in the host app; install `effect@4.0.0` for this alpha.
 
 The contexts are `RecordHookContext` (`{ collection, data, record, auth }`), `RecordResultContext` (the same plus `result`), and `HookErrorContext` (`{ collection, action, error, auth }`).
 

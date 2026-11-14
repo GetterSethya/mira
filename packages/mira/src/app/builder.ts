@@ -6,7 +6,7 @@ import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
 import { NoopEmail } from "@/email/noop.js"
 import type { MigrateOptions } from "@/migrator/types.js"
-import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
+import { ConsoleTelemetryLayer } from "@/telemetry/index-core.js"
 
 import { MiraApp } from "./app.js"
 import type { RuleBinding } from "./define-rule.js"

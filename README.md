@@ -16,7 +16,7 @@ Your collections are TypeScript files. Your rules are composable expressions eva
 
 | Package | Description | npm |
 |---|---|---|
-| `@gettersethya/mira` | Server library (Node.js) — the main package you run on the server | [![npm](https://img.shields.io/npm/v/@gettersethya/mira)](https://www.npmjs.com/package/@gettersethya/mira) |
+| `@gettersethya/mira` | Server library (Node.js and Bun) — the main package you run on the server | [![npm](https://img.shields.io/npm/v/@gettersethya/mira)](https://www.npmjs.com/package/@gettersethya/mira) |
 | `@gettersethya/mira-collection` | Collection definitions, filter DSL, rule builder — isomorphic (browser + Node) | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-collection)](https://www.npmjs.com/package/@gettersethya/mira-collection) |
 | `@gettersethya/mira-client` | Type-safe HTTP client SDK for browsers or server-to-server calls | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-client)](https://www.npmjs.com/package/@gettersethya/mira-client) |
 | `@gettersethya/mira-tanstack-adapter` | Framework-agnostic TanStack Query adapter (React / Svelte / Solid) | [![npm](https://img.shields.io/npm/v/@gettersethya/mira-tanstack-adapter)](https://www.npmjs.com/package/@gettersethya/mira-tanstack-adapter) |
@@ -28,7 +28,7 @@ All packages require `effect >= 4` (Effect v4) as a peer dependency.
 
 ## Installation
 
-**Server** (runs in Node.js, produces the HTTP API)
+**Server** (runs in Node.js or Bun, produces the HTTP API)
 
 ```bash
 npm install @gettersethya/mira @gettersethya/mira-collection effect
@@ -144,7 +144,7 @@ Mira.builder()
 
 | Step | Required | Description |
 |---|---|---|
-| `.platform(p)` | yes | Runtime environment. Currently `NodePlatform`. |
+| `.platform(p)` | yes | Runtime environment. `NodePlatform`, or `BunPlatform` from the `@gettersethya/mira/bun` entry. |
 | `.database(d)` | yes | SQL backend. Currently `SqliteDatabase({ filename })`. |
 | `.storage(s)` | yes | File storage. `LocalFileStorage({ directory })` for local disk, or `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for S3-compatible buckets (AWS S3, MinIO, R2, LocalStack). |
 | `.email(e)` | no | Email transport. `SmtpEmail({ host, port, secure, auth, from })`. Without it, a no-op `EmailService` is used. |

@@ -15,8 +15,16 @@
   ],
   "exports": {
     ".": {
+      "bun": {
+        "types": "./dist/index.bun.d.ts",
+        "default": "./dist/index.bun.js"
+      },
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./bun": {
+      "types": "./dist/index.bun.d.ts",
+      "default": "./dist/index.bun.js"
     }
   },
   "scripts": {
@@ -27,8 +35,11 @@
   },
   "dependencies": {
     "@cf-wasm/photon": "^0.3.5",
-    "@effect/platform-node": "^4.0.0",
-    "@effect/sql-sqlite-node": "^4.0.0",
+    "@effect/platform-bun": "4.0.0",
+    "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
+    "@effect/sql-sqlite-bun": "4.0.0",
+    "@effect/sql-sqlite-node": "4.0.0",
     "@gettersethya/mira-client": "workspace:*",
     "chalk": "^6.0.1",
     "files-sdk": "^3.1.2",
@@ -37,14 +48,15 @@
     "nodemailer": "^10.5.0"
   },
   "peerDependencies": {
-    "effect": "^4.0.0"
+    "effect": "~4.0.0"
   },
   "devDependencies": {
     "@effect/vitest": "^4.0.0",
+    "@types/bun": "^1.4.2",
     "@types/node": "^25.7.0",
     "@types/nodemailer": "^8.0.2",
     "@types/smtp-server": "^3.5.13",
-    "effect": "^4.0.0",
+    "effect": "4.0.0",
     "smtp-server": "^3.21.4",
     "tsc-alias": "^1.8.17",
     "typescript": "^6.0.3",

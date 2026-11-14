@@ -80,7 +80,7 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - Pagination defaults `limit` to 30 and clamps it to 100; `after` must be a non-negative integer: `[params.ts:parsePaginationParam]`
 - `filter` must JSON-decode to a `FilterNode` or the request 422s: `[params.ts:parseFilterParam]`
 - CORS rejects `credentials: true` with a wildcard/omitted origin list: `[cors.ts:assertValidCorsConfig]`
-- Port retry only retries `EADDRINUSE`; the starting port is attempted first; other serve errors fail immediately: `[port-retry.ts:isAddressInUse]`
+- Port retry only retries `EADDRINUSE`; the starting port is attempted first; other serve errors fail immediately. `Bun.serve` throws bind errors as defects, so `serveErrorFromCause` normalizes typed `ServeError` failures and `EADDRINUSE` defects: `[port-retry.ts:serveErrorFromCause]`
 - Password hashes are stored as `scrypt$<salt>$<hash>` with random 16-byte salts: `[auth-node.ts:NodeAuthServiceLayer]`
 - Telemetry logs cap `limit` at 1000 and page backward by `seqId`; spans clamp `limit` to 1–200, group by trace without a filter, and return all spans for `traceId`: `[telemetry-routes.ts:telemetryLogsRoute]`
 - Schema introspection deliberately preserves `x-system`/`x-hidden`/`x-generated`/`x-kind` annotations: `[schema.ts:makeSchemaRoute]`

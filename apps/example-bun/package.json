@@ -1,0 +1,22 @@
+{
+  "name": "mira-example-bun",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "smoke": "bun run src/smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gettersethya/mira": "workspace:*",
+    "@gettersethya/mira-dashboard": "workspace:*",
+    "effect": "4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/smtp-server": "^3.5.13",
+    "smtp-server": "^3.21.4",
+    "typescript": "^6.0.3"
+  }
+}

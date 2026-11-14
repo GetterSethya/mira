@@ -6,16 +6,27 @@ const here = dirname(fileURLToPath(import.meta.url))
 const pkgDir = resolve(here, "..")
 const pkg: {
   name?: unknown
-  exports?: Record<string, Record<string, unknown>>
+  exports?: Record<string, unknown>
 } = JSON.parse(readFileSync(resolve(pkgDir, "package.json"), "utf8"))
 
 const missing: Array<string> = []
-for (const [subpath, conditions] of Object.entries(pkg.exports ?? {})) {
-  for (const [condition, rel] of Object.entries(conditions)) {
-    if (typeof rel !== "string" || !rel.startsWith("./dist/")) continue
-    const abs = resolve(pkgDir, rel)
-    if (!existsSync(abs)) missing.push(`${subpath} [${condition}]: ${rel}`)
+
+const visit = (subpath: string, condition: string, value: unknown): void => {
+  if (typeof value === "string") {
+    if (!value.startsWith("./dist/")) return
+    const abs = resolve(pkgDir, value)
+    if (!existsSync(abs)) missing.push(`${subpath} [${condition}]: ${value}`)
+    return
   }
+  if (typeof value === "object" && value !== null) {
+    for (const [key, nested] of Object.entries(value)) {
+      visit(subpath, condition.length === 0 ? key : `${condition}.${key}`, nested)
+    }
+  }
+}
+
+for (const [subpath, conditions] of Object.entries(pkg.exports ?? {})) {
+  visit(subpath, "", conditions)
 }
 
 // Fail on stale layouts from previous configs (nested src/, leaked tests/).

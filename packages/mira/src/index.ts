@@ -63,6 +63,14 @@ export { defaultCorsConfig, makeCorsMiddleware } from "./http/cors.js"
 export { catchCollectionErrors } from "./http/errors.js"
 export { TokenStore, TokenStoreLive } from "./http/token-store.js"
 export { Repository, RepositoryLive } from "./repository/index.js"
+export {
+  parseThumbSpec,
+  ThumbnailError,
+  ThumbnailService,
+  ThumbnailServiceNoopLive,
+  ThumbnailServicePhotonLive
+} from "./thumbnail/index.js"
+export type { ThumbSpec } from "./thumbnail/index.js"
 
 // Telemetry (sqlite logger)
 export type { SqliteLoggerConfig } from "./telemetry/sqlite-logger.js"
@@ -70,8 +78,8 @@ export { logCleanupCronDef,makeSqliteTelemetryLayer } from "./telemetry/sqlite-l
 export { TelemetrySqlClient } from "./telemetry/telemetry-sql-client.js"
 
 // Telemetry (console tracer/logger)
-export type { ConsolePrintOptions } from "./telemetry/index.js"
-export { ConsoleTelemetryLayer, makeConsoleTelemetryLayer } from "./telemetry/index.js"
+export type { ConsolePrintOptions } from "./telemetry/index-core.js"
+export { ConsoleTelemetryLayer, makeConsoleTelemetryLayer } from "./telemetry/index-core.js"
 
 // Cron system
 export type {

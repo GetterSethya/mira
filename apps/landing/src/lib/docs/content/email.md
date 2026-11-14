@@ -170,7 +170,7 @@ For local testing, no paid provider is needed:
 docker compose -f docker-compose.mailpit.yml up -d
 ```
 
-Mailpit listens on `localhost:1025` for SMTP and serves the inbox at `http://localhost:8025`. Point `SmtpEmail` at that host and port. Automated tests use an in-process `smtp-server`, so CI needs no Docker or account.
+Mailpit listens on `localhost:1025` for SMTP and serves the inbox at `http://localhost:8025`. Point `SmtpEmail` at that host and port. Automated tests use an in-process `smtp-server`, so CI needs no Docker or account. The same `SmtpEmail` transport works on Bun; use `BunPlatform` and `BunSqliteDatabase` from `@gettersethya/mira/bun` and keep the email config unchanged.
 
 ## Related pages
 

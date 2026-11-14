@@ -17,7 +17,7 @@
     "declaration":                true,
     "declarationMap":             true,
     "sourceMap":                  true,
-    "types":                      ["node"],
+    "types":                      ["node", "bun"],
     "plugins": [
       {
         "name": "@effect/language-service",
@@ -25,7 +25,9 @@
           "effect",
           "effect/http",
           "effect/sql",
+          "@effect/platform-bun",
           "@effect/platform-node",
+          "@effect/sql-sqlite-bun",
           "@effect/sql-sqlite-node"
         ]
       }

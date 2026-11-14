@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bun-smoke:
+    name: Bun smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
+      - name: Pack/install smoke
+        run: node scripts/pack-smoke.mjs
+
+      - name: Bun smoke
+        run: bun run apps/example-bun/src/smoke.ts
+
+      - name: Bun example boot
+        run: |
+          set -euo pipefail
+          export DB_PATH="$RUNNER_TEMP/mira-bun.db"
+          export UPLOAD_DIR="$RUNNER_TEMP/mira-bun-uploads"
+          export PORT=$(( (RANDOM % 10000) + 40000 ))
+          bun run apps/example-bun/src/index.ts > "$RUNNER_TEMP/bun-example.log" 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            for candidate in $(seq "$PORT" $((PORT + 9))); do
+              if curl -fsS "http://127.0.0.1:${candidate}/_dashboard/api/bootstrap-status" > /dev/null; then
+                exit 0
+              fi
+            done
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/bun-example.log"
+          exit 1

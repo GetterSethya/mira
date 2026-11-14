@@ -5,10 +5,12 @@ Mira is a self-hosted backend: you define collections in TypeScript, attach acce
 Mira ships as a set of packages. A server install needs one:
 
 ```install
-pnpm add @gettersethya/mira effect@^4
+pnpm add @gettersethya/mira effect@4.0.0
 ```
 
-`@gettersethya/mira` is the server library. It depends on `@gettersethya/mira-client` (the typed client and collection DSL) and `@gettersethya/mira-collection` (the isomorphic collection builders), so this install pulls all three. `effect` is a peer dependency in the `^4.0.0` range, so install it explicitly.
+`@gettersethya/mira` is the server library. It depends on `@gettersethya/mira-client` (the typed client and collection DSL) and `@gettersethya/mira-collection` (the isomorphic collection builders), so this install pulls all three. `effect` is a peer dependency in the `~4.0.0` range for this alpha; install `effect@4.0.0` explicitly.
+
+On Bun, use `bun add @gettersethya/mira effect@4.0.0` and import the runtime presets from `@gettersethya/mira/bun`. See the [Bun runtime page](../bun/) for the builder snippet and the SQLite preset. The collection and client code is unchanged.
 
 Install the packages the frontend needs in its own app:
 

@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@effect/platform-node-shared': 4.0.0
+
 importers:
 
   .:
@@ -21,7 +24,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/dashboard
       effect:
-        specifier: ^4.0.0
+        specifier: 4.0.0
         version: 4.0.0
     devDependencies:
       '@types/node':
@@ -30,6 +33,31 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.22.3
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  apps/example-bun:
+    dependencies:
+      '@gettersethya/mira':
+        specifier: workspace:*
+        version: link:../../packages/mira
+      '@gettersethya/mira-dashboard':
+        specifier: workspace:*
+        version: link:../../packages/dashboard
+      effect:
+        specifier: 4.0.0
+        version: 4.0.0
+    devDependencies:
+      '@types/bun':
+        specifier: ^1.4.2
+        version: 1.4.4
+      '@types/smtp-server':
+        specifier: ^3.5.13
+        version: 3.5.13
+      smtp-server:
+        specifier: ^3.21.4
+        version: 3.21.4
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -265,11 +293,20 @@ importers:
       '@cf-wasm/photon':
         specifier: ^0.3.5
         version: 0.3.5
+      '@effect/platform-bun':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@effect/platform-node':
-        specifier: ^4.0.0
+        specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.3.0)
+      '@effect/platform-node-shared':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
+      '@effect/sql-sqlite-bun':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@effect/sql-sqlite-node':
-        specifier: ^4.0.0
+        specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
       '@gettersethya/mira-client':
         specifier: workspace:*
@@ -293,6 +330,9 @@ importers:
       '@effect/vitest':
         specifier: ^4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.3(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)))
+      '@types/bun':
+        specifier: ^1.4.2
+        version: 1.4.4
       '@types/node':
         specifier: ^25.7.0
         version: 25.9.1
@@ -303,7 +343,7 @@ importers:
         specifier: ^3.5.13
         version: 3.5.13
       effect:
-        specifier: ^4.0.0
+        specifier: 4.0.0
         version: 4.0.0
       smtp-server:
         specifier: ^3.21.4
@@ -345,6 +385,11 @@ packages:
     resolution: {integrity: sha512-g1OmRBZF5chbW9QMNoirPo5Bb4zzU2HfP88tR7/VSZEUxHJ1/qVb8AQ0kUh2ggctLH1I715yCwP4gkw56PTjpQ==}
     hasBin: true
 
+  '@effect/platform-bun@4.0.0':
+    resolution: {integrity: sha512-g9O41Sub/+JKfLjvBNEoqR1Pg6wtc2bbYzv7Kw8YsMihbt/ypCn7ZoydEXaHvTTUvbVrXOQbVFlfplyo84Clug==}
+    peerDependencies:
+      effect: ^4.0.0
+
   '@effect/platform-node-shared@4.0.0':
     resolution: {integrity: sha512-VBXHJU9UXVZPdQGGDRjGXpo+TpOzRwZuMrdKAtIxi1qwcRftmacZ1zTgIrzBa0Z2RA2KVkoOecQUsTlt/nJZhw==}
     engines: {node: '>=18.0.0'}
@@ -357,6 +402,11 @@ packages:
     peerDependencies:
       effect: ^4.0.0
       redis: '>=5.0.0 <7.0.0'
+
+  '@effect/sql-sqlite-bun@4.0.0':
+    resolution: {integrity: sha512-tUDqqNq4lZMLQkp8YDQej2uuy8BBjmqfMXcJU/KOmrK/WWbzudC8oabZ1TEs1lLSuKzhBEPhnE0cRtAOYe05ew==}
+    peerDependencies:
+      effect: ^4.0.0
 
   '@effect/sql-sqlite-node@4.0.0':
     resolution: {integrity: sha512-xyUSLY7v55iMgGxrjFrTo5ngixgQ3jLmOQ+AX8CCazO/caxuMM0oq8zb974FAcvQHRrpMEWU7Vnoo+rxct7PAQ==}
@@ -1247,6 +1297,9 @@ packages:
   '@tybys/wasm-util@0.10.2':
     resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
 
+  '@types/bun@1.4.4':
+    resolution: {integrity: sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ==}
+
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
@@ -1376,6 +1429,9 @@ packages:
   braces@3.0.3:
     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
     engines: {node: '>=8'}
+
+  bun-types@1.4.4:
+    resolution: {integrity: sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ==}
 
   bytes@3.1.2:
     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
@@ -2699,6 +2755,14 @@ snapshots:
 
   '@effect/language-service@0.87.3': {}
 
+  '@effect/platform-bun@4.0.0(effect@4.0.0)':
+    dependencies:
+      '@effect/platform-node-shared': 4.0.0(effect@4.0.0)
+      effect: 4.0.0
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
   '@effect/platform-node-shared@4.0.0(effect@4.0.0)':
     dependencies:
       '@types/ws': 8.18.2
@@ -2717,6 +2781,10 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@effect/sql-sqlite-bun@4.0.0(effect@4.0.0)':
+    dependencies:
+      effect: 4.0.0
 
   '@effect/sql-sqlite-node@4.0.0(effect@4.0.0)':
     dependencies:
@@ -3396,6 +3464,10 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
+  '@types/bun@1.4.4':
+    dependencies:
+      bun-types: 1.4.4
+
   '@types/chai@5.2.3':
     dependencies:
       '@types/deep-eql': 4.0.2
@@ -3531,6 +3603,11 @@ snapshots:
   braces@3.0.3:
     dependencies:
       fill-range: 7.1.1
+
+  bun-types@1.4.4:
+    dependencies:
+      '@types/node': 25.9.1
+      undici-types: 7.24.6
 
   bytes@3.1.2:
     optional: true
