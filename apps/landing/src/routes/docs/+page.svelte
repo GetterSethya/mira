@@ -20,6 +20,7 @@
   <h1>Mira documentation</h1>
   <p class="docs-lede">
     Start with the install path, then move through collections, auth, rules, and queries.
+    Mira runs on Node or Bun; the Bun runtime page covers the native preset and SQLite path.
     Each page is checked against the package contracts and the source it documents.
   </p>
 

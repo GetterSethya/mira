@@ -79,7 +79,32 @@ const app = Mira.builder()
 app.serve()
 ```
 
-The core presets are `NodePlatform`, `SqliteDatabase`, `LocalFileStorage`, and `S3CompatibleStorage`. `SqliteDatabase({ filename })` accepts a file path or `":memory:"`; `LocalFileStorage({ directory })` writes uploads under that folder. Swap in `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for any S3-compatible bucket; its config values can also be Effect `Config` values, and it is optional because local storage is enough to start. Email is optional too: add `.email(SmtpEmail({ host, port, from }))` when you want login alerts, password reset, verification, or OTP login; the [email page](../email/) covers it. Tables and indexes are created by auto-migration during boot, before the first request.
+On Bun, keep the same collections and rules and swap the runtime presets:
+
+```ts
+import {
+  BunPlatform,
+  BunSqliteDatabase,
+  LocalFileStorage,
+  Mira
+} from "@gettersethya/mira/bun"
+import { Posts, Users } from "./collections.js"
+import { postsRules } from "./rules.js"
+
+const app = Mira.builder()
+  .platform(BunPlatform)
+  .database(BunSqliteDatabase({ filename: "mira.db" }))
+  .storage(LocalFileStorage({ directory: "./uploads" }))
+  .collections([Users, Posts])
+  .rules([postsRules])
+  .build()
+
+app.serve()
+```
+
+The Bun entry uses native Bun filesystem, path, HTTP, runtime, and SQLite; it reuses the Node-compatible crypto, password, and SMTP layers. See the [Bun runtime page](../bun/) for the install, export conditions, and telemetry caveat.
+
+The core presets are `NodePlatform`/`BunPlatform`, `SqliteDatabase`/`BunSqliteDatabase`, `LocalFileStorage`, and `S3CompatibleStorage`. `SqliteDatabase({ filename })` accepts a file path or `":memory:"`; `LocalFileStorage({ directory })` writes uploads under that folder. Swap in `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for any S3-compatible bucket; its config values can also be Effect `Config` values, and it is optional because local storage is enough to start. Email is optional too: add `.email(SmtpEmail({ host, port, from }))` when you want login alerts, password reset, verification, or OTP login; the [email page](../email/) covers it. Tables and indexes are created by auto-migration during boot, before the first request.
 
 ## Serve the app
 
@@ -92,7 +117,7 @@ app.serve({ port: 8080, maxPortAttempts: 1 }) // fail instead of incrementing
 
 `serve()` also runs plugin bootstrap hooks and starts configured crons. The [server page](../server/) covers config, storage, and telemetry in depth.
 
-Run the server entrypoint with your TypeScript runner (for example `tsx server.ts`). If port 8080 is taken, check the logged port before using the `curl` commands below.
+Run the server entrypoint with your TypeScript runner (`tsx server.ts` on Node, `bun run server.ts` on Bun). If port 8080 is taken, check the logged port before using the `curl` commands below.
 
 ## Make the first requests
 
