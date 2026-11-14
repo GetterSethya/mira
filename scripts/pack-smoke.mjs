@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -22,16 +22,42 @@ try {
     run("pnpm", ["pack", "--pack-destination", packs], join(repo, dir))
   }
 
+  const tarballRank = (file) => {
+    if (file.startsWith("gettersethya-mira-collection-")) return 0
+    if (file.startsWith("gettersethya-mira-client-")) return 1
+    return 2
+  }
   const tarballs = readdirSync(packs)
     .filter((file) => file.endsWith(".tgz"))
+    .sort((a, b) => tarballRank(a) - tarballRank(b))
     .map((file) => join(packs, file))
   if (tarballs.length !== 3) {
     throw new Error(`expected 3 tarballs, found ${tarballs.length}`)
   }
 
+  const fileSpec = (from, file) => `file:${relative(from, file).replaceAll("\\", "/")}`
+  const findTarball = (prefix) => {
+    const tarball = tarballs.find((file) => file.split(/[\\/]/).at(-1)?.startsWith(prefix))
+    if (!tarball) throw new Error(`missing ${prefix} tarball`)
+    return tarball
+  }
+  const overrides = {
+    "@gettersethya/mira-client": fileSpec(temp, findTarball("gettersethya-mira-client-")),
+    "@gettersethya/mira-collection": fileSpec(temp, findTarball("gettersethya-mira-collection-"))
+  }
+
   writeFileSync(
     join(temp, "package.json"),
-    JSON.stringify({ name: "mira-pack-smoke", private: true, type: "module" }, null, 2)
+    JSON.stringify(
+      {
+        name: "mira-pack-smoke",
+        private: true,
+        type: "module",
+        pnpm: { overrides }
+      },
+      null,
+      2
+    )
   )
   run("pnpm", ["add", ...tarballs, "effect@4.0.0"], temp)
 
@@ -60,7 +86,22 @@ try {
   mkdirSync(bunTemp, { recursive: true })
   writeFileSync(
     join(bunTemp, "package.json"),
-    JSON.stringify({ name: "mira-pack-smoke-bun", private: true, type: "module" }, null, 2)
+    JSON.stringify(
+      {
+        name: "mira-pack-smoke-bun",
+        private: true,
+        type: "module",
+        overrides: {
+          "@gettersethya/mira-client": fileSpec(bunTemp, findTarball("gettersethya-mira-client-")),
+          "@gettersethya/mira-collection": fileSpec(
+            bunTemp,
+            findTarball("gettersethya-mira-collection-")
+          )
+        }
+      },
+      null,
+      2
+    )
   )
   run("bun", ["add", ...tarballs, "effect@4.0.0"], bunTemp, false)
   const bunExportCheck =
