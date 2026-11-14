@@ -24,6 +24,7 @@ export {
   bytesToBase64Url,
   CryptoHashError,
   CryptoService,
+  hmacSha256Base64,
   hmacSha256Base64Url,
   sha256Base64Url
 } from "./crypto/index.js"

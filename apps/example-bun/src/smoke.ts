@@ -1,26 +1,43 @@
+import { scryptSync } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SMTPServer } from "smtp-server"
-import { Context, Effect, Layer, Stream } from "effect"
+import { Context, Effect, Layer, Result, Stream } from "effect"
 import {
   AppConfig,
+  AuthService,
   BaseCollection,
   BunPlatform,
   BunSqliteDatabase,
+  CryptoService,
   defineRule,
   EmailService,
   Field,
   FileStorage,
+  hmacSha256Base64Url,
   LocalFileStorage,
+  makeThumbnailServiceBunLive,
   Mira,
   parseThumbSpec,
   RateLimiter,
+  sha256Base64Url,
   SmtpEmail,
   ThumbnailService
 } from "@gettersethya/mira/bun"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
+
+type BunImagePipeline = {
+  metadata(): Promise<{ readonly width: number; readonly height: number }>
+  resize(width: number, height: number): BunImagePipeline
+  png(): BunImagePipeline
+  bytes(): Promise<Uint8Array>
+}
+
+type BunImageConstructor = new (input: Uint8Array) => BunImagePipeline
+
+const BunImage = (Bun as unknown as { Image?: BunImageConstructor }).Image
 
 const startedSmtp = await new Promise<{
   readonly port: number
@@ -100,11 +117,94 @@ const program = Effect.gen(function* () {
   const context = yield* Layer.build(app.buildLayer({ port, maxPortAttempts: 5 }))
   requestPort = Context.get(context, AppConfig).port
 
+  // Native Bun crypto: hashing and UUIDv7.
+  const sha = yield* sha256Base64Url("hello")
+  if (sha !== "LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ") {
+    throw new Error(`unexpected SHA-256 vector: ${sha}`)
+  }
+  const hmac = yield* hmacSha256Base64Url("secret", "hello")
+  if (hmac !== "iKqz7ejTrflNJquQ07r9SiCDBww7zOnAFO4EpEOEfAs") {
+    throw new Error(`unexpected HMAC-SHA-256 vector: ${hmac}`)
+  }
+  const cryptoService = Context.get(context, CryptoService)
+  const uuid = yield* cryptoService.randomUUID()
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uuid)) {
+    throw new Error(`expected a UUIDv7 from BunCryptoLayer, got ${uuid}`)
+  }
+
+  // Native Bun password hashing, including a Node-created scrypt row.
+  const auth = Context.get(context, AuthService)
+  const passwordHash = yield* auth.hashPassword("correct horse battery staple")
+  if (!passwordHash.startsWith("$argon2id$")) {
+    throw new Error(`expected an Argon2id hash, got ${passwordHash.slice(0, 24)}`)
+  }
+  if (!(yield* auth.verifyPassword("correct horse battery staple", passwordHash))) {
+    throw new Error("Bun.password could not verify its own hash")
+  }
+  if (yield* auth.verifyPassword("wrong password", passwordHash)) {
+    throw new Error("Bun.password accepted the wrong password")
+  }
+  const legacySalt = "00112233445566778899aabbccddeeff"
+  const legacyHash = `scrypt$${legacySalt}$${scryptSync("legacy password", legacySalt, 64).toString("hex")}`
+  if (!(yield* auth.verifyPassword("legacy password", legacyHash))) {
+    throw new Error("legacy scrypt verification failed under Bun")
+  }
+
+  if (BunImage === undefined) throw new Error("Bun.Image is unavailable")
+
+  // Native Bun.Image for contain/fill; cover stays on Photon (no native crop).
   const thumbnail = Context.get(context, ThumbnailService)
-  const spec = parseThumbSpec("2x2")
-  if (spec === null) throw new Error("invalid thumb spec")
-  const resized = yield* thumbnail.resize(png, "image/png", spec)
-  if (resized.length === 0) throw new Error("thumbnail output is empty")
+  const widePng = yield* Effect.tryPromise({
+    try: () => new BunImage(png).resize(8, 4).png().bytes(),
+    catch: (error) => new Error(`Bun.Image fixture failed: ${String(error)}`)
+  })
+  const containSpec = parseThumbSpec("4x4b")
+  const fillSpec = parseThumbSpec("4x4f")
+  const coverSpec = parseThumbSpec("4x4")
+  if (containSpec === null || fillSpec === null || coverSpec === null) {
+    throw new Error("invalid thumb spec")
+  }
+  const containBytes = yield* thumbnail.resize(widePng, "image/png", containSpec)
+  const fillBytes = yield* thumbnail.resize(widePng, "image/png", fillSpec)
+  const coverBytes = yield* thumbnail.resize(widePng, "image/png", coverSpec)
+  const readDimensions = (bytes: Uint8Array) =>
+    Effect.tryPromise({
+      try: () => new BunImage(bytes).metadata(),
+      catch: (error) => new Error(`Bun.Image metadata failed: ${String(error)}`)
+    })
+  const containMeta = yield* readDimensions(containBytes)
+  const fillMeta = yield* readDimensions(fillBytes)
+  const coverMeta = yield* readDimensions(coverBytes)
+  if (containMeta.width !== 4 || containMeta.height !== 2) {
+    throw new Error(`contain resize returned ${containMeta.width}x${containMeta.height}`)
+  }
+  if (fillMeta.width !== 4 || fillMeta.height !== 4) {
+    throw new Error(`fill resize returned ${fillMeta.width}x${fillMeta.height}`)
+  }
+  if (coverMeta.width !== 4 || coverMeta.height !== 4) {
+    throw new Error(`cover resize returned ${coverMeta.width}x${coverMeta.height}`)
+  }
+
+  // Prove the native path: with Photon fallback disabled, contain must still
+  // succeed.
+  const strictNative = makeThumbnailServiceBunLive({ allowPhotonFallback: false })
+  const nativeContain = yield* Effect.gen(function* () {
+    const service = yield* ThumbnailService
+    return yield* service.resize(widePng, "image/png", containSpec)
+  }).pipe(Effect.provide(strictNative))
+  if (nativeContain.length === 0) {
+    throw new Error("strict native contain resize produced no bytes")
+  }
+
+  // The header budget is enforced before decode and before any Photon fallback.
+  const guarded = makeThumbnailServiceBunLive({ maxPixels: 4 })
+  const guardResult = yield* Effect.gen(function* () {
+    const service = yield* ThumbnailService
+    return yield* service.resize(widePng, "image/png", containSpec).pipe(Effect.result)
+  }).pipe(Effect.provide(guarded))
+  if (Result.isSuccess(guardResult)) {
+    throw new Error("maxPixels guard accepted an 8x4 image with maxPixels=4")
+  }
 
   const storage = Context.get(context, FileStorage)
   const key = yield* storage.upload(
@@ -181,7 +281,19 @@ const program = Effect.gen(function* () {
 
   return {
     http: { listed: listed.status, created: created.status, dashboard: dashboard.status },
-    thumbnailBytes: resized.length,
+    thumbnailBytes: containBytes.length + fillBytes.length + coverBytes.length,
+    native: {
+      password: passwordHash.slice(0, "$argon2id$v=19".length),
+      uuidVersion: uuid[14],
+      hmac: hmac.slice(0, 8),
+      thumbnail: {
+        contain: `${containMeta.width}x${containMeta.height}`,
+        fill: `${fillMeta.width}x${fillMeta.height}`,
+        cover: `${coverMeta.width}x${coverMeta.height}`,
+        strictNative: nativeContain.length > 0,
+        pixelGuard: Result.isFailure(guardResult)
+      }
+    },
     emailReceived: startedSmtp.received.length,
     storage: { key, listed: listedKeys.length },
     port: requestPort,
@@ -201,6 +313,18 @@ const program = Effect.gen(function* () {
 type SmokeResult = {
   readonly http: { readonly listed: number; readonly created: number; readonly dashboard: number }
   readonly thumbnailBytes: number
+  readonly native: {
+    readonly password: string
+    readonly uuidVersion: string
+    readonly hmac: string
+    readonly thumbnail: {
+      readonly contain: string
+      readonly fill: string
+      readonly cover: string
+      readonly strictNative: boolean
+      readonly pixelGuard: boolean
+    }
+  }
   readonly emailReceived: number
   readonly storage: { readonly key: string; readonly listed: number }
   readonly port: number

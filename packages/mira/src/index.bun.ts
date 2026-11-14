@@ -22,9 +22,11 @@ export type { CursorPage, RequestCtx } from "./collection-service/index.js"
 export { CollectionService, makeCollectionServiceLayer } from "./collection-service/index.js"
 export { AppConfig, AppConfigLive } from "./config/index.js"
 export {
+  BunCryptoLayer,
   bytesToBase64Url,
   CryptoHashError,
   CryptoService,
+  hmacSha256Base64,
   hmacSha256Base64Url,
   sha256Base64Url
 } from "./crypto/index.js"
@@ -59,19 +61,24 @@ export {
   verifyJwt,
   verifyPassword
 } from "./http/auth.js"
+export { BunAuthServiceLayer } from "./http/auth-bun.js"
+export { NodeAuthServiceLayer } from "./http/auth-node.js"
 export type { CorsConfig } from "./http/cors.js"
 export { defaultCorsConfig, makeCorsMiddleware } from "./http/cors.js"
 export { catchCollectionErrors } from "./http/errors.js"
 export { TokenStore, TokenStoreLive } from "./http/token-store.js"
 export { Repository, RepositoryLive } from "./repository/index.js"
 export {
+  makeThumbnailServiceBunLive,
   parseThumbSpec,
+  SUPPORTED_THUMBNAIL_MIME_TYPES,
   ThumbnailError,
   ThumbnailService,
+  ThumbnailServiceBunLive,
   ThumbnailServiceNoopLive,
   ThumbnailServicePhotonLive
 } from "./thumbnail/index.js"
-export type { ThumbSpec } from "./thumbnail/index.js"
+export type { BunThumbnailOptions, ThumbSpec } from "./thumbnail/index.js"
 
 // Console telemetry. The SQLite logger is Node-only in this cut because it
 // imports the Node SQLite driver; the Bun smoke uses console telemetry.

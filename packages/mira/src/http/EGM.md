@@ -37,11 +37,13 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `hashPassword`, `verifyPassword` — service-delegating helpers: `[auth.ts:hashPassword]`
 - `signJwt`, `verifyJwt` — session JWTs (`typ: "session"`, HS256, 72 h), carrying `jti`, `exp`, `pwf`, `gen`: `[auth.ts:signJwt]`
 - `signFileToken`, `verifyFileToken` — file JWTs (`typ: "file"`, 5 m, `sub`/`col`/`filecol`): `[auth.ts:signFileToken]`
-- `computePwf` — HMAC-SHA-256 (WebCrypto) of the stored password hash: `[auth.ts:computePwf]`
+- `computePwf` — HMAC-SHA-256 of the stored password hash via the shared hash helper (`Bun.CryptoHasher` on Bun, WebCrypto elsewhere): `[auth.ts:computePwf]`
 - `authenticateSession(rawToken, isAuthCollection)` — the shared fail-closed session decision: `[auth.ts:authenticateSession]`
 - `isAuthCollectionName(collections)` — predicate factory over auth collections: `[auth.ts:isAuthCollectionName]`
 - `JwtPayload`, `FileTokenPayload`, `VerifiedJwt`, `SessionTokenOptions`, `SessionAuth` (types) and the `AuthError` class: `[auth.ts:JwtPayload]`
 - `NodeAuthServiceLayer` — scrypt `hashPassword` / `verifyPassword` implementation: `[auth-node.ts:NodeAuthServiceLayer]`
+- `BunAuthServiceLayer` — Argon2id `hashPassword` via `Bun.password` plus legacy scrypt verification: `[auth-bun.ts:BunAuthServiceLayer]`
+- `scryptHash`, `hashScryptPassword`, `verifyScryptPassword` — shared async scrypt helpers and the `scrypt$<salt>$<hash>` format: `[password-scrypt.ts:verifyScryptPassword]`
 - `FileServeServices` (type) — `Repository | FileStorage | ThumbnailService | AppConfig`: `[file-serve.ts:FileServeServices]`
 - `makeFileKey`, `processMultipartUpload`, `uploadBudget`: `[files.ts:processMultipartUpload]`
 - `DEFAULT_MAX_FILE_SIZE`, `GLOBAL_MAX_UPLOAD_BYTES`, `CONTENT_OVERHEAD_BYTES`, `MAX_MULTIPART_PARTS`, `MAX_FIELD_SIZE` — size/count limits: `[files.ts:DEFAULT_MAX_FILE_SIZE]`
@@ -81,7 +83,9 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `filter` must JSON-decode to a `FilterNode` or the request 422s: `[params.ts:parseFilterParam]`
 - CORS rejects `credentials: true` with a wildcard/omitted origin list: `[cors.ts:assertValidCorsConfig]`
 - Port retry only retries `EADDRINUSE`; the starting port is attempted first; other serve errors fail immediately. `Bun.serve` throws bind errors as defects, so `serveErrorFromCause` normalizes typed `ServeError` failures and `EADDRINUSE` defects: `[port-retry.ts:serveErrorFromCause]`
-- Password hashes are stored as `scrypt$<salt>$<hash>` with random 16-byte salts: `[auth-node.ts:NodeAuthServiceLayer]`
+- Node password hashes are stored as `scrypt$<salt>$<hash>` with random 16-byte salts: `[password-scrypt.ts:hashScryptPassword]`
+- Bun password hashes are stored as Argon2id PHC strings (`$argon2id$v=19$...`) with `memoryCost: 19456`, `timeCost: 2`; legacy `scrypt$...` rows remain verifiable: `[auth-bun.ts:BunAuthServiceLayer]`
+- Node → Bun password migration is automatic; Bun → Node is not. The Node scrypt verifier fails closed on `$argon2id$...` rows, so `BunPortablePlatform` exists for databases that must move both ways: `[auth-node.ts:NodeAuthServiceLayer]` `[platforms/bun.ts:BunPortablePlatform]`
 - Telemetry logs cap `limit` at 1000 and page backward by `seqId`; spans clamp `limit` to 1–200, group by trace without a filter, and return all spans for `traceId`: `[telemetry-routes.ts:telemetryLogsRoute]`
 - Schema introspection deliberately preserves `x-system`/`x-hidden`/`x-generated`/`x-kind` annotations: `[schema.ts:makeSchemaRoute]`
 
@@ -98,7 +102,7 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - Caches: `TokenStore` default keeps revoked-jti and generation maps in process memory: `[token-store.ts:inMemoryTokenStore]`
 - Caches: thumbnails are persisted under `_thumbs/<filename>/<spec>`: `[file-serve.ts:serveFile]`
 - Logging/tracing: `http.handler`, `http.auth`, `http.session-auth`, `http.body.parse` spans; port retry warnings/info: `[router.ts:makeCollectionRouter]`
-- CPU/randomness: scrypt password hashing and salt generation: `[auth-node.ts:NodeAuthServiceLayer]`
+- CPU/randomness: scrypt password hashing and salt generation on Node; native Argon2id hashing on Bun: `[password-scrypt.ts:hashScryptPassword]` `[auth-bun.ts:BunAuthServiceLayer]`
 
 ## Verification
 

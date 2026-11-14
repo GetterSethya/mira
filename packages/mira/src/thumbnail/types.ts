@@ -6,6 +6,13 @@ export type ThumbSpec = {
   fit: "cover" | "contain" | "fill"
 }
 
+/** MIME types both the Photon and Bun image backends are expected to handle. */
+export const SUPPORTED_THUMBNAIL_MIME_TYPES: ReadonlySet<string> = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp"
+])
+
 export class ThumbnailError extends Data.TaggedError("ThumbnailError")<{
   reason: string
 }> {}

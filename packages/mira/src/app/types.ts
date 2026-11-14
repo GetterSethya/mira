@@ -11,6 +11,7 @@ import type { HttpServerFactory } from "@/http/server-factory.js"
 import type { EmailRateLimitPolicies } from "@/rate-limit/policies.js"
 import type { RateLimitStore } from "@/rate-limit/types.js"
 import type { FileStorage } from "@/storage/storage.js"
+import type { ThumbnailService } from "@/thumbnail/types.js"
 
 /**
  * Services that a platform preset must provide.
@@ -45,6 +46,11 @@ export type DatabaseServices = SqlClient.SqlClient | Dialect
 export interface MiraPlatform {
   layer: Layer.Layer<PlatformServices>
   runMain: (effect: Effect.Effect<never, never, never>) => void
+  /**
+   * Optional platform image backend. Defaults to the Photon layer. Bun supplies
+   * a native `Bun.Image` layer for contain/fill specs.
+   */
+  readonly thumbnailLayer?: Layer.Layer<ThumbnailService>
 }
 
 /**

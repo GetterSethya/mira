@@ -205,8 +205,10 @@ export class MiraApp<R = never> {
 
     const extrasLayer = pluginLayers.length > 0 ? pluginLayers.reduce((acc, l) => Layer.merge(acc, l)) : Layer.empty
 
-    // Foundation: database + storage + thumbnail + telemetry, wired on platform
-    const foundation = Layer.mergeAll(database.layer, storage.layer, ThumbnailServicePhotonLive, telemetry).pipe(
+    // Foundation: database + storage + thumbnails + telemetry, wired on platform.
+    // Platforms may supply a native thumbnail backend; Photon is the default.
+    const thumbnailLayer = platform.thumbnailLayer ?? ThumbnailServicePhotonLive
+    const foundation = Layer.mergeAll(database.layer, storage.layer, thumbnailLayer, telemetry).pipe(
       Layer.provideMerge(platform.layer)
     )
 

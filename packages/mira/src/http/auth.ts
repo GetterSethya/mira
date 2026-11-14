@@ -6,6 +6,7 @@ import * as jose from "jose"
 import { toPublicRecord } from "@/collection-service/decode.js"
 import { idClause } from "@/collection-service/where.js"
 import { AppConfig } from "@/config/index.js"
+import { hmacSha256Base64 } from "@/crypto/hash.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
@@ -139,35 +140,16 @@ export function verifyJwt(token: string, secret: string) {
  * to the same value, so a password change invalidates previously minted tokens
  * (including the current session).
  *
- * Uses WebCrypto (`globalThis.crypto.subtle`) so there is no `node:crypto`
- * dependency — the auth module stays platform-agnostic.
+ * Uses the shared hash helper: `Bun.CryptoHasher` on Bun, WebCrypto elsewhere.
+ * No `node:crypto` dependency, so the auth module stays platform-agnostic.
  */
-export function computePwf(storedHash: string, secret: string) {
-  return Effect.tryPromise({
-    try: () => hmacSha256Base64(secret, storedHash),
-    catch: (e) => new AuthError({ reason: `pwf computation failed: ${String(e)}` })
-  })
-}
-
-async function hmacSha256Base64(secret: string, message: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const key = await globalThis.crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
+export function computePwf(
+  storedHash: string,
+  secret: string
+): Effect.Effect<string, AuthError> {
+  return hmacSha256Base64(secret, storedHash).pipe(
+    Effect.mapError((error) => new AuthError({ reason: `pwf computation failed: ${error.message}` }))
   )
-  const signature = await globalThis.crypto.subtle.sign("HMAC", key, encoder.encode(message))
-  return bytesToBase64(new Uint8Array(signature))
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ""
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
-  }
-  return btoa(binary)
 }
 
 /** Constant-time string compare (both inputs are fixed-length HMAC outputs). */

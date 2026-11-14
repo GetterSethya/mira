@@ -7,9 +7,10 @@ Effect Node runtime and assembles every Node-specific service implementation
 (filesystem, path, crypto, HTTP server factory) into `NodePlatformLayer`, then
 wraps that layer plus the Node auth service and `NodeRuntime.runMain` into the
 `NodePlatform` preset. `bun.ts` does the same with native Bun filesystem/path,
-`BunHttpServer`, and `BunRuntime`, reusing the Node-compatible crypto, auth, and
-mail transport layers because Bun implements `node:crypto` and `nodemailer`.
-Both presets are consumed by `Mira.builder().platform(...)`.
+`BunHttpServer`, `BunRuntime`, `BunCryptoLayer`, `BunAuthServiceLayer`, and a
+native thumbnail layer; SMTP still reuses the Node-compatible `nodemailer`
+transport, which runs on Bun's native sockets. Both presets are consumed by
+`Mira.builder().platform(...)`.
 
 ## Interface
 
@@ -21,8 +22,9 @@ Both presets are consumed by `Mira.builder().platform(...)`.
 
 ### `bun.ts`
 
-- `BunPlatformLayer` — `Layer.mergeAll(BunFileSystem.layer, BunPath.layer, NodeCryptoLayer, BunHttpServerFactoryLayer, NodeMailTransportLayer)`. [bun.ts:BunPlatformLayer]
-- `BunPlatform` — `MiraPlatform` preset: `{ layer: BunPlatformLayer + NodeAuthServiceLayer, runMain: (effect) => BunRuntime.runMain(effect) }`. [bun.ts:BunPlatform]
+- `BunPlatformLayer` — `Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCryptoLayer, BunHttpServerFactoryLayer, NodeMailTransportLayer)`. [bun.ts:BunPlatformLayer]
+- `BunPlatform` — `MiraPlatform` preset: `{ layer: BunPlatformLayer + BunAuthServiceLayer, runMain: (effect) => BunRuntime.runMain(effect), thumbnailLayer: ThumbnailServiceBunLive }`. [bun.ts:BunPlatform]
+- `BunPortablePlatform` — same as `BunPlatform` but `NodeAuthServiceLayer` (scrypt) instead of Argon2id, so credentials remain verifiable on both runtimes. [bun.ts:BunPortablePlatform]
 - `BunRuntime` — re-export from `@effect/platform-bun` for custom Bun entrypoints. [bun.ts:BunRuntime]
 
 No subdirectories.
@@ -35,9 +37,11 @@ No subdirectories.
 - `NodePlatform` must satisfy `MiraPlatform`, i.e. expose both `layer` and `runMain`. [node.ts:NodePlatform]
 - `NodePlatform.runMain` delegates directly to `NodeRuntime.runMain` — no custom error handling or process wiring is added here. [node.ts:NodePlatform]
 - `NodeRuntime` is re-exported as a value so custom entrypoints can reach it without importing `@effect/platform-node` themselves. [node.ts:NodeRuntime]
-- `BunPlatformLayer` uses native Bun filesystem, path, and HTTP layers; it does not import `@effect/platform-node`. [bun.ts:BunPlatformLayer]
-- `BunPlatform` reuses `NodeCryptoLayer`, `NodeAuthServiceLayer`, and `NodeMailTransportLayer`; these are Node-compatible implementations, not a Node runtime dependency. [bun.ts:BunPlatform]
+- `BunPlatformLayer` uses native Bun filesystem, path, HTTP, and crypto layers; it does not import `@effect/platform-node`. [bun.ts:BunPlatformLayer]
+- `BunPlatform` uses `BunAuthServiceLayer` (Argon2id) and supplies `ThumbnailServiceBunLive` (native contain/fill); only `NodeMailTransportLayer` is Node-compatible. [bun.ts:BunPlatform]
+- `BunPortablePlatform` trades Argon2id for the shared scrypt format so a Bun-created database can return to Node without password resets. [bun.ts:BunPortablePlatform]
 - `BunPlatform.runMain` delegates to `BunRuntime.runMain`; no custom signal handling is added. [bun.ts:BunPlatform]
+- `MiraPlatform.thumbnailLayer` is optional; when absent the app foundation uses `ThumbnailServicePhotonLive`. [bun.ts:BunPlatform]
 
 ## Side Effects
 

@@ -63,7 +63,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - SQL: `SqliteRateLimitStoreLive` creates/uses `_rate_limits` and prunes expired buckets: `[app.ts:MiraApp.buildServiceLayer]`
 - Network: binds an HTTP server, retrying ports on `EADDRINUSE` via `makePortRetryServerLayer`: `[app.ts:MiraApp.buildLayer]`
 - Filesystem: storage preset is wired in the foundation layer (uploads/reads/deletes): `[app.ts:MiraApp.buildServiceLayer]`
-- Filesystem: thumbnail service (`ThumbnailServicePhotonLive`) is part of the foundation layer: `[app.ts:MiraApp.buildServiceLayer]`
+- Filesystem: the platform's optional `thumbnailLayer` (default `ThumbnailServicePhotonLive`, Bun supplies `ThumbnailServiceBunLive`) is part of the foundation layer: `[app.ts:MiraApp.buildServiceLayer]`
 - Timers/background fibers: cron service starts every configured cron as a scoped fiber: `[app.ts:MiraApp.buildServiceLayer]`
 - Configuration/environment: port and bound-port callback come from `AppConfig`: `[app.ts:MiraApp.buildLayer]`
 - Logging: warning when the permissive default CORS config is active: `[app.ts:MiraApp.serve]`

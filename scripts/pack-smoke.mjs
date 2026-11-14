@@ -35,12 +35,22 @@ try {
   )
   run("pnpm", ["add", ...tarballs, "effect@4.0.0"], temp)
 
+  const bunOnlyExports = [
+    "BunPlatform",
+    "BunPlatformLayer",
+    "BunPortablePlatform",
+    "BunCryptoLayer",
+    "BunAuthServiceLayer",
+    "ThumbnailServiceBunLive",
+    "makeThumbnailServiceBunLive",
+    "BunRuntime"
+  ]
   run(
     process.execPath,
     [
       "--input-type=module",
       "-e",
-      "import('@gettersethya/mira').then((m) => { if (!m.NodePlatform) throw new Error('Node entry missing NodePlatform'); if ('BunPlatform' in m) throw new Error('Node entry leaked BunPlatform') })"
+      `import('@gettersethya/mira').then((m) => { if (!m.NodePlatform) throw new Error('Node entry missing NodePlatform'); const leaked = ${JSON.stringify(bunOnlyExports)}.filter((name) => name in m); if (leaked.length > 0) throw new Error('Node entry leaked Bun exports: ' + leaked.join(', ')) })`
     ],
     temp,
     false
@@ -53,12 +63,11 @@ try {
     JSON.stringify({ name: "mira-pack-smoke-bun", private: true, type: "module" }, null, 2)
   )
   run("bun", ["add", ...tarballs, "effect@4.0.0"], bunTemp, false)
+  const bunExportCheck =
+    "if (!m.BunPlatform) throw new Error('Bun entry missing BunPlatform'); if (!m.BunPortablePlatform) throw new Error('Bun entry missing BunPortablePlatform'); if (!m.BunCryptoLayer) throw new Error('Bun entry missing BunCryptoLayer'); if (!m.BunAuthServiceLayer) throw new Error('Bun entry missing BunAuthServiceLayer'); if (!m.ThumbnailServiceBunLive) throw new Error('Bun entry missing ThumbnailServiceBunLive'); if ('makeSqliteTelemetryLayer' in m) throw new Error('Bun entry leaked Node SQLite telemetry')"
   run(
     bunExecutable(),
-    [
-      "-e",
-      "import('@gettersethya/mira').then((m) => { if (!m.BunPlatform) throw new Error('Bun root condition missing BunPlatform'); if ('makeSqliteTelemetryLayer' in m) throw new Error('Bun entry leaked Node SQLite telemetry') })"
-    ],
+    ["-e", `import('@gettersethya/mira').then((m) => { ${bunExportCheck} })`],
     bunTemp,
     false
   )
@@ -66,7 +75,7 @@ try {
     bunExecutable(),
     [
       "-e",
-      "import('@gettersethya/mira/bun').then((m) => { if (!m.BunSqliteDatabase) throw new Error('Bun subpath missing BunSqliteDatabase'); if ('makeSqliteTelemetryLayer' in m) throw new Error('Bun subpath leaked Node SQLite telemetry') })"
+      `import('@gettersethya/mira/bun').then((m) => { if (!m.BunSqliteDatabase) throw new Error('Bun subpath missing BunSqliteDatabase'); ${bunExportCheck} })`
     ],
     bunTemp,
     false
