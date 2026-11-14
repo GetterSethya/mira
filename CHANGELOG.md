@@ -17,6 +17,14 @@ published by CI.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.1.0-alpha.37] - 2026-11-14
+
+### Added
+
 - **Landing API reference and changelog.** The landing now builds a TypeDoc reference for
   every public package and the Bun entry, linked from `/docs/api/`, and a `/changelog`
   page that renders `CHANGELOG.md` from GitHub at build time. The landing `build` script
