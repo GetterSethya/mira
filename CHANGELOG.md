@@ -37,9 +37,13 @@ published by CI.
 - **Bun runtime.** `BunPlatform` and `BunSqliteDatabase` backed by
   `@effect/platform-bun` and `@effect/sql-sqlite-bun`, plus the
   `@gettersethya/mira/bun` package entry and a root `bun` export condition. Bun uses native
-  filesystem, path, HTTP server, runtime, and SQLite; crypto, password hashing, SMTP, and
-  thumbnails reuse the Node-compatible implementations. A Bun smoke app exercises
-  migrations, HTTP CRUD, thumbnails, and the rate-limit store.
+  filesystem, path, HTTP server, runtime, SQLite, hashing (`Bun.CryptoHasher`), password
+  hashing (`Bun.password` Argon2id), UUIDs (`Bun.randomUUIDv7`), and contain/fill
+  thumbnails (`Bun.Image`). SMTP reuses `nodemailer` on Bun's native sockets; `cover`
+  thumbnails reuse Photon because `Bun.Image` has no crop. `BunPortablePlatform` keeps
+  scrypt hashing for databases that must move between Node and Bun. A Bun smoke app
+  exercises migrations, HTTP CRUD, Argon2id, legacy scrypt, UUIDv7, native thumbnails,
+  and the rate-limit store.
 
 ### Changed
 
