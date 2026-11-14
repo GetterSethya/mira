@@ -41,7 +41,19 @@ const CTX_PLACEHOLDER_PATTERN = String.raw`@auth_(\w+)|@request_(\w+)_(\w+)`
  * Returns `ForbiddenError` if the rule references auth but `ctx.auth` is absent, or if
  * the rule references an unknown request source (fail closed).
  */
-export function resolveCtxPlaceholders(result: EnforceResult, ctx: RequestCtx, collection: string, action: string) {
+export interface ResolveOptions {
+  /** Dialect-aware encoder for bound values (e.g. boolean -> 0/1 on SQLite). */
+  readonly encodeParam?: (value: unknown) => unknown
+}
+
+export function resolveCtxPlaceholders(
+  result: EnforceResult,
+  ctx: RequestCtx,
+  collection: string,
+  action: string,
+  options?: ResolveOptions
+) {
+  const encode = options?.encodeParam ?? ((value: unknown) => value)
   return Effect.gen(function* () {
     const needsAuth = /@auth_\w+/.test(result.sql)
     if (needsAuth && ctx.auth === undefined) {
@@ -67,19 +79,19 @@ export function resolveCtxPlaceholders(result: EnforceResult, ctx: RequestCtx, c
       const reqKey = typeof g3 === "string" ? g3 : undefined
 
       if (match === "?") {
-        resolved.push(params[pIdx++])
+        resolved.push(encode(params[pIdx++]))
       } else if (authField === "collection") {
-        resolved.push(ctx.auth?.collection ?? null)
+        resolved.push(encode(ctx.auth?.collection ?? null))
       } else if (authField !== undefined) {
-        resolved.push(ctx.auth?.record[authField] ?? null)
+        resolved.push(encode(ctx.auth?.record[authField] ?? null))
       } else if (reqSource === "query" && reqKey !== undefined) {
         const val = ctx.query[reqKey]
-        resolved.push(Array.isArray(val) ? val[0] : (val ?? null))
+        resolved.push(encode(Array.isArray(val) ? val[0] : (val ?? null)))
       } else if (reqSource === "header" && reqKey !== undefined) {
-        resolved.push(ctx.headers[reqKey] ?? null)
+        resolved.push(encode(ctx.headers[reqKey] ?? null))
       } else if (reqSource === "body" && reqKey !== undefined) {
         const val = ctx.body?.[reqKey]
-        resolved.push(Array.isArray(val) ? val[0] : (val ?? null))
+        resolved.push(encode(Array.isArray(val) ? val[0] : (val ?? null)))
       }
       return "?"
     })
@@ -137,7 +149,12 @@ export function extractCtxRefs(sql: string): CtxRefs {
  * Used for the `create` permission pre-check: `SELECT 1 WHERE <rule>` without a FROM.
  * The replacement is done left-to-right to preserve param ordering with existing `?`.
  */
-export function resolveFieldRefs(clause: WhereClause, record: RepoRecord): WhereClause {
+export function resolveFieldRefs(
+  clause: WhereClause,
+  record: RepoRecord,
+  options?: ResolveOptions
+): WhereClause {
+  const encode = options?.encodeParam ?? ((value: unknown) => value)
   const resolved: Array<unknown> = []
   let pIdx = 0
   const { params } = clause
@@ -145,9 +162,9 @@ export function resolveFieldRefs(clause: WhereClause, record: RepoRecord): Where
   const newSql = clause.sql.replace(/\?|\bt\.(\w+)\b/g, (_, g1): string => {
     const field = typeof g1 === "string" ? g1 : undefined
     if (field !== undefined) {
-      resolved.push(record[field] ?? null)
+      resolved.push(encode(record[field] ?? null))
     } else {
-      resolved.push(params[pIdx++])
+      resolved.push(encode(params[pIdx++]))
     }
     return "?"
   })

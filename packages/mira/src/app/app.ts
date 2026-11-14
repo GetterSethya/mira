@@ -3,8 +3,10 @@ import type { RuleMap } from "@gettersethya/mira-client"
 import { Effect, Layer } from "effect"
 import { HttpRouter } from "effect/http"
 
+import { AuthChallengeStoreLive } from "@/auth/index.js"
 import { makeCachedCollectionServiceLayer } from "@/cache/index.js"
 import { AppConfig, AppConfigLive } from "@/config/index.js"
+import { makeHookedEmailServiceLayer } from "@/email/index.js"
 import { makeCronServiceLayer } from "@/cron/cron-service.js"
 import type { CronDef } from "@/cron/types.js"
 import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
@@ -183,7 +185,7 @@ export class MiraApp<R = never> {
    * )
    */
   buildServiceLayer() {
-    const { database, migrations: migrateOptions, platform, storage, telemetry } = this.#config
+    const { database, email, migrations: migrateOptions, platform, storage, telemetry } = this.#config
     const allCollections = this.#getAllCollections()
     const allPlugins = this.#getAllPlugins()
     const allCronDefs = this.#getAllCrons()
@@ -198,14 +200,30 @@ export class MiraApp<R = never> {
       Layer.provideMerge(platform.layer)
     )
 
-    // Mid: Repository + Migrator + AppConfig + durable TokenStore, wired on foundation
-    const mid = Layer.mergeAll(RepositoryLive, MigratorLive, AppConfigLive, TokenStoreLive).pipe(
-      Layer.provideMerge(foundation)
+    // Mid: Repository + Migrator + AppConfig + durable TokenStore + challenge store
+    const mid = Layer.mergeAll(
+      RepositoryLive,
+      MigratorLive,
+      AppConfigLive,
+      TokenStoreLive,
+      AuthChallengeStoreLive
+    ).pipe(Layer.provideMerge(foundation))
+
+    // Hook service is independent of the collection service; email hooks need it early.
+    const hookServiceLayer = makeHookServiceLayer(allPlugins)
+
+    // Email: base transport after AppConfig, then the hook decorator.
+    const baseEmail: Layer.Layer<never, never, never> = email.layer.pipe(
+      Layer.provide(mid),
+      Layer.orDie
+    )
+    const hookedEmail: Layer.Layer<never, never, never> = makeHookedEmailServiceLayer().pipe(
+      Layer.provide(Layer.merge(baseEmail, hookServiceLayer))
     )
 
-    // Extras: plugin layers run after mid so they can depend on AppConfig + platform services
-    const extrasProvided = extrasLayer.pipe(Layer.provide(mid))
-    const fullMid = Layer.merge(mid, extrasProvided)
+    // Extras: plugin layers run after mid + email so they can depend on both
+    const extrasProvided = extrasLayer.pipe(Layer.provide(Layer.merge(mid, hookedEmail)))
+    const fullMid = Layer.mergeAll(mid, hookedEmail, extrasProvided)
 
     // Auto-migrate on boot: runs during layer initialization before requests are served
     const schemas: Array<NamedSchema> = allCollections.map((c) => ({ name: c.name, schema: c.schema }))
@@ -218,9 +236,6 @@ export class MiraApp<R = never> {
 
     // Core collection service (cached)
     const cachedCollectionLayer = makeCachedCollectionServiceLayer(allCollections)
-
-    // Hook service layer (collects all plugin hooks)
-    const hookServiceLayer = makeHookServiceLayer(allPlugins)
 
     // Hook collection service decorator: wraps cached collection service with hooks
     const hookCollectionLayer = makeHookCollectionServiceLayer().pipe(

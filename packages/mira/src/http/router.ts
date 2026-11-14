@@ -10,14 +10,16 @@ import { PayloadTooLargeError, ValidationError } from "@/collection-service/erro
 import { AppConfig } from "@/config/index.js"
 import type { CryptoService } from "@/crypto/index.js"
 import { Dialect } from "@/dialect/dialect.js"
+import { EmailService } from "@/email/types.js"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
 import type { FileStorage } from "@/storage/storage.js"
 import type { ThumbnailService } from "@/thumbnail/types.js"
 
+import { clientIp, emailOptionsOf, issueLoginOtp, loginWithPasswordless, requestEmailVerification, requestPasswordReset, requestPasswordlessLogin, resendLoginOtp, resetPassword, sendLoginAlert, verifyEmail, verifyLoginOtp } from "./auth-email.js"
 import type { AuthService} from "./auth.js";
-import { authenticateSession, computePwf, signJwt, verifyJwt, verifyPassword } from "./auth.js"
-import { catchCollectionErrors } from "./errors.js"
+import { authenticateSession, mintSession as mintSessionFromAuth, verifyJwt, verifyPassword } from "./auth.js"
+import { catchAuthEmailErrors, catchCollectionErrors } from "./errors.js"
 import { makeFileServeRoute } from "./file-serve.js"
 import { makeFileTokenRoute } from "./file-token.js"
 import { processMultipartUpload } from "./files.js"
@@ -40,6 +42,28 @@ const AuthBodySchema = Schema.Struct({
   email: Schema.String,
   password: Schema.String
 })
+
+const AuthEmailBodySchema = Schema.Struct({ email: Schema.String })
+const CodeBodySchema = Schema.Struct({ challengeId: Schema.String, code: Schema.String })
+const ResetBodySchema = Schema.Struct({
+  token: Schema.String,
+  password: Schema.String,
+  passwordConfirm: Schema.String
+})
+
+const decodeBody = <S extends Schema.Constraint>(
+  req: HttpServerRequest.HttpServerRequest,
+  schema: S
+): Effect.Effect<S["Type"], HttpServerResponse.HttpServerResponse, S["DecodingServices"]> =>
+  req.json.pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(schema)),
+    Effect.mapError(() =>
+      HttpServerResponse.jsonUnsafe(
+        { error: "validation_failed", issues: ["Invalid request body"] },
+        { status: 422 }
+      )
+    )
+  )
 
 /**
  * Maximum size of a non-multipart (JSON) request body, enforced from the
@@ -249,6 +273,32 @@ export function makeCollectionRouter(
       const body = yield* getBody(req, col).pipe(catchCollectionErrors)
       const svc = yield* CollectionService
       const record = yield* svc.create(col, body, ctx).pipe(catchCollectionErrors)
+      if (
+        col.schema["x-collection-kind"] === "auth" &&
+        ctx.admin !== true &&
+        emailOptionsOf(col).verification
+      ) {
+        const email = yield* EmailService
+        const address = record["email"]
+        if (email.enabled && typeof address === "string") {
+          const verification = yield* requestEmailVerification(col, address, clientIp(req)).pipe(
+            catchAuthEmailErrors,
+            Effect.catch((response) => Effect.succeed(response))
+          )
+          if ("challengeId" in verification) {
+            return HttpServerResponse.jsonUnsafe(
+              {
+                ...record,
+                emailVerification: {
+                  challengeId: verification.challengeId,
+                  expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+                }
+              },
+              { status: 201 }
+            )
+          }
+        }
+      }
       return HttpServerResponse.jsonUnsafe(record, { status: 201 })
     })
   )
@@ -332,26 +382,165 @@ export function makeCollectionRouter(
       if (!valid) {
         return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
-      const config = yield* AppConfig
-      const jwtSecret = Redacted.value(config.jwtSecret)
-      const store = yield* TokenStore
-      // Bind the token to the credential hash and record the current generation.
-      const pwf = yield* computePwf(storedHash, jwtSecret).pipe(
-        Effect.mapError(() => HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
+      const options = emailOptionsOf(col)
+      if (options.loginOtp === "required") {
+        const email = yield* EmailService
+        if (!email.enabled) {
+          return HttpServerResponse.jsonUnsafe({ error: "email_not_configured" }, { status: 503 })
+        }
+        const address = fullRow["email"]
+        if (typeof address !== "string") {
+          return HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })
+        }
+        const challenge = yield* issueLoginOtp(col, fullRow, clientIp(req), address).pipe(
+          catchAuthEmailErrors,
+          Effect.catch((response) => Effect.succeed(response))
+        )
+        if ("id" in challenge) {
+          return HttpServerResponse.jsonUnsafe(
+            {
+              otpRequired: true,
+              challengeId: challenge.id,
+              expiresAt: new Date(challenge.expiresAt).toISOString()
+            },
+            { status: 200 }
+          )
+        }
+        return challenge
+      }
+
+      const session = yield* mintSessionFromAuth(col, fullRow).pipe(
+        Effect.mapError(() =>
+          HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })
+        )
       )
-      const gen = yield* store.currentGeneration(col.name, rid).pipe(Effect.orElseSucceed(() => 0))
-      const token = yield* signJwt({ sub: rid, col: col.name }, jwtSecret, { pwf, gen }).pipe(
-        Effect.mapError(() => HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
-      )
-      const dialect = yield* Dialect
-      const publicRow = yield* toPublicRecord(col.schema, dialect.storesBooleanAsInteger, fullRow)
-      return HttpServerResponse.jsonUnsafe({ token, record: publicRow }, { status: 200 }).pipe(
-        HttpServerResponse.setCookieUnsafe("mira_token", token, {
+      yield* sendLoginAlert(col, fullRow, req).pipe(Effect.catchCause(() => Effect.void))
+      return HttpServerResponse.jsonUnsafe(
+        { token: session.token, record: session.record },
+        { status: 200 }
+      ).pipe(
+        HttpServerResponse.setCookieUnsafe("mira_token", session.token, {
           httpOnly: true,
           sameSite: "strict",
           path: "/",
-          maxAge: Duration.hours(72),
+          maxAge: Duration.hours(72)
         })
+      )
+    })
+  )
+
+  const authConfigRoute = collectionRoute("auth-config", (col) =>
+    Effect.gen(function* () {
+      if (col.schema["x-collection-kind"] !== "auth") {
+        return HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
+      }
+      const email = yield* EmailService
+      return HttpServerResponse.jsonUnsafe({
+        collection: col.name,
+        emailConfigured: email.enabled,
+        email: emailOptionsOf(col)
+      })
+    })
+  )
+
+  const passwordResetRequestRoute = collectionRoute("password-reset-request", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      const { email } = yield* decodeBody(req, AuthEmailBodySchema)
+      yield* requestPasswordReset(col, email, clientIp(req)).pipe(catchAuthEmailErrors)
+      return HttpServerResponse.jsonUnsafe(
+        { message: "If the address exists, a reset link has been sent." },
+        { status: 202 }
+      )
+    })
+  )
+
+  const passwordResetRoute = collectionRoute("password-reset", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      const body = yield* decodeBody(req, ResetBodySchema)
+      if (body.password !== body.passwordConfirm) {
+        return HttpServerResponse.jsonUnsafe(
+          { error: "validation_failed", issues: ["passwordConfirm must match password"] },
+          { status: 422 }
+        )
+      }
+      yield* resetPassword(col, body.token, body.password).pipe(catchAuthEmailErrors)
+      return HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })
+    })
+  )
+
+  const verifyEmailRequestRoute = collectionRoute("verify-email-request", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      const { email } = yield* decodeBody(req, AuthEmailBodySchema)
+      const result = yield* requestEmailVerification(col, email, clientIp(req)).pipe(catchAuthEmailErrors)
+      return HttpServerResponse.jsonUnsafe(result, { status: 202 })
+    })
+  )
+
+  const verifyEmailRoute = collectionRoute("verify-email", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      const body = yield* decodeBody(req, CodeBodySchema)
+      yield* verifyEmail(col, body.challengeId, body.code).pipe(catchAuthEmailErrors)
+      return HttpServerResponse.jsonUnsafe({ verified: true }, { status: 200 })
+    })
+  )
+
+  const passwordlessRequestRoute = collectionRoute("passwordless-request", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      const { email } = yield* decodeBody(req, AuthEmailBodySchema)
+      const result = yield* requestPasswordlessLogin(col, email, clientIp(req)).pipe(catchAuthEmailErrors)
+      return HttpServerResponse.jsonUnsafe(result, { status: 202 })
+    })
+  )
+
+  const passwordlessLoginRoute = collectionRoute("passwordless-login", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      const body = yield* decodeBody(req, CodeBodySchema)
+      const session = yield* loginWithPasswordless(col, body.challengeId, body.code).pipe(
+        catchAuthEmailErrors
+      )
+      yield* sendLoginAlert(col, session.raw, req).pipe(Effect.catchCause(() => Effect.void))
+      return HttpServerResponse.jsonUnsafe(
+        { token: session.token, record: session.record },
+        { status: 200 }
+      ).pipe(
+        HttpServerResponse.setCookieUnsafe("mira_token", session.token, {
+          httpOnly: true,
+          sameSite: "strict",
+          path: "/",
+          maxAge: Duration.hours(72)
+        })
+      )
+    })
+  )
+
+  const loginOtpVerifyRoute = collectionRoute("login-otp-verify", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      const body = yield* decodeBody(req, CodeBodySchema)
+      const session = yield* verifyLoginOtp(col, body.challengeId, body.code).pipe(catchAuthEmailErrors)
+      yield* sendLoginAlert(col, session.raw, req).pipe(Effect.catchCause(() => Effect.void))
+      return HttpServerResponse.jsonUnsafe(
+        { token: session.token, record: session.record },
+        { status: 200 }
+      ).pipe(
+        HttpServerResponse.setCookieUnsafe("mira_token", session.token, {
+          httpOnly: true,
+          sameSite: "strict",
+          path: "/",
+          maxAge: Duration.hours(72)
+        })
+      )
+    })
+  )
+
+  const resendLoginOtpRoute = collectionRoute("login-otp-resend", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      const body = yield* decodeBody(req, Schema.Struct({ challengeId: Schema.String }))
+      const result = yield* resendLoginOtp(col, body.challengeId, clientIp(req)).pipe(
+        catchAuthEmailErrors
+      )
+      return HttpServerResponse.jsonUnsafe(
+        { challengeId: result.id, expiresAt: new Date(result.expiresAt).toISOString() },
+        { status: 202 }
       )
     })
   )
@@ -530,6 +719,15 @@ export function makeCollectionRouter(
     HttpRouter.route("PATCH", "/api/collections/:name/:id", updateRoute),
     HttpRouter.route("DELETE", "/api/collections/:name/:id", deleteRoute),
     HttpRouter.route("POST", "/api/collections/:name/auth-with-password", authRoute),
+    HttpRouter.route("POST", "/api/collections/:name/auth-with-password/verify-otp", loginOtpVerifyRoute),
+    HttpRouter.route("POST", "/api/collections/:name/auth-with-password/resend-otp", resendLoginOtpRoute),
+    HttpRouter.route("POST", "/api/collections/:name/auth-with-otp/request", passwordlessRequestRoute),
+    HttpRouter.route("POST", "/api/collections/:name/auth-with-otp", passwordlessLoginRoute),
+    HttpRouter.route("POST", "/api/collections/:name/verify-email/request", verifyEmailRequestRoute),
+    HttpRouter.route("POST", "/api/collections/:name/verify-email", verifyEmailRoute),
+    HttpRouter.route("POST", "/api/collections/:name/password-reset/request", passwordResetRequestRoute),
+    HttpRouter.route("POST", "/api/collections/:name/password-reset", passwordResetRoute),
+    HttpRouter.route("GET", "/api/collections/:name/auth-config", authConfigRoute),
     HttpRouter.route("POST", "/api/auth/logout", logoutRoute),
     HttpRouter.route("POST", "/api/auth/logout-all", logoutAllRoute),
     HttpRouter.route("GET", "/api/auth/me", meRoute),

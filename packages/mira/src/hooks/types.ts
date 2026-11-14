@@ -1,6 +1,7 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
 
+import type { EmailMessage, EmailSendError, EmailSendResult } from "@/email/types.js"
 import type { RepoRecord, SortOrder } from "@/repository/types.js"
 
 export interface AuthContext {
@@ -58,6 +59,31 @@ export interface HookErrorContext {
   readonly action: string
   readonly error: unknown
   readonly auth: AuthContext | undefined
+}
+
+export interface EmailSendHookContext {
+  readonly message: EmailMessage
+  readonly purpose: string
+  readonly collection: string | null
+  readonly userId: string | null
+  readonly originalTo: string | ReadonlyArray<string>
+  readonly skip: boolean
+}
+
+export interface EmailSentHookContext {
+  readonly message: EmailMessage
+  readonly purpose: string
+  readonly collection: string | null
+  readonly userId: string | null
+  readonly result: EmailSendResult
+}
+
+export interface EmailErrorHookContext {
+  readonly message: EmailMessage
+  readonly purpose: string
+  readonly collection: string | null
+  readonly userId: string | null
+  readonly error: EmailSendError
 }
 
 export interface CronContext {

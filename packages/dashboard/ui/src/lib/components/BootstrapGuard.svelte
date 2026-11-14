@@ -9,7 +9,12 @@
 
   const { children }: { children: Snippet } = $props()
 
-  const publicPaths = [resolve(`/login`), resolve(`/register`)]
+  const publicPaths = [
+    resolve(`/login`),
+    resolve(`/register`),
+    resolve(`/forgot-password`),
+    resolve(`/reset-password`)
+  ]
   const isPublic = $derived(publicPaths.some((p) => page.url.pathname === p || page.url.pathname.startsWith(p + "?")))
   const getIsPublic = () => isPublic
 

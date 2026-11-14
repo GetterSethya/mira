@@ -1,9 +1,13 @@
-import { Config, Effect, Layer, Redacted, Stream } from "effect"
+import { Effect, Layer, Redacted, Stream } from "effect"
 import { Files as FilesClient } from "files-sdk"
 import type { FilesService } from "files-sdk/effect"
 import { make as makeFilesService } from "files-sdk/effect"
 import { s3Fetch } from "files-sdk/s3-fetch"
 
+import { resolveConfigValue, unwrapSecret } from "@/config/config-value.js"
+import type { ConfigValue } from "@/config/config-value.js"
+
+import type { StorageDescription } from "./storage.js"
 import { FileStorage, FileStorageError, FileStorageNotFound } from "./storage.js"
 
 /**
@@ -14,7 +18,7 @@ import { FileStorage, FileStorageError, FileStorageNotFound } from "./storage.js
  * endpoint: "http://localhost:9000"      // plain value
  * endpoint: Config.String("S3_ENDPOINT") // resolved at layer build
  */
-export type S3ConfigValue<T> = T | Config.Config<T>
+export type S3ConfigValue<T> = ConfigValue<T>
 
 /**
  * Configuration for the S3-compatible {@link FileStorage} backend. Works with
@@ -83,18 +87,6 @@ interface ResolvedS3CompatibleStorageConfig {
   readonly forcePathStyle: boolean
   readonly publicBaseUrl?: string
 }
-
-/** Narrow a plain value or a `Config` to a `Config`. */
-const isConfigValue = <A>(value: A | Config.Config<A>): value is Config.Config<A> =>
-  Config.isConfig(value)
-
-/** Lift a plain value into a `Config`; leaves an existing `Config` untouched. */
-const resolveConfigValue = <A>(value: A | Config.Config<A>): Config.Config<A> =>
-  isConfigValue(value) ? value : Config.succeed(value)
-
-/** Unwrap a string or `Redacted<string>` secret. */
-const unwrapSecret = (value: string | Redacted.Redacted<string>): string =>
-  typeof value === "string" ? value : Redacted.value(value)
 
 /**
  * Encode a storage key for use in a URL path.
@@ -177,9 +169,11 @@ const makeUrlBuilder = (config: ResolvedS3CompatibleStorageConfig) => {
  */
 export const makeFileStorageFromFiles = (
   files: FilesService,
-  urlForKey: (key: string) => string = (key: string) => `/files/${encodeKeyPath(key)}`
+  urlForKey: (key: string) => string = (key: string) => `/files/${encodeKeyPath(key)}`,
+  description?: StorageDescription
 ) =>
   FileStorage.of({
+    ...(description === undefined ? {} : { describe: () => description }),
     // The upstream stream is drained *inside* the Effect and only then handed
     // to the adapter, so streaming errors (e.g. the upload size limit's
     // `PayloadTooLargeError`) stay in the error channel with their original
@@ -331,6 +325,13 @@ export const makeS3FileStorageLayer = (config: S3CompatibleStorageConfig): Layer
           ...(resolved.publicBaseUrl === undefined ? {} : { publicBaseUrl: resolved.publicBaseUrl })
         })
       })
-      return makeFileStorageFromFiles(makeFilesService(client), makeUrlBuilder(resolved))
+      return makeFileStorageFromFiles(makeFilesService(client), makeUrlBuilder(resolved), {
+        kind: "s3",
+        endpoint: resolved.endpoint,
+        bucketName: resolved.bucketName,
+        regionName: resolved.regionName,
+        forcePathStyle: resolved.forcePathStyle,
+        publicBaseUrl: resolved.publicBaseUrl ?? null
+      })
     }).pipe(Effect.orDie)
   )

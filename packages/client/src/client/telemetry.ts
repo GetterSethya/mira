@@ -1,4 +1,4 @@
-import type { FilterNode } from "@gettersethya/mira-collection"
+import type { AuthCollectionOptions, FilterNode } from "@gettersethya/mira-collection"
 import { HttpClientRequest as HCR } from "effect/http"
 
 import type { ClientHandler, ExecuteFn } from "./handler.js"
@@ -33,6 +33,7 @@ export type ApiCollectionSchema = {
   fields: Record<string, ApiFieldSchema>
   required?: Array<string>
   indexes?: Array<unknown>
+  auth?: AuthCollectionOptions
   rules?: unknown
   viewQuery?: string
 }

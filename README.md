@@ -147,6 +147,7 @@ Mira.builder()
 | `.platform(p)` | yes | Runtime environment. Currently `NodePlatform`. |
 | `.database(d)` | yes | SQL backend. Currently `SqliteDatabase({ filename })`. |
 | `.storage(s)` | yes | File storage. `LocalFileStorage({ directory })` for local disk, or `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for S3-compatible buckets (AWS S3, MinIO, R2, LocalStack). |
+| `.email(e)` | no | Email transport. `SmtpEmail({ host, port, secure, auth, from })`. Without it, a no-op `EmailService` is used. |
 | `.collections(c)` | yes | Array of collection definitions. |
 | `.rules(r)` | no | Array of `RuleBinding` from `defineRule(collection, cb)`. Collections without rules deny all actions. |
 | `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
@@ -203,6 +204,78 @@ MIRA_S3_E2E=1 pnpm --filter @gettersethya/mira exec vitest run tests/storage/s3-
 ```
 
 Endpoint, bucket and credentials can be overridden with `MIRA_S3_ENDPOINT`, `MIRA_S3_BUCKET`, `MIRA_S3_REGION`, `MIRA_S3_ACCESS_KEY` and `MIRA_S3_SECRET_KEY`.
+
+### Email (SMTP)
+
+Email is optional. Select the transport in code, the same way storage is selected:
+
+```typescript
+import { Config } from "effect"
+import { Mira, NodePlatform, SmtpEmail, SqliteDatabase, LocalFileStorage } from "@gettersethya/mira"
+
+Mira.builder()
+  .platform(NodePlatform)
+  .database(SqliteDatabase({ filename: "data.db" }))
+  .storage(LocalFileStorage({ directory: "./uploads" }))
+  .email(SmtpEmail({
+    host: Config.String("SMTP_HOST"),
+    port: Config.Number("SMTP_PORT"),
+    secure: false,
+    auth: {
+      user: Config.String("SMTP_USER"),
+      pass: Config.Redacted("SMTP_PASS")
+    },
+    from: "Mira <no-reply@example.com>"
+  }))
+  .collections([Users])
+  .build()
+  .serve()
+```
+
+Every setting accepts a plain value or an Effect `Config`, resolved once at layer build. Without `.email(...)`, a no-op `EmailService` is used and email-dependent request endpoints return `email_not_configured`.
+
+Auth collections opt into each flow with a third argument:
+
+```typescript
+const Users = AuthCollection.define("users", {
+  name: Field.text()
+}, {
+  email: {
+    verification: true,     // send an OTP after registration
+    loginAlerts: true,      // alert after a successful login
+    loginOtp: "required",   // require an OTP after a correct password
+    passwordless: true      // allow email-OTP login
+  }
+})
+```
+
+New auth routes:
+
+| Method | Route | Purpose |
+|---|---|---|
+| `POST` | `/api/collections/:name/auth-with-password` | Password login; returns `otpRequired` + `challengeId` when login OTP is required |
+| `POST` | `/api/collections/:name/auth-with-password/verify-otp` | Complete login OTP |
+| `POST` | `/api/collections/:name/auth-with-password/resend-otp` | Reissue a login OTP |
+| `POST` | `/api/collections/:name/auth-with-otp/request` | Request a passwordless code |
+| `POST` | `/api/collections/:name/auth-with-otp` | Complete passwordless login |
+| `POST` | `/api/collections/:name/verify-email/request` | Request/resend an email verification code |
+| `POST` | `/api/collections/:name/verify-email` | Verify email by `challengeId` + code |
+| `POST` | `/api/collections/:name/password-reset/request` | Request a reset link |
+| `POST` | `/api/collections/:name/password-reset` | Complete reset by token |
+| `GET` | `/api/collections/:name/auth-config` | Public auth capability flags |
+
+Plugins can use `EmailService` directly and observe sends with `onEmailSend`, `onEmailSent`, and `onEmailError`.
+
+For local testing, Mailpit is enough — no paid provider is required:
+
+```bash
+docker compose -f docker-compose.mailpit.yml up -d
+# SMTP: localhost:1025, inbox: http://localhost:8025
+```
+
+Use `SmtpEmail({ host: "127.0.0.1", port: 1025, secure: false, from: "Mira <no-reply@mira.local>" })`. Automated tests use an in-process `smtp-server`; see `packages/mira/tests/email/smtp.test.ts`.
+
+The dashboard Settings -> App cards show the live storage and email descriptions read-only. They do not edit backend settings; use the builder.
 
 ### CORS
 

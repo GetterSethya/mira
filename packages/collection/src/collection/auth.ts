@@ -1,7 +1,15 @@
 import type { IndexBuilder, IndexEntry } from "./index-builder.js"
 import { Index } from "./index-builder.js"
 import { toJSONSchema } from "./serialize.js"
-import type { CollectionSchema, FieldDef, FieldsMap, IndexDef, JsonSchemaProperty } from "./types.js"
+import type {
+  AuthCollectionEmailOptions,
+  AuthCollectionOptions,
+  CollectionSchema,
+  FieldDef,
+  FieldsMap,
+  IndexDef,
+  JsonSchemaProperty
+} from "./types.js"
 
 type AuthSystemField = "id" | "email" | "password" | "emailVerified" | "created" | "updated" | "seqId"
 type AuthRuleField = "id" | "email" | "emailVerified" | "created" | "updated" | "seqId"
@@ -47,9 +55,31 @@ const AUTH_SYSTEM_FIELD_DEFS: AuthPublicFieldDefs = {
 
 const AUTH_SYSTEM_INDEXES: Array<IndexDef> = [{ fields: ["email"], unique: true }]
 
+const normalizeEmailOptions = (
+  options: AuthCollectionOptions | undefined
+): AuthCollectionEmailOptions | undefined => {
+  if (options?.email === undefined) return undefined
+  const email: AuthCollectionEmailOptions = {
+    verification: options.email.verification ?? false,
+    loginAlerts: options.email.loginAlerts ?? false,
+    loginOtp: options.email.loginOtp ?? "off",
+    passwordless: options.email.passwordless ?? false
+  }
+  if (
+    email.verification === false &&
+    email.loginAlerts === false &&
+    email.loginOtp === "off" &&
+    email.passwordless === false
+  ) {
+    return undefined
+  }
+  return email
+}
+
 function makeAuthBuilder<F extends FieldsMap>(
   name: string,
   extraFields: F,
+  authOptions?: AuthCollectionOptions,
   indexesCb?: IndexCb<F>
 ): AuthCollectionBuilder<F> {
   type AF = (keyof F & string) | AuthRuleField
@@ -60,14 +90,16 @@ function makeAuthBuilder<F extends FieldsMap>(
     get schema(): CollectionSchema & { "x-collection-kind": "auth" } {
       if (_schema === undefined) {
         const indexes = indexesCb?.(Index as IndexBuilder<AF>)
+        const email = normalizeEmailOptions(authOptions)
         _schema = toJSONSchema("auth", name, extraFields, {
           indexes: [...AUTH_SYSTEM_INDEXES, ...(indexes ?? [])],
           systemFields: AUTH_SYSTEM_PROPERTIES,
+          ...(email === undefined ? {} : { auth: { email } })
         }) as CollectionSchema & { "x-collection-kind": "auth" }
       }
       return _schema!
     },
-    indexes: (cb) => makeAuthBuilder(name, extraFields, cb)
+    indexes: (cb) => makeAuthBuilder(name, extraFields, authOptions, cb)
   }
 }
 
@@ -85,8 +117,9 @@ function makeAuthBuilder<F extends FieldsMap>(
 export const AuthCollection = {
   define<F extends FieldsMap & { [K in keyof F & AuthSystemField]?: never }>(
     name: string,
-    extraFields: F
+    extraFields: F,
+    options?: AuthCollectionOptions
   ): AuthCollectionBuilder<F> {
-    return makeAuthBuilder(name, extraFields)
+    return makeAuthBuilder(name, extraFields, options)
   }
 }

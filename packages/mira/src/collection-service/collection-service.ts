@@ -5,6 +5,7 @@ import { Context, Effect, Layer, Option, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { literal } from "effect/sql/Statement"
 
+import { AuthChallengeStore } from "@/auth/challenge-store.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { AuthService } from "@/http/auth.js"
 import { Repository } from "@/repository/repository.js"
@@ -18,6 +19,7 @@ import { makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
 import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
+import type { ResolveOptions } from "./where.js"
 import { andWhere, cursorClause, idClause, resolveCtxPlaceholders, resolveFieldRefs } from "./where.js"
 
 /**
@@ -231,13 +233,14 @@ function extractReplacedFileKeys(
 function compileRule(
   collection: AnyCollectionDef,
   action: "list" | "view" | "create" | "update" | "delete",
-  ctx: RequestCtx
+  ctx: RequestCtx,
+  options?: ResolveOptions
 ) {
   const result = enforcerForAction(collection.schema, action)
   if (result === null) {
     return Effect.fail(new ForbiddenError({ collection: collection.name, action }))
   }
-  return resolveCtxPlaceholders(result, ctx, collection.name, action)
+  return resolveCtxPlaceholders(result, ctx, collection.name, action, options)
 }
 
 /**
@@ -267,6 +270,12 @@ export function makeCollectionServiceLayer(
       const fileStorage = yield* FileStorage
       const dialect = yield* Dialect
       const authService = yield* AuthService
+      const challengeStore = yield* AuthChallengeStore
+      const resolveOptions: ResolveOptions = {
+        encodeParam: dialect.storesBooleanAsInteger
+          ? (value) => (typeof value === "boolean" ? (value ? 1 : 0) : value)
+          : (value) => value
+      }
 
       // One-time dev warning: a `@request_body_` reference in a list/view/delete
       // rule can never match a submitted value — bodiless actions carry no body,
@@ -347,8 +356,8 @@ export function makeCollectionServiceLayer(
           if (!isAuthCollection(collection) || ctx.auth === undefined) return false
           const rule = enforcerForAction(collection.schema, "manage")
           if (rule === null) return false
-          const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage")
-          const bound = resolveFieldRefs(resolved, { ...payload, emailVerified: false })
+          const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage", resolveOptions)
+          const bound = resolveFieldRefs(resolved, { ...payload, emailVerified: false }, resolveOptions)
           const where = literal(bound.sql, bound.params)
           const check = yield* sql<{ ok: number }>`SELECT 1 AS ok WHERE ${where}`
           return check.length > 0
@@ -364,7 +373,7 @@ export function makeCollectionServiceLayer(
           if (!isAuthCollection(collection) || ctx.auth === undefined) return false
           const rule = enforcerForAction(collection.schema, "manage")
           if (rule === null) return false
-          const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage")
+          const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage", resolveOptions)
           const allowed = yield* repo.viewFilter(collection.name, {
             where: andWhere(resolved, idClause(id))
           })
@@ -401,7 +410,7 @@ export function makeCollectionServiceLayer(
         ctx: RequestCtx
       ) =>
         Effect.gen(function* () {
-          if (!isAuthCollection(collection) || ctx.admin === true) return
+          if (!isAuthCollection(collection) || ctx.admin === true || ctx.internal === "auth-flow") return
           const password = asString(cleaned["password"]) ?? asString(raw["password"]) ?? ""
           if (password.length > 0) {
             const confirm = asString(raw["passwordConfirm"])
@@ -423,7 +432,19 @@ export function makeCollectionServiceLayer(
         ctx: RequestCtx
       ) =>
         Effect.gen(function* () {
-          if (!isAuthCollection(collection) || ctx.admin === true) return
+          if (!isAuthCollection(collection)) return
+          if (ctx.internal === "auth-flow") {
+            const disallowed = Object.keys(cleaned).filter(
+              (key) => key !== "password" && key !== "emailVerified"
+            )
+            if (disallowed.length > 0) {
+              return yield* Effect.fail(
+                credentialError(collection, `auth-flow cannot update: ${disallowed.join(", ")}`)
+              )
+            }
+            return
+          }
+          if (ctx.admin === true) return
           const newPassword = asString(cleaned["password"])
           const passwordChanging = newPassword !== undefined && newPassword.length > 0
           const emailChanging = "email" in cleaned && cleaned["email"] !== existing["email"]
@@ -457,7 +478,7 @@ export function makeCollectionServiceLayer(
         expand?: ReadonlyArray<string> | null
       ) =>
         Effect.gen(function* () {
-          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "list", ctx)
+          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "list", ctx, resolveOptions)
           const userFilter =
             filter !== undefined
               ? yield* filterNodeToWhereClause(filter, collection.schema, collection.name, {
@@ -518,7 +539,7 @@ export function makeCollectionServiceLayer(
         expand?: ReadonlyArray<string> | null
       ) =>
         Effect.gen(function* () {
-          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "view", ctx)
+          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "view", ctx, resolveOptions)
           const combined = ruleWhere !== null ? andWhere(ruleWhere, idClause(id)) : idClause(id)
 
           const fields = resolveFields(collection.schema, select ?? null, ctx.admin === true)
@@ -556,10 +577,10 @@ export function makeCollectionServiceLayer(
 
           if (!ctx.admin) {
             const ctxWithBody: RequestCtx = { ...ctx, body: cleaned }
-            const ruleWhere = yield* compileRule(collection, "create", ctxWithBody)
+            const ruleWhere = yield* compileRule(collection, "create", ctxWithBody, resolveOptions)
 
             // Pre-check: evaluate the create rule against the payload (no table needed).
-            const payloadBound = resolveFieldRefs(ruleWhere, cleaned)
+            const payloadBound = resolveFieldRefs(ruleWhere, cleaned, resolveOptions)
             const where = literal(payloadBound.sql, payloadBound.params)
             const check = yield* sql<{ ok: number }>`SELECT 1 AS ok WHERE ${where}`
 
@@ -596,7 +617,7 @@ export function makeCollectionServiceLayer(
           )
 
           // If the collection has no rules at all, deny immediately (don't leak existence)
-          if (!ctx.admin) {
+          if (!ctx.admin && ctx.internal !== "auth-flow") {
             const enforcerResult = enforcerForAction(collection.schema, "update")
             if (enforcerResult === null) {
               return yield* new ForbiddenError({ collection: collection.name, action: "update" })
@@ -613,8 +634,8 @@ export function makeCollectionServiceLayer(
           // record's value, otherwise to null.
           const ctxWithBody: RequestCtx = { ...ctx, body: { ...existing.value, ...cleaned } }
 
-          if (!ctx.admin) {
-            const ruleWhere = yield* compileRule(collection, "update", ctxWithBody)
+          if (!ctx.admin && ctx.internal !== "auth-flow") {
+            const ruleWhere = yield* compileRule(collection, "update", ctxWithBody, resolveOptions)
 
             // Rule check against this specific row
             const combined = andWhere(ruleWhere, idClause(id))
@@ -632,6 +653,18 @@ export function makeCollectionServiceLayer(
             id,
             getEncoder(collection)(yield* hashAuthPassword(collection, cleaned, true))
           )
+
+          if (isAuthCollection(collection) && asString(cleaned["password"]) !== undefined) {
+            yield* challengeStore
+              .consumeAllForUser(collection.name, id, Date.now())
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("auth.password_change.challenge_cleanup_failed", {
+                    cause: String(cause)
+                  })
+                )
+              )
+          }
 
           // Best-effort: delete old files and their thumbnails for any replaced file fields.
           const oldKeys = extractReplacedFileKeys(existing.value, cleaned, collection.schema)
@@ -682,7 +715,7 @@ export function makeCollectionServiceLayer(
           }
 
           if (!ctx.admin) {
-            const ruleWhere = yield* compileRule(collection, "delete", ctx)
+            const ruleWhere = yield* compileRule(collection, "delete", ctx, resolveOptions)
             const combined = andWhere(ruleWhere, idClause(id))
             const allowed = yield* repo.viewFilter(collection.name, { where: combined })
             if (allowed.length === 0) {

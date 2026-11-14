@@ -1,7 +1,7 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { FileSystem, Path } from "effect"
 import { SqlClient } from "effect/sql"
-import type { AppConfig, CollectionService, CronService } from "@gettersethya/mira"
+import type { AppConfig, CollectionService, CronService, FileStorage, Repository } from "@gettersethya/mira"
 import { Cause, Effect, Option, Tracer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { bootstrapStatusRoute } from "./api/bootstrap-status.js"
@@ -9,6 +9,7 @@ import { registerRoute } from "./api/register.js"
 import { createSuperadminRoute, listSuperadminsRoute, deleteSuperadminRoute } from "./api/superadmin.js"
 import { configRoute, configUpdateRoute } from "./api/config.js"
 import { cronsRoute, cronRunNowRoute } from "./api/crons.js"
+import { emailTestRoute } from "./api/email.js"
 import { DashboardUnauthorizedError, requireDashboardAuth } from "./api/auth.js"
 
 function makeContentType(ext: string): string {
@@ -118,6 +119,8 @@ type DashboardRouteServices =
   | AppConfig
   | CronService
   | SqlClient.SqlClient
+  | Repository
+  | FileStorage
 
 export function makeDashboardRouter(
   _collections: ReadonlyArray<AnyCollectionDef>
@@ -132,6 +135,7 @@ export function makeDashboardRouter(
     HttpRouter.route("GET", "/_dashboard/api/config", wrapAuthRoute("config", configRoute)),
     HttpRouter.route("PUT", "/_dashboard/api/config", wrapAuthRoute("config_update", configUpdateRoute)),
     HttpRouter.route("GET", "/_dashboard/api/crons", wrapAuthRoute("crons_list", cronsRoute)),
-    HttpRouter.route("POST", "/_dashboard/api/crons/:name/run", wrapAuthRoute("crons_run", cronRunNowRoute))
+    HttpRouter.route("POST", "/_dashboard/api/crons/:name/run", wrapAuthRoute("crons_run", cronRunNowRoute)),
+    HttpRouter.route("POST", "/_dashboard/api/email/test", wrapAuthRoute("email_test", emailTestRoute))
   ]
 }

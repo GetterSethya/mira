@@ -17,9 +17,21 @@ const token = Schema.String.pipe(
   Schema.check(Schema.makeFilter((s: string) => s.length > 0, { message: "Registration token is required" }))
 )
 
+const otpCode = Schema.String.pipe(
+  Schema.check(Schema.makeFilter((s: string) => /^\d{6}$/.test(s), { message: "Enter the 6-digit code" }))
+)
+
 export const LoginSchema = Schema.Struct({ email, password })
 
 export const RegisterSchema = Schema.Struct({ name: Schema.String, email, password: strongPassword })
+
+export const ForgotPasswordSchema = Schema.Struct({ email })
+
+export const ResetPasswordSchema = Schema.Struct({ password: strongPassword, passwordConfirm: strongPassword })
+
+export const LoginOtpSchema = Schema.Struct({ code: otpCode })
+
+export const TestEmailSchema = Schema.Struct({ to: Schema.optional(email) })
 
 export function formatFieldErrors(errors: any[]): string {
   return errors.map((e) => e.message).join(", ")

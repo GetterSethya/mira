@@ -10,6 +10,9 @@ import type {
   CronErrorContext,
   CronFinishedContext,
   CronResultContext,
+  EmailErrorHookContext,
+  EmailSendHookContext,
+  EmailSentHookContext,
   HookErrorContext,
   ListHookContext,
   ListResultContext,
@@ -37,6 +40,16 @@ export interface ListHook<T> {
 }
 
 export interface ListSuccessHook<T> {
+  readonly collections?: ReadonlyArray<string>
+  readonly handler: (ctx: T) => Effect.Effect<void, never, never>
+}
+
+export interface EmailHook<T> {
+  readonly collections?: ReadonlyArray<string>
+  readonly handler: (ctx: T) => Effect.Effect<T, never, never>
+}
+
+export interface EmailObserverHook<T> {
   readonly collections?: ReadonlyArray<string>
   readonly handler: (ctx: T) => Effect.Effect<void, never, never>
 }
@@ -89,6 +102,10 @@ export interface MiraPlugin<R = never> {
   readonly onRecordViewSuccess?: ListSuccessHook<ViewResultContext>
   readonly onRecordViewError?: ListSuccessHook<HookErrorContext>
 
+  readonly onEmailSend?: EmailHook<EmailSendHookContext>
+  readonly onEmailSent?: EmailObserverHook<EmailSentHookContext>
+  readonly onEmailError?: EmailObserverHook<EmailErrorHookContext>
+
   readonly crons?: ReadonlyArray<CronDef<R>>
   readonly onCronStart?: CronHook<CronContext>
   readonly onCronExecute?: CronHook<CronContext>
@@ -96,7 +113,7 @@ export interface MiraPlugin<R = never> {
   readonly onCronSuccess?: CronObserverHook<CronResultContext>
   readonly onCronError?: CronObserverHook<CronErrorContext>
 
-  readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository | CollectionService>
+  readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository>
   readonly routes?: ReadonlyArray<HttpRouter.Route<never, R>>
   readonly collections?: ReadonlyArray<AnyCollectionDef>
   /**

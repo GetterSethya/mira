@@ -21,7 +21,31 @@ export type { CursorPage,RequestCtx } from "./collection-service/index.js"
 export { CollectionService, makeCollectionServiceLayer } from "./collection-service/index.js"
 export { AppConfig, AppConfigLive } from "./config/index.js"
 export { CryptoService } from "./crypto/index.js"
-export { AuthService, hashPassword, verifyJwt,verifyPassword } from "./http/auth.js"
+export * from "./email/index.js"
+export {
+  AuthChallengeStore,
+  AuthChallengeStoreLive,
+  constantTimeEqual,
+  generateChallengeId,
+  generateOtp,
+  generateResetToken,
+  hashOtp,
+  hashResetToken
+} from "./auth/index.js"
+export type {
+  AuthChallengeStoreShape,
+  AuthEmailError,
+  ChallengePurpose,
+  ChallengeRecord
+} from "./auth/index.js"
+export {
+  AuthService,
+  authenticateSession,
+  hashPassword,
+  mintSession,
+  verifyJwt,
+  verifyPassword
+} from "./http/auth.js"
 export type { CorsConfig } from "./http/cors.js"
 export { defaultCorsConfig, makeCorsMiddleware } from "./http/cors.js"
 export { catchCollectionErrors } from "./http/errors.js"

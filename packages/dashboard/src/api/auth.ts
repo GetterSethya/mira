@@ -1,6 +1,6 @@
-import { Data, Effect, Redacted, Tracer } from "effect"
+import { Data, Effect, Tracer } from "effect"
 import { HttpServerRequest } from "effect/http"
-import { AppConfig, verifyJwt } from "@gettersethya/mira"
+import { authenticateSession } from "@gettersethya/mira"
 
 export class DashboardUnauthorizedError extends Data.TaggedError("DashboardUnauthorizedError")<{}> {}
 
@@ -28,12 +28,8 @@ export const requireDashboardAuth = Effect.gen(function* () {
     return yield* new DashboardUnauthorizedError()
   }
 
-  const config = yield* AppConfig
-  const payload = yield* verifyJwt(token, Redacted.value(config.jwtSecret)).pipe(
-    Effect.catch(() => new DashboardUnauthorizedError())
-  )
-
-  if (payload.col !== "_superadmin") {
+  const session = yield* authenticateSession(token, (name) => name === "_superadmin")
+  if (session === undefined) {
     yield* annotateCurrentSpan("auth.result", "invalid_token")
     return yield* new DashboardUnauthorizedError()
   }
@@ -41,5 +37,10 @@ export const requireDashboardAuth = Effect.gen(function* () {
   yield* annotateCurrentSpan("auth.result", "authenticated")
   yield* annotateCurrentSpan("auth.collection", "_superadmin")
 
-  return payload
+  const id = session.record["id"]
+  return {
+    col: session.collection,
+    sub: typeof id === "string" ? id : "",
+    record: session.record
+  }
 }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))

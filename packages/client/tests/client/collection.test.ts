@@ -261,6 +261,7 @@ describe("CollectionClient", () => {
     const result = await authWithPassword().raw({ email: "test@example.com", password: "secret" })
     expect(captured[0].method).toBe("POST")
     expect(captured[0].url).toBe("/api/collections/users/auth-with-password")
+    if (!("token" in result)) throw new Error("Expected a token result")
     expect(result.token).toBe("test-token")
   })
 

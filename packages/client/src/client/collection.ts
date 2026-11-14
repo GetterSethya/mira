@@ -10,7 +10,30 @@ import { MiraError } from "./errors.js"
 import { makeFileFields } from "./file.js"
 import type { ClientHandler, ExecuteFn } from "./handler.js"
 import { makeClientHandler as makeHandler, makeMutationHandler } from "./handler.js"
-import type { CollectionFileFields, CollectionKind, CreateInput, InferRecord, RegisterInput, RelationKeys, SelectableKeys, UpdateInput, WithSelect } from "./types.js"
+import type {
+  AuthConfig,
+  AuthLoginOtpVerifyInput,
+  AuthOtpLoginInput,
+  AuthOtpRequestInput,
+  AuthOtpRequestResult,
+  AuthResendLoginOtpInput,
+  AuthWithPasswordResult,
+  CollectionFileFields,
+  CollectionKind,
+  CreateInput,
+  InferRecord,
+  PasswordResetInput,
+  PasswordResetRequestInput,
+  RegisterInput,
+  RegisterResult,
+  RelationKeys,
+  SelectableKeys,
+  UpdateInput,
+  VerifyEmailInput,
+  VerifyEmailRequestInput,
+  VerifyEmailResult,
+  WithSelect
+} from "./types.js"
 
 type RequestWithBody = Effect.Effect<HttpClientRequest.HttpClientRequest, HttpBodyError, never>
 
@@ -306,7 +329,7 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    *
    * @returns A mutation ClientHandler — call `.raw({ email, password })`
    */
-  authWithPassword?(): ClientHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>
+  authWithPassword?(): ClientHandler<AuthWithPasswordResult<F>, { email: string; password: string }>
 
   /**
    * Register (self-signup) a new user on an auth collection.
@@ -325,7 +348,7 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    *
    * @returns A mutation ClientHandler — call `.raw({ email, password, passwordConfirm, ... })`
    */
-  register?(): ClientHandler<InferRecord<F>, RegisterInput<F>>
+  register?(): ClientHandler<RegisterResult<F>, RegisterInput<F>>
 
   /**
    * Fetch the currently authenticated user for this auth collection from
@@ -342,6 +365,18 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    * @returns A query ClientHandler — call `.raw()`
    */
   me?(): ClientHandler<InferRecord<F>>
+
+  /** Public auth capabilities for this collection. */
+  authConfig?(): ClientHandler<AuthConfig>
+
+  requestPasswordReset?(): ClientHandler<void, PasswordResetRequestInput>
+  resetPassword?(): ClientHandler<void, PasswordResetInput>
+  requestEmailVerification?(): ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>
+  verifyEmail?(): ClientHandler<VerifyEmailResult, VerifyEmailInput>
+  requestPasswordlessLogin?(): ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>
+  loginWithPasswordlessOtp?(): ClientHandler<{ token: string; record: InferRecord<F> }, AuthOtpLoginInput>
+  verifyLoginOtp?(): ClientHandler<{ token: string; record: InferRecord<F> }, AuthLoginOtpVerifyInput>
+  resendLoginOtp?(): ClientHandler<AuthOtpRequestResult, AuthResendLoginOtpInput>
 
   /**
    * File field client interfaces for the collection.
@@ -377,9 +412,18 @@ export type CollectionClient<F extends FieldsMap, K extends CollectionKind = "ba
 export type AuthByKind<F extends FieldsMap> = {
   [P in CollectionKind]: P extends "auth"
     ? {
-        authWithPassword(): ClientHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>
-        register(): ClientHandler<InferRecord<F>, RegisterInput<F>>
+        authWithPassword(): ClientHandler<AuthWithPasswordResult<F>, { email: string; password: string }>
+        register(): ClientHandler<RegisterResult<F>, RegisterInput<F>>
         me(): ClientHandler<InferRecord<F>>
+        authConfig(): ClientHandler<AuthConfig>
+        requestPasswordReset(): ClientHandler<void, PasswordResetRequestInput>
+        resetPassword(): ClientHandler<void, PasswordResetInput>
+        requestEmailVerification(): ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>
+        verifyEmail(): ClientHandler<VerifyEmailResult, VerifyEmailInput>
+        requestPasswordlessLogin(): ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>
+        loginWithPasswordlessOtp(): ClientHandler<{ token: string; record: InferRecord<F> }, AuthOtpLoginInput>
+        verifyLoginOtp(): ClientHandler<{ token: string; record: InferRecord<F> }, AuthLoginOtpVerifyInput>
+        resendLoginOtp(): ClientHandler<AuthOtpRequestResult, AuthResendLoginOtpInput>
       }
     : {}
 }
@@ -388,10 +432,23 @@ export type AdaptedAuthByKind<F extends FieldsMap> = {
   [P in CollectionKind]: P extends "auth"
     ? {
         authWithPassword(): EnrichedMutationHandler<
-          ClientHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>
+          ClientHandler<AuthWithPasswordResult<F>, { email: string; password: string }>
         >
-        register(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, RegisterInput<F>>>
+        register(): EnrichedMutationHandler<ClientHandler<RegisterResult<F>, RegisterInput<F>>>
         me(): EnrichedQueryHandler<ClientHandler<InferRecord<F>>>
+        authConfig(): EnrichedQueryHandler<ClientHandler<AuthConfig>>
+        requestPasswordReset(): EnrichedMutationHandler<ClientHandler<void, PasswordResetRequestInput>>
+        resetPassword(): EnrichedMutationHandler<ClientHandler<void, PasswordResetInput>>
+        requestEmailVerification(): EnrichedMutationHandler<ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>>
+        verifyEmail(): EnrichedMutationHandler<ClientHandler<VerifyEmailResult, VerifyEmailInput>>
+        requestPasswordlessLogin(): EnrichedMutationHandler<ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>>
+        loginWithPasswordlessOtp(): EnrichedMutationHandler<
+          ClientHandler<{ token: string; record: InferRecord<F> }, AuthOtpLoginInput>
+        >
+        verifyLoginOtp(): EnrichedMutationHandler<
+          ClientHandler<{ token: string; record: InferRecord<F> }, AuthLoginOtpVerifyInput>
+        >
+        resendLoginOtp(): EnrichedMutationHandler<ClientHandler<AuthOtpRequestResult, AuthResendLoginOtpInput>>
       }
     : {}
 }
@@ -474,6 +531,15 @@ export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"
   | "register"
   | "authWithPassword"
   | "me"
+  | "authConfig"
+  | "requestPasswordReset"
+  | "resetPassword"
+  | "requestEmailVerification"
+  | "verifyEmail"
+  | "requestPasswordlessLogin"
+  | "loginWithPasswordlessOtp"
+  | "verifyLoginOtp"
+  | "resendLoginOtp"
 > & {
   getList<const O extends GetListOptions<F> = GetListOptions<F>>(
     options?: O
@@ -639,38 +705,119 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     })
   }
 
+  function storeSession(token: string) {
+    if (authTokenRef !== null) MutableRef.set(authTokenRef, token)
+    if (loggedInRef !== null) MutableRef.set(loggedInRef, true)
+    if (sessionMemoRef !== null) MutableRef.set(sessionMemoRef, null)
+  }
+
   function authWithPassword() {
-    return makeMutationHandler<{ token: string; record: InferRecord<F> }, { email: string; password: string }>(
+    return makeMutationHandler<AuthWithPasswordResult<F>, { email: string; password: string }>(
       ({ email, password }) =>
         withRetry(Effect.gen(function* () {
-          const res = yield* toExecuteEffect<{ token: string; record: InferRecord<F> }>(
+          const res = yield* toExecuteEffect<AuthWithPasswordResult<F>>(
             HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/auth-with-password`), { email, password }),
             execute
           )
-          if (authTokenRef !== null) {
-            MutableRef.set(authTokenRef, res.token)
-          }
-          if (loggedInRef !== null) {
-            MutableRef.set(loggedInRef, true)
-          }
-          // Drop any memoized session check from before login (e.g. the `false`
-          // that a route guard cached while logged out) so the next
-          // `ensureSession()` re-checks against the server.
-          if (sessionMemoRef !== null) {
-            MutableRef.set(sessionMemoRef, null)
-          }
+          if ("token" in res) storeSession(res.token)
           return res
         }))
     )
   }
 
   function register() {
-    return makeMutationHandler<InferRecord<F>, RegisterInput<F>>((input) => {
+    return makeMutationHandler<RegisterResult<F>, RegisterInput<F>>((input) => {
       const reqEffect: RequestWithBody = hasFileOrBlob(input)
         ? Effect.succeed(HCR.bodyFormData(HCR.post(`/api/collections/${collectionName}`), buildFormData(input)))
         : HCR.bodyJson(HCR.post(`/api/collections/${collectionName}`), input)
-      return withRetry(toExecuteEffect<InferRecord<F>>(reqEffect, execute))
+      return withRetry(toExecuteEffect<RegisterResult<F>>(reqEffect, execute))
     })
+  }
+
+  function authConfig() {
+    return makeHandler(execute<AuthConfig>(HCR.get(`/api/collections/${collectionName}/auth-config`)))
+  }
+
+  function requestPasswordReset() {
+    return makeMutationHandler<void, PasswordResetRequestInput>((input) =>
+      withRetry(toExecuteEffect<void>(HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/password-reset/request`), input), execute))
+    )
+  }
+
+  function resetPassword() {
+    return makeMutationHandler<void, PasswordResetInput>((input) =>
+      withRetry(toExecuteEffect<void>(HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/password-reset`), input), execute))
+    )
+  }
+
+  function requestEmailVerification() {
+    return makeMutationHandler<AuthOtpRequestResult, AuthOtpRequestInput>((input) =>
+      withRetry(
+        toExecuteEffect<AuthOtpRequestResult>(
+          HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/verify-email/request`), input),
+          execute
+        )
+      )
+    )
+  }
+
+  function verifyEmail() {
+    return makeMutationHandler<VerifyEmailResult, VerifyEmailInput>((input) =>
+      withRetry(
+        toExecuteEffect<VerifyEmailResult>(
+          HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/verify-email`), input),
+          execute
+        )
+      )
+    )
+  }
+
+  function requestPasswordlessLogin() {
+    return makeMutationHandler<AuthOtpRequestResult, AuthOtpRequestInput>((input) =>
+      withRetry(
+        toExecuteEffect<AuthOtpRequestResult>(
+          HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/auth-with-otp/request`), input),
+          execute
+        )
+      )
+    )
+  }
+
+  function loginWithPasswordlessOtp() {
+    return makeMutationHandler<{ token: string; record: InferRecord<F> }, AuthOtpLoginInput>((input) =>
+      withRetry(Effect.gen(function* () {
+        const res = yield* toExecuteEffect<{ token: string; record: InferRecord<F> }>(
+          HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/auth-with-otp`), input),
+          execute
+        )
+        storeSession(res.token)
+        return res
+      }))
+    )
+  }
+
+  function verifyLoginOtp() {
+    return makeMutationHandler<{ token: string; record: InferRecord<F> }, AuthLoginOtpVerifyInput>((input) =>
+      withRetry(Effect.gen(function* () {
+        const res = yield* toExecuteEffect<{ token: string; record: InferRecord<F> }>(
+          HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/auth-with-password/verify-otp`), input),
+          execute
+        )
+        storeSession(res.token)
+        return res
+      }))
+    )
+  }
+
+  function resendLoginOtp() {
+    return makeMutationHandler<AuthOtpRequestResult, AuthResendLoginOtpInput>((input) =>
+      withRetry(
+        toExecuteEffect<AuthOtpRequestResult>(
+          HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/auth-with-password/resend-otp`), input),
+          execute
+        )
+      )
+    )
   }
 
   function me() {
@@ -697,7 +844,22 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     create,
     update,
     delete: deleteFn,
-    ...(isAuth ? { authWithPassword, register, me } : {}),
+    ...(isAuth
+      ? {
+          authWithPassword,
+          register,
+          me,
+          authConfig,
+          requestPasswordReset,
+          resetPassword,
+          requestEmailVerification,
+          verifyEmail,
+          requestPasswordlessLogin,
+          loginWithPasswordlessOtp,
+          verifyLoginOtp,
+          resendLoginOtp
+        }
+      : {}),
     fields: fileFields,
   }
   return client

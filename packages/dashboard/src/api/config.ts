@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { SqlClient, SqlSchema } from "effect/sql"
-import { AppConfig } from "@gettersethya/mira"
+import { AppConfig, EmailService, FileStorage } from "@gettersethya/mira"
 
 const ConfigRowSchema = Schema.Struct({
   key: Schema.String,
@@ -15,7 +15,24 @@ const ConfigUpdateSchema = Schema.Struct({
 /**
  * Keys the dashboard never exposes: internal state written by other services.
  */
-const HIDDEN_KEYS: ReadonlyArray<string> = ["cron_state"]
+const HIDDEN_KEYS: ReadonlyArray<string> = [
+  "cron_state",
+  "use_s3",
+  "s3_endpoint",
+  "s3_bucket_name",
+  "s3_region_name",
+  "s3_access_key",
+  "s3_secret",
+  "use_email",
+  "smtp_host",
+  "smtp_port",
+  "smtp_secure",
+  "smtp_user",
+  "smtp_password",
+  "email_from",
+  "email_from_name",
+  "password_reset_url"
+]
 
 /**
  * Keys the dashboard shows but refuses to write. `jwt_secret` is readable
@@ -32,17 +49,11 @@ const EDITABLE_KEYS: ReadonlyArray<string> = [
   "app_name",
   "application_url",
   "port",
-  "use_s3",
-  "log_retention_days",
-  "s3_endpoint",
-  "s3_bucket_name",
-  "s3_region_name",
-  "s3_access_key",
-  "s3_secret"
+  "log_retention_days"
 ]
 
 /** Keys whose values the UI masks until explicitly revealed. */
-const SECRET_KEYS: ReadonlyArray<string> = ["jwt_secret", "s3_access_key", "s3_secret"]
+const SECRET_KEYS: ReadonlyArray<string> = ["jwt_secret"]
 
 const readRows = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -59,6 +70,8 @@ const readRows = Effect.gen(function* () {
  */
 const snapshot = Effect.gen(function* () {
   const config = yield* AppConfig
+  const storage = yield* FileStorage
+  const email = yield* EmailService
   const rows = yield* readRows
 
   const values: Record<string, string> = {}
@@ -74,7 +87,9 @@ const snapshot = Effect.gen(function* () {
     values,
     editable: EDITABLE_KEYS,
     readOnly: READ_ONLY_KEYS,
-    secret: SECRET_KEYS
+    secret: SECRET_KEYS,
+    storage: storage.describe?.() ?? null,
+    email: email.describe()
   }
 })
 

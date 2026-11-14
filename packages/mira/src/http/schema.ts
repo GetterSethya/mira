@@ -13,6 +13,7 @@ export function makeSchemaRoute(collections: ReadonlyArray<AnyCollectionDef>) {
     fields: c.schema.properties,
     required: c.schema.required,
     indexes: c.schema["x-indexes"],
+    auth: c.schema["x-auth"],
     viewQuery: c.schema["x-view-query"],
   }))
   return Effect.succeed(HttpServerResponse.jsonUnsafe(schemas, { status: 200 }))

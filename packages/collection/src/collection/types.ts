@@ -93,10 +93,26 @@ import type { RuleMap } from "@/rule/types.js"
  * This is the serialized format stored in the `_collections` table.
  * TypeScript field definitions are compiled down to this format.
  */
+export type AuthCollectionEmailOptions = {
+  /** Send an email verification OTP after registration. Default false. */
+  readonly verification?: boolean
+  /** Send an alert after a successful password or OTP login. Default false. */
+  readonly loginAlerts?: boolean
+  /** Require an email OTP after a correct password. Default "off". */
+  readonly loginOtp?: "off" | "required"
+  /** Allow passwordless login through an email OTP. Default false. */
+  readonly passwordless?: boolean
+}
+
+export type AuthCollectionOptions = {
+  readonly email?: AuthCollectionEmailOptions
+}
+
 export type CollectionSchema = {
   "x-collection-kind": "base" | "auth" | "view"
   "x-indexes"?: Array<IndexDef>
   "x-rules"?: RuleMap
+  "x-auth"?: AuthCollectionOptions
   "x-view-query"?: string
   type: "object"
   properties: Record<string, JsonSchemaProperty>
@@ -133,6 +149,16 @@ export type JsonSchemaProperty = {
  * { title: Field.text(), published: Field.boolean() }
  */
 export type FieldsMap = Record<string, FieldDef>
+
+/** Auth system fields available to `R.auth(...)` in `defineRule`. */
+export type AuthRuleFields = {
+  id: FieldDef & { kind: "text" }
+  email: FieldDef & { kind: "email" }
+  emailVerified: FieldDef & { kind: "boolean" }
+  created: FieldDef & { kind: "date" }
+  updated: FieldDef & { kind: "date" }
+  seqId: FieldDef & { kind: "seqId" }
+}
 
 /**
  * The user-facing output of a collection definition.

@@ -47,6 +47,7 @@ export function toJSONSchema<K extends "base" | "auth" | "view">(
     indexes?: Array<IndexEntry<string>>
     viewQuery?: string
     systemFields?: Record<string, JsonSchemaProperty>
+    auth?: CollectionSchema["x-auth"]
   }
 ): CollectionSchema & { "x-collection-kind": K } {
   const xIndexes: Array<{ fields: Array<string>; unique: boolean }> = []
@@ -85,6 +86,7 @@ export function toJSONSchema<K extends "base" | "auth" | "view">(
   const result: CollectionSchema & { "x-collection-kind": K } = {
     "x-collection-kind": kind,
     ...(xIndexes.length > 0 ? { "x-indexes": xIndexes } : {}),
+    ...(options.auth !== undefined ? { "x-auth": options.auth } : {}),
     ...(options.viewQuery !== undefined ? { "x-view-query": options.viewQuery } : {}),
     type: "object",
     properties: {

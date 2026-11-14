@@ -137,14 +137,11 @@ describe("AppConfig", () => {
     )
   )
 
-  it.effect("S3 enabled with missing keys causes defect", () =>
+  it.effect("S3 enabled with missing keys is non-fatal", () =>
     Effect.gen(function* () {
       const seededLayer = preSeeded({ use_s3: "true" }).pipe(Layer.provide(db))
-      const exit = yield* Effect.exit(Effect.provide(AppConfig, seededLayer))
-      expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) {
-        expect(Cause.hasDies(exit.cause)).toBe(true)
-      }
+      const config = yield* Effect.provide(AppConfig, seededLayer)
+      expect(Option.isNone(config.s3Config)).toBe(true)
     })
   )
 })

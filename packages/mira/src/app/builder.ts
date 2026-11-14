@@ -4,12 +4,13 @@ import type { Layer } from "effect"
 import type { CronDef } from "@/cron/types.js"
 import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
+import { NoopEmail } from "@/email/noop.js"
 import type { MigrateOptions } from "@/migrator/types.js"
 import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
 
 import { MiraApp } from "./app.js"
 import type { RuleBinding } from "./define-rule.js"
-import type { MiraDatabase, MiraPlatform, MiraStorage, PlatformServices } from "./types.js"
+import type { MiraDatabase, MiraEmail, MiraPlatform, MiraStorage, PlatformServices } from "./types.js"
 
 /**
  * Configuration object for `MiraApp`. Constructed by `MiraBuilder` after all
@@ -23,6 +24,7 @@ export interface MiraAppConfig {
   platform: MiraPlatform
   database: MiraDatabase
   storage: MiraStorage
+  email: MiraEmail
   collections: ReadonlyArray<AnyCollectionDef>
   rules?: ReadonlyArray<RuleBinding>
   crons: ReadonlyArray<CronDef<any>>
@@ -118,6 +120,16 @@ export class MiraBuilder<Has extends string = never, R = never> {
    */
   storage(s: MiraStorage): MiraBuilder<Has | "storage", R> {
     return new MiraBuilder({ ...this.#config, storage: s })
+  }
+
+  /**
+   * Set the optional email backend. When omitted, a no-op `EmailService` is used.
+   *
+   * @param e - A MiraEmail preset (e.g., SmtpEmail({ ... }))
+   * @returns A new builder with "email" added to the phantom type
+   */
+  email(e: MiraEmail): MiraBuilder<Has | "email", R> {
+    return new MiraBuilder({ ...this.#config, email: e })
   }
 
   /**
@@ -231,6 +243,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
       platform: config.platform,
       database: config.database,
       storage: config.storage,
+      email: config.email ?? NoopEmail,
       collections: config.collections,
       rules: config.rules ?? [],
       crons: config.crons ?? [],

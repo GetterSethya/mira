@@ -10,6 +10,14 @@ import { AuthCollection, Field } from "@gettersethya/mira-client"
  *
  * Rules are attached server-side in `superadmin.ts` via `defineRule`.
  */
-export const SuperAdminDef = AuthCollection.define("_superadmin", {
-  name: Field.text({ default: "" })
-})
+export const SuperAdminDef = AuthCollection.define(
+  "_superadmin",
+  {
+    name: Field.text({ default: "" })
+  },
+  {
+    email: {
+      loginAlerts: true
+    }
+  }
+)

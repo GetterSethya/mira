@@ -213,7 +213,11 @@ function renderCollectionDefinition(
   }
 
   const builder = schema.kind === "auth" ? "AuthCollection" : "BaseCollection"
-  return `export const ${name} = ${builder}.define(${JSON.stringify(schema.name)}, ${renderObject(entries, 0)})`
+  const email = schema.kind === "auth" ? schema.auth?.email : undefined
+  const options = email === undefined
+    ? ""
+    : `, { email: ${JSON.stringify(email)} }`
+  return `export const ${name} = ${builder}.define(${JSON.stringify(schema.name)}, ${renderObject(entries, 0)}${options})`
 }
 
 function renderTypeAliases(schema: ApiCollectionSchema): ReadonlyArray<string> {

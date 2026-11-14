@@ -1,7 +1,10 @@
 import { Effect } from "effect"
 import { HttpServerResponse } from "effect/http"
+import type { SqlError } from "effect/sql"
 
+import type { AuthEmailError } from "@/auth/errors.js"
 import type { CollectionError } from "@/collection-service/errors.js"
+import type { AuthError } from "./auth.js"
 import type { FileStorageError } from "@/storage/storage.js"
 
 /**
@@ -74,4 +77,45 @@ export const catchCollectionErrors = <A, R>(
       Effect.fail(
         HttpServerResponse.jsonUnsafe({ error: "internal_error" }, { status: 500 as const })
       ),
+  })
+
+/**
+ * Maps auth-email failures to the public status table. `EmailNotConfiguredError`
+ * and `EmailSendError` are mapped as well so a route cannot accidentally expose a
+ * generic 500.
+ */
+export const catchAuthEmailErrors = <A, R>(
+  eff: Effect.Effect<A, AuthEmailError | AuthError | SqlError.SqlError, R>
+): Effect.Effect<A, HttpServerResponse.HttpServerResponse, R> =>
+  Effect.catchTags(eff, {
+    AuthError: () =>
+      Effect.fail(HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 as const })),
+    InvalidCodeError: () =>
+      Effect.fail(HttpServerResponse.jsonUnsafe({ error: "invalid_code" }, { status: 400 as const })),
+    InvalidResetTokenError: () =>
+      Effect.fail(HttpServerResponse.jsonUnsafe({ error: "invalid_token" }, { status: 400 as const })),
+    TooManyAttemptsError: (e) =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "too_many_attempts", retryAfterSeconds: e.retryAfterSeconds },
+          { status: 429 as const }
+        )
+      ),
+    AuthEmailRateLimitedError: (e) =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "rate_limited", retryAfterSeconds: e.retryAfterSeconds },
+          { status: 429 as const }
+        )
+      ),
+    EmailFlowDisabledError: () =>
+      Effect.fail(HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 as const })),
+    EmailUnavailableError: () =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe({ error: "email_unavailable" }, { status: 503 as const })
+      ),
+    ChallengeCryptoError: () =>
+      Effect.fail(HttpServerResponse.jsonUnsafe({ error: "internal_error" }, { status: 500 as const })),
+    SqlError: () =>
+      Effect.fail(HttpServerResponse.jsonUnsafe({ error: "internal_error" }, { status: 500 as const }))
   })

@@ -263,3 +263,46 @@ export type RegisterInput<F extends FieldsMap> =
     passwordConfirm: string
     emailVerified?: boolean
   }
+
+export type AuthVerificationEnvelope = {
+  readonly challengeId: string
+  readonly expiresAt: string
+}
+
+export type AuthWithPasswordResult<F extends FieldsMap> =
+  | { readonly token: string; readonly record: InferRecord<F> }
+  | {
+      readonly otpRequired: true
+      readonly challengeId: string
+      readonly expiresAt: string
+    }
+
+export type RegisterResult<F extends FieldsMap> = InferRecord<F> & {
+  readonly emailVerification?: AuthVerificationEnvelope
+}
+
+export type AuthConfig = {
+  readonly collection: string
+  readonly emailConfigured: boolean
+  readonly email: {
+    readonly verification: boolean
+    readonly loginAlerts: boolean
+    readonly loginOtp: "off" | "required"
+    readonly passwordless: boolean
+  }
+}
+
+export type AuthOtpRequestInput = { readonly email: string }
+export type AuthOtpRequestResult = { readonly challengeId: string }
+export type AuthOtpLoginInput = { readonly challengeId: string; readonly code: string }
+export type AuthLoginOtpVerifyInput = { readonly challengeId: string; readonly code: string }
+export type AuthResendLoginOtpInput = { readonly challengeId: string }
+export type PasswordResetRequestInput = { readonly email: string }
+export type PasswordResetInput = {
+  readonly token: string
+  readonly password: string
+  readonly passwordConfirm: string
+}
+export type VerifyEmailRequestInput = { readonly email: string }
+export type VerifyEmailInput = { readonly challengeId: string; readonly code: string }
+export type VerifyEmailResult = { readonly verified: true }

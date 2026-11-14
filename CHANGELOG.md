@@ -15,6 +15,38 @@ published by CI.
 
 ## [Unreleased]
 
+### Added
+
+- **SMTP email service.** Optional `.email(SmtpEmail(...))` builder step backed by
+  `nodemailer` and a platform `MailTransport` capability. Settings accept plain values or
+  Effect `Config` values; missing required values fail at layer build. Without the step a
+  no-op `EmailService` is used.
+- **Auth email flows.** Per-auth-collection options for login alerts, email verification,
+  login OTP, and passwordless login. New routes for verification, reset, login OTP, and
+  passwordless login; reset links use a configurable `passwordResetUrl`.
+- **Email plugin surface.** Plugins can use `EmailService` and observe sends through
+  `onEmailSend`, `onEmailSent`, and `onEmailError`.
+- **Local email testing.** `docker-compose.mailpit.yml`, plus an in-process `smtp-server`
+  test suite.
+
+### Changed
+
+- **Dashboard config is read-only and live.** Settings -> App now shows the live
+  `FileStorage` and `EmailService` descriptions instead of editable legacy `_config`
+  rows. S3/email `_config` keys are hidden and rejected by the update route.
+- **Auth client result.** `authWithPassword()` now returns a union: a session result or
+  `{ otpRequired: true, challengeId, expiresAt }`. This is a pre-1.0 type change.
+- **Legacy `use_s3` is non-fatal.** An incomplete `use_s3=true` row logs a warning and
+  yields no S3 config instead of crashing boot.
+
+### Fixed
+
+- **Boolean rule parameters.** Auth rules such as
+  `R.auth(Users, "emailVerified").eq(R.literal(true))` now encode booleans for the active
+  dialect, including create and `manage` pre-checks.
+- **Session invalidation.** Password reset bumps the token generation and consumes all
+  outstanding auth challenges; dashboard auth now uses `authenticateSession`.
+
 ## [0.1.0-alpha.36] - 2026-11-09
 
 ### Added

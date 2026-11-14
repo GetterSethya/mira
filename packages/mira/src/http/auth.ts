@@ -1,9 +1,12 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { Context, Data, Effect, Redacted } from "effect"
+import type { SqlError } from "effect/sql"
 import * as jose from "jose"
 
+import { toPublicRecord } from "@/collection-service/decode.js"
 import { idClause } from "@/collection-service/where.js"
 import { AppConfig } from "@/config/index.js"
+import { Dialect } from "@/dialect/dialect.js"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
 
@@ -186,6 +189,42 @@ export interface SessionAuth {
   collection: string
   record: RepoRecord
 }
+
+/**
+ * Mints a session token from a stored auth row. Used by password login, login
+ * OTP and passwordless login so every path binds `pwf` and `gen` the same way.
+ */
+export const mintSession = (
+  collection: AnyCollectionDef,
+  record: RepoRecord
+): Effect.Effect<
+  { token: string; record: RepoRecord; raw: RepoRecord },
+  AuthError | SqlError.SqlError,
+  AppConfig | Dialect
+> =>
+  Effect.gen(function* () {
+    const config = yield* AppConfig
+    const jwtSecret = Redacted.value(config.jwtSecret)
+    const storedHash = record["password"]
+    if (typeof storedHash !== "string") {
+      return yield* new AuthError({ reason: "Account has no stored password hash" })
+    }
+    const id = record["id"]
+    if (typeof id !== "string") {
+      return yield* new AuthError({ reason: "Account has no id" })
+    }
+    const pwf = yield* computePwf(storedHash, jwtSecret)
+    const store = yield* TokenStore
+    const gen = yield* store.currentGeneration(collection.name, id)
+    const token = yield* signJwt({ sub: id, col: collection.name }, jwtSecret, { pwf, gen })
+    const dialect = yield* Dialect
+    const publicRecord = yield* toPublicRecord(
+      collection.schema,
+      dialect.storesBooleanAsInteger,
+      record
+    )
+    return { token, record: publicRecord, raw: record }
+  })
 
 /**
  * The single auth decision used by `resolveAuth`, `requireApiAuth` **and** the

@@ -5,6 +5,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { andWhere, idClause, resolveCtxPlaceholders } from "@/collection-service/where.js"
 import { AppConfig } from "@/config/index.js"
+import { Dialect } from "@/dialect/dialect.js"
 import { Repository } from "@/repository/repository.js"
 import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage } from "@/storage/storage.js"
@@ -12,7 +13,7 @@ import { parseThumbSpec,ThumbnailService } from "@/thumbnail/types.js"
 
 import { verifyFileToken } from "./auth.js"
 
-export type FileServeServices = Repository | FileStorage | ThumbnailService | AppConfig
+export type FileServeServices = Repository | FileStorage | ThumbnailService | AppConfig | Dialect
 
 const MIME_MAP: Record<string, string> = {
   jpg: "image/jpeg",
@@ -131,6 +132,12 @@ function serveFile(
     const repo = yield* Repository
     const fileStorage = yield* FileStorage
     const thumbSvc = yield* ThumbnailService
+    const dialect = yield* Dialect
+    const resolveOptions = {
+      encodeParam: dialect.storesBooleanAsInteger
+        ? (value: unknown) => (typeof value === "boolean" ? (value ? 1 : 0) : value)
+        : (value: unknown) => value
+    }
 
     // Step 2: fetch record directly (no rule enforcement yet)
     const rows = yield* repo
@@ -199,7 +206,8 @@ function serveFile(
           ruleResult,
           ctx,
           collection.name,
-          "view"
+          "view",
+          resolveOptions
         ).pipe(Effect.catchTag("ForbiddenError", () => Effect.succeed(null)))
 
         if (ruleWhere === null) {

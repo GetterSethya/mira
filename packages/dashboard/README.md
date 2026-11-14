@@ -48,7 +48,7 @@ Open that URL to create the first superadmin account. Once registered, subsequen
 - **Collection browser** — list, create, edit, and delete records with a record editor
 - **Connect sheet** — per-collection SDK snippets, raw `fetch`/`curl` calls, and a generated `mira.generated.ts` TypeScript file
 - **Logs and span viewer** — works best with `makeSqliteTelemetryLayer` from `@gettersethya/mira`
-- **App config display** — view and edit the current `AppConfig` from the `_config` table
+- **App config** — edit app name/URL/port/log retention; view the live storage and email backends read-only
 - **Superadmin management** — create, list, and delete superadmin accounts
 - **Cron job monitoring** — list all registered cron jobs with their current status and trigger manual runs
 
@@ -61,9 +61,12 @@ The dashboard exposes two cron endpoints:
 | `GET` | `/_dashboard/api/crons` | List all cron jobs with name, status, last run info |
 | `POST` | `/_dashboard/api/crons/:name/run` | Trigger immediate execution of a cron job by name |
 
-`GET /_dashboard/api/config` returns the config snapshot, and
-`PUT /_dashboard/api/config` updates the allowlisted keys. Running process values
-stay unchanged until restart.
+`GET /_dashboard/api/config` returns the config snapshot plus live `storage` and
+`email` descriptions. `PUT /_dashboard/api/config` updates only the allowlisted
+application keys (`app_name`, `application_url`, `port`, `log_retention_days`);
+legacy S3/email `_config` rows are hidden and rejected. Running process values stay
+unchanged until restart. Use `POST /_dashboard/api/email/test` to send a test email to
+the authenticated superadmin's own address.
 
 ## Connect sheet
 

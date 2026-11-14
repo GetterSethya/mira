@@ -70,12 +70,6 @@ export const AppConfigLive = Layer.effect(
         return defaultValue
       })
 
-    const require = (key: string) =>
-      Effect.fromOption(Option.fromNullishOr(stored.get(key))).pipe(
-        Effect.mapError(() => new Error(`_config key "${key}" is required when use_s3=true`)),
-        Effect.orDie
-      )
-
     const appName = yield* seed("app_name", "mira")
     const port = Number(yield* seed("port", "8080"))
     const applicationUrl = yield* seed("application_url", `http://localhost:${port}`)
@@ -96,15 +90,35 @@ export const AppConfigLive = Layer.effect(
 
     const useS3 = (yield* seed("use_s3", "false")) === "true"
 
-    const s3Config: Option.Option<S3Config> = useS3
-      ? Option.some({
-          endpoint: Redacted.make(yield* require("s3_endpoint")),
-          bucketName: yield* require("s3_bucket_name"),
-          regionName: yield* require("s3_region_name"),
-          accessKey: Redacted.make(yield* require("s3_access_key")),
-          secret: Redacted.make(yield* require("s3_secret"))
-        })
-      : Option.none()
+    const s3Config: Option.Option<S3Config> = (() => {
+      if (!useS3) return Option.none()
+      const endpoint = stored.get("s3_endpoint")
+      const bucketName = stored.get("s3_bucket_name")
+      const regionName = stored.get("s3_region_name")
+      const accessKey = stored.get("s3_access_key")
+      const secret = stored.get("s3_secret")
+      if (
+        endpoint === undefined ||
+        bucketName === undefined ||
+        regionName === undefined ||
+        accessKey === undefined ||
+        secret === undefined
+      ) {
+        return Option.none()
+      }
+      return Option.some({
+        endpoint: Redacted.make(endpoint),
+        bucketName,
+        regionName,
+        accessKey: Redacted.make(accessKey),
+        secret: Redacted.make(secret)
+      })
+    })()
+    if (useS3 && Option.isNone(s3Config)) {
+      yield* Effect.logWarning(
+        "use_s3 is true but the legacy s3_* keys are incomplete; ignoring them. Select storage with .storage(...)."
+      )
+    }
 
     const logRetentionDays = Number(yield* seed("log_retention_days", "30"))
 

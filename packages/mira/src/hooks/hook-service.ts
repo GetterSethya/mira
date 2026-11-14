@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option } from "effect"
 
 import type { MiraPlugin } from "@/app/plugin.js"
 import type { CollectionService } from "@/collection-service/collection-service.js"
@@ -9,6 +9,9 @@ import type {
   CronErrorContext,
   CronFinishedContext,
   CronResultContext,
+  EmailErrorHookContext,
+  EmailSendHookContext,
+  EmailSentHookContext,
   HookErrorContext,
   ListHookContext,
   ListResultContext,
@@ -42,6 +45,10 @@ export class HookService extends Context.Service<
     runRecordView(ctx: ViewHookContext): Effect.Effect<ViewHookContext, never, never>
     runRecordViewSuccess(ctx: ViewResultContext): Effect.Effect<void, never, never>
     runRecordViewError(ctx: HookErrorContext): Effect.Effect<void, never, never>
+
+    runEmailSend(ctx: EmailSendHookContext): Effect.Effect<EmailSendHookContext, never, never>
+    runEmailSent(ctx: EmailSentHookContext): Effect.Effect<void, never, never>
+    runEmailError(ctx: EmailErrorHookContext): Effect.Effect<void, never, never>
 
     runBootstrap(): Effect.Effect<void, never, AppConfig | CollectionService>
     runServe(): Effect.Effect<void, never, never>
@@ -270,6 +277,64 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
           (p) =>
             p.onRecordViewError && matchesCollection(p.onRecordViewError, ctx.collection.name)
               ? p.onRecordViewError.handler(ctx).pipe(Effect.orDie)
+              : Effect.void,
+          { concurrency: "unbounded" }
+        )
+      ).pipe(Effect.asVoid),
+
+    runEmailSend: (ctx: EmailSendHookContext) =>
+      Effect.gen(function* () {
+        let current = ctx
+        for (const plugin of plugins) {
+          if (
+            plugin.onEmailSend &&
+            (current.collection === null || matchesCollection(plugin.onEmailSend, current.collection))
+          ) {
+            const timed = yield* plugin.onEmailSend.handler(current).pipe(
+              Effect.timeoutOption(2000)
+            )
+            if (Option.isSome(timed)) {
+              current = timed.value
+            } else {
+              yield* Effect.logWarning("email.hook_timeout", {
+                purpose: current.purpose,
+                collection: current.collection
+              })
+            }
+          }
+        }
+        return current
+      }),
+
+    runEmailSent: (ctx: EmailSentHookContext) =>
+      Effect.forkDetach(
+        Effect.forEach(
+          plugins,
+          (p) =>
+            p.onEmailSent &&
+            (ctx.collection === null || matchesCollection(p.onEmailSent, ctx.collection))
+              ? p.onEmailSent.handler(ctx).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("email.sent_hook_failed", { cause: String(cause) })
+                  )
+                )
+              : Effect.void,
+          { concurrency: "unbounded" }
+        )
+      ).pipe(Effect.asVoid),
+
+    runEmailError: (ctx: EmailErrorHookContext) =>
+      Effect.forkDetach(
+        Effect.forEach(
+          plugins,
+          (p) =>
+            p.onEmailError &&
+            (ctx.collection === null || matchesCollection(p.onEmailError, ctx.collection))
+              ? p.onEmailError.handler(ctx).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("email.error_hook_failed", { cause: String(cause) })
+                  )
+                )
               : Effect.void,
           { concurrency: "unbounded" }
         )

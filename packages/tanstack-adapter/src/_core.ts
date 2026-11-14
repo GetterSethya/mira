@@ -53,6 +53,15 @@ export const ActionKeys = {
   GetFirstOrNone: "getFirstOrNone",
   GetFullList:    "getFullList",
   Me:             "me",
+  AuthConfig:     "authConfig",
+  RequestPasswordReset: "requestPasswordReset",
+  ResetPassword:  "resetPassword",
+  RequestEmailVerification: "requestEmailVerification",
+  VerifyEmail:    "verifyEmail",
+  RequestPasswordlessLogin: "requestPasswordlessLogin",
+  LoginWithPasswordlessOtp: "loginWithPasswordlessOtp",
+  VerifyLoginOtp: "verifyLoginOtp",
+  ResendLoginOtp: "resendLoginOtp"
 } as const
 
 /**
@@ -163,6 +172,15 @@ export function createCollectionAdapter() {
         authWithPassword: () => enrichMutation(authClient.authWithPassword()),
         register: () => enrichMutation(authClient.register()),
         me: () => enrichQuery(authClient.me(), [name, ActionKeys.Me]),
+        authConfig: () => enrichQuery(authClient.authConfig(), [name, ActionKeys.AuthConfig]),
+        requestPasswordReset: () => enrichMutation(authClient.requestPasswordReset()),
+        resetPassword: () => enrichMutation(authClient.resetPassword()),
+        requestEmailVerification: () => enrichMutation(authClient.requestEmailVerification()),
+        verifyEmail: () => enrichMutation(authClient.verifyEmail()),
+        requestPasswordlessLogin: () => enrichMutation(authClient.requestPasswordlessLogin()),
+        loginWithPasswordlessOtp: () => enrichMutation(authClient.loginWithPasswordlessOtp()),
+        verifyLoginOtp: () => enrichMutation(authClient.verifyLoginOtp()),
+        resendLoginOtp: () => enrichMutation(authClient.resendLoginOtp())
       }),
     }
     const authExtras = kindAuthAdapters[kind](client, name)

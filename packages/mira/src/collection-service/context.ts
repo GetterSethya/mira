@@ -9,6 +9,12 @@ export type RequestCtx = {
   body?: RepoRecord
   /** When true, skip all rule enforcement (validation still applies). Used by admin/dashboard routes. */
   admin?: boolean
+  /**
+   * Narrow trusted principal used only by internal auth-email flows. It may
+   * write `password` or `emailVerified` for the challenge's own user, nothing
+   * else.
+   */
+  internal?: "auth-flow"
 }
 
 /** Paginated result — cursor-based via seqId. Used for all collection kinds. */

@@ -56,6 +56,17 @@ const isPlatformError = (
  * @see makeFileStorageLayer — factory function
  * @see LocalFileStorage — local disk preset
  */
+export type StorageDescription =
+  | { readonly kind: "local"; readonly directory: string }
+  | {
+      readonly kind: "s3"
+      readonly endpoint: string
+      readonly bucketName: string
+      readonly regionName: string
+      readonly forcePathStyle: boolean
+      readonly publicBaseUrl: string | null
+    }
+
 export class FileStorage extends Context.Service<
   FileStorage,
   {
@@ -69,6 +80,8 @@ export class FileStorage extends Context.Service<
     read(key: string): Effect.Effect<Uint8Array, FileStorageError | FileStorageNotFound>
     exists(key: string): Effect.Effect<boolean, FileStorageError>
     list(prefix: string): Effect.Effect<ReadonlyArray<string>, FileStorageError>
+    /** Non-secret backend description for the dashboard. */
+    describe?(): StorageDescription
   }
 >()("FileStorage") {}
 
@@ -179,6 +192,8 @@ export function makeFileStorageLayer(_provider: string, config: Record<string, s
               Effect.catchTag("PlatformError", () => Effect.succeed(false))
             )
           }),
+
+        describe: () => ({ kind: "local" as const, directory: root }),
 
         list: (prefix: string) =>
           Effect.gen(function* () {

@@ -91,13 +91,18 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
         label: "login",
         language: "ts",
         code: [
-          `const { token, record } = await ${access}.authWithPassword().raw({`,
+          `const result = await ${access}.authWithPassword().raw({`,
           '  email: "user@example.com",',
           '  password: "secret123"',
           "})",
           "",
-          "// Browser: the server sets an HttpOnly mira_token cookie.",
-          "// Server: call mira.auth.setToken(token)."
+          'if ("otpRequired" in result) {',
+          "  // POST /auth-with-password/verify-otp with { challengeId, code }",
+          "} else {",
+          "  const { token, record } = result",
+          "  // Browser: the server also sets an HttpOnly mira_token cookie.",
+          "  // Server: call mira.auth.setToken(token).",
+          "}"
         ].join("\n")
       },
       {
@@ -196,12 +201,12 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
       label: "set token",
       language: "ts",
       code: [
-        `const { token } = await ${access}.authWithPassword().raw({`,
+        `const result = await ${access}.authWithPassword().raw({`,
         '  email: "user@example.com",',
         '  password: "secret123"',
         "})",
         "",
-        "mira.auth.setToken(token)"
+        'if ("token" in result) mira.auth.setToken(result.token)'
       ].join("\n")
     })
   } else {

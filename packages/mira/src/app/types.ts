@@ -2,8 +2,10 @@ import type { FileSystem, Path } from "effect"
 import type { Effect, Layer } from "effect"
 import type { SqlClient } from "effect/sql"
 
+import type { AppConfig } from "@/config/index.js"
 import type { CryptoService } from "@/crypto/crypto.js"
 import type { Dialect } from "@/dialect/dialect.js"
+import type { MailTransport } from "@/email/types.js"
 import type { AuthService } from "@/http/auth.js"
 import type { HttpServerFactory } from "@/http/server-factory.js"
 import type { FileStorage } from "@/storage/storage.js"
@@ -20,6 +22,7 @@ export type PlatformServices =
   | Path.Path
   | HttpServerFactory
   | AuthService
+  | MailTransport
 
 /**
  * Services that a database preset must provide.
@@ -63,4 +66,13 @@ export interface MiraDatabase {
  */
 export interface MiraStorage {
   layer: Layer.Layer<FileStorage, never, FileSystem.FileSystem | Path.Path>
+}
+
+/**
+ * Optional email preset. Mirrors {@link MiraStorage}: the builder selects the
+ * transport, and the layer resolves settings once at build time.
+ */
+export interface MiraEmail {
+  /** `EmailService` is a referenced service; the layer output type is never. */
+  readonly layer: Layer.Layer<never, never, PlatformServices | AppConfig>
 }

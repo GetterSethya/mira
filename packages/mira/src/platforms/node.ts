@@ -5,6 +5,7 @@ import type { MiraPlatform } from "@/app/types.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { NodeHttpServerFactoryLayer } from "@/http/server-factory-node.js"
+import { NodeMailTransportLayer } from "./node-email.js"
 
 /**
  * Node.js platform layer preset.
@@ -24,6 +25,7 @@ export const NodePlatformLayer = Layer.mergeAll(
   NodePath.layer,
   NodeCryptoLayer,
   NodeHttpServerFactoryLayer,
+  NodeMailTransportLayer
 )
 
 /**

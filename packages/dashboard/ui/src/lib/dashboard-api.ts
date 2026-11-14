@@ -64,6 +64,32 @@ export interface CronApiState {
   lastError: string | null
 }
 
+/** Non-secret description of the live file-storage backend. */
+export type StorageDescription =
+  | { kind: "local"; directory: string }
+  | {
+      kind: "s3"
+      endpoint: string
+      bucketName: string
+      regionName: string
+      forcePathStyle: boolean
+      publicBaseUrl: string | null
+    }
+
+/** Non-secret description of the live email transport. */
+export interface EmailDescription {
+  enabled: boolean
+  transport: "smtp" | "none"
+  host: string | null
+  port: number | null
+  secure: boolean
+  requireTLS: boolean
+  from: string | null
+  replyTo: string | null
+  hasAuth: boolean
+  passwordResetUrl: string | null
+}
+
 export interface AppConfigResponse {
   /** Resolved at boot — may differ from `values.application_url` if the port was taken. */
   appName: string
@@ -74,6 +100,9 @@ export interface AppConfigResponse {
   editable: string[]
   readOnly: string[]
   secret: string[]
+  /** `null` when the storage layer does not implement `describe()`. */
+  storage: StorageDescription | null
+  email: EmailDescription
 }
 
 export const dashboardApi = {
@@ -91,6 +120,9 @@ export const dashboardApi = {
 
   updateConfig: (values: Record<string, string>): DashboardEffect<AppConfigResponse> =>
     executeWithBody(HCR.bodyJson(HCR.put("/config"), { values })),
+
+  emailTest: (to?: string): DashboardEffect<{ ok: true }> =>
+    executeWithBody(HCR.bodyJson(HCR.post("/email/test"), to === undefined ? {} : { to })),
 
   crons: {
     getAll: (): DashboardEffect<CronApiState[]> => execute(HCR.get("/crons")),

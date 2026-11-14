@@ -34,6 +34,13 @@ export type { MiraAppConfig } from "./builder.js"
 export { MiraBuilder } from "./builder.js"
 export type { RuleBinding } from "./define-rule.js"
 export { defineRule } from "./define-rule.js"
-export type { ListHook, ListSuccessHook,RecordHook, RecordSuccessHook } from "./plugin.js"
+export type {
+  EmailHook,
+  EmailObserverHook,
+  ListHook,
+  ListSuccessHook,
+  RecordHook,
+  RecordSuccessHook
+} from "./plugin.js"
 export { MiraPlugin, onCollection, onCollectionSuccess } from "./plugin.js"
-export type { MiraDatabase, MiraPlatform, MiraStorage, PlatformServices } from "./types.js"
+export type { MiraDatabase, MiraEmail, MiraPlatform, MiraStorage, PlatformServices } from "./types.js"

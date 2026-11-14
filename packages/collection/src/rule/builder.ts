@@ -1,4 +1,4 @@
-import type { AnyCollectionDef, FieldsMap, InferFieldValue } from "@/collection/types.js"
+import type { AnyCollectionDef, AuthRuleFields, FieldsMap, InferFieldValue } from "@/collection/types.js"
 
 import type { ExprNode, OperandNode } from "./types.js"
 
@@ -20,7 +20,10 @@ export type FieldOperand<K extends string, V = unknown> = OperandNode<K, V> & Fi
 /** Base rule methods shared by Rule and RuleBuilder (excludes field and subquery). */
 type RuleBase = {
   request: (source: "header" | "query" | "body", key: string) => FieldOperand<string, string>
-  auth: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(_collection: C, field: K) => FieldOperand<string, string>
+  auth: <C extends AnyCollectionDef, K extends keyof (C["fields"] & AuthRuleFields) & string>(
+    _collection: C,
+    field: K
+  ) => FieldOperand<string, InferFieldValue<(C["fields"] & AuthRuleFields)[K]>>
   authId: <C extends AnyCollectionDef>(_collection: C) => FieldOperand<any, string>
   /** The collection name of the authenticated user. Use to restrict access to a specific auth collection. */
   authCollection: () => FieldOperand<any, string>
@@ -114,10 +117,15 @@ export const Rule: RuleBase & {
     toChainable<string, string>({ kind: "request", source, key }),
 
   /** Reference a field from the authenticated user's record. */
-  auth: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(
+  auth: <C extends AnyCollectionDef, K extends keyof (C["fields"] & AuthRuleFields) & string>(
     _collection: C,
     field: K
-  ): FieldOperand<string, string> => toChainable<string, string>({ kind: "auth", collection: _collection.name, field }),
+  ): FieldOperand<string, InferFieldValue<(C["fields"] & AuthRuleFields)[K]>> =>
+    toChainable<string, InferFieldValue<(C["fields"] & AuthRuleFields)[K]>>({
+      kind: "auth",
+      collection: _collection.name,
+      field
+    }),
 
   /** Reference the ID of the currently authenticated user. */
   authId: <C extends AnyCollectionDef>(_collection: C): FieldOperand<any, string> =>
