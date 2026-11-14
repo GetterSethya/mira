@@ -11,14 +11,21 @@ export {
   makeInMemoryRateLimiter
 } from "./memory.js"
 export {
+  assertValidAuthRateLimitPolicies,
   assertValidEmailRateLimitPolicies,
+  AuthRateLimitConfig,
+  defaultAuthRateLimitPolicies,
   defaultEmailRateLimitPolicies,
   EmailRateLimitConfig,
   emailPurposeClass,
   LOGIN_REQUEST_COOLDOWN_MS,
   REQUEST_COOLDOWN_MS
 } from "./policies.js"
-export type { EmailPurposeClass, EmailRateLimitPolicies } from "./policies.js"
+export type {
+  AuthRateLimitPolicies,
+  EmailPurposeClass,
+  EmailRateLimitPolicies
+} from "./policies.js"
 export {
   RateLimiter,
   RateLimitKeySecret,

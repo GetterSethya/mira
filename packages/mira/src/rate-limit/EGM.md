@@ -20,6 +20,8 @@ any future Redis/Postgres implementation. Email, HTTP, and auth code depend on
 - `InMemoryRateLimiterLive` — fresh in-memory store per layer build [memory.ts:InMemoryRateLimiterLive]
 - `SqliteRateLimitStoreLive`, `RateLimiterLive`, `RateLimitKeySecretLive` [sqlite.ts:SqliteRateLimitStoreLive]
 - `EmailRateLimitConfig` — `Context.Reference` with the email policy defaults [policies.ts:EmailRateLimitConfig]
+- `AuthRateLimitConfig` — `Context.Reference` with the password-login defaults (`auth:login:ip`, `auth:login:recipient`) [policies.ts:AuthRateLimitConfig]
+- `defaultAuthRateLimitPolicies`, `assertValidAuthRateLimitPolicies` [policies.ts:defaultAuthRateLimitPolicies]
 - `rateLimitKey`, `normalizeIpForRateLimit` [keys.ts:rateLimitKey]
 
 ## Invariants
@@ -42,6 +44,10 @@ any future Redis/Postgres implementation. Email, HTTP, and auth code depend on
   secret changes the key space; old buckets are pruned.
 - IP normalization maps IPv4-mapped IPv6 to IPv4, buckets IPv6 by `/64`, and returns null
   for a missing address. A null IP skips the IP policy rather than sharing a bucket.
+- Auth login policies must use `onStoreError: "deny"`; boot fails otherwise. The recipient
+  key is account-agnostic and is charged for unknown addresses [policies.ts:assertValidAuthRateLimitPolicies].
+- Login consumes the recipient and IP budgets in one batch before the user lookup, so a
+  blocked attempt cannot reveal whether the account exists [auth-rate-limit.ts:consumeLoginRequestLimits].
 
 ## Side Effects
 

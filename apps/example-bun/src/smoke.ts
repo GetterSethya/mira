@@ -149,6 +149,12 @@ const program = Effect.gen(function* () {
   if (!(yield* auth.verifyPassword("legacy password", legacyHash))) {
     throw new Error("legacy scrypt verification failed under Bun")
   }
+  if (auth.needsRehash?.(legacyHash) !== true) {
+    throw new Error("legacy scrypt row should be scheduled for an Argon2id rehash")
+  }
+  if (auth.needsRehash?.(passwordHash) === true) {
+    throw new Error("Argon2id row should not be rehashed")
+  }
 
   if (BunImage === undefined) throw new Error("Bun.Image is unavailable")
 

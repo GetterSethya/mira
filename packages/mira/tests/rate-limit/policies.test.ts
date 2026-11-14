@@ -2,7 +2,9 @@ import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 
 import {
+  assertValidAuthRateLimitPolicies,
   assertValidEmailRateLimitPolicies,
+  defaultAuthRateLimitPolicies,
   defaultEmailRateLimitPolicies
 } from "@/rate-limit/index.js"
 
@@ -33,5 +35,23 @@ describe("email rate-limit policy validation", () => {
         }
       })
     ).toThrow(/send policy/)
+  })
+})
+
+describe("auth rate-limit policy validation", () => {
+  it("accepts the defaults", () => {
+    expect(() => assertValidAuthRateLimitPolicies(defaultAuthRateLimitPolicies)).not.toThrow()
+  })
+
+  it("rejects a login policy that fails open", () => {
+    expect(() =>
+      assertValidAuthRateLimitPolicies({
+        ...defaultAuthRateLimitPolicies,
+        loginRecipient: {
+          ...defaultAuthRateLimitPolicies.loginRecipient,
+          onStoreError: "allow"
+        }
+      })
+    ).toThrow(/auth policy/)
   })
 })

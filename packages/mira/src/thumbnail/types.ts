@@ -13,6 +13,9 @@ export const SUPPORTED_THUMBNAIL_MIME_TYPES: ReadonlySet<string> = new Set([
   "image/webp"
 ])
 
+/** Default pixel budget for thumbnail decoding (64 megapixels). */
+export const DEFAULT_THUMBNAIL_MAX_PIXELS = 64 * 1024 * 1024
+
 export class ThumbnailError extends Data.TaggedError("ThumbnailError")<{
   reason: string
 }> {}

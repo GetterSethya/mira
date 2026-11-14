@@ -65,13 +65,15 @@ export { catchCollectionErrors } from "./http/errors.js"
 export { TokenStore, TokenStoreLive } from "./http/token-store.js"
 export { Repository, RepositoryLive } from "./repository/index.js"
 export {
+  DEFAULT_THUMBNAIL_MAX_PIXELS,
+  makeThumbnailServicePhotonLive,
   parseThumbSpec,
   ThumbnailError,
   ThumbnailService,
   ThumbnailServiceNoopLive,
   ThumbnailServicePhotonLive
 } from "./thumbnail/index.js"
-export type { ThumbSpec } from "./thumbnail/index.js"
+export type { PhotonThumbnailOptions, ThumbSpec } from "./thumbnail/index.js"
 
 // Telemetry (sqlite logger)
 export type { SqliteLoggerConfig } from "./telemetry/sqlite-logger.js"

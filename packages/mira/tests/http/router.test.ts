@@ -5,7 +5,7 @@ import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { Effect, Layer, Option, Redacted } from "effect"
-import { Cookies, HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { Cookies, Headers, HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 
 import { applyRulesToCollections,defineRule } from "@/app/index.js"
@@ -14,13 +14,14 @@ import { AppConfig } from "@/config/index.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
-import {hashPassword } from "@/http/auth.js"
+import { AuthService, hashPassword } from "@/http/auth.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { defaultAuthRateLimitPolicies } from "@/rate-limit/index.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { makeRateLimitTestLayer, rateLimitTestLayer } from "../_rate-limit.js"
 
 // ---------------------------------------------------------------------------
 // Collection definitions
@@ -108,19 +109,22 @@ const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pi
 )
 
 // Merge everything needed by the router handlers + table setup into one test layer
-const testLayer = Layer.mergeAll(
-  collectionServiceWithDeps,
-  repoWithSql,
-  FileStorageTest,
-  sqliteLayer,
-  ThumbnailServiceNoopLive,
-  NodeHttpServer.layerTest,
-  AppConfigTest,
-  NodeCryptoLayer,
-  NodeAuthServiceLayer,
-  DialectTest,
-  rateLimitTestLayer
-)
+const makeBaseLayer = (authLayer: Layer.Layer<AuthService>) =>
+  Layer.mergeAll(
+    collectionServiceWithDeps,
+    repoWithSql,
+    FileStorageTest,
+    sqliteLayer,
+    ThumbnailServiceNoopLive,
+    NodeHttpServer.layerTest,
+    AppConfigTest,
+    NodeCryptoLayer,
+    authLayer,
+    DialectTest
+  )
+
+const baseLayer = makeBaseLayer(NodeAuthServiceLayer)
+const testLayer = Layer.mergeAll(baseLayer, rateLimitTestLayer)
 
 // ---------------------------------------------------------------------------
 // Table setup helper
@@ -374,6 +378,89 @@ describe("makeCollectionRouter", () => {
       )
       assert.strictEqual(res.status, 403)
     }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("POST auth-with-password — repeated attempts are rate limited", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* seedUser("limited@example.com", "correctpass")
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+
+      const attempt = () =>
+        HttpClient.execute(
+          HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+            HttpClientRequest.bodyJsonUnsafe({
+              email: "limited@example.com",
+              password: "wrongpass"
+            })
+          )
+        )
+
+      const first = yield* attempt()
+      const second = yield* attempt()
+      assert.strictEqual(first.status, 403)
+      assert.strictEqual(second.status, 429)
+      assert.ok(Headers.get(second.headers, "retry-after") !== undefined)
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          baseLayer,
+          makeRateLimitTestLayer({
+            authPolicies: {
+              loginRecipient: {
+                ...defaultAuthRateLimitPolicies.loginRecipient,
+                limit: 1
+              }
+            }
+          })
+        )
+      )
+    )
+  )
+
+  it.effect("POST auth-with-password — upgrades a legacy hash after login", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      const repo = yield* Repository
+      yield* repo
+        .create("users", { email: "legacy@example.com", password: "legacy" })
+        .pipe(Effect.orDie)
+      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+
+      const res = yield* HttpClient.execute(
+        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+          HttpClientRequest.bodyJsonUnsafe({
+            email: "legacy@example.com",
+            password: "correct"
+          })
+        )
+      )
+      assert.strictEqual(res.status, 200)
+
+      const rows = yield* repo.viewFilter("users", {
+        where: { sql: "t.email = ?", params: ["legacy@example.com"] }
+      })
+      const row = rows[0]
+      assert.ok(row !== undefined)
+      assert.strictEqual(row["password"], "rehashed:correct")
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          makeBaseLayer(
+            Layer.succeed(
+              AuthService,
+              AuthService.of({
+                hashPassword: (plain) => Effect.succeed(`rehashed:${plain}`),
+                verifyPassword: (plain, stored) =>
+                  Effect.succeed(stored === "legacy" && plain === "correct"),
+                needsRehash: (stored) => stored === "legacy"
+              })
+            )
+          ),
+          rateLimitTestLayer
+        )
+      )
+    )
   )
 
   it.effect("POST auth-with-password — non-auth collection returns 405", () =>

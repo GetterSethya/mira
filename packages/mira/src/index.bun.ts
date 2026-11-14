@@ -69,7 +69,9 @@ export { catchCollectionErrors } from "./http/errors.js"
 export { TokenStore, TokenStoreLive } from "./http/token-store.js"
 export { Repository, RepositoryLive } from "./repository/index.js"
 export {
+  DEFAULT_THUMBNAIL_MAX_PIXELS,
   makeThumbnailServiceBunLive,
+  makeThumbnailServicePhotonLive,
   parseThumbSpec,
   SUPPORTED_THUMBNAIL_MIME_TYPES,
   ThumbnailError,
@@ -78,7 +80,7 @@ export {
   ThumbnailServiceNoopLive,
   ThumbnailServicePhotonLive
 } from "./thumbnail/index.js"
-export type { BunThumbnailOptions, ThumbSpec } from "./thumbnail/index.js"
+export type { BunThumbnailOptions, PhotonThumbnailOptions, ThumbSpec } from "./thumbnail/index.js"
 
 // Console telemetry. The SQLite logger is Node-only in this cut because it
 // imports the Node SQLite driver; the Bun smoke uses console telemetry.

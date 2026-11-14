@@ -22,12 +22,20 @@ handled by the HTTP layer and file storage, not here.
 - `ThumbnailService` — `Context.Service` with `supported(mimeType): boolean` and `resize(input, mimeType, spec): Effect<Uint8Array, ThumbnailError>`. [types.ts:ThumbnailService]
 - `parseThumbSpec(raw)` — parses `"WxH"`, `"WxHt"`, `"WxHb"`, `"WxHf"`; returns `null` for unrecognised strings. [types.ts:parseThumbSpec]
 - `SUPPORTED_THUMBNAIL_MIME_TYPES` — shared JPEG/PNG/WebP set. [types.ts:SUPPORTED_THUMBNAIL_MIME_TYPES]
+- `DEFAULT_THUMBNAIL_MAX_PIXELS` — 64 MP default budget shared by both backends. [types.ts:DEFAULT_THUMBNAIL_MAX_PIXELS]
 - `ThumbnailServiceNoopLive` — layer reporting `supported: false` and failing every resize with `ThumbnailError`. [types.ts:ThumbnailServiceNoopLive]
+
+### `dimensions.ts`
+
+- `readImageDimensions(input)` — header-only PNG/JPEG/WebP dimension parser; `null` for unrecognised or truncated input. [dimensions.ts:readImageDimensions]
+- `assertImageWithinPixelBudget(input, maxPixels)` — rejects a header whose `width * height` exceeds the budget before any decoder allocates pixels. [dimensions.ts:assertImageWithinPixelBudget]
 
 ### `photon.ts`
 
-- `resizePhoton(input, mimeType, spec)` — the full Photon resize path, including centre cropping for `cover`. [photon.ts:resizePhoton]
-- `ThumbnailServicePhotonLive` — layer backed by `@cf-wasm/photon/node`; supported MIME set is JPEG/PNG/WebP. [photon.ts:ThumbnailServicePhotonLive]
+- `makeResizePhoton(options)` — builds a Photon resize function that checks the header budget before decoding. [photon.ts:makeResizePhoton]
+- `resizePhoton(input, mimeType, spec)` — the default Photon resize path (64 MP budget), including centre cropping for `cover`. [photon.ts:resizePhoton]
+- `makeThumbnailServicePhotonLive(options)` — Photon layer with a configurable budget. [photon.ts:makeThumbnailServicePhotonLive]
+- `ThumbnailServicePhotonLive` — default Photon layer backed by `@cf-wasm/photon/node`; supported MIME set is JPEG/PNG/WebP. [photon.ts:ThumbnailServicePhotonLive]
 - `computeDimensions(imgWidth, imgHeight, spec)` — pure target-size calculation for fill/cover/contain and zero-axis specs. [photon.ts:computeDimensions]
 
 ### `bun.ts`
@@ -38,7 +46,7 @@ handled by the HTTP layer and file storage, not here.
 
 ### `index.ts`
 
-- Barrel re-exporting `ThumbnailServiceBunLive`, `ThumbnailServicePhotonLive`, `parseThumbSpec`, `SUPPORTED_THUMBNAIL_MIME_TYPES`, `ThumbnailError`, `ThumbnailService`, `ThumbnailServiceNoopLive`, and the `ThumbSpec` type. `computeDimensions` is exported from `photon.ts` but not re-exported here. [index.ts:ThumbnailServiceBunLive]
+- Barrel re-exporting the Bun/Photon layers and factories, the header parser, `DEFAULT_THUMBNAIL_MAX_PIXELS`, `parseThumbSpec`, `SUPPORTED_THUMBNAIL_MIME_TYPES`, `ThumbnailError`, `ThumbnailService`, `ThumbnailServiceNoopLive`, and the relevant types. [index.ts:ThumbnailServiceBunLive]
 
 No subdirectories.
 
@@ -61,7 +69,8 @@ No subdirectories.
 - The Bun layer passes `computeDimensions` output to `Bun.Image.resize`, so contain dimensions stay aspect-correct and fill dimensions stay exact. [bun.ts:resizeWithBunImage]
 - Every Bun image path parses the header through `Bun.Image.metadata()` with `maxPixels` (default 64 MP) before decoding, and the same guard runs before the Photon fallback. A metadata failure is not caught into Photon. [bun.ts:readBoundedImage]
 - The layer independently checks `width * height <= maxPixels` after metadata; it does not rely solely on `Bun.Image` enforcing its own option. [bun.ts:readBoundedImage]
-- The guard requires `Bun.Image` (Bun 1.3.14+). If `Bun.Image` is absent, the layer goes straight to Photon with no pixel preflight; the tested baseline is Bun 1.4.2. [bun.ts:ThumbnailServiceBunLive]
+- Every Photon decode runs `assertImageWithinPixelBudget` first, so the Node path, older Bun without `Bun.Image`, and the Bun `cover`/fallback path all enforce the same header budget. [photon.ts:makeResizePhoton] [dimensions.ts:assertImageWithinPixelBudget]
+- The header parser accepts only PNG (IHDR), JPEG (SOF), and WebP (VP8/VP8L/VP8X) headers; unknown or truncated input fails with `ThumbnailError` before decoding. [dimensions.ts:readImageDimensions]
 - A native `Bun.Image` resize/encode error is caught and retried through Photon (unless `allowPhotonFallback` is false); the request only fails if both backends fail. [bun.ts:ThumbnailServiceBunLive]
 - `allowPhotonFallback: false` makes `cover` and native failures fail instead of using Photon; the Bun smoke uses it to prove the native path. [bun.ts:makeThumbnailServiceBunLive]
 - Bun.Image encodes JPEG at quality 80, WebP with defaults, and PNG with defaults, matching the Photon arms. [bun.ts:encode]

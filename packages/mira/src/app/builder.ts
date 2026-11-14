@@ -141,11 +141,13 @@ export class MiraBuilder<Has extends string = never, R = never> {
   }
 
   /**
-   * Set an optional rate-limit store and email policy overrides.
+   * Set an optional rate-limit store plus email and password-login policy
+   * overrides.
    *
    * The default store is SQLite. A custom store layer must be self-contained
-   * (`Layer<RateLimitStore, never, never>`). The email policies are partial
-   * overrides of `defaultEmailRateLimitPolicies`.
+   * (`Layer<RateLimitStore, never, never>`). `emailPolicies` overrides
+   * `defaultEmailRateLimitPolicies`; `authPolicies` overrides the fail-closed
+   * password-login limits.
    *
    * @param r - A `MiraRateLimits` object
    * @returns A new builder (same phantom type — rate limits are optional)

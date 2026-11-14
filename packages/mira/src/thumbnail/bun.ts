@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect"
 
 import { computeDimensions, resizePhoton } from "./photon.js"
 import {
+  DEFAULT_THUMBNAIL_MAX_PIXELS,
   SUPPORTED_THUMBNAIL_MIME_TYPES,
   ThumbnailError,
   ThumbnailService,
@@ -51,8 +52,6 @@ export interface BunThumbnailOptions {
    */
   readonly allowPhotonFallback?: boolean
 }
-
-const DEFAULT_MAX_PIXELS = 64 * 1024 * 1024
 
 const bunImage = (): BunImageConstructor | undefined =>
   (globalThis as { Bun?: { Image?: BunImageConstructor } }).Bun?.Image
@@ -126,7 +125,7 @@ const resizeWithBunImage = (
   })
 
 const makeLayer = (options: BunThumbnailOptions): Layer.Layer<ThumbnailService> => {
-  const maxPixels = options.maxPixels ?? DEFAULT_MAX_PIXELS
+  const maxPixels = options.maxPixels ?? DEFAULT_THUMBNAIL_MAX_PIXELS
   const allowPhotonFallback = options.allowPhotonFallback ?? true
   return Layer.succeed(
     ThumbnailService,

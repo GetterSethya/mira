@@ -1,12 +1,19 @@
 import { crop, PhotonImage, resize, SamplingFilter } from "@cf-wasm/photon/node"
 import { Effect, Layer, Match } from "effect"
 
+import { assertImageWithinPixelBudget } from "./dimensions.js"
 import {
+  DEFAULT_THUMBNAIL_MAX_PIXELS,
   SUPPORTED_THUMBNAIL_MIME_TYPES,
   ThumbnailError,
   ThumbnailService,
   type ThumbSpec
 } from "./types.js"
+
+export interface PhotonThumbnailOptions {
+  /** Reject images whose `width * height` exceeds this before Photon decodes. */
+  readonly maxPixels?: number
+}
 
 function computeDimensions(
   imgWidth: number,
@@ -46,11 +53,7 @@ function computeDimensions(
   return { width: Math.round(imgWidth * scale), height: Math.round(imgHeight * scale) }
 }
 
-/**
- * Photon-backed resize. Handles every fit (including `cover`, which needs a
- * centre crop) and is the fallback for the Bun image backend.
- */
-export const resizePhoton = (
+const resizePhotonDecoded = (
   input: Uint8Array,
   mimeType: string,
   spec: ThumbSpec
@@ -120,12 +123,39 @@ export const resizePhoton = (
     (img, _exit) => Effect.sync(() => img.free())
   )
 
-export const ThumbnailServicePhotonLive: Layer.Layer<ThumbnailService> = Layer.succeed(
-  ThumbnailService,
-  ThumbnailService.of({
-    supported: (mimeType) => SUPPORTED_THUMBNAIL_MIME_TYPES.has(mimeType),
-    resize: resizePhoton
-  })
-)
+/**
+ * Photon resize factory. The returned function parses the header and enforces
+ * `maxPixels` before Photon allocates a pixel buffer.
+ */
+export const makeResizePhoton =
+  (options: PhotonThumbnailOptions = {}) => {
+    const maxPixels = options.maxPixels ?? DEFAULT_THUMBNAIL_MAX_PIXELS
+    return (
+      input: Uint8Array,
+      mimeType: string,
+      spec: ThumbSpec
+    ): Effect.Effect<Uint8Array, ThumbnailError> =>
+      assertImageWithinPixelBudget(input, maxPixels).pipe(
+        Effect.flatMap(() => resizePhotonDecoded(input, mimeType, spec))
+      )
+  }
+
+/** Default Photon resize with the 64 MP header budget. */
+export const resizePhoton = makeResizePhoton()
+
+/** Photon-backed layer with the default budget. */
+export const makeThumbnailServicePhotonLive = (
+  options: PhotonThumbnailOptions = {}
+): Layer.Layer<ThumbnailService> =>
+  Layer.succeed(
+    ThumbnailService,
+    ThumbnailService.of({
+      supported: (mimeType) => SUPPORTED_THUMBNAIL_MIME_TYPES.has(mimeType),
+      resize: makeResizePhoton(options)
+    })
+  )
+
+export const ThumbnailServicePhotonLive: Layer.Layer<ThumbnailService> =
+  makeThumbnailServicePhotonLive()
 
 export { computeDimensions }

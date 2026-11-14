@@ -1,5 +1,5 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import { Context, Data, Effect, Redacted } from "effect"
+import { Context, Data, Effect, Option, Redacted } from "effect"
 import type { SqlError } from "effect/sql"
 import * as jose from "jose"
 
@@ -41,6 +41,12 @@ export class AuthService extends Context.Service<
   {
     hashPassword(plain: string): Effect.Effect<string>
     verifyPassword(plain: string, stored: string): Effect.Effect<boolean>
+    /**
+     * Whether a successfully verified stored hash should be upgraded.
+     * Optional so existing custom `AuthService` layers keep compiling; a
+     * missing method means "never rehash".
+     */
+    needsRehash?(stored: string): boolean
   }
 >()("AuthService") {}
 
@@ -151,6 +157,48 @@ export function computePwf(
     Effect.mapError((error) => new AuthError({ reason: `pwf computation failed: ${error.message}` }))
   )
 }
+
+/**
+ * Upgrade a stored password hash after a successful login when the platform's
+ * `AuthService` says the current row uses a legacy format (scrypt on Bun).
+ *
+ * Best-effort: a hash or write failure logs and keeps the old row instead of
+ * blocking the login. The returned record carries the effective hash so the
+ * newly minted `pwf` claim matches the stored value.
+ */
+export const maybeRehashPassword = (
+  collection: string,
+  record: RepoRecord,
+  plainPassword: string
+): Effect.Effect<RepoRecord, never, AuthService | Repository> =>
+  Effect.gen(function* () {
+    const stored = record["password"]
+    const id = record["id"]
+    if (typeof stored !== "string" || typeof id !== "string") return record
+
+    const auth = yield* AuthService
+    if (auth.needsRehash?.(stored) !== true) return record
+
+    const rehashed = yield* auth.hashPassword(plainPassword).pipe(
+      Effect.catchCause(() =>
+        Effect.logWarning("auth.rehash_failed", { collection, stage: "hash" }).pipe(
+          Effect.as(null)
+        )
+      )
+    )
+    if (rehashed === null) return record
+
+    const repo = yield* Repository
+    const updated = yield* repo.update(collection, id, { password: rehashed }).pipe(
+      Effect.map(Option.isSome),
+      Effect.catchCause(() =>
+        Effect.logWarning("auth.rehash_failed", { collection, stage: "update" }).pipe(
+          Effect.as(false)
+        )
+      )
+    )
+    return updated ? { ...record, password: rehashed } : record
+  })
 
 /** Constant-time string compare (both inputs are fixed-length HMAC outputs). */
 function constantTimeEqual(a: string, b: string): boolean {

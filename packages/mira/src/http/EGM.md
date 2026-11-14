@@ -33,8 +33,10 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `assertValidCorsConfig` — throws on wildcard + credentials: `[cors.ts:assertValidCorsConfig]`
 - `makeCorsMiddleware` — maps `CorsConfig` onto `HttpMiddleware.cors`: `[cors.ts:makeCorsMiddleware]`
 - `ipAnnotationMiddleware` — annotates the root span with `http.forwarded_for` from `x-forwarded-for` / `x-real-ip`; this is observability only, not the enforcement key: `[ip-middleware.ts:ipAnnotationMiddleware]`
-- `AuthService` — service tag with `hashPassword` / `verifyPassword`: `[auth.ts:AuthService]`
+- `AuthService` — service tag with `hashPassword` / `verifyPassword` / `needsRehash`: `[auth.ts:AuthService]`
 - `hashPassword`, `verifyPassword` — service-delegating helpers: `[auth.ts:hashPassword]`
+- `maybeRehashPassword` — best-effort upgrade of a verified legacy hash, returning the row with the effective hash for `pwf`: `[auth.ts:maybeRehashPassword]`
+- `consumeLoginRequestLimits` — per-IP and per-recipient password-login budgets, fail-closed on store errors: `[auth-rate-limit.ts:consumeLoginRequestLimits]`
 - `signJwt`, `verifyJwt` — session JWTs (`typ: "session"`, HS256, 72 h), carrying `jti`, `exp`, `pwf`, `gen`: `[auth.ts:signJwt]`
 - `signFileToken`, `verifyFileToken` — file JWTs (`typ: "file"`, 5 m, `sub`/`col`/`filecol`): `[auth.ts:signFileToken]`
 - `computePwf` — HMAC-SHA-256 of the stored password hash via the shared hash helper (`Bun.CryptoHasher` on Bun, WebCrypto elsewhere): `[auth.ts:computePwf]`
@@ -61,6 +63,9 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - Status mapping: `NotFoundError` 404, `ForbiddenError` 403, `ValidationError` 422, `ReadOnlyError` 405, `PayloadTooLargeError` 413, `FileStorageError` 502, `SqlError` 500: `[errors.ts:catchCollectionErrors]`
 - Auth email mapping: `RateLimitedError`/`TooManyAttemptsError` 429 with `Retry-After`, `RateLimitUnavailableError`/`EmailNotConfiguredError`/`EmailUnavailableError`/`EmailSendError` 503, `EmailFlowDisabledError` 404, `InvalidCodeError`/`InvalidResetTokenError` 400: `[errors.ts:catchAuthEmailErrors]`
 - Auth email request order: feature and transport check -> cooldown -> request limits (IP, recipient) -> user lookup -> challenge -> send. The cooldown and pre-lookup checks are account-agnostic: `[auth-email.ts:consumeEmailRequestLimits]`
+- Password login order: auth-kind check -> body validation -> login budgets (IP + submitted recipient) -> user lookup -> password verify -> optional rehash -> OTP/session. The recipient budget is charged for unknown addresses too: `[router.ts:authRoute]` `[auth-rate-limit.ts:consumeLoginRequestLimits]`
+- Login rate-limit store errors fail closed with 503; a blocked login returns 429 with `Retry-After`: `[auth-rate-limit.ts:consumeLoginRequestLimits]` `[errors.ts:catchAuthEmailErrors]`
+- Rehash-on-login is best-effort. A hash or write failure logs and keeps the old row; the returned record carries the effective hash so `pwf` matches storage: `[auth.ts:maybeRehashPassword]`
 - JSON request bodies over 32 MiB are rejected from `Content-Length` before reading: `[router.ts:MAX_JSON_BODY_BYTES]`
 - Multipart budget = `min(64 MiB, 1 MiB overhead + Σ per-file x-maxSize)`, defaulting each file field to 8 MiB; per-file overflow drains the rest of the stream and then 422s: `[files.ts:uploadBudget]`
 - At most 64 multipart parts and 64 KiB per non-file field; unknown fields and non-file fields are rejected: `[files.ts:processMultipartUpload]`

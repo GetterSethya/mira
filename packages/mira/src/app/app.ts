@@ -21,7 +21,10 @@ import { TokenStoreLive } from "@/http/token-store.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 import type { NamedSchema } from "@/migrator/types.js"
 import {
+  assertValidAuthRateLimitPolicies,
   assertValidEmailRateLimitPolicies,
+  AuthRateLimitConfig,
+  defaultAuthRateLimitPolicies,
   defaultEmailRateLimitPolicies,
   EmailRateLimitConfig
 } from "@/rate-limit/index.js"
@@ -223,6 +226,12 @@ export class MiraApp<R = never> {
     }
     assertValidEmailRateLimitPolicies(emailRateLimitPolicies)
     const emailRateLimitConfigLayer = Layer.succeed(EmailRateLimitConfig, emailRateLimitPolicies)
+    const authRateLimitPolicies = {
+      ...defaultAuthRateLimitPolicies,
+      ...this.#config.rateLimits?.authPolicies
+    }
+    assertValidAuthRateLimitPolicies(authRateLimitPolicies)
+    const authRateLimitConfigLayer = Layer.succeed(AuthRateLimitConfig, authRateLimitPolicies)
 
     // Mid: Repository + Migrator + AppConfig + durable TokenStore + challenge and rate stores
     const mid = Layer.mergeAll(
@@ -234,7 +243,8 @@ export class MiraApp<R = never> {
       rateLimitStoreLayer,
       rateLimiterLayer,
       rateLimitKeySecretLayer,
-      emailRateLimitConfigLayer
+      emailRateLimitConfigLayer,
+      authRateLimitConfigLayer
     ).pipe(Layer.provideMerge(foundation))
 
     // Hook service is independent of the collection service; email hooks need it early.

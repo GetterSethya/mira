@@ -1,12 +1,18 @@
 import { Layer, Redacted } from "effect"
 
 import {
+  AuthRateLimitConfig,
+  defaultAuthRateLimitPolicies,
   defaultEmailRateLimitPolicies,
   EmailRateLimitConfig,
   InMemoryRateLimiterLive,
   RateLimitKeySecret
 } from "@/rate-limit/index.js"
-import type { EmailRateLimitPolicies, RateLimitPolicy } from "@/rate-limit/index.js"
+import type {
+  AuthRateLimitPolicies,
+  EmailRateLimitPolicies,
+  RateLimitPolicy
+} from "@/rate-limit/index.js"
 
 const high = (policy: RateLimitPolicy): RateLimitPolicy => ({
   ...policy,
@@ -31,9 +37,24 @@ export const emailRateLimitTestConfig: EmailRateLimitPolicies = {
   dashboardTestEmail: high(defaultEmailRateLimitPolicies.dashboardTestEmail)
 }
 
-/** Fresh in-memory limiter plus a fixed key secret for router-level tests. */
-export const rateLimitTestLayer = Layer.mergeAll(
-  InMemoryRateLimiterLive,
-  Layer.succeed(RateLimitKeySecret, Redacted.make("mira-test-rate-limit-secret")),
-  Layer.succeed(EmailRateLimitConfig, emailRateLimitTestConfig)
-)
+/** High login limits so unrelated router tests do not trip the auth policies. */
+export const authRateLimitTestConfig: AuthRateLimitPolicies = {
+  loginIp: high(defaultAuthRateLimitPolicies.loginIp),
+  loginRecipient: high(defaultAuthRateLimitPolicies.loginRecipient)
+}
+
+/** Fresh in-memory limiter plus fixed key secrets for router-level tests. */
+export const makeRateLimitTestLayer = (overrides?: {
+  readonly authPolicies?: Partial<AuthRateLimitPolicies>
+}) =>
+  Layer.mergeAll(
+    InMemoryRateLimiterLive,
+    Layer.succeed(RateLimitKeySecret, Redacted.make("mira-test-rate-limit-secret")),
+    Layer.succeed(EmailRateLimitConfig, emailRateLimitTestConfig),
+    Layer.succeed(AuthRateLimitConfig, {
+      ...authRateLimitTestConfig,
+      ...overrides?.authPolicies
+    })
+  )
+
+export const rateLimitTestLayer = makeRateLimitTestLayer()

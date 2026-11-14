@@ -44,6 +44,15 @@ published by CI.
   scrypt hashing for databases that must move between Node and Bun. A Bun smoke app
   exercises migrations, HTTP CRUD, Argon2id, legacy scrypt, UUIDv7, native thumbnails,
   and the rate-limit store.
+- **Password-login rate limits and hash upgrades.** `auth-with-password` charges per-IP
+  and per-submitted-recipient budgets before the user lookup; store errors fail closed
+  with `503`. A successful login upgrades a legacy `scrypt$...` row to the platform's
+  current hash (Argon2id on Bun). `BunPortablePlatform` keeps scrypt for bidirectional
+  databases.
+- **Image decode budget.** PNG/JPEG/WebP headers are checked against a 64 MP budget
+  before Photon or `Bun.Image` allocates pixels, including the Node/Photon path and
+  older Bun without `Bun.Image`. `makeThumbnailServicePhotonLive({ maxPixels })` and
+  `makeThumbnailServiceBunLive({ maxPixels })` override the budget.
 
 ### Changed
 

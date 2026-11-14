@@ -39,6 +39,14 @@ describe("BunAuthServiceLayer", () => {
       assert.strictEqual(yield* auth.verifyPassword("password", "scrypt$onlysalt"), false)
     }).pipe(Effect.provide(BunAuthServiceLayer))
   )
+
+  it.effect("requests a rehash for scrypt rows only when Bun.password exists", () =>
+    Effect.gen(function* () {
+      const auth = yield* AuthService
+      assert.strictEqual(auth.needsRehash?.("scrypt$salt$hash"), hasBunPassword)
+      assert.strictEqual(auth.needsRehash?.(ARGON2ID_HASH), false)
+    }).pipe(Effect.provide(BunAuthServiceLayer))
+  )
 })
 
 describe("NodeAuthServiceLayer compatibility", () => {
@@ -46,6 +54,14 @@ describe("NodeAuthServiceLayer compatibility", () => {
     Effect.gen(function* () {
       const auth = yield* AuthService
       assert.strictEqual(yield* auth.verifyPassword("correct horse battery staple", ARGON2ID_HASH), false)
+    }).pipe(Effect.provide(NodeAuthServiceLayer))
+  )
+
+  it.effect("never requests a rehash", () =>
+    Effect.gen(function* () {
+      const auth = yield* AuthService
+      assert.strictEqual(auth.needsRehash?.("scrypt$salt$hash"), false)
+      assert.strictEqual(auth.needsRehash?.(ARGON2ID_HASH), false)
     }).pipe(Effect.provide(NodeAuthServiceLayer))
   )
 })

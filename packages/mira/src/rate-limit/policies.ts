@@ -56,6 +56,39 @@ export const EmailRateLimitConfig = Context.Reference<EmailRateLimitPolicies>(
   { defaultValue: () => defaultEmailRateLimitPolicies }
 )
 
+export interface AuthRateLimitPolicies {
+  readonly loginIp: RateLimitPolicy
+  readonly loginRecipient: RateLimitPolicy
+}
+
+/**
+ * Password-login limits. These fail closed: a store outage returns 503 instead
+ * of letting unlimited password guesses through. The recipient limit is keyed
+ * by the submitted address, including unknown addresses, so the endpoint does
+ * not become an account-enumeration oracle.
+ */
+export const defaultAuthRateLimitPolicies: AuthRateLimitPolicies = {
+  // The per-recipient budget is the brute-force control. The IP budget is
+  // deliberately generous enough for shared NAT/office egress.
+  loginIp: policy("auth:login:ip", 100, 15 * 60_000, "deny"),
+  loginRecipient: policy("auth:login:recipient", 10, 15 * 60_000, "deny")
+}
+
+export const AuthRateLimitConfig = Context.Reference<AuthRateLimitPolicies>(
+  "mira/AuthRateLimitConfig",
+  { defaultValue: () => defaultAuthRateLimitPolicies }
+)
+
+export const assertValidAuthRateLimitPolicies = (policies: AuthRateLimitPolicies): void => {
+  for (const policy of [policies.loginIp, policies.loginRecipient]) {
+    if (policy.onStoreError !== "deny") {
+      throw new Error(
+        `Rate-limit policy "${policy.name}" is an auth policy and must use onStoreError: "deny"`
+      )
+    }
+  }
+}
+
 /**
  * A request batch and a send batch must not mix store-error modes, because a
  * store failure is handled once per batch. Fail at boot instead of silently

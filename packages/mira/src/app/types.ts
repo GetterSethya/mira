@@ -8,7 +8,7 @@ import type { Dialect } from "@/dialect/dialect.js"
 import type { MailTransport } from "@/email/types.js"
 import type { AuthService } from "@/http/auth.js"
 import type { HttpServerFactory } from "@/http/server-factory.js"
-import type { EmailRateLimitPolicies } from "@/rate-limit/policies.js"
+import type { AuthRateLimitPolicies, EmailRateLimitPolicies } from "@/rate-limit/policies.js"
 import type { RateLimitStore } from "@/rate-limit/types.js"
 import type { FileStorage } from "@/storage/storage.js"
 import type { ThumbnailService } from "@/thumbnail/types.js"
@@ -93,4 +93,6 @@ export interface MiraEmail {
 export interface MiraRateLimits {
   readonly store?: Layer.Layer<RateLimitStore, never, never>
   readonly emailPolicies?: Partial<EmailRateLimitPolicies>
+  /** Password-login limits. These fail closed on store errors. */
+  readonly authPolicies?: Partial<AuthRateLimitPolicies>
 }

@@ -19,7 +19,8 @@ import type { ThumbnailService } from "@/thumbnail/types.js"
 
 import { clientIp, emailOptionsOf, issueLoginOtp, loginWithPasswordless, requestEmailVerification, requestPasswordReset, requestPasswordlessLogin, resendLoginOtp, resetPassword, sendLoginAlert, verifyEmail, verifyLoginOtp } from "./auth-email.js"
 import type { AuthService} from "./auth.js";
-import { authenticateSession, mintSession as mintSessionFromAuth, verifyJwt, verifyPassword } from "./auth.js"
+import { authenticateSession, maybeRehashPassword, mintSession as mintSessionFromAuth, verifyJwt, verifyPassword } from "./auth.js"
+import { consumeLoginRequestLimits } from "./auth-rate-limit.js"
 import { catchAuthEmailErrors, catchCollectionErrors } from "./errors.js"
 import { makeFileServeRoute } from "./file-serve.js"
 import { makeFileTokenRoute } from "./file-token.js"
@@ -409,6 +410,10 @@ export function makeCollectionRouter(
           )
         )
       )
+      // Charge the login budget before the user lookup and password check.
+      // This fails closed on a store outage and does not reveal whether the
+      // submitted address exists.
+      yield* consumeLoginRequestLimits(email, clientIp(req)).pipe(catchAuthEmailErrors)
       const repo = yield* Repository
       const rows = yield* repo
         .viewFilter(col.name, { where: { sql: "t.email = ?", params: [email] } })
@@ -429,17 +434,21 @@ export function makeCollectionRouter(
       if (!valid) {
         return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
+      // Opportunistically upgrade a legacy scrypt row to the platform's current
+      // hash (Argon2id on Bun). The returned row carries the effective hash so
+      // the newly minted `pwf` claim matches what is stored.
+      const effectiveRow = yield* maybeRehashPassword(col.name, fullRow, password)
       const options = emailOptionsOf(col)
       if (options.loginOtp === "required") {
         const email = yield* EmailService
         if (!email.enabled) {
           return HttpServerResponse.jsonUnsafe({ error: "email_not_configured" }, { status: 503 })
         }
-        const address = fullRow["email"]
+        const address = effectiveRow["email"]
         if (typeof address !== "string") {
           return HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })
         }
-        const challenge = yield* issueLoginOtp(col, fullRow, clientIp(req), address).pipe(
+        const challenge = yield* issueLoginOtp(col, effectiveRow, clientIp(req), address).pipe(
           catchAuthEmailErrors,
           Effect.catch((response) => Effect.succeed(response))
         )
@@ -456,12 +465,12 @@ export function makeCollectionRouter(
         return challenge
       }
 
-      const session = yield* mintSessionFromAuth(col, fullRow).pipe(
+      const session = yield* mintSessionFromAuth(col, effectiveRow).pipe(
         Effect.mapError(() =>
           HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })
         )
       )
-      yield* sendLoginAlert(col, fullRow, req).pipe(Effect.catchCause(() => Effect.void))
+      yield* sendLoginAlert(col, effectiveRow, req).pipe(Effect.catchCause(() => Effect.void))
       return HttpServerResponse.jsonUnsafe(
         { token: session.token, record: session.record },
         { status: 200 }

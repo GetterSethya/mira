@@ -8,6 +8,7 @@ export const NodeAuthServiceLayer = Layer.succeed(
   AuthService,
   AuthService.of({
     hashPassword: hashScryptPassword,
-    verifyPassword: verifyScryptPassword
+    verifyPassword: verifyScryptPassword,
+    needsRehash: () => false
   })
 )

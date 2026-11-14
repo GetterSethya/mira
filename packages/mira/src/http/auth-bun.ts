@@ -67,6 +67,10 @@ export const BunAuthServiceLayer = Layer.succeed(
           try: () => password.verify(plain, stored),
           catch: () => new Error("Bun.password.verify failed")
         }).pipe(Effect.orElseSucceed(() => false))
-      })
+      }),
+    // Only request an upgrade when the native Argon2id hasher is available.
+    // On a Node fallback the new hash would still be scrypt, causing a rehash
+    // on every login.
+    needsRehash: (stored) => bunPassword() !== undefined && stored.startsWith("scrypt$")
   })
 )
