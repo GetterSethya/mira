@@ -22,10 +22,11 @@ transport, which runs on Bun's native sockets. Both presets are consumed by
 
 ### `bun.ts`
 
-- `BunPlatformLayer` — `Layer.mergeAll(BunFileSystem.layer, BunPath.layer, BunCryptoLayer, BunHttpServerFactoryLayer, NodeMailTransportLayer)`. [bun.ts:BunPlatformLayer]
+- `BunPlatformLayer` — `Layer.mergeAll(assertSupportedBunRuntime, BunFileSystem.layer, BunPath.layer, BunCryptoLayer, BunHttpServerFactoryLayer, NodeMailTransportLayer)`. [bun.ts:BunPlatformLayer]
 - `BunPlatform` — `MiraPlatform` preset: `{ layer: BunPlatformLayer + BunAuthServiceLayer, runMain: (effect) => BunRuntime.runMain(effect), thumbnailLayer: ThumbnailServiceBunLive }`. [bun.ts:BunPlatform]
 - `BunPortablePlatform` — same as `BunPlatform` but `NodeAuthServiceLayer` (scrypt) instead of Argon2id, so credentials remain verifiable on both runtimes. [bun.ts:BunPortablePlatform]
 - `BunRuntime` — re-export from `@effect/platform-bun` for custom Bun entrypoints. [bun.ts:BunRuntime]
+- `isSupportedBunVersion`, `MINIMUM_BUN_VERSION` — the `1.3.14` floor (`Bun.Image`) and its version predicate. [bun-version.ts:isSupportedBunVersion]
 
 No subdirectories.
 
@@ -38,6 +39,7 @@ No subdirectories.
 - `NodePlatform.runMain` delegates directly to `NodeRuntime.runMain` — no custom error handling or process wiring is added here. [node.ts:NodePlatform]
 - `NodeRuntime` is re-exported as a value so custom entrypoints can reach it without importing `@effect/platform-node` themselves. [node.ts:NodeRuntime]
 - `BunPlatformLayer` uses native Bun filesystem, path, HTTP, and crypto layers; it does not import `@effect/platform-node`. [bun.ts:BunPlatformLayer]
+- `BunPlatformLayer` asserts `Bun.version >= 1.3.14` at build time and fails with a clear message below the floor. `engines.bun` declares the same range for package tooling. [bun.ts:assertSupportedBunRuntime] [bun-version.ts:MINIMUM_BUN_VERSION]
 - `BunPlatform` uses `BunAuthServiceLayer` (Argon2id) and supplies `ThumbnailServiceBunLive` (native contain/fill); only `NodeMailTransportLayer` is Node-compatible. [bun.ts:BunPlatform]
 - `BunPortablePlatform` trades Argon2id for the shared scrypt format so a Bun-created database can return to Node without password resets. [bun.ts:BunPortablePlatform]
 - `BunPlatform.runMain` delegates to `BunRuntime.runMain`; no custom signal handling is added. [bun.ts:BunPlatform]

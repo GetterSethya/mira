@@ -2,6 +2,9 @@
   "name": "mira-example-bun",
   "private": true,
   "type": "module",
+  "engines": {
+    "bun": ">=1.3.14"
+  },
   "scripts": {
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",

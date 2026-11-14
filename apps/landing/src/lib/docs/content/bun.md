@@ -1,5 +1,9 @@
 Mira runs on Bun through a native platform preset. Filesystem, path, HTTP server, runtime, SQLite, hashing, password hashing, UUIDs, and the common thumbnail paths use Bun's native APIs. SMTP reuses `nodemailer` (backed by Bun's native sockets), and `cover` thumbnails fall back to Photon because `Bun.Image` has no centre-crop primitive yet.
 
+## Requirements
+
+Bun **1.3.14 or newer**. `Bun.Image` landed in 1.3.14 and backs the native thumbnail path; `BunPlatform` checks `Bun.version` when the layer builds and fails with a clear error on older runtimes. The tested baseline is 1.4.2.
+
 ## Quick start
 
 Install the same packages you would on Node. `@gettersethya/mira` includes the Bun presets; there is no separate package.
@@ -96,7 +100,7 @@ Password login consumes two budgets before the user lookup: 100 attempts per IP 
 
 `ThumbnailServiceBunLive` uses `Bun.Image` for `contain` (`WxHb`) and `fill` (`WxHf`) specs. The work runs off the JavaScript thread and is encoded back to the input MIME type (JPEG quality 80). `Bun.Image` does not expose a centre-crop operation, so `cover` (`WxH`, the default) uses Photon. A native `Bun.Image` failure also falls back to Photon rather than failing the request.
 
-Before either backend decodes pixels, a platform-neutral PNG/JPEG/WebP header parser enforces a 64-megapixel budget, including an independent `width * height` check. A compressed image bomb is rejected before allocation. On Bun 1.3.14+ the native path also passes `maxPixels` to `Bun.Image.metadata()`; the Photon path (including Node and older Bun) uses the header parser.
+Before either backend decodes pixels, a platform-neutral PNG/JPEG/WebP header parser enforces a 64-megapixel budget, including an independent `width * height` check. A compressed image bomb is rejected before allocation. On supported Bun the native path also passes `maxPixels` to `Bun.Image.metadata()`; the Photon path (Node and the Bun `cover`/fallback) uses the header parser.
 
 Use `makeThumbnailServiceBunLive({ maxPixels, allowPhotonFallback })` for a different Bun budget or for a strict no-fallback layer; `allowPhotonFallback: false` is how the smoke proves the native path actually ran. The Node/Photon layer has the same knob: `makeThumbnailServicePhotonLive({ maxPixels })`.
 
@@ -116,7 +120,7 @@ Console telemetry is the default and has no Node SQLite dependency. The SQLite t
 
 ## Version pin
 
-The tested set is `effect@4.0.0`, `@effect/platform-bun@4.0.0`, `@effect/sql-sqlite-bun@4.0.0`, `@effect/platform-node@4.0.0`, `@effect/sql-sqlite-node@4.0.0`, and `@effect/platform-node-shared@4.0.0`. The server package pins those platform/SQL packages and narrows its Effect peer range to `~4.0.0`, so a fresh install does not drift to Effect 4.1.x. The workspace also adds a `pnpm.overrides` entry. Keep the set aligned when upgrading.
+The tested set is Bun `1.4.2`, `effect@4.0.0`, `@effect/platform-bun@4.0.0`, `@effect/sql-sqlite-bun@4.0.0`, `@effect/platform-node@4.0.0`, `@effect/sql-sqlite-node@4.0.0`, and `@effect/platform-node-shared@4.0.0`. The supported Bun floor is `1.3.14` (declared in `engines.bun`). The server package pins those platform/SQL packages and narrows its Effect peer range to `~4.0.0`, so a fresh install does not drift to Effect 4.1.x. The workspace also adds a `pnpm.overrides` entry. Keep the set aligned when upgrading.
 
 ## Example and smoke
 
@@ -135,6 +139,7 @@ The smoke is the runtime proof. It does not replace the Node test suite; run `pn
 ## What is not covered
 
 - Deno, Postgres, and MySQL.
+- Bun versions older than `1.3.14`; `BunPlatform` fails fast on them.
 - Bun-native SQLite telemetry.
 - A Bun-native SMTP client. `nodemailer` uses Bun's native `node:net` and TLS implementation.
 - Native `cover` thumbnails. `Bun.Image` has no centre-crop operation yet, so `cover` uses Photon.

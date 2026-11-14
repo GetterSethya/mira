@@ -40,10 +40,11 @@ published by CI.
   filesystem, path, HTTP server, runtime, SQLite, hashing (`Bun.CryptoHasher`), password
   hashing (`Bun.password` Argon2id), UUIDs (`Bun.randomUUIDv7`), and contain/fill
   thumbnails (`Bun.Image`). SMTP reuses `nodemailer` on Bun's native sockets; `cover`
-  thumbnails reuse Photon because `Bun.Image` has no crop. `BunPortablePlatform` keeps
-  scrypt hashing for databases that must move between Node and Bun. A Bun smoke app
-  exercises migrations, HTTP CRUD, Argon2id, legacy scrypt, UUIDv7, native thumbnails,
-  and the rate-limit store.
+  thumbnails reuse Photon because `Bun.Image` has no crop. Requires Bun `1.3.14+`
+  (`Bun.Image`); `BunPlatform` fails fast below that floor and `engines.bun` declares
+  it. `BunPortablePlatform` keeps scrypt hashing for databases that must move between
+  Node and Bun. A Bun smoke app exercises migrations, HTTP CRUD, Argon2id, legacy
+  scrypt, UUIDv7, native thumbnails, and the rate-limit store.
 - **Password-login rate limits and hash upgrades.** `auth-with-password` charges per-IP
   and per-submitted-recipient budgets before the user lookup; store errors fail closed
   with `503`. A successful login upgrades a legacy `scrypt$...` row to the platform's
@@ -51,7 +52,7 @@ published by CI.
   databases.
 - **Image decode budget.** PNG/JPEG/WebP headers are checked against a 64 MP budget
   before Photon or `Bun.Image` allocates pixels, including the Node/Photon path and
-  older Bun without `Bun.Image`. `makeThumbnailServicePhotonLive({ maxPixels })` and
+  the Bun `cover`/fallback. `makeThumbnailServicePhotonLive({ maxPixels })` and
   `makeThumbnailServiceBunLive({ maxPixels })` override the budget.
 
 ### Changed
@@ -61,6 +62,9 @@ published by CI.
   rows. S3/email `_config` keys are hidden and rejected by the update route.
 - **Auth client result.** `authWithPassword()` now returns a union: a session result or
   `{ otpRequired: true, challengeId, expiresAt }`. This is a pre-1.0 type change.
+- **Bun floor is 1.3.14.** `engines.bun` declares `>=1.3.14`, and `BunPlatform` checks
+  `Bun.version` at layer build, failing with a clear error instead of silently losing the
+  native `Bun.Image` path. The tested baseline remains 1.4.2.
 - **Legacy `use_s3` is non-fatal.** An incomplete `use_s3=true` row logs a warning and
   yields no S3 config instead of crashing boot.
 - **Auth email request outcomes.** Request endpoints now return `503 email_not_configured`
