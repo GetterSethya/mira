@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@gettersethya/mira-client": ["../client/src/index.ts"],
+      "@gettersethya/mira-collection": ["../collection/src/index.ts"]
+    },
+    "composite": false
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,28 @@
+/* Keep the generated reference visually close to the landing's neutral palette. */
+:root {
+  --light-color-background: #fafafa;
+  --light-color-background-secondary: #ffffff;
+  --light-color-background-active: #f4f4f5;
+  --light-color-text: #1c1c1f;
+  --light-color-text-aside: #6b6b73;
+  --light-color-link: #0a0a0a;
+  --light-color-accent: #e4e4e7;
+  --light-color-contrast-text: #0a0a0a;
+  --light-color-icon-background: #ffffff;
+  --light-color-icon-text: #1c1c1f;
+  --light-color-comment-tag: #f4f4f5;
+  --light-color-comment-tag-text: #1c1c1f;
+
+  --dark-color-background: #08080a;
+  --dark-color-background-secondary: #0e0e11;
+  --dark-color-background-active: #1c1c1f;
+  --dark-color-text: #d6d6da;
+  --dark-color-text-aside: #8b8b95;
+  --dark-color-link: #f4f4f5;
+  --dark-color-accent: #222227;
+  --dark-color-contrast-text: #f4f4f5;
+  --dark-color-icon-background: #0e0e11;
+  --dark-color-icon-text: #d6d6da;
+  --dark-color-comment-tag: #1c1c1f;
+  --dark-color-comment-tag-text: #e4e4e7;
+}

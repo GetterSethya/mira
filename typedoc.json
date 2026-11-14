@@ -1,0 +1,40 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "Mira API",
+  "entryPoints": [
+    "packages/collection",
+    "packages/client",
+    "packages/mira",
+    "packages/tanstack-adapter",
+    "packages/dashboard"
+  ],
+  "entryPointStrategy": "packages",
+  "packageOptions": {
+    "entryPoints": ["src/index.ts"],
+    "tsconfig": "tsconfig.typedoc.json",
+    "skipErrorChecking": true,
+    "excludeExternals": true,
+    "excludePrivate": true,
+    "excludeInternal": true,
+    "sourceLinkTemplate": "https://github.com/GetterSethya/mira/blob/main/{path}#L{line}",
+    "gitRevision": "main",
+    "disableGit": false
+  },
+  "out": "apps/landing/static/api",
+  "customCss": "apps/landing/typedoc.css",
+  "customFooterHtml": "Generated from the Mira source with TypeDoc.",
+  "sourceLinkTemplate": "https://github.com/GetterSethya/mira/blob/main/{path}#L{line}",
+  "gitRevision": "main",
+  "disableGit": false,
+  "excludeExternals": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "skipErrorChecking": true,
+  "validation": {
+    "notDocumented": false,
+    "invalidLink": false,
+    "notExported": false
+  },
+  "treatWarningsAsErrors": false,
+  "logLevel": "Error"
+}

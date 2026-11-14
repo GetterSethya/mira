@@ -153,9 +153,9 @@ function renderInstallBlock(
   )}${panels}</div>`;
 }
 
-let rendererPromise: Promise<InstanceType<typeof MarkdownIt>> | undefined;
+const rendererPromises = new Map<string, Promise<InstanceType<typeof MarkdownIt>>>();
 
-async function makeRenderer() {
+async function makeRenderer(anchorPrefix: string) {
   const highlighter = await getHighlighter();
   const md = new MarkdownIt({
     html: false,
@@ -163,7 +163,18 @@ async function makeRenderer() {
     typographer: false
   });
 
-  md.use(anchor, { slugify });
+  md.use(anchor, {
+    slugify: (value) => `${anchorPrefix}${slugify(value)}`
+  });
+
+  // The TypeDoc site under /api/ is copied as a static asset, not a SvelteKit
+  // route. Mark those links as external so the prerender crawler does not try
+  // to resolve them.
+  md.renderer.rules.link_open = (tokens, idx, options, _env, self) => {
+    const href = String(tokens[idx].attrGet('href') ?? '');
+    if (href.startsWith('../../api/')) tokens[idx].attrSet('rel', 'external');
+    return self.renderToken(tokens, idx, options);
+  };
 
   md.renderer.rules.table_open = (tokens, idx, options, _env, self) =>
     `<div class="table-wrap" tabindex="0" role="region" aria-label="Table, scroll horizontally for more columns">${self.renderToken(
@@ -194,12 +205,16 @@ async function makeRenderer() {
   return md;
 }
 
-function getRenderer() {
-  rendererPromise ??= makeRenderer();
-  return rendererPromise;
+function getRenderer(anchorPrefix: string) {
+  let renderer = rendererPromises.get(anchorPrefix);
+  if (!renderer) {
+    renderer = makeRenderer(anchorPrefix);
+    rendererPromises.set(anchorPrefix, renderer);
+  }
+  return renderer;
 }
 
-export async function renderMarkdown(source: string) {
-  const md = await getRenderer();
+export async function renderMarkdown(source: string, options?: { anchorPrefix?: string }) {
+  const md = await getRenderer(options?.anchorPrefix ?? '');
   return md.render(source);
 }

@@ -43,6 +43,12 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
+      - name: Landing
+        run: |
+          pnpm --filter @gettersethya/mira-landing check
+          pnpm --filter @gettersethya/mira-landing check:docs
+          pnpm --filter @gettersethya/mira-landing docs:api
+
       - name: Test
         run: pnpm -r test
 

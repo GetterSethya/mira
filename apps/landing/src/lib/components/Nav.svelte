@@ -9,12 +9,14 @@
   let solid = $state(false);
   let showCta = $state(false);
 
+  const home = resolve('/');
   const links = [
-    { href: '#features', label: 'Features' },
-    { href: '#how-it-works', label: 'How it works' },
-    { href: '#quickstart', label: 'Quickstart' },
-    { href: '#faq', label: 'FAQ' },
-    { href: resolve('/docs/'), label: 'Docs' }
+    { href: `${home}#features`, label: 'Features' },
+    { href: `${home}#how-it-works`, label: 'How it works' },
+    { href: `${home}#quickstart`, label: 'Quickstart' },
+    { href: `${home}#faq`, label: 'FAQ' },
+    { href: resolve('/docs/'), label: 'Docs' },
+    { href: resolve('/changelog/'), label: 'Changelog' }
   ];
 
   function close() {
@@ -46,7 +48,7 @@
 
 <header class="nav" class:solid>
   <div class="container inner">
-    <a class="wordmark" href="#top" onclick={close}>mira</a>
+    <a class="wordmark" href={resolve('/')} onclick={close}>mira</a>
 
     <nav class="links" aria-label="Primary">
       {#each links as link}
@@ -58,7 +60,7 @@
       <GitHubLink />
       <ThemeToggle />
       <span class="cta-slot" class:visible={showCta} inert={!showCta} aria-hidden={!showCta}>
-        <a class="btn desk-cta" href="#quickstart" tabindex={showCta ? 0 : -1}>Quickstart</a>
+        <a class="btn desk-cta" href={`${home}#quickstart`} tabindex={showCta ? 0 : -1}>Quickstart</a>
       </span>
       <button
         class="toggle"
@@ -84,7 +86,7 @@
         {#each links as link}
           <a href={link.href} onclick={close}>{link.label}</a>
         {/each}
-        <a class="btn mobile-cta" href="#quickstart" onclick={close}>Quickstart</a>
+        <a class="btn mobile-cta" href={`${home}#quickstart`} onclick={close}>Quickstart</a>
       </nav>
     </div>
   {/if}

@@ -1,21 +1,29 @@
+<script lang="ts">
+  import { resolve } from '$app/paths';
+
+  const home = resolve('/');
+</script>
+
 <footer class="footer">
   <div class="container">
     <div class="top">
       <div class="brand">
-        <a class="wordmark" href="#top">mira</a>
+        <a class="wordmark" href={resolve('/')}>mira</a>
         <p>Collections in, REST out. One TypeScript process on Effect v4.</p>
       </div>
 
       <nav class="cols" aria-label="Footer">
         <div class="col">
           <h3>Product</h3>
-          <a href="#features">Features</a>
-          <a href="#how-it-works">How it works</a>
+          <a href={`${home}#features`}>Features</a>
+          <a href={`${home}#how-it-works`}>How it works</a>
+          <a href={resolve('/changelog/')}>Changelog</a>
         </div>
         <div class="col">
           <h3>Learn</h3>
-          <a href="#quickstart">Quickstart</a>
-          <a href="#faq">FAQ</a>
+          <a href={`${home}#quickstart`}>Quickstart</a>
+          <a href={`${home}#faq`}>FAQ</a>
+          <a href={resolve('/docs/api/')}>API reference</a>
           <a href="https://github.com/GetterSethya/mira" target="_blank" rel="noreferrer">GitHub</a>
         </div>
       </nav>

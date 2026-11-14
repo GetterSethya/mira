@@ -17,6 +17,10 @@ published by CI.
 
 ### Added
 
+- **Landing API reference and changelog.** The landing now builds a TypeDoc reference for
+  every public package and the Bun entry, linked from `/docs/api/`, and a `/changelog`
+  page that renders `CHANGELOG.md` from GitHub at build time. The landing `build` script
+  regenerates the reference, and CI checks it.
 - **SMTP email service.** Optional `.email(SmtpEmail(...))` builder step backed by
   `nodemailer` and a platform `MailTransport` capability. Settings accept plain values or
   Effect `Config` values; missing required values fail at layer build. Without the step a

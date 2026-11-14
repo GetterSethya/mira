@@ -21,7 +21,7 @@
   <p class="docs-lede">
     Start with the install path, then move through collections, auth, rules, and queries.
     Mira runs on Node or Bun 1.3.14+; the Bun runtime page covers the native preset, SQLite path, Bun.CryptoHasher, Bun.password, and Bun.Image thumbnails.
-    Each page is checked against the package contracts and the source it documents.
+    Each page is checked against the package contracts and the source it documents. The API reference is generated from the same source with TypeDoc.
   </p>
 
   <a class="docs-start" href={resolve('/docs/getting-started/')}>Start with getting started</a>

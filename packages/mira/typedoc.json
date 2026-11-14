@@ -1,0 +1,7 @@
+{
+  "entryPoints": ["src/index.ts", "src/index.bun.ts"],
+  "tsconfig": "tsconfig.typedoc.json",
+  "sourceLinkTemplate": "https://github.com/GetterSethya/mira/blob/main/{path}#L{line}",
+  "gitRevision": "main",
+  "disableGit": false
+}

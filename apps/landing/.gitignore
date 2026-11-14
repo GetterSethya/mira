@@ -1,6 +1,7 @@
 .svelte-kit
 build
 node_modules
+static/api
 .env
 .env.*
 !.env.example

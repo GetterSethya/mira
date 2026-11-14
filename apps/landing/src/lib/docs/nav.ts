@@ -1,4 +1,4 @@
-export type DocsGroup = "Start" | "Core" | "Build" | "Operate";
+export type DocsGroup = "Start" | "Core" | "Build" | "Operate" | "Reference";
 
 export type DocsPage = {
   readonly slug: string;
@@ -9,7 +9,13 @@ export type DocsPage = {
   readonly sourceFolders: ReadonlyArray<string>;
 };
 
-export const docsGroups: ReadonlyArray<DocsGroup> = ["Start", "Core", "Build", "Operate"];
+export const docsGroups: ReadonlyArray<DocsGroup> = [
+  "Start",
+  "Core",
+  "Build",
+  "Operate",
+  "Reference"
+];
 
 export const docsPages: ReadonlyArray<DocsPage> = [
   {
@@ -206,6 +212,28 @@ export const docsPages: ReadonlyArray<DocsPage> = [
       "packages/dashboard/src/api/EGM.md"
     ],
     sourceFolders: ["packages/dashboard/src", "packages/dashboard/src/api"]
+  },
+  {
+    slug: "api",
+    title: "API reference",
+    group: "Reference",
+    summary: "Browse the generated TypeScript reference for every package, entry point, and Bun export.",
+    contracts: [
+      "typedoc.json",
+      "packages/collection/src/index.ts",
+      "packages/client/src/index.ts",
+      "packages/mira/src/index.ts",
+      "packages/mira/src/index.bun.ts",
+      "packages/tanstack-adapter/src/index.ts",
+      "packages/dashboard/src/index.ts"
+    ],
+    sourceFolders: [
+      "packages/collection/src",
+      "packages/client/src",
+      "packages/mira/src",
+      "packages/tanstack-adapter/src",
+      "packages/dashboard/src"
+    ]
   }
 ];
 
