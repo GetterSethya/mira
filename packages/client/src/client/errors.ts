@@ -39,4 +39,16 @@ import { Data } from "effect"
 export class MiraError extends Data.TaggedError("MiraError")<{
   readonly status: number
   readonly body: unknown
+  /**
+   * Seconds until the caller may retry, when the server supplied it. Read from
+   * the JSON body first, then from the `Retry-After` header.
+   */
+  readonly retryAfterSeconds?: number
+  /** Which limiter produced a 429, when the server supplied it. */
+  readonly rateLimitScope?: "request" | "send" | "cooldown"
+  /** True for `too_many_attempts`: request a new code instead of retrying the same one. */
+  readonly restart?: boolean
 }> {}
+
+/** True when the server asked the caller to slow down. */
+export const isRateLimited = (error: MiraError): boolean => error.status === 429

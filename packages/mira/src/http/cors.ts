@@ -79,7 +79,8 @@ export interface CorsConfig {
  */
 export const defaultCorsConfig: CorsConfig = {
   allowedOrigins: (origin) => typeof origin === "string" && origin.length > 0,
-  credentials: true
+  credentials: true,
+  exposedHeaders: ["Retry-After"]
 }
 
 /**

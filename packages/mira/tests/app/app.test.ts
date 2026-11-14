@@ -17,6 +17,7 @@ import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { LocalFileStorage } from "@/storage/index.js"
@@ -87,6 +88,7 @@ const testLayer = Layer.mergeAll(
   NodeCryptoLayer,
   NodeAuthServiceLayer,
   DialectTest,
+  rateLimitTestLayer
 )
 
 const setupTables = Effect.gen(function* () {

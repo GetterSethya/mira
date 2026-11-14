@@ -11,18 +11,13 @@ import {
   hashOtp,
   hashResetToken,
   MAX_ATTEMPTS,
-  MAX_PER_IP,
-  MAX_PER_USER,
   OTP_TTL_MS,
   PASSWORD_RESET_TTL_MS,
-  RESEND_COOLDOWN_MS,
-  USER_WINDOW_MS,
   VERIFY_EMAIL_TTL_MS
 } from "@/auth/index.js"
 import type { ChallengePurpose, ChallengeRecord } from "@/auth/index.js"
 import type { AuthEmailError } from "@/auth/index.js"
 import {
-  AuthEmailRateLimitedError,
   EmailFlowDisabledError,
   EmailUnavailableError,
   InvalidCodeError,
@@ -34,8 +29,16 @@ import type { RequestCtx } from "@/collection-service/context.js"
 import { AppConfig } from "@/config/index.js"
 import { CryptoService } from "@/crypto/index.js"
 import { Dialect } from "@/dialect/dialect.js"
-import { EmailService } from "@/email/index.js"
-import type { EmailMessage, EmailSendOptions } from "@/email/index.js"
+import {
+  EmailNotConfiguredError,
+  EmailSendError,
+  EmailService
+} from "@/email/index.js"
+import type {
+  EmailMessage,
+  EmailSendOptions,
+  EmailServiceShape
+} from "@/email/index.js"
 import {
   loginAlertEmail,
   loginOtpEmail,
@@ -43,6 +46,16 @@ import {
   passwordResetEmail,
   verificationOtpEmail
 } from "@/email/index.js"
+import {
+  EmailRateLimitConfig,
+  normalizeIpForRateLimit,
+  RateLimitKeySecret,
+  RateLimiter,
+  RateLimitedError,
+  rateLimitKey,
+  RateLimitUnavailableError
+} from "@/rate-limit/index.js"
+import type { RateLimitRequest } from "@/rate-limit/index.js"
 import type { AuthCollectionEmailOptions } from "@gettersethya/mira-client"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
@@ -56,8 +69,15 @@ export type AuthEmailServices =
   | AppConfig
   | CryptoService
   | Dialect
+  | RateLimiter
+  | RateLimitKeySecret
 
-type FlowError = AuthEmailError | AuthError | SqlError.SqlError
+type FlowError =
+  | AuthEmailError
+  | AuthError
+  | SqlError.SqlError
+  | EmailNotConfiguredError
+  | EmailSendError
 
 export const emailOptionsOf = (collection: AnyCollectionDef): Required<AuthCollectionEmailOptions> => {
   const email = collection.schema["x-auth"]?.email
@@ -72,8 +92,8 @@ export const emailOptionsOf = (collection: AnyCollectionDef): Required<AuthColle
 export const isAuthCollection = (collection: AnyCollectionDef) =>
   collection.schema["x-collection-kind"] === "auth"
 
-export const clientIp = (req: HttpServerRequest.HttpServerRequest) =>
-  Option.getOrElse(req.remoteAddress, () => "unknown")
+export const clientIp = (req: HttpServerRequest.HttpServerRequest): string | null =>
+  Option.getOrElse(req.remoteAddress, () => null)
 
 export const userAgent = (req: HttpServerRequest.HttpServerRequest) =>
   req.headers["user-agent"] ?? "unknown"
@@ -103,35 +123,95 @@ const challengeTtl = (purpose: ChallengePurpose) => {
   }
 }
 
-const ensureCanIssue = (
-  collection: AnyCollectionDef,
-  userId: string | null,
-  purpose: ChallengePurpose,
-  ip: string,
-  recordRequest = true
+const requireTransport = (): Effect.Effect<EmailServiceShape, EmailNotConfiguredError> =>
+  Effect.gen(function* () {
+    const email = yield* EmailService
+    if (!email.enabled) {
+      return yield* Effect.fail(
+        new EmailNotConfiguredError({
+          message: "Email transport is not configured. Add .email(SmtpEmail(...)) to the Mira builder."
+        })
+      )
+    }
+    return email
+  })
+
+const consumeEmailRequestLimits = (
+  emailAddress: string,
+  ip: string | null,
+  purpose: ChallengePurpose
 ) =>
   Effect.gen(function* () {
-    const store = yield* AuthChallengeStore
-    const since = nowMs() - USER_WINDOW_MS
-    if (recordRequest) {
-      const ipCount = yield* store.countRecentForIp(ip, purpose, since)
-      if (ipCount >= MAX_PER_IP) {
-        return yield* Effect.fail(new AuthEmailRateLimitedError({ retryAfterSeconds: 60 }))
+    const secret = Redacted.value(yield* RateLimitKeySecret)
+    const policies = yield* EmailRateLimitConfig
+
+    const emailKey = yield* rateLimitKey(secret, `${purpose}:${emailAddress.trim()}`).pipe(
+      Effect.catchTag("RateLimitUnavailableError", (error) =>
+        Effect.logWarning("rate_limit.degraded", {
+          reason: error.message,
+          purpose
+        }).pipe(Effect.as(null))
+      )
+    )
+    if (emailKey === null) return yield* Effect.void
+
+    const requests: Array<RateLimitRequest> = [
+      {
+        policy:
+          purpose === "login_otp" ? policies.requestLoginCooldown : policies.requestCooldown,
+        key: emailKey,
+        cost: 1
       }
-      yield* store.logRequest(ip, purpose, nowMs())
+    ]
+
+    const normalizedIp = normalizeIpForRateLimit(ip)
+    if (normalizedIp !== null) {
+      const ipKey = yield* rateLimitKey(secret, `ip:${normalizedIp}`).pipe(
+        Effect.catchTag("RateLimitUnavailableError", (error) =>
+          Effect.logWarning("rate_limit.degraded", {
+            reason: error.message,
+            purpose
+          }).pipe(Effect.as(null))
+        )
+      )
+      if (ipKey !== null) {
+        requests.push({
+          policy: purpose === "login_otp" ? policies.requestLoginIp : policies.requestRecoveryIp,
+          key: ipKey,
+          cost: 1
+        })
+      }
+    } else {
+      yield* Effect.logWarning("rate_limit.ip_unavailable", { purpose })
     }
-    if (userId === null) return
-    const userCount = yield* store.countRecentForUser(collection.name, userId, purpose, since)
-    if (userCount >= MAX_PER_USER) {
-      return yield* Effect.fail(new AuthEmailRateLimitedError({ retryAfterSeconds: 60 }))
+
+    requests.push({ policy: policies.requestRecipient, key: emailKey, cost: 1 })
+
+    const limiter = yield* RateLimiter
+    const result = yield* limiter.consumeMany(requests).pipe(
+      Effect.catchTag("RateLimitUnavailableError", (error) =>
+        Effect.logWarning("rate_limit.degraded", {
+          reason: error.message,
+          purpose
+        }).pipe(Effect.as({ decisions: [], blocked: null }))
+      )
+    )
+
+    if (result.blocked !== null) {
+      return yield* Effect.fail(
+        new RateLimitedError({
+          retryAfterSeconds: result.blocked.retryAfterSeconds,
+          policy: result.blocked.policy,
+          scope: result.blocked.policy.includes("cooldown") ? "cooldown" : "request"
+        })
+      )
     }
   })
 
 const buildChallenge = (
   collection: AnyCollectionDef,
   userId: string,
-  purpose: ChallengePurpose,
-  ip: string
+  purpose: ChallengePurpose
 ) =>
   Effect.gen(function* () {
     const config = yield* AppConfig
@@ -152,7 +232,6 @@ const buildChallenge = (
       expiresAt: createdAt + challengeTtl(purpose),
       consumedAt: null,
       attempts: 0,
-      requestIp: ip,
       createdAt
     }
     return { record, secret: raw }
@@ -161,17 +240,20 @@ const buildChallenge = (
 const storeChallenge = (record: ChallengeRecord) =>
   Effect.gen(function* () {
     const store = yield* AuthChallengeStore
-    yield* store.supersedeLive(record.collection, record.userId, record.purpose, nowMs())
+    const now = nowMs()
+    yield* store.deleteExpired(now)
+    yield* store.supersedeLive(record.collection, record.userId, record.purpose, now)
     yield* store.create(record)
   })
 
 const sendEmail = (message: EmailMessage, options: EmailSendOptions) =>
   Effect.gen(function* () {
-    const email = yield* EmailService
-    if (!email.enabled) {
-      return yield* Effect.fail(new EmailFlowDisabledError({ collection: options.collection ?? "unknown" }))
-    }
-    yield* email.send(message, options)
+    const email = yield* requireTransport()
+    yield* email.send(message, options).pipe(
+      Effect.catchTag("EmailSendError", (error) =>
+        Effect.fail(new EmailUnavailableError({ message: `Could not send email: ${error.code}` }))
+      )
+    )
   })
 
 const detachSend = (message: EmailMessage, options: EmailSendOptions) =>
@@ -180,9 +262,27 @@ const detachSend = (message: EmailMessage, options: EmailSendOptions) =>
     if (!email.enabled) return
     yield* Effect.forkDetach(
       email.send(message, options).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("email.detached_send_failed", { purpose: options.purpose, cause: String(cause) })
-        )
+        Effect.catchTags({
+          RateLimitedError: (error) =>
+            Effect.logWarning("email.rate_limited", {
+              purpose: options.purpose,
+              collection: options.collection,
+              policy: error.policy
+            }),
+          RateLimitUnavailableError: () =>
+            Effect.logWarning("email.rate_limit_unavailable", {
+              purpose: options.purpose,
+              collection: options.collection
+            }),
+          EmailNotConfiguredError: () => Effect.void,
+          EmailSendError: (error) =>
+            Effect.logWarning("email.detached_send_failed", {
+              purpose: options.purpose,
+              code: error.code,
+              command: error.command,
+              responseCode: error.responseCode
+            })
+        })
       )
     )
   })
@@ -192,21 +292,30 @@ const appName = Effect.map(AppConfig, (config) => config.appName)
 export const requestPasswordReset = (
   collection: AnyCollectionDef,
   emailAddress: string,
-  ip: string
+  ip: string | null
 ): Effect.Effect<{ readonly challengeId: string }, FlowError, AuthEmailServices> =>
   Effect.gen(function* () {
-    yield* ensureCanIssue(collection, null, "password_reset", ip)
+    const email = yield* requireTransport()
+    if (email.describe().passwordResetUrl === null) {
+      return yield* Effect.fail(
+        new EmailNotConfiguredError({
+          message: "Email is enabled but no passwordResetUrl is configured"
+        })
+      )
+    }
+
+    yield* consumeEmailRequestLimits(emailAddress, ip, "password_reset")
+
     const user = yield* findAuthUser(collection, emailAddress)
     if (user === undefined) {
       return { challengeId: yield* generateChallengeId() }
     }
     const userId = String(user["id"])
-    yield* ensureCanIssue(collection, userId, "password_reset", ip, false)
-    const built = yield* buildChallenge(collection, userId, "password_reset", ip)
+    const built = yield* buildChallenge(collection, userId, "password_reset")
     yield* storeChallenge(built.record)
-    const email = yield* EmailService
+
     const description = email.describe()
-    if (!email.enabled || description.passwordResetUrl === null) {
+    if (description.passwordResetUrl === null) {
       return { challengeId: built.record.id }
     }
     const resetUrl = description.passwordResetUrl
@@ -262,21 +371,30 @@ export const resetPassword = (
 export const requestEmailVerification = (
   collection: AnyCollectionDef,
   emailAddress: string,
-  ip: string
-): Effect.Effect<{ readonly challengeId: string }, FlowError, AuthEmailServices> =>
+  ip: string | null
+): Effect.Effect<
+  { readonly challengeId: string; readonly expiresAt: string },
+  FlowError,
+  AuthEmailServices
+> =>
   Effect.gen(function* () {
     const options = emailOptionsOf(collection)
     if (!options.verification) {
       return yield* Effect.fail(new EmailFlowDisabledError({ collection: collection.name }))
     }
-    yield* ensureCanIssue(collection, null, "verify_email", ip)
+    yield* requireTransport()
+    yield* consumeEmailRequestLimits(emailAddress, ip, "verify_email")
+
     const user = yield* findAuthUser(collection, emailAddress)
     if (user === undefined) {
-      return { challengeId: yield* generateChallengeId() }
+      const expiresAt = nowMs() + VERIFY_EMAIL_TTL_MS
+      return {
+        challengeId: yield* generateChallengeId(),
+        expiresAt: new Date(expiresAt).toISOString()
+      }
     }
     const userId = String(user["id"])
-    yield* ensureCanIssue(collection, userId, "verify_email", ip, false)
-    const built = yield* buildChallenge(collection, userId, "verify_email", ip)
+    const built = yield* buildChallenge(collection, userId, "verify_email")
     yield* storeChallenge(built.record)
     const message = verificationOtpEmail({
       appName: yield* appName,
@@ -285,7 +403,10 @@ export const requestEmailVerification = (
       expiresMinutes: Math.round(VERIFY_EMAIL_TTL_MS / 60_000)
     })
     yield* detachSend(message, { purpose: "verify_email", collection: collection.name, userId })
-    return { challengeId: built.record.id }
+    return {
+      challengeId: built.record.id,
+      expiresAt: new Date(built.record.expiresAt).toISOString()
+    }
   })
 
 export const verifyEmail = (
@@ -334,21 +455,30 @@ export const verifyEmail = (
 export const requestPasswordlessLogin = (
   collection: AnyCollectionDef,
   emailAddress: string,
-  ip: string
-): Effect.Effect<{ readonly challengeId: string }, FlowError, AuthEmailServices> =>
+  ip: string | null
+): Effect.Effect<
+  { readonly challengeId: string; readonly expiresAt: string },
+  FlowError,
+  AuthEmailServices
+> =>
   Effect.gen(function* () {
     const options = emailOptionsOf(collection)
     if (!options.passwordless) {
       return yield* Effect.fail(new EmailFlowDisabledError({ collection: collection.name }))
     }
-    yield* ensureCanIssue(collection, null, "passwordless", ip)
+    yield* requireTransport()
+    yield* consumeEmailRequestLimits(emailAddress, ip, "passwordless")
+
     const user = yield* findAuthUser(collection, emailAddress)
     if (user === undefined) {
-      return { challengeId: yield* generateChallengeId() }
+      const expiresAt = nowMs() + OTP_TTL_MS
+      return {
+        challengeId: yield* generateChallengeId(),
+        expiresAt: new Date(expiresAt).toISOString()
+      }
     }
     const userId = String(user["id"])
-    yield* ensureCanIssue(collection, userId, "passwordless", ip, false)
-    const built = yield* buildChallenge(collection, userId, "passwordless", ip)
+    const built = yield* buildChallenge(collection, userId, "passwordless")
     yield* storeChallenge(built.record)
     const message = passwordlessOtpEmail({
       appName: yield* appName,
@@ -357,7 +487,10 @@ export const requestPasswordlessLogin = (
       expiresMinutes: Math.round(OTP_TTL_MS / 60_000)
     })
     yield* detachSend(message, { purpose: "passwordless_otp", collection: collection.name, userId })
-    return { challengeId: built.record.id }
+    return {
+      challengeId: built.record.id,
+      expiresAt: new Date(built.record.expiresAt).toISOString()
+    }
   })
 
 const verifyOtpChallenge = (
@@ -417,26 +550,21 @@ export const verifyLoginOtp = (
 export const issueLoginOtp = (
   collection: AnyCollectionDef,
   user: RepoRecord,
-  ip: string,
+  ip: string | null,
   emailAddress: string
 ): Effect.Effect<ChallengeRecord, FlowError, AuthEmailServices> =>
   Effect.gen(function* () {
+    yield* requireTransport()
     const userId = String(user["id"])
-    yield* ensureCanIssue(collection, userId, "login_otp", ip)
-    const built = yield* buildChallenge(collection, userId, "login_otp", ip)
+    yield* consumeEmailRequestLimits(emailAddress, ip, "login_otp")
+    const built = yield* buildChallenge(collection, userId, "login_otp")
     const message = loginOtpEmail({
       appName: yield* appName,
       email: emailAddress,
       code: built.secret,
       expiresMinutes: Math.round(OTP_TTL_MS / 60_000)
     })
-    yield* sendEmail(message, { purpose: "login_otp", collection: collection.name, userId }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.fail(
-          new EmailUnavailableError({ message: `Could not send login code: ${String(cause)}` })
-        )
-      )
-    )
+    yield* sendEmail(message, { purpose: "login_otp", collection: collection.name, userId })
     yield* storeChallenge(built.record)
     return built.record
   })
@@ -444,7 +572,7 @@ export const issueLoginOtp = (
 export const resendLoginOtp = (
   collection: AnyCollectionDef,
   challengeId: string,
-  ip: string
+  ip: string | null
 ): Effect.Effect<ChallengeRecord, FlowError, AuthEmailServices> =>
   Effect.gen(function* () {
     const store = yield* AuthChallengeStore
@@ -461,8 +589,7 @@ export const resendLoginOtp = (
     if (typeof emailAddress !== "string") {
       return yield* Effect.fail(new InvalidCodeError({ message: "Invalid or expired challenge" }))
     }
-    const record = yield* issueLoginOtp(collection, rows.value, ip, emailAddress)
-    return record
+    return yield* issueLoginOtp(collection, rows.value, ip, emailAddress)
   })
 
 export const sendLoginAlert = (
@@ -482,7 +609,7 @@ export const sendLoginAlert = (
       appName: name,
       collection: collection.name,
       email: emailAddress,
-      ip: clientIp(req),
+      ip: clientIp(req) ?? "unknown",
       userAgent: userAgent(req),
       time: new Date().toISOString()
     })
@@ -492,9 +619,17 @@ export const sendLoginAlert = (
         collection: collection.name,
         userId: String(record["id"])
       }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("email.login_alert_failed", { cause: String(cause) })
-        )
+        Effect.catchTags({
+          RateLimitedError: () => Effect.void,
+          RateLimitUnavailableError: () => Effect.void,
+          EmailNotConfiguredError: () => Effect.void,
+          EmailSendError: (error) =>
+            Effect.logWarning("email.login_alert_failed", {
+              code: error.code,
+              command: error.command,
+              responseCode: error.responseCode
+            })
+        })
       )
     )
   })

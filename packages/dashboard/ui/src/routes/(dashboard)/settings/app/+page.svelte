@@ -108,7 +108,14 @@
     } catch (error) {
       if (error instanceof DashboardApiError) {
         if (error.status === 403) toast.error("You can only send a test email to your own address")
-        else if (error.status === 429) toast.error("Too many test emails — try again later")
+        else if (error.status === 429) {
+          const seconds = error.retryAfterSeconds
+          toast.error(
+            seconds === undefined
+              ? "Too many test emails — try again later"
+              : `Too many test emails — try again in ${seconds}s`
+          )
+        }
         else if (error.status === 503) toast.error("Email is not configured on this server")
         else if (error.status === 502) toast.error("The email server could not deliver the message")
         else toast.error("Failed to send test email")

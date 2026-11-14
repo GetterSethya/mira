@@ -29,7 +29,22 @@ Mira.builder()
 
 `secure` means implicit TLS (usually port 465). Use `requireTLS: true` for STARTTLS. `passwordResetUrl` defaults to `${applicationUrl}/reset-password?token={{token}}&collection={{collection}}`; both placeholders are required.
 
-Without `.email(...)` Mira uses a no-op `EmailService`. `EmailService.enabled` is `false`, `send` fails with `EmailNotConfiguredError`, and email-dependent request endpoints return `email_not_configured`. A collection that requires login OTP fails at boot instead of silently downgrading to password-only.
+Without `.email(...)` Mira uses a no-op `EmailService`. `EmailService.enabled` is `false`, `send` fails with `EmailNotConfiguredError`, and email-dependent request endpoints return `503 email_not_configured`. A collection that requires login OTP fails at boot instead of silently downgrading to password-only.
+
+Every send also passes through the rate-limit engine. The default store is SQLite; the default budgets are listed under [Rate limits and cost controls](#rate-limits-and-cost-controls). To use another store, pass a self-contained `RateLimitStore` layer:
+
+```typescript
+Mira.builder()
+  // ...
+  .rateLimits({
+    store: MyRedisRateLimitStoreLayer,
+    emailPolicies: {
+      sendRecoveryHourly: { name: "email:send:recovery-hourly", limit: 300, windowMs: 3_600_000, onStoreError: "deny" }
+    }
+  })
+```
+
+The email code depends on the `RateLimiter` service, not on SQLite. The in-memory store is for tests and isolated processes; production should use the SQLite default or a shared store. SQLite is single-node.
 
 `SmtpEmail` does not import a mail library into the core service. The platform supplies a `MailTransport`; the Node preset is the only implementation that imports `nodemailer`, so the `EmailService` contract stays portable.
 
@@ -63,31 +78,66 @@ The flags are serialized as `x-auth.email` and are available from the public `GE
 
 ## Routes
 
-| Method | Route | Purpose |
-|---|---|---|
-| `POST` | `/api/collections/:name/auth-with-password` | Existing login. Returns `{ otpRequired: true, challengeId, expiresAt }` when login OTP is required. |
-| `POST` | `/api/collections/:name/auth-with-password/verify-otp` | Complete login OTP with `{ challengeId, code }`. |
-| `POST` | `/api/collections/:name/auth-with-password/resend-otp` | Reissue a login OTP. |
-| `POST` | `/api/collections/:name/auth-with-otp/request` | Request a passwordless code. Returns a `challengeId`, even for an unknown email. |
-| `POST` | `/api/collections/:name/auth-with-otp` | Complete passwordless login with `{ challengeId, code }`. |
-| `POST` | `/api/collections/:name/verify-email/request` | Request or resend a verification code. |
-| `POST` | `/api/collections/:name/verify-email` | Verify with `{ challengeId, code }`. |
-| `POST` | `/api/collections/:name/password-reset/request` | Request a reset link. Always returns a generic `202`. |
-| `POST` | `/api/collections/:name/password-reset` | Complete reset with `{ token, password, passwordConfirm }`. |
-| `GET` | `/api/collections/:name/auth-config` | Public capability flags and `emailConfigured`. |
+| Method | Route | Success | Other outcomes |
+|---|---|---|---|
+| `POST` | `/api/collections/:name/auth-with-password` | `{ token, record }` or `{ otpRequired: true, challengeId, expiresAt }` | `429 rate_limited` when the login OTP budget is blocked |
+| `POST` | `/api/collections/:name/auth-with-password/verify-otp` | `{ token, record }` | `400 invalid_code`, `429 too_many_attempts` |
+| `POST` | `/api/collections/:name/auth-with-password/resend-otp` | `202 { challengeId, expiresAt }` | `429 rate_limited` (cooldown or budget) |
+| `POST` | `/api/collections/:name/auth-with-otp/request` | `202 { challengeId, expiresAt }` | `404 not_found`, `429 rate_limited`, `503 email_not_configured` |
+| `POST` | `/api/collections/:name/auth-with-otp` | `{ token, record }` | `400 invalid_code`, `429 too_many_attempts` |
+| `POST` | `/api/collections/:name/verify-email/request` | `202 { challengeId, expiresAt }` | `404 not_found`, `429 rate_limited`, `503 email_not_configured` |
+| `POST` | `/api/collections/:name/verify-email` | `{ verified: true }` | `400 invalid_code`, `429 too_many_attempts` |
+| `POST` | `/api/collections/:name/password-reset/request` | `202 { message }` | `429 rate_limited`, `503 email_not_configured` |
+| `POST` | `/api/collections/:name/password-reset` | `{ ok: true }` | `400 invalid_token`, `422 validation_failed` |
+| `GET` | `/api/collections/:name/auth-config` | `{ collection, emailConfigured, email }` | `404 not_found` |
 
-Registration sends a verification OTP when the collection enables it. The create response is the public record plus `emailVerification: { challengeId, expiresAt }`. Password login remains allowed while `emailVerified` is false; use a rule such as `R.auth(Users, "emailVerified").eq(R.literal(true))` if an app needs to restrict access.
+Registration sends a verification OTP when the collection enables it. The create response is the public record plus `emailVerification: { challengeId, expiresAt }`. If the verification mail is rate-limited or the limiter is unavailable, the account is still created and the response carries `verificationDeferred: true` instead; a rate limit also includes `verificationRetryAfterSeconds`. The client can call `verify-email/request` later. Password login remains allowed while `emailVerified` is false; use a rule such as `R.auth(Users, "emailVerified").eq(R.literal(true))` if an app needs to restrict access.
 
 ## Security and limits
 
 - Email verification, login OTP, and passwordless codes are six digits, HMAC-hashed at rest, single-use, and expiring.
 - Password reset uses a 256-bit token whose SHA-256 hash is stored.
 - One live challenge exists per `(collection, user, purpose)`; issuing a new code supersedes the old one.
-- Request endpoints return the same `202` + `challengeId` shape for known and unknown emails and detach the send, so timing does not leak account existence.
+- Request endpoints return the same `202` + `challengeId` shape for known and unknown emails and detach the send. The pre-lookup rate checks and cooldown are account-agnostic, so timing does not reveal whether the address exists. A live challenge's attempt limit can still distinguish a real challenge from a dummy one; that is a pre-existing OTP property.
 - Login OTP awaits delivery; a failed send returns `503 email_unavailable` and does not leave a challenge.
 - Password reset consumes the token, updates the password through the collection service, bumps the token generation, and consumes all outstanding challenges for that user.
 - The internal auth-flow write context may set only `password` or `emailVerified` for the challenge's own user. It is not `admin: true`.
 - Login alerts are detached and skipped when email is disabled. Failures are logged, never surfaced to the login response.
+
+## Rate limits and cost controls
+
+Every email request and every `EmailService.send` consumes a policy. Request policies fail open if the limiter store is down and log a warning. Send policies fail closed with `503 rate_limit_unavailable`, so a broken limiter does not become an open relay.
+
+Default policies:
+
+| Policy | Key | Limit | Window |
+|---|---|---:|---:|
+| `email:request:recovery-ip` | peer IP | 60 | 15 min |
+| `email:request:login-ip` | peer IP | 30 | 15 min |
+| `email:request:recipient` | address + purpose | 5 | 15 min |
+| `email:request:cooldown` | address + purpose | 1 | 60 s |
+| `email:request:login-cooldown` | address + purpose | 1 | 30 s |
+| `email:send:recovery-hourly` | global | 300 | 1 hour |
+| `email:send:recovery-daily` | global | 3,000 | 24 hours |
+| `email:send:login-hourly` | global | 200 | 1 hour |
+| `email:send:login-daily` | global | 2,000 | 24 hours |
+| `email:send:notification-hourly` | global | 200 | 1 hour |
+| `email:send:notification-daily` | global | 2,000 | 24 hours |
+| `email:send:collection` | collection + class | 300 | 1 hour |
+| `email:send:recipient` | address + purpose | 10 | 1 hour |
+| `email:dashboard:test` | superadmin | 5 | 1 hour |
+
+Recovery mail is password reset and email verification. Login mail is login OTP and passwordless codes. Notification mail is login alerts, dashboard test mail, and plugin `custom` sends. The three budgets are separate, so reset spam cannot exhaust the login OTP budget and a notification flood cannot starve either security flow. Recovery and login OTP also use separate IP and recipient buckets, so reset spam cannot block OTP login for the same address or proxy.
+
+The send budgets are all-or-nothing: if one recipient is over budget, the global and collection counters are not charged. The daily budgets are the hard cost ceiling; the hourly budgets bound the rate. A transport failure still consumes the attempted budget. Changing `jwt_secret` changes the HMAC key space; old buckets become unreachable and are pruned.
+
+All policies use fixed windows. A cooldown can therefore allow two requests around a window boundary; the recipient and send limits still bound the burst. Login alerts and plugin `custom` mail share the notification budget, so abuse can exhaust alerts without affecting security mail. Password reset, verification, and passwordless request sends are detached: a send-budget block is logged (`email.rate_limited`) and the request still returns its generic `202`; `202` means "accepted", not "delivered".
+
+`429` responses carry `retryAfterSeconds`, `scope` (`request`, `cooldown`, or `send`), and a `Retry-After` header. The default CORS config exposes `Retry-After`; browser clients can also read the body field. A request endpoint returning `429` is a normal backoff signal, not an account-existence answer. `too_many_attempts` also carries `restart: true`: the challenge is dead and the client must request a new code.
+
+`clientIp` uses `HttpServerRequest.remoteAddress`. It does not trust `X-Forwarded-For` or `X-Real-IP`, which are spoofable without a trusted-proxy configuration. Behind a plain L7 proxy every user shares the proxy's bucket; preserve the peer address at the socket level or plan a `trustProxy` option. A missing peer address skips the IP policy and logs `rate_limit.ip_unavailable`; it never collapses all callers into one `"unknown"` bucket. IPv4-mapped IPv6 collapses to IPv4, and IPv6 buckets by `/64`.
+
+The SQLite store is single-node. A multi-instance deployment needs a shared `RateLimitStore`; the email code does not change when you swap it.
 
 ## Plugins
 
@@ -108,11 +158,11 @@ MiraPlugin.define({
 })
 ```
 
-`onEmailSend` runs serially, may rewrite the message, and may set `skip: true` to cancel the send. Its chain has a 2-second fail-open timeout. `onEmailSent` and `onEmailError` are detached observers. `onEmailError` never fires for `EmailNotConfiguredError`. Plugin layers, `onBootstrap`, and routes may `yield* EmailService`; when email is not configured the referenced service reports `enabled: false`.
+`onEmailSend` runs serially, may rewrite the message, and may set `skip: true` to cancel the send. Its chain has a 2-second fail-open timeout. A skipped message consumes no budget; a rewritten recipient is charged on the rewritten address. `onEmailSent` and `onEmailError` are detached observers. `onEmailError` never fires for `EmailNotConfiguredError` or a rate limit. Plugin layers, `onBootstrap`, and routes may `yield* EmailService`; when email is not configured the referenced service reports `enabled: false`. Plugin sends consume the notification budget and cannot bypass the send limits.
 
 ## Dashboard and local testing
 
-Settings -> App shows the live storage and email descriptions read-only. There are no editable SMTP fields in the dashboard; change the builder and restart. The Email diagnostics card sends a test message only to the authenticated superadmin's own address.
+Settings -> App shows the live storage and email descriptions read-only. There are no editable SMTP fields in the dashboard; change the builder and restart. The Email diagnostics card sends a test message only to the authenticated superadmin's own address. It is limited to five per hour per superadmin and returns `429` with `retryAfterSeconds` when blocked; a shared send-budget block looks the same to the UI.
 
 For local testing, no paid provider is needed:
 

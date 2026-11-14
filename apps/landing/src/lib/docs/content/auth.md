@@ -125,9 +125,9 @@ const Users = AuthCollection.define("users", {
 
 `POST /auth-with-password` returns `{ otpRequired: true, challengeId, expiresAt }` instead of a token when `loginOtp` is required; the client completes it with `verify-otp`. Passwordless login starts at `POST /auth-with-otp/request` and completes at `POST /auth-with-otp`. Password reset uses `POST /password-reset/request` and `POST /password-reset`; email verification uses `POST /verify-email/request` and `POST /verify-email`. All OTP endpoints take `{ challengeId, code }`.
 
-Registration sends a verification OTP when enabled; the create response includes `emailVerification: { challengeId, expiresAt }`. Password login remains allowed while `emailVerified` is false. To restrict an app, use a rule such as `R.auth(Users, "emailVerified").eq(R.literal(true))`.
+Registration sends a verification OTP when enabled; the create response includes `emailVerification: { challengeId, expiresAt }`. If the verification mail is rate-limited, the account is still created and the response carries `verificationDeferred: true` and `verificationRetryAfterSeconds`; the client can call `verify-email/request` later. Password login remains allowed while `emailVerified` is false. To restrict an app, use a rule such as `R.auth(Users, "emailVerified").eq(R.literal(true))`.
 
-The transport is selected in the builder with `.email(SmtpEmail(...))`; without it the flows are disabled and request endpoints return `email_not_configured`. See the [email page](../email/) for the SMTP config, route table, challenge rules, plugin hooks, and local Mailpit testing.
+The transport is selected in the builder with `.email(SmtpEmail(...))`; without it the flows are disabled and request endpoints return `503 email_not_configured`. Request, cooldown, and send limits can return `429` with `retryAfterSeconds`; a limiter store failure on a send returns `503 rate_limit_unavailable`. See the [email page](../email/) for the SMTP config, route table, rate limits, plugin hooks, and local Mailpit testing.
 
 ## Grant manager access with the manage rule
 

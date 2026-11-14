@@ -15,7 +15,7 @@ export type {
   RetryOptions
 } from "./collection.js"
 export { makeCollectionClient } from "./collection.js"
-export { MiraError } from "./errors.js"
+export { isRateLimited, MiraError } from "./errors.js"
 export { createMiraClient } from "./factory.js"
 export type { ProtectedFileFieldClient,PublicFileFieldClient } from "./file.js"
 export { buildFileUrl } from "./file.js"

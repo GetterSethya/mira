@@ -1,6 +1,6 @@
 import type { AnyCollectionDef, FieldsMap } from "@gettersethya/mira-collection"
-import { Effect, MutableRef } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest as HCR } from "effect/http"
+import { Effect, MutableRef, Option } from "effect"
+import { FetchHttpClient, Headers, HttpClient, HttpClientRequest as HCR } from "effect/http"
 import type { HttpBodyError } from "effect/http/HttpBody"
 import type { HttpClientError } from "effect/http/HttpClientError"
 
@@ -87,6 +87,34 @@ function catchAllErrors<T>(
   )
 }
 
+const rateLimitFields = (
+  body: unknown
+): { rateLimitScope?: "request" | "send" | "cooldown"; restart?: boolean } => {
+  if (typeof body !== "object" || body === null) return {}
+  const value = body as { readonly scope?: unknown; readonly restart?: unknown }
+  const scope =
+    value.scope === "request" || value.scope === "send" || value.scope === "cooldown"
+      ? value.scope
+      : undefined
+  return {
+    ...(scope === undefined ? {} : { rateLimitScope: scope }),
+    ...(value.restart === true ? { restart: true } : {})
+  }
+}
+
+const retryAfterFrom = (body: unknown, headers: Headers.Headers): number | undefined => {
+  if (typeof body === "object" && body !== null && "retryAfterSeconds" in body) {
+    const value = Number((body as { readonly retryAfterSeconds?: unknown }).retryAfterSeconds)
+    if (Number.isFinite(value) && value > 0) return value
+  }
+  const header = Headers.get(headers, "retry-after")
+  if (Option.isSome(header)) {
+    const value = Number(header.value)
+    if (Number.isFinite(value) && value > 0) return value
+  }
+  return undefined
+}
+
 function createExecute(
   baseUrl: string,
   authTokenRef: MutableRef.MutableRef<string | null> | null,
@@ -103,7 +131,13 @@ function createExecute(
 
       if (res.status >= 400) {
         const body = yield* res.json
-        return yield* new MiraError({ status: res.status, body })
+        const retryAfterSeconds = retryAfterFrom(body, res.headers)
+        return yield* new MiraError({
+          status: res.status,
+          body,
+          ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+          ...rateLimitFields(body)
+        })
       }
 
       if (res.status === 204) {

@@ -1,4 +1,4 @@
-import { FetchHttpClient, HttpClient, HttpClientRequest as HCR } from "effect/http"
+import { FetchHttpClient, Headers, HttpClient, HttpClientRequest as HCR } from "effect/http"
 import type { HttpBodyError } from "effect/http/HttpBody"
 import { Data, Effect, Exit, Cause, Option } from "effect"
 import type {
@@ -14,9 +14,23 @@ const BASE = "/_dashboard/api"
 export class DashboardApiError extends Data.TaggedError("DashboardApiError")<{
   status: number
   body: unknown
+  retryAfterSeconds?: number
 }> {}
 
 type DashboardEffect<T> = Effect.Effect<T, DashboardApiError, HttpClient.HttpClient>
+
+const retryAfterFrom = (body: unknown, headers: Headers.Headers): number | undefined => {
+  if (typeof body === "object" && body !== null && "retryAfterSeconds" in body) {
+    const value = Number((body as { readonly retryAfterSeconds?: unknown }).retryAfterSeconds)
+    if (Number.isFinite(value) && value > 0) return value
+  }
+  const header = Headers.get(headers, "retry-after")
+  if (Option.isSome(header)) {
+    const value = Number(header.value)
+    if (Number.isFinite(value) && value > 0) return value
+  }
+  return undefined
+}
 
 function execute<T>(req: HCR.HttpClientRequest): DashboardEffect<T> {
   return Effect.gen(function* () {
@@ -26,7 +40,12 @@ function execute<T>(req: HCR.HttpClientRequest): DashboardEffect<T> {
 
     if (res.status >= 400) {
       const body = yield* res.json
-      return yield* new DashboardApiError({ status: res.status, body })
+      const retryAfterSeconds = retryAfterFrom(body, res.headers)
+      return yield* new DashboardApiError({
+        status: res.status,
+        body,
+        ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds })
+      })
     }
 
     if (res.status === 204) {

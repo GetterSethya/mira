@@ -23,6 +23,7 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { hashPassword, signJwt } from "@/http/auth.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 import { TokenStore, TokenStoreLive } from "@/http/token-store.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
@@ -115,7 +116,8 @@ const testLayer = Layer.mergeAll(
   NodeCryptoLayer,
   NodeAuthServiceLayer,
   DialectTest,
-  tokenStoreLayer
+  tokenStoreLayer,
+  rateLimitTestLayer
 )
 
 // ---------------------------------------------------------------------------

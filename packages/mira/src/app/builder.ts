@@ -10,7 +10,14 @@ import { ConsoleTelemetryLayer } from "@/telemetry/index.js"
 
 import { MiraApp } from "./app.js"
 import type { RuleBinding } from "./define-rule.js"
-import type { MiraDatabase, MiraEmail, MiraPlatform, MiraStorage, PlatformServices } from "./types.js"
+import type {
+  MiraDatabase,
+  MiraEmail,
+  MiraPlatform,
+  MiraRateLimits,
+  MiraStorage,
+  PlatformServices
+} from "./types.js"
 
 /**
  * Configuration object for `MiraApp`. Constructed by `MiraBuilder` after all
@@ -31,6 +38,7 @@ export interface MiraAppConfig {
   telemetry: Layer.Layer<never, never, PlatformServices>
   cors: CorsConfig
   migrations?: MigrateOptions
+  rateLimits?: MiraRateLimits
 }
 
 function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfig {
@@ -130,6 +138,20 @@ export class MiraBuilder<Has extends string = never, R = never> {
    */
   email(e: MiraEmail): MiraBuilder<Has | "email", R> {
     return new MiraBuilder({ ...this.#config, email: e })
+  }
+
+  /**
+   * Set an optional rate-limit store and email policy overrides.
+   *
+   * The default store is SQLite. A custom store layer must be self-contained
+   * (`Layer<RateLimitStore, never, never>`). The email policies are partial
+   * overrides of `defaultEmailRateLimitPolicies`.
+   *
+   * @param r - A `MiraRateLimits` object
+   * @returns A new builder (same phantom type — rate limits are optional)
+   */
+  rateLimits(r: MiraRateLimits): MiraBuilder<Has, R> {
+    return new MiraBuilder({ ...this.#config, rateLimits: r })
   }
 
   /**
@@ -249,7 +271,8 @@ export class MiraBuilder<Has extends string = never, R = never> {
       crons: config.crons ?? [],
       telemetry: config.telemetry ?? ConsoleTelemetryLayer,
       cors: config.cors ?? defaultCorsConfig,
-      migrations: config.migrations ?? {}
+      migrations: config.migrations ?? {},
+      rateLimits: config.rateLimits ?? {}
     })
   }
 }

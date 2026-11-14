@@ -20,6 +20,7 @@ import { makeCollectionRouter } from "@/http/router.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 
 // ---------------------------------------------------------------------------
 // Collection definitions
@@ -118,6 +119,7 @@ const testLayer = Layer.mergeAll(
   NodeCryptoLayer,
   NodeAuthServiceLayer,
   DialectTest,
+  rateLimitTestLayer
 )
 
 // ---------------------------------------------------------------------------

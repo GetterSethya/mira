@@ -61,7 +61,9 @@ const one = mira.posts.getOne("abc123").toEffect()
 // Effect<PostRecord, MiraError, HttpClient.HttpClient>
 ```
 
-`.raw()` supplies the fetch-based HTTP client and rejects with the unwrapped `MiraError`, which carries `status` and `body`. `.toEffect()` leaves the `HttpClient` requirement to you, so you can provide a test client or a different transport.
+`.raw()` supplies the fetch-based HTTP client and rejects with the unwrapped `MiraError`, which carries `status`, `body`, and `retryAfterSeconds` when the server supplied one. `.toEffect()` leaves the `HttpClient` requirement to you, so you can provide a test client or a different transport.
+
+Use `isRateLimited(error)` or `error.status === 429` to detect a backoff response. A generic retry schedule does not retry `429`; honor `error.retryAfterSeconds` instead. `error.rateLimitScope` says whether the request, a cooldown, or the mail budget blocked; `error.restart` is true for `too_many_attempts`, meaning the client must request a new code. Email mutations are not idempotent, so do not retry a reset or OTP request without user intent.
 
 `getFirstOrNone` requires a filter and forces `limit: 1`. `getFullList` fetches pages at a default page size of `1000` and returns the flat array; it is a convenience method, not an unbounded export.
 
@@ -144,9 +146,9 @@ const user = await mira.users.register().raw({
 })
 ```
 
-`authWithPassword()` returns either `{ token, record }` or `{ otpRequired: true, challengeId, expiresAt }`. `register()` does not log the user in; call `authWithPassword()` afterwards. It wraps the collection's create endpoint, so open signup requires the collection's `create` rule to allow it. `me()` unwraps the `{ collection, record }` envelope and rejects with a 401 `MiraError` if the token belongs to another collection.
+`authWithPassword()` returns either `{ token, record }` or `{ otpRequired: true, challengeId, expiresAt }`. `register()` does not log the user in; call `authWithPassword()` afterwards. It wraps the collection's create endpoint, so open signup requires the collection's `create` rule to allow it. If the verification mail is blocked, `register()` returns the record with `verificationDeferred: true` and, for a rate limit, `verificationRetryAfterSeconds` instead of `emailVerification`. `me()` unwraps the `{ collection, record }` envelope and rejects with a 401 `MiraError` if the token belongs to another collection.
 
-Email flows add `authConfig()`, `requestPasswordReset()`, `resetPassword()`, `requestEmailVerification()`, `verifyEmail()`, `requestPasswordlessLogin()`, `loginWithPasswordlessOtp()`, `verifyLoginOtp()`, and `resendLoginOtp()`. They are required only for auth collections and are enriched by the TanStack adapter like every other mutation or query. The [email page](../email/) lists the routes and payloads.
+Email flows add `authConfig()`, `requestPasswordReset()`, `resetPassword()`, `requestEmailVerification()`, `verifyEmail()`, `requestPasswordlessLogin()`, `loginWithPasswordlessOtp()`, `verifyLoginOtp()`, and `resendLoginOtp()`. They are required only for auth collections and are enriched by the TanStack adapter like every other mutation or query. Request methods can reject with a `429` `MiraError`; read `retryAfterSeconds` before retrying. The [email page](../email/) lists the routes, payloads, and limits.
 
 ### Browser sessions
 

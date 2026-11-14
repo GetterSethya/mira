@@ -18,6 +18,7 @@ import type { AuthService} from "@/http/auth.js";
 import {hashPassword, signFileToken } from "@/http/auth.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
@@ -130,6 +131,7 @@ const testLayer = Layer.mergeAll(
   NodeCryptoLayer,
   NodeAuthServiceLayer,
   DialectTest,
+  rateLimitTestLayer
 )
 
 // ---------------------------------------------------------------------------

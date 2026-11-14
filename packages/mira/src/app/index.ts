@@ -43,4 +43,11 @@ export type {
   RecordSuccessHook
 } from "./plugin.js"
 export { MiraPlugin, onCollection, onCollectionSuccess } from "./plugin.js"
-export type { MiraDatabase, MiraEmail, MiraPlatform, MiraStorage, PlatformServices } from "./types.js"
+export type {
+  MiraDatabase,
+  MiraEmail,
+  MiraPlatform,
+  MiraRateLimits,
+  MiraStorage,
+  PlatformServices
+} from "./types.js"

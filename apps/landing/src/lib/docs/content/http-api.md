@@ -44,7 +44,7 @@ curl -X POST http://localhost:8080/api/collections/users/auth-with-password \
 
 Success returns `{ token, record }`, with `record` hidden-field-stripped and boolean-decoded, and sets a `mira_token` cookie: `httpOnly`, `sameSite: strict`, `path: /`, 72 hours. A malformed body returns `422`; bad credentials return `403` without revealing the cause. If the auth collection requires login OTP, the response is `{ otpRequired: true, challengeId, expiresAt }` and no session is minted until `POST /auth-with-password/verify-otp` succeeds.
 
-Email flows use the same `challengeId` + six-digit code shape. `POST /auth-with-otp/request` and `/verify-email/request` return `202 { challengeId }` even for unknown addresses; `POST /password-reset/request` returns a generic `202`. Invalid, expired, or replayed codes return `400`, too many attempts return `429`, and a missing transport returns `503 email_not_configured`. See the [email page](../email/) for the full route list and security rules.
+Email flows use the same `challengeId` + six-digit code shape. `POST /auth-with-otp/request` and `/verify-email/request` return `202 { challengeId, expiresAt }` even for unknown addresses; `POST /password-reset/request` returns a generic `202 { message }`. Invalid, expired, or replayed codes return `400`; too many attempts return `429 { error: "too_many_attempts", retryAfterSeconds, restart: true }`; request or cooldown limits return `429 { error: "rate_limited", retryAfterSeconds, scope }`; and a missing transport returns `503 email_not_configured`. Both 429 bodies are accompanied by a `Retry-After` header. See the [email page](../email/) for the full route list and rate-limit rules.
 
 `POST /api/auth/logout` revokes the presented `jti` best-effort and clears the cookie with `204`. `POST /api/auth/logout-all` requires a valid session, bumps the user's generation so earlier tokens are rejected, and returns `204`; without a session it returns `401`. `GET /api/auth/me` returns `{ collection, record }` with hidden fields stripped and booleans decoded.
 
@@ -140,7 +140,9 @@ Domain errors map to a fixed set of responses:
 | `422` | Schema validation failure, malformed JSON, bad filter, bad multipart field, or a file over its own `x-maxSize` |
 | `405` | Write against a view collection, or login against a non-auth collection |
 | `413` | JSON body, multipart budget, or part count over its limit |
-| `502` | Storage backend failure |
+| `429` | Auth email request/cooldown limit (`rate_limited`) or an exhausted OTP attempt budget (`too_many_attempts`); includes `retryAfterSeconds` and `Retry-After` |
+| `502` | Storage backend failure, or a dashboard test email the transport rejected |
+| `503` | `email_not_configured`, `email_unavailable`, or `rate_limit_unavailable` |
 | `500` | SQL error or an unexpected defect |
 
-Errors are JSON with an `error` string and, where useful, `message` or `issues`. CORS headers appear on errors too. Collection and auth handlers emit server spans and annotate auth results as `anonymous`, `invalid_token`, or `authenticated`; file and logout routes are not guaranteed to carry the same annotations.
+Errors are JSON with an `error` string and, where useful, `message`, `issues`, `retryAfterSeconds`, or `scope`. CORS headers appear on errors too. The default CORS config exposes `Retry-After`; a custom config must list it in `exposedHeaders` for browser clients to read the header. Collection and auth handlers emit server spans and annotate auth results as `anonymous`, `invalid_token`, or `authenticated`; file and logout routes are not guaranteed to carry the same annotations.

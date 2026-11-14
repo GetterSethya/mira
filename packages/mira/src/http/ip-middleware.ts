@@ -27,7 +27,8 @@ export const ipAnnotationMiddleware = <E, R>(
         Effect.sync(() => {
           span.attribute("auth.collection", "")
           if (ip !== undefined) {
-            span.attribute("http.client_ip", ip ?? "")
+            // Header-derived and spoofable. Enforcement uses remoteAddress.
+            span.attribute("http.forwarded_for", ip ?? "")
           }
         })
       ),

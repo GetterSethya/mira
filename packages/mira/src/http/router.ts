@@ -11,6 +11,7 @@ import { AppConfig } from "@/config/index.js"
 import type { CryptoService } from "@/crypto/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { EmailService } from "@/email/types.js"
+import { RateLimitKeySecret, RateLimiter } from "@/rate-limit/index.js"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
 import type { FileStorage } from "@/storage/storage.js"
@@ -37,6 +38,8 @@ type Ms =
   | AuthService
   | CryptoService
   | Dialect
+  | RateLimiter
+  | RateLimitKeySecret
 
 const AuthBodySchema = Schema.Struct({
   email: Schema.String,
@@ -63,6 +66,24 @@ const decodeBody = <S extends Schema.Constraint>(
         { status: 422 }
       )
     )
+  )
+
+const decodeEmailBody = (
+  req: HttpServerRequest.HttpServerRequest
+): Effect.Effect<{ readonly email: string }, HttpServerResponse.HttpServerResponse> =>
+  decodeBody(req, AuthEmailBodySchema).pipe(
+    Effect.flatMap(({ email }) => {
+      const trimmed = email.trim()
+      if (trimmed.length === 0 || !trimmed.includes("@") || /\s/.test(trimmed)) {
+        return Effect.fail(
+          HttpServerResponse.jsonUnsafe(
+            { error: "validation_failed", issues: ["Invalid email address"] },
+            { status: 422 }
+          )
+        )
+      }
+      return Effect.succeed({ email: trimmed })
+    })
   )
 
 /**
@@ -282,21 +303,47 @@ export function makeCollectionRouter(
         const address = record["email"]
         if (email.enabled && typeof address === "string") {
           const verification = yield* requestEmailVerification(col, address, clientIp(req)).pipe(
-            catchAuthEmailErrors,
-            Effect.catch((response) => Effect.succeed(response))
+            Effect.map((result) => ({ kind: "issued" as const, ...result })),
+            Effect.catchTags({
+              RateLimitedError: (error) =>
+                Effect.succeed({
+                  kind: "deferred" as const,
+                  retryAfterSeconds: error.retryAfterSeconds
+                }),
+              RateLimitUnavailableError: () => Effect.succeed({ kind: "deferred" as const }),
+              EmailNotConfiguredError: () => Effect.succeed({ kind: "deferred" as const }),
+              EmailFlowDisabledError: () => Effect.succeed({ kind: "deferred" as const })
+            }),
+            Effect.catch(() =>
+              Effect.fail(
+                HttpServerResponse.jsonUnsafe({ error: "internal_error" }, { status: 500 })
+              )
+            )
           )
-          if ("challengeId" in verification) {
+          if (verification.kind === "issued") {
             return HttpServerResponse.jsonUnsafe(
               {
                 ...record,
                 emailVerification: {
                   challengeId: verification.challengeId,
-                  expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+                  expiresAt: verification.expiresAt
                 }
               },
               { status: 201 }
             )
           }
+          const retryAfterSeconds =
+            "retryAfterSeconds" in verification ? verification.retryAfterSeconds : undefined
+          return HttpServerResponse.jsonUnsafe(
+            {
+              ...record,
+              verificationDeferred: true,
+              ...(retryAfterSeconds === undefined
+                ? {}
+                : { verificationRetryAfterSeconds: retryAfterSeconds })
+            },
+            { status: 201 }
+          )
         }
       }
       return HttpServerResponse.jsonUnsafe(record, { status: 201 })
@@ -445,7 +492,7 @@ export function makeCollectionRouter(
 
   const passwordResetRequestRoute = collectionRoute("password-reset-request", (col, _ctx, req) =>
     Effect.gen(function* () {
-      const { email } = yield* decodeBody(req, AuthEmailBodySchema)
+      const { email } = yield* decodeEmailBody(req)
       yield* requestPasswordReset(col, email, clientIp(req)).pipe(catchAuthEmailErrors)
       return HttpServerResponse.jsonUnsafe(
         { message: "If the address exists, a reset link has been sent." },
@@ -470,7 +517,7 @@ export function makeCollectionRouter(
 
   const verifyEmailRequestRoute = collectionRoute("verify-email-request", (col, _ctx, req) =>
     Effect.gen(function* () {
-      const { email } = yield* decodeBody(req, AuthEmailBodySchema)
+      const { email } = yield* decodeEmailBody(req)
       const result = yield* requestEmailVerification(col, email, clientIp(req)).pipe(catchAuthEmailErrors)
       return HttpServerResponse.jsonUnsafe(result, { status: 202 })
     })
@@ -486,7 +533,7 @@ export function makeCollectionRouter(
 
   const passwordlessRequestRoute = collectionRoute("passwordless-request", (col, _ctx, req) =>
     Effect.gen(function* () {
-      const { email } = yield* decodeBody(req, AuthEmailBodySchema)
+      const { email } = yield* decodeEmailBody(req)
       const result = yield* requestPasswordlessLogin(col, email, clientIp(req)).pipe(catchAuthEmailErrors)
       return HttpServerResponse.jsonUnsafe(result, { status: 202 })
     })

@@ -4,6 +4,8 @@ import type { SqlError } from "effect/sql"
 
 import type { AuthEmailError } from "@/auth/errors.js"
 import type { CollectionError } from "@/collection-service/errors.js"
+import type { EmailNotConfiguredError, EmailSendError } from "@/email/types.js"
+import type { RateLimitedError } from "@/rate-limit/errors.js"
 import type { AuthError } from "./auth.js"
 import type { FileStorageError } from "@/storage/storage.js"
 
@@ -79,13 +81,22 @@ export const catchCollectionErrors = <A, R>(
       ),
   })
 
+const withRetryAfter = (
+  response: HttpServerResponse.HttpServerResponse,
+  seconds: number
+): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.setHeader(response, "Retry-After", String(Math.max(1, seconds)))
+
 /**
- * Maps auth-email failures to the public status table. `EmailNotConfiguredError`
- * and `EmailSendError` are mapped as well so a route cannot accidentally expose a
- * generic 500.
+ * Maps auth-email failures to the public status table. Every tag in
+ * `AuthEmailError`, plus the transport errors, has an explicit arm.
  */
 export const catchAuthEmailErrors = <A, R>(
-  eff: Effect.Effect<A, AuthEmailError | AuthError | SqlError.SqlError, R>
+  eff: Effect.Effect<
+    A,
+    AuthEmailError | AuthError | SqlError.SqlError | EmailNotConfiguredError | EmailSendError,
+    R
+  >
 ): Effect.Effect<A, HttpServerResponse.HttpServerResponse, R> =>
   Effect.catchTags(eff, {
     AuthError: () =>
@@ -96,21 +107,53 @@ export const catchAuthEmailErrors = <A, R>(
       Effect.fail(HttpServerResponse.jsonUnsafe({ error: "invalid_token" }, { status: 400 as const })),
     TooManyAttemptsError: (e) =>
       Effect.fail(
-        HttpServerResponse.jsonUnsafe(
-          { error: "too_many_attempts", retryAfterSeconds: e.retryAfterSeconds },
-          { status: 429 as const }
+        withRetryAfter(
+          HttpServerResponse.jsonUnsafe(
+            {
+              error: "too_many_attempts",
+              retryAfterSeconds: e.retryAfterSeconds,
+              restart: true
+            },
+            { status: 429 as const }
+          ),
+          e.retryAfterSeconds
         )
       ),
-    AuthEmailRateLimitedError: (e) =>
+    RateLimitedError: (e) =>
+      Effect.fail(
+        withRetryAfter(
+          HttpServerResponse.jsonUnsafe(
+            {
+              error: "rate_limited",
+              retryAfterSeconds: e.retryAfterSeconds,
+              scope: e.scope
+            },
+            { status: 429 as const }
+          ),
+          e.retryAfterSeconds
+        )
+      ),
+    RateLimitUnavailableError: () =>
       Effect.fail(
         HttpServerResponse.jsonUnsafe(
-          { error: "rate_limited", retryAfterSeconds: e.retryAfterSeconds },
-          { status: 429 as const }
+          { error: "rate_limit_unavailable" },
+          { status: 503 as const }
+        )
+      ),
+    EmailNotConfiguredError: () =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "email_not_configured" },
+          { status: 503 as const }
         )
       ),
     EmailFlowDisabledError: () =>
       Effect.fail(HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 as const })),
     EmailUnavailableError: () =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe({ error: "email_unavailable" }, { status: 503 as const })
+      ),
+    EmailSendError: () =>
       Effect.fail(
         HttpServerResponse.jsonUnsafe({ error: "email_unavailable" }, { status: 503 as const })
       ),

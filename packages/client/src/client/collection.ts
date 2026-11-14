@@ -601,7 +601,9 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     methodOptions?: { retryOptions?: RetryOptions }
   ): Effect.Effect<T, MiraError, HttpClient.HttpClient> {
     const schedule = methodOptions?.retryOptions?.schedule ?? defaultRetryOptions?.schedule
-    return schedule ? Effect.retry(effect, schedule) : effect
+    return schedule
+      ? Effect.retry(effect, { schedule, while: (error: MiraError) => error.status !== 429 })
+      : effect
   }
 
   const fileFields = makeFileFields<F>(

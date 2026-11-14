@@ -20,7 +20,19 @@ export * from "./hooks/index.js"
 export type { CursorPage,RequestCtx } from "./collection-service/index.js"
 export { CollectionService, makeCollectionServiceLayer } from "./collection-service/index.js"
 export { AppConfig, AppConfigLive } from "./config/index.js"
-export { CryptoService } from "./crypto/index.js"
+export {
+  bytesToBase64Url,
+  CryptoHashError,
+  CryptoService,
+  hmacSha256Base64Url,
+  sha256Base64Url
+} from "./crypto/index.js"
+export * from "./rate-limit/index.js"
+export {
+  RateLimiterLive,
+  RateLimitKeySecretLive,
+  SqliteRateLimitStoreLive
+} from "./rate-limit/sqlite.js"
 export * from "./email/index.js"
 export {
   AuthChallengeStore,

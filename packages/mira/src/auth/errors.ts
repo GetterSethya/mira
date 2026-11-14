@@ -1,5 +1,7 @@
 import { Data } from "effect"
 
+import type { RateLimitedError, RateLimitUnavailableError } from "@/rate-limit/errors.js"
+
 export class ChallengeCryptoError extends Data.TaggedError("ChallengeCryptoError")<{
   readonly message: string
 }> {}
@@ -16,10 +18,6 @@ export class TooManyAttemptsError extends Data.TaggedError("TooManyAttemptsError
   readonly retryAfterSeconds: number
 }> {}
 
-export class AuthEmailRateLimitedError extends Data.TaggedError("AuthEmailRateLimitedError")<{
-  readonly retryAfterSeconds: number
-}> {}
-
 export class EmailFlowDisabledError extends Data.TaggedError("EmailFlowDisabledError")<{
   readonly collection: string
 }> {}
@@ -33,6 +31,7 @@ export type AuthEmailError =
   | InvalidCodeError
   | InvalidResetTokenError
   | TooManyAttemptsError
-  | AuthEmailRateLimitedError
+  | RateLimitedError
+  | RateLimitUnavailableError
   | EmailFlowDisabledError
   | EmailUnavailableError

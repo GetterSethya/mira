@@ -15,6 +15,7 @@ import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, makeFileStorageLayer } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
@@ -100,7 +101,8 @@ function makeServerLayer(storageLayer: Layer.Layer<FileStorage, never, FileSyste
     AppConfigTest,
     NodeCryptoLayer,
     NodeAuthServiceLayer,
-    DialectTest
+    DialectTest,
+    rateLimitTestLayer
   )
 }
 

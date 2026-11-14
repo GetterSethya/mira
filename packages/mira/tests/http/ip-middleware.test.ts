@@ -20,7 +20,7 @@ function makeIpTestLayer(queue: Queue.Queue<CompletedSpan>) {
 }
 
 function findSpanWithIp(spans: ReadonlyArray<CompletedSpan>): CompletedSpan | undefined {
-  return spans.find((s) => "http.client_ip" in s.attributes)
+  return spans.find((s) => "http.forwarded_for" in s.attributes)
 }
 
 describe("ipAnnotationMiddleware", () => {
@@ -36,7 +36,7 @@ describe("ipAnnotationMiddleware", () => {
       }).pipe(Effect.provide(makeIpTestLayer(queue)))
       const spans = (yield* Queue.clear(queue))
       const span = findSpanWithIp(spans)
-      expect(span?.attributes["http.client_ip"]).toBe("1.2.3.4")
+      expect(span?.attributes["http.forwarded_for"]).toBe("1.2.3.4")
     })
   )
 
@@ -52,7 +52,7 @@ describe("ipAnnotationMiddleware", () => {
       }).pipe(Effect.provide(makeIpTestLayer(queue)))
       const spans = (yield* Queue.clear(queue))
       const span = findSpanWithIp(spans)
-      expect(span?.attributes["http.client_ip"]).toBe("1.2.3.4")
+      expect(span?.attributes["http.forwarded_for"]).toBe("1.2.3.4")
     })
   )
 
@@ -68,11 +68,11 @@ describe("ipAnnotationMiddleware", () => {
       }).pipe(Effect.provide(makeIpTestLayer(queue)))
       const spans = (yield* Queue.clear(queue))
       const span = findSpanWithIp(spans)
-      expect(span?.attributes["http.client_ip"]).toBe("2.3.4.5")
+      expect(span?.attributes["http.forwarded_for"]).toBe("2.3.4.5")
     })
   )
 
-  it.effect("no IP headers — http.client_ip attribute absent", () =>
+  it.effect("no IP headers — http.forwarded_for attribute absent", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
       yield* Effect.gen(function* () {

@@ -20,6 +20,16 @@ import { HttpServerFactory } from "@/http/server-factory.js"
 import { TokenStoreLive } from "@/http/token-store.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 import type { NamedSchema } from "@/migrator/types.js"
+import {
+  assertValidEmailRateLimitPolicies,
+  defaultEmailRateLimitPolicies,
+  EmailRateLimitConfig
+} from "@/rate-limit/index.js"
+import {
+  RateLimiterLive,
+  RateLimitKeySecretLive,
+  SqliteRateLimitStoreLive
+} from "@/rate-limit/sqlite.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { ThumbnailServicePhotonLive } from "@/thumbnail/index.js"
 
@@ -200,25 +210,38 @@ export class MiraApp<R = never> {
       Layer.provideMerge(platform.layer)
     )
 
-    // Mid: Repository + Migrator + AppConfig + durable TokenStore + challenge store
+    // Rate limiting: the store is the swap point. The default is SQLite.
+    const appConfigLayer = AppConfigLive
+    const rateLimitStoreLayer = this.#config.rateLimits?.store ?? SqliteRateLimitStoreLive
+    const rateLimiterLayer = RateLimiterLive.pipe(Layer.provide(rateLimitStoreLayer))
+    const rateLimitKeySecretLayer = RateLimitKeySecretLive.pipe(Layer.provide(appConfigLayer))
+    const emailRateLimitPolicies = {
+      ...defaultEmailRateLimitPolicies,
+      ...this.#config.rateLimits?.emailPolicies
+    }
+    assertValidEmailRateLimitPolicies(emailRateLimitPolicies)
+    const emailRateLimitConfigLayer = Layer.succeed(EmailRateLimitConfig, emailRateLimitPolicies)
+
+    // Mid: Repository + Migrator + AppConfig + durable TokenStore + challenge and rate stores
     const mid = Layer.mergeAll(
       RepositoryLive,
       MigratorLive,
-      AppConfigLive,
+      appConfigLayer,
       TokenStoreLive,
-      AuthChallengeStoreLive
+      AuthChallengeStoreLive,
+      rateLimitStoreLayer,
+      rateLimiterLayer,
+      rateLimitKeySecretLayer,
+      emailRateLimitConfigLayer
     ).pipe(Layer.provideMerge(foundation))
 
     // Hook service is independent of the collection service; email hooks need it early.
     const hookServiceLayer = makeHookServiceLayer(allPlugins)
 
     // Email: base transport after AppConfig, then the hook decorator.
-    const baseEmail: Layer.Layer<never, never, never> = email.layer.pipe(
-      Layer.provide(mid),
-      Layer.orDie
-    )
-    const hookedEmail: Layer.Layer<never, never, never> = makeHookedEmailServiceLayer().pipe(
-      Layer.provide(Layer.merge(baseEmail, hookServiceLayer))
+    const baseEmail = email.layer.pipe(Layer.provide(mid), Layer.orDie)
+    const hookedEmail = makeHookedEmailServiceLayer().pipe(
+      Layer.provide(Layer.mergeAll(baseEmail, hookServiceLayer, mid))
     )
 
     // Extras: plugin layers run after mid + email so they can depend on both

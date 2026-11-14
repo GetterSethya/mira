@@ -28,6 +28,12 @@ published by CI.
   `onEmailSend`, `onEmailSent`, and `onEmailError`.
 - **Local email testing.** `docker-compose.mailpit.yml`, plus an in-process `smtp-server`
   test suite.
+- **Rate-limit engine and email budgets.** A reusable `RateLimiter` with an in-memory
+  store for tests and a swappable `RateLimitStore` (SQLite by default). Auth email requests
+  are limited per IP and recipient; sends are limited per recovery, login, or notification
+  class, collection, and recipient. Daily caps bound cost. `429` responses
+  carry `retryAfterSeconds` and `Retry-After`. The builder accepts `.rateLimits({ store,
+  emailPolicies })`.
 
 ### Changed
 
@@ -38,6 +44,13 @@ published by CI.
   `{ otpRequired: true, challengeId, expiresAt }`. This is a pre-1.0 type change.
 - **Legacy `use_s3` is non-fatal.** An incomplete `use_s3=true` row logs a warning and
   yields no S3 config instead of crashing boot.
+- **Auth email request outcomes.** Request endpoints now return `503 email_not_configured`
+  when no transport is configured and can return `429 rate_limited`. Signup returns
+  `verificationDeferred: true` when verification mail is blocked. `EmailService.send` gains
+  `RateLimitedError` and `RateLimitUnavailableError` in its error union. These are pre-1.0
+  client-visible changes.
+- **Spans use `http.forwarded_for`.** The header-derived IP attribute is no longer named
+  `http.client_ip`; enforcement uses `remoteAddress`.
 
 ### Fixed
 

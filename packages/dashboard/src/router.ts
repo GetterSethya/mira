@@ -1,7 +1,15 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { FileSystem, Path } from "effect"
 import { SqlClient } from "effect/sql"
-import type { AppConfig, CollectionService, CronService, FileStorage, Repository } from "@gettersethya/mira"
+import type {
+  AppConfig,
+  CollectionService,
+  CronService,
+  FileStorage,
+  RateLimiter,
+  RateLimitKeySecret,
+  Repository
+} from "@gettersethya/mira"
 import { Cause, Effect, Option, Tracer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { bootstrapStatusRoute } from "./api/bootstrap-status.js"
@@ -121,6 +129,8 @@ type DashboardRouteServices =
   | SqlClient.SqlClient
   | Repository
   | FileStorage
+  | RateLimiter
+  | RateLimitKeySecret
 
 export function makeDashboardRouter(
   _collections: ReadonlyArray<AnyCollectionDef>

@@ -16,6 +16,7 @@ import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
@@ -154,7 +155,8 @@ function makeCachedSecurityLayer(collections: ReadonlyArray<typeof CACHED_COLLEC
     NodeAuthServiceLayer,
     DialectTest,
     NodeFileSystem.layer,
-    NodePath.layer
+    NodePath.layer,
+    rateLimitTestLayer
   )
 }
 

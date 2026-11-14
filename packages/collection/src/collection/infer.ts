@@ -279,6 +279,10 @@ export type AuthWithPasswordResult<F extends FieldsMap> =
 
 export type RegisterResult<F extends FieldsMap> = InferRecord<F> & {
   readonly emailVerification?: AuthVerificationEnvelope
+  /** True when the account was created but the verification mail was deferred. */
+  readonly verificationDeferred?: boolean
+  /** Seconds to wait before calling `verify-email/request` when verification was deferred. */
+  readonly verificationRetryAfterSeconds?: number
 }
 
 export type AuthConfig = {
@@ -293,7 +297,10 @@ export type AuthConfig = {
 }
 
 export type AuthOtpRequestInput = { readonly email: string }
-export type AuthOtpRequestResult = { readonly challengeId: string }
+export type AuthOtpRequestResult = {
+  readonly challengeId: string
+  readonly expiresAt: string
+}
 export type AuthOtpLoginInput = { readonly challengeId: string; readonly code: string }
 export type AuthLoginOtpVerifyInput = { readonly challengeId: string; readonly code: string }
 export type AuthResendLoginOtpInput = { readonly challengeId: string }

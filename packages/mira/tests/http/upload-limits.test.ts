@@ -29,6 +29,7 @@ import {
   GLOBAL_MAX_UPLOAD_BYTES
 } from "@/http/files.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, makeFileStorageLayer } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
@@ -106,7 +107,8 @@ const testLayer = Layer.mergeAll(
   NodeAuthServiceLayer,
   DialectTest,
   NodeFileSystem.layer,
-  NodePath.layer
+  NodePath.layer,
+  rateLimitTestLayer
 )
 
 // ---------------------------------------------------------------------------

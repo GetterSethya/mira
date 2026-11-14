@@ -8,6 +8,8 @@ import type { Dialect } from "@/dialect/dialect.js"
 import type { MailTransport } from "@/email/types.js"
 import type { AuthService } from "@/http/auth.js"
 import type { HttpServerFactory } from "@/http/server-factory.js"
+import type { EmailRateLimitPolicies } from "@/rate-limit/policies.js"
+import type { RateLimitStore } from "@/rate-limit/types.js"
 import type { FileStorage } from "@/storage/storage.js"
 
 /**
@@ -75,4 +77,14 @@ export interface MiraStorage {
 export interface MiraEmail {
   /** `EmailService` is a referenced service; the layer output type is never. */
   readonly layer: Layer.Layer<never, never, PlatformServices | AppConfig>
+}
+
+/**
+ * Optional rate-limit configuration. The default store is SQLite; a custom
+ * store layer must be self-contained so the app does not need to know its
+ * backend. `emailPolicies` overrides the default limits for the email flows.
+ */
+export interface MiraRateLimits {
+  readonly store?: Layer.Layer<RateLimitStore, never, never>
+  readonly emailPolicies?: Partial<EmailRateLimitPolicies>
 }

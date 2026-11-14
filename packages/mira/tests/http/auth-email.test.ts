@@ -20,6 +20,7 @@ import { makeCollectionRouter } from "@/http/router.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 
 const UsersDef = AuthCollection.define(
   "users",
@@ -119,7 +120,8 @@ const testLayer = Layer.mergeAll(
   NodeCryptoLayer,
   NodeAuthServiceLayer,
   DialectTest,
-  Layer.succeed(EmailService, fakeEmail)
+  Layer.succeed(EmailService, fakeEmail),
+  rateLimitTestLayer
 )
 
 const setupTables = Effect.gen(function* () {

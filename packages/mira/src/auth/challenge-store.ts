@@ -13,7 +13,6 @@ export interface ChallengeRecord {
   readonly expiresAt: number
   readonly consumedAt: number | null
   readonly attempts: number
-  readonly requestIp: string | null
   readonly createdAt: number
 }
 
@@ -53,19 +52,10 @@ export interface AuthChallengeStoreShape {
     now: number
   ): Effect.Effect<boolean, SqlError.SqlError>
   consumeAllForUser(collection: string, userId: string, now: number): Effect.Effect<void, SqlError.SqlError>
-  countRecentForUser(
-    collection: string,
-    userId: string,
-    purpose: ChallengePurpose,
-    since: number
-  ): Effect.Effect<number, SqlError.SqlError>
-  countRecentForIp(ip: string, purpose: ChallengePurpose, since: number): Effect.Effect<number, SqlError.SqlError>
-  logRequest(ip: string, purpose: ChallengePurpose, now: number): Effect.Effect<void, SqlError.SqlError>
   deleteExpired(now: number): Effect.Effect<void, SqlError.SqlError>
 }
 
 const liveChallenges = new Map<string, ChallengeRecord>()
-const requestLog: Array<{ ip: string; purpose: ChallengePurpose; createdAt: number }> = []
 
 const key = (collection: string, userId: string, purpose: ChallengePurpose) =>
   `${collection}\u0000${userId}\u0000${purpose}`
@@ -153,31 +143,10 @@ export const inMemoryAuthChallengeStore: AuthChallengeStoreShape = {
         }
       }
     }),
-  countRecentForUser: (collection, userId, purpose, since) =>
-    Effect.sync(
-      () =>
-        [...liveChallenges.values()].filter(
-          (r) =>
-            r.collection === collection &&
-            r.userId === userId &&
-            r.purpose === purpose &&
-            r.createdAt >= since
-        ).length
-    ),
-  countRecentForIp: (ip, purpose, since) =>
-    Effect.sync(() => requestLog.filter((r) => r.ip === ip && r.purpose === purpose && r.createdAt >= since).length),
-  logRequest: (ip, purpose, now) =>
-    Effect.sync(() => {
-      requestLog.push({ ip, purpose, createdAt: now })
-    }),
   deleteExpired: (now) =>
     Effect.sync(() => {
       for (const [id, record] of liveChallenges) {
         if (record.expiresAt <= now) liveChallenges.delete(id)
-      }
-      for (let i = requestLog.length - 1; i >= 0; i--) {
-        const entry = requestLog[i]
-        if (entry !== undefined && entry.createdAt < now - 60 * 60 * 1000) requestLog.splice(i, 1)
       }
     })
 }
@@ -195,7 +164,6 @@ interface ChallengeRow {
   readonly expires_at: number
   readonly consumed_at: number | null
   readonly attempts: number
-  readonly request_ip: string | null
   readonly created_at: number
 }
 
@@ -208,7 +176,6 @@ const toRecord = (row: ChallengeRow): ChallengeRecord => ({
   expiresAt: Number(row.expires_at),
   consumedAt: row.consumed_at === null ? null : Number(row.consumed_at),
   attempts: Number(row.attempts),
-  requestIp: row.request_ip,
   createdAt: Number(row.created_at)
 })
 
@@ -227,7 +194,6 @@ export const AuthChallengeStoreLive = Layer.effect(
         expires_at INTEGER NOT NULL,
         consumed_at INTEGER,
         attempts INTEGER NOT NULL DEFAULT 0,
-        request_ip TEXT,
         created_at INTEGER NOT NULL
       )`
     )
@@ -247,17 +213,6 @@ export const AuthChallengeStoreLive = Layer.effect(
     yield* sql.unsafe(
       `CREATE INDEX IF NOT EXISTS _auth_challenges_expires ON _auth_challenges (expires_at)`
     )
-    yield* sql.unsafe(
-      `CREATE TABLE IF NOT EXISTS _auth_request_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ip TEXT NOT NULL,
-        purpose TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      )`
-    )
-    yield* sql.unsafe(
-      `CREATE INDEX IF NOT EXISTS _auth_request_log_ip ON _auth_request_log (ip, purpose, created_at)`
-    )
 
     const create: AuthChallengeStoreShape["create"] = (record) =>
       sql`
@@ -270,7 +225,6 @@ export const AuthChallengeStoreLive = Layer.effect(
           expires_at: record.expiresAt,
           consumed_at: record.consumedAt,
           attempts: record.attempts,
-          request_ip: record.requestIp,
           created_at: record.createdAt
         })}
       `.pipe(Effect.asVoid)
@@ -357,35 +311,8 @@ export const AuthChallengeStoreLive = Layer.effect(
         WHERE collection = ${collection} AND user_id = ${userId} AND consumed_at IS NULL
       `.pipe(Effect.asVoid)
 
-    const countRecentForUser: AuthChallengeStoreShape["countRecentForUser"] = (collection, userId, purpose, since) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ count: number }>`
-          SELECT COUNT(*) AS count FROM ${sql("_auth_challenges")}
-          WHERE collection = ${collection} AND user_id = ${userId} AND purpose = ${purpose}
-            AND created_at >= ${since}
-        `
-        return Number(rows[0]?.count ?? 0)
-      })
-
-    const countRecentForIp: AuthChallengeStoreShape["countRecentForIp"] = (ip, purpose, since) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ count: number }>`
-          SELECT COUNT(*) AS count FROM ${sql("_auth_request_log")}
-          WHERE ip = ${ip} AND purpose = ${purpose} AND created_at >= ${since}
-        `
-        return Number(rows[0]?.count ?? 0)
-      })
-
-    const logRequest: AuthChallengeStoreShape["logRequest"] = (ip, purpose, now) =>
-      sql`
-        INSERT INTO ${sql("_auth_request_log")} ${sql.insert({ ip, purpose, created_at: now })}
-      `.pipe(Effect.asVoid)
-
     const deleteExpired: AuthChallengeStoreShape["deleteExpired"] = (now) =>
-      Effect.gen(function* () {
-        yield* sql`DELETE FROM ${sql("_auth_challenges")} WHERE expires_at <= ${now}`
-        yield* sql`DELETE FROM ${sql("_auth_request_log")} WHERE created_at < ${now - 60 * 60 * 1000}`
-      })
+      sql`DELETE FROM ${sql("_auth_challenges")} WHERE expires_at <= ${now}`.pipe(Effect.asVoid)
 
     return {
       create,
@@ -397,9 +324,6 @@ export const AuthChallengeStoreLive = Layer.effect(
       consumeById,
       consumeToken,
       consumeAllForUser,
-      countRecentForUser,
-      countRecentForIp,
-      logRequest,
       deleteExpired
     }
   })

@@ -9,6 +9,7 @@ Mira assembles a server from four required builder steps and a few optional ones
 | `storage` | yes | `FileStorage` for uploads, downloads, thumbnails |
 | `collections` | yes | Base, auth, and view definitions |
 | `email` | no | SMTP `EmailService`; defaults to a no-op |
+| `rateLimits` | no | Custom `RateLimitStore` and email policy overrides |
 | `rules` | no | Server-only bindings merged onto schemas |
 | `crons` | no | Scoped scheduled jobs |
 | `telemetry` | no | Tracer and logger layer; defaults to console |
@@ -94,7 +95,9 @@ SQLite is the only database backend today. `SqliteDatabase({ filename })` wires 
 
 `.email(SmtpEmail(...))` selects an SMTP transport; without it Mira uses a no-op `EmailService`. Host, port, TLS, auth, From, and the reset URL are resolved once at layer build; every field also accepts an Effect `Config` value. The transport is optional because local development and clients that do not use email should not need an SMTP server.
 
-`SmtpEmail` delegates socket work to the platform `MailTransport`, so the core service does not import `nodemailer`; only the Node platform does. The [email page](../email/) covers auth-collection options, routes, plugin hooks, and Mailpit.
+`SmtpEmail` delegates socket work to the platform `MailTransport`, so the core service does not import `nodemailer`; only the Node platform does. The [email page](../email/) covers auth-collection options, routes, rate limits, plugin hooks, and Mailpit.
+
+Rate limits use a `RateLimitStore` service. The app's default store is SQLite (`_rate_limits`); tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQLite store is single-node; a multi-instance deployment needs a shared store. Request policies fail open on store errors; send policies fail closed with `503 rate_limit_unavailable`.
 
 ## Migrations at boot
 

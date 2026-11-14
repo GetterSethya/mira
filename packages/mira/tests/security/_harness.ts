@@ -23,6 +23,7 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { hashPassword } from "@/http/auth.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { rateLimitTestLayer } from "../_rate-limit.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound, makeFileStorageLayer } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
@@ -161,7 +162,8 @@ export function makeSecurityLayer(storageDirectory?: string) {
     NodeAuthServiceLayer,
     DialectTest,
     NodeFileSystem.layer,
-    NodePath.layer
+    NodePath.layer,
+    rateLimitTestLayer
   )
 }
 

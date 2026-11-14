@@ -19,7 +19,6 @@ const record = (overrides: Partial<ChallengeRecord> = {}): ChallengeRecord => ({
   expiresAt: Date.now() + 60_000,
   consumedAt: null,
   attempts: 0,
-  requestIp: "127.0.0.1",
   createdAt: Date.now(),
   ...overrides
 })
@@ -39,13 +38,20 @@ const exercise = (label: string) => (store: AuthChallengeStoreShape) =>
     expect(second, label).toEqual({ attempts: 2, consumed: true })
     const afterConsume = yield* store.findByTokenHash("users", "login_otp", "hash-1")
     expect(afterConsume, label).toBeUndefined()
-    yield* store.logRequest("127.0.0.1", "login_otp", now)
-    expect(yield* store.countRecentForIp("127.0.0.1", "login_otp", now - 1000), label).toBe(1)
-    expect(yield* store.countRecentForUser("users", "user-1", "login_otp", now - 1000), label).toBe(1)
+
+    yield* store.create(
+      record({
+        id: "expired",
+        createdAt: now - 120_000,
+        expiresAt: now - 60_000
+      })
+    )
+    yield* store.deleteExpired(now)
+    expect(yield* store.findById("users", "expired", "login_otp"), label).toBeUndefined()
   })
 
 describe("AuthChallengeStore", () => {
-  it.effect("in-memory default supports atomic attempts and counters", () =>
+  it.effect("in-memory default supports atomic attempts and expiry pruning", () =>
     exercise("memory")(inMemoryAuthChallengeStore)
   )
 

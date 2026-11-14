@@ -1,5 +1,7 @@
 import { Context, Data, Effect } from "effect"
 
+import type { RateLimitedError, RateLimitUnavailableError } from "@/rate-limit/errors.js"
+
 /** A single outgoing email message. */
 export interface EmailMessage {
   readonly to: string | ReadonlyArray<string>
@@ -48,7 +50,11 @@ export interface EmailSendOptions {
   readonly userId?: string
 }
 
-export type EmailError = EmailNotConfiguredError | EmailSendError
+export type EmailError =
+  | EmailNotConfiguredError
+  | EmailSendError
+  | RateLimitedError
+  | RateLimitUnavailableError
 
 export interface EmailServiceShape {
   readonly enabled: boolean

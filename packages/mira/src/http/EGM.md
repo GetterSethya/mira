@@ -32,7 +32,7 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `defaultCorsConfig` — permissive development default (reflecting predicate + credentials): `[cors.ts:defaultCorsConfig]`
 - `assertValidCorsConfig` — throws on wildcard + credentials: `[cors.ts:assertValidCorsConfig]`
 - `makeCorsMiddleware` — maps `CorsConfig` onto `HttpMiddleware.cors`: `[cors.ts:makeCorsMiddleware]`
-- `ipAnnotationMiddleware` — annotates the root span with `http.client_ip` from `x-forwarded-for` / `x-real-ip`: `[ip-middleware.ts:ipAnnotationMiddleware]`
+- `ipAnnotationMiddleware` — annotates the root span with `http.forwarded_for` from `x-forwarded-for` / `x-real-ip`; this is observability only, not the enforcement key: `[ip-middleware.ts:ipAnnotationMiddleware]`
 - `AuthService` — service tag with `hashPassword` / `verifyPassword`: `[auth.ts:AuthService]`
 - `hashPassword`, `verifyPassword` — service-delegating helpers: `[auth.ts:hashPassword]`
 - `signJwt`, `verifyJwt` — session JWTs (`typ: "session"`, HS256, 72 h), carrying `jti`, `exp`, `pwf`, `gen`: `[auth.ts:signJwt]`
@@ -57,6 +57,8 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 ## Invariants
 
 - Status mapping: `NotFoundError` 404, `ForbiddenError` 403, `ValidationError` 422, `ReadOnlyError` 405, `PayloadTooLargeError` 413, `FileStorageError` 502, `SqlError` 500: `[errors.ts:catchCollectionErrors]`
+- Auth email mapping: `RateLimitedError`/`TooManyAttemptsError` 429 with `Retry-After`, `RateLimitUnavailableError`/`EmailNotConfiguredError`/`EmailUnavailableError`/`EmailSendError` 503, `EmailFlowDisabledError` 404, `InvalidCodeError`/`InvalidResetTokenError` 400: `[errors.ts:catchAuthEmailErrors]`
+- Auth email request order: feature and transport check -> cooldown -> request limits (IP, recipient) -> user lookup -> challenge -> send. The cooldown and pre-lookup checks are account-agnostic: `[auth-email.ts:consumeEmailRequestLimits]`
 - JSON request bodies over 32 MiB are rejected from `Content-Length` before reading: `[router.ts:MAX_JSON_BODY_BYTES]`
 - Multipart budget = `min(64 MiB, 1 MiB overhead + Σ per-file x-maxSize)`, defaulting each file field to 8 MiB; per-file overflow drains the rest of the stream and then 422s: `[files.ts:uploadBudget]`
 - At most 64 multipart parts and 64 KiB per non-file field; unknown fields and non-file fields are rejected: `[files.ts:processMultipartUpload]`

@@ -89,7 +89,7 @@ Auth routes take the token from `Authorization: Bearer` then the `mira_token` co
 
 `PUT /_dashboard/api/config` accepts `{ values: Record<string, string> }`; any key outside the allowlist rejects the whole request with `400 not_editable`. Accepted keys upsert into `_config`, but the running process keeps resolved values, so changes apply after restart. S3 and email backends are selected in code with `.storage(...)` and `.email(...)`, not from this API.
 
-`POST /_dashboard/api/email/test` sends to the authenticated superadmin's own address only. It returns `503 email_not_configured` when no transport is configured, `502 email_unavailable` when delivery fails, and is rate-limited per superadmin. The settings page exposes this as a separate Email diagnostics card.
+`POST /_dashboard/api/email/test` sends to the authenticated superadmin's own address only. It returns `503 email_not_configured` when no transport is configured, `502 email_unavailable` when delivery fails, and `429 rate_limited` with `retryAfterSeconds` and `Retry-After` when the five-per-hour per-superadmin limit is hit. A shared send-budget block also returns `429` and looks the same to the UI. The settings page exposes this as a separate Email diagnostics card and shows the remaining wait.
 
 The dashboard login page also handles the auth-email flows when the `_superadmin` collection enables them: it accepts `authWithPassword`'s `otpRequired` challenge, offers a passwordless code request when advertised by `GET /api/collections/_superadmin/auth-config`, and links to the public `/forgot-password` and `/_dashboard/reset-password` pages. Login alerts are sent through the same SMTP transport when `loginAlerts` is true.
 
