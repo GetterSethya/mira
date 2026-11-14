@@ -53,6 +53,28 @@ Success and error stages are observers. They are detached with `Effect.forkDetac
 
 The decorator forwards rewrites selectively. A list hook may change `limit`, `filter`, `sort`, `select`, and `expand`; the original `cursor` and request context still reach the service. A view hook may change `select` and `expand`; the original `id` and context still reach the service. Create and update forward the execute stage's `data`; delete forwards the original `id` and context. Rewrites to `cursor`, `id`, and `auth` are not forwarded, so a hook cannot repaginate a list, redirect a read, or swap the caller identity.
 
+## Email hooks
+
+Plugins can use the `EmailService` directly and observe outgoing mail. `onEmailSend` runs serially and may rewrite the message or set `skip: true`; `onEmailSent` and `onEmailError` are detached observers. The serial chain has a 2-second fail-open timeout, and error hooks never fire for a missing transport.
+
+```ts
+MiraPlugin.define({
+  onEmailSend: {
+    collections: ["users"],
+    handler: (ctx) =>
+      Effect.succeed({ ...ctx, message: { ...ctx.message, subject: `[Mira] ${ctx.message.subject}` } })
+  },
+  onEmailSent: {
+    handler: (ctx) => Effect.log(`sent ${ctx.purpose}`)
+  },
+  onEmailError: {
+    handler: (ctx) => Effect.logWarning(`email failed: ${ctx.error.code}`)
+  }
+})
+```
+
+The contexts carry `message`, `purpose`, `collection`, `userId`, and `originalTo`; `onEmailSend` also has `skip`. The built-in transport is SMTP. When no transport is configured the service still exists with `enabled: false`, so a plugin can check before sending. See the [email page](../email/) for the transport setup and auth flows.
+
 ## Admin collections
 
 `adminCollections` is an array of auth collection definitions whose tokens receive `ctx.admin = true` on generic collection and protected-file routes, bypassing rule enforcement and hidden-field stripping for the whole request. The definitions are also merged into the served collection set automatically. For example:

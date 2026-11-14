@@ -123,10 +123,17 @@ Multipart drops `null` and `undefined` values, so clear other fields with a sepa
 Auth collections are the only kind that expose `authWithPassword`, `register`, and `me` at runtime; the typed `CollectionClient` requires them for `K = "auth"` and omits them from the required surface for base/view collections.
 
 ```ts
-const session = await mira.users.authWithPassword().raw({
+const result = await mira.users.authWithPassword().raw({
   email: "user@example.com",
   password: "secret123"
 })
+
+if ("otpRequired" in result) {
+  // email login OTP is enabled for this collection
+  await mira.users.verifyLoginOtp().raw({ challengeId: result.challengeId, code })
+} else {
+  const { token, record } = result
+}
 
 const me = await mira.users.me().raw()
 
@@ -137,7 +144,9 @@ const user = await mira.users.register().raw({
 })
 ```
 
-`register()` does not log the user in; call `authWithPassword()` afterwards. It wraps the collection's create endpoint, so open signup requires the collection's `create` rule to allow it. `me()` unwraps the `{ collection, record }` envelope and rejects with a 401 `MiraError` if the token belongs to another collection.
+`authWithPassword()` returns either `{ token, record }` or `{ otpRequired: true, challengeId, expiresAt }`. `register()` does not log the user in; call `authWithPassword()` afterwards. It wraps the collection's create endpoint, so open signup requires the collection's `create` rule to allow it. `me()` unwraps the `{ collection, record }` envelope and rejects with a 401 `MiraError` if the token belongs to another collection.
+
+Email flows add `authConfig()`, `requestPasswordReset()`, `resetPassword()`, `requestEmailVerification()`, `verifyEmail()`, `requestPasswordlessLogin()`, `loginWithPasswordlessOtp()`, `verifyLoginOtp()`, and `resendLoginOtp()`. They are required only for auth collections and are enriched by the TanStack adapter like every other mutation or query. The [email page](../email/) lists the routes and payloads.
 
 ### Browser sessions
 

@@ -106,6 +106,29 @@ curl -X POST http://localhost:8080/api/auth/logout-all -H "authorization: Bearer
 
 Both routes answer `204` on success. Tokens minted before a `logout-all` are rejected afterwards.
 
+## Email flows
+
+An auth collection can opt into email verification, login alerts, login OTP, and passwordless login with the third `AuthCollection.define()` argument:
+
+```ts
+const Users = AuthCollection.define("users", {
+  name: Field.text()
+}, {
+  email: {
+    verification: true,
+    loginAlerts: true,
+    loginOtp: "required",
+    passwordless: true
+  }
+})
+```
+
+`POST /auth-with-password` returns `{ otpRequired: true, challengeId, expiresAt }` instead of a token when `loginOtp` is required; the client completes it with `verify-otp`. Passwordless login starts at `POST /auth-with-otp/request` and completes at `POST /auth-with-otp`. Password reset uses `POST /password-reset/request` and `POST /password-reset`; email verification uses `POST /verify-email/request` and `POST /verify-email`. All OTP endpoints take `{ challengeId, code }`.
+
+Registration sends a verification OTP when enabled; the create response includes `emailVerification: { challengeId, expiresAt }`. Password login remains allowed while `emailVerified` is false. To restrict an app, use a rule such as `R.auth(Users, "emailVerified").eq(R.literal(true))`.
+
+The transport is selected in the builder with `.email(SmtpEmail(...))`; without it the flows are disabled and request endpoints return `email_not_configured`. See the [email page](../email/) for the SMTP config, route table, challenge rules, plugin hooks, and local Mailpit testing.
+
 ## Grant manager access with the manage rule
 
 `manage` is an additive rule. It never bypasses the base create or update rule; it only escalates what a caller already allowed to do. It applies to auth collections only, and a `manage` key on a base or view collection is a compile error. The complete rule set, with a manager path:

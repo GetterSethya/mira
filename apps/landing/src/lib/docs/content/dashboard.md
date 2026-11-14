@@ -73,8 +73,9 @@ The body requires `email`, `password`, `name`, and `token`. Success returns `201
 | `POST` | `/_dashboard/api/superadmin/create` | yes | Add another superadmin |
 | `GET` | `/_dashboard/api/superadmin` | yes | List up to 500 superadmins |
 | `DELETE` | `/_dashboard/api/superadmin/:id` | yes | Delete a superadmin |
-| `GET` | `/_dashboard/api/config` | yes | Read the `_config` snapshot |
-| `PUT` | `/_dashboard/api/config` | yes | Update editable config keys |
+| `GET` | `/_dashboard/api/config` | yes | Read the config snapshot plus live storage/email descriptions |
+| `PUT` | `/_dashboard/api/config` | yes | Update editable application keys |
+| `POST` | `/_dashboard/api/email/test` | yes | Send a test email to the authenticated superadmin |
 | `GET` | `/_dashboard/api/crons` | yes | List cron state |
 | `POST` | `/_dashboard/api/crons/:name/run` | yes | Run a cron immediately |
 
@@ -84,9 +85,13 @@ Auth routes take the token from `Authorization: Bearer` then the `mira_token` co
 
 ## Config and crons
 
-`GET /_dashboard/api/config` returns `{ appName, applicationUrl, port, values, editable, readOnly, secret }`. `values` drops `cron_state`. `editable` is the full write allowlist: `app_name`, `application_url`, `port`, `use_s3`, `log_retention_days`, and the five S3 keys. `readOnly` holds `jwt_secret`; `secret` names masked values (`jwt_secret`, `s3_access_key`, `s3_secret`).
+`GET /_dashboard/api/config` returns `{ appName, applicationUrl, port, values, editable, readOnly, secret, storage, email }`. `values` drops `cron_state` and the legacy S3/email keys. `storage` is the live `FileStorage.describe()` result (local directory or S3 endpoint/bucket/region) and `email` is the live `EmailService.describe()` result (transport, host, port, TLS, From, auth presence) — neither contains credentials. `editable` is only `app_name`, `application_url`, `port`, and `log_retention_days`. `readOnly` holds `jwt_secret`; `secret` names `jwt_secret`.
 
-`PUT /_dashboard/api/config` accepts `{ values: Record<string, string> }`; any key outside the allowlist rejects the whole request with `400 not_editable`. Accepted keys upsert into `_config`, but the running process keeps resolved values, so changes apply after restart.
+`PUT /_dashboard/api/config` accepts `{ values: Record<string, string> }`; any key outside the allowlist rejects the whole request with `400 not_editable`. Accepted keys upsert into `_config`, but the running process keeps resolved values, so changes apply after restart. S3 and email backends are selected in code with `.storage(...)` and `.email(...)`, not from this API.
+
+`POST /_dashboard/api/email/test` sends to the authenticated superadmin's own address only. It returns `503 email_not_configured` when no transport is configured, `502 email_unavailable` when delivery fails, and is rate-limited per superadmin. The settings page exposes this as a separate Email diagnostics card.
+
+The dashboard login page also handles the auth-email flows when the `_superadmin` collection enables them: it accepts `authWithPassword`'s `otpRequired` challenge, offers a passwordless code request when advertised by `GET /api/collections/_superadmin/auth-config`, and links to the public `/forgot-password` and `/_dashboard/reset-password` pages. Login alerts are sent through the same SMTP transport when `loginAlerts` is true.
 
 `GET /_dashboard/api/crons` returns every cron's state with ISO dates and errors normalised to strings or `null`. `POST /_dashboard/api/crons/:name/run` calls `runNow(name)`, returning `204` on success and `404` for an unknown name. Last-run state persists across restarts, but live status starts as standby on boot.
 

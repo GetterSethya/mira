@@ -9,7 +9,16 @@ Mira exposes one generated REST surface for every collection, plus shared auth, 
 | `GET` | `/api/collections/:name/:id` | View one record | `200` |
 | `PATCH` | `/api/collections/:name/:id` | Update a record | `200` |
 | `DELETE` | `/api/collections/:name/:id` | Delete a record | `204` |
-| `POST` | `/api/collections/:name/auth-with-password` | Log in to an auth collection | `200` |
+| `POST` | `/api/collections/:name/auth-with-password` | Log in; may return an OTP challenge | `200` |
+| `POST` | `/api/collections/:name/auth-with-password/verify-otp` | Complete login OTP | `200` |
+| `POST` | `/api/collections/:name/auth-with-password/resend-otp` | Reissue login OTP | `202` |
+| `POST` | `/api/collections/:name/auth-with-otp/request` | Request a passwordless code | `202` |
+| `POST` | `/api/collections/:name/auth-with-otp` | Complete passwordless login | `200` |
+| `POST` | `/api/collections/:name/verify-email/request` | Request or resend a verification code | `202` |
+| `POST` | `/api/collections/:name/verify-email` | Verify an email address | `200` |
+| `POST` | `/api/collections/:name/password-reset/request` | Request a reset link | `202` |
+| `POST` | `/api/collections/:name/password-reset` | Complete a password reset | `200` |
+| `GET` | `/api/collections/:name/auth-config` | Public auth capability flags | `200` |
 | `POST` | `/api/auth/logout` | Revoke the presented token | `204` |
 | `POST` | `/api/auth/logout-all` | Revoke every session for the user | `204` |
 | `GET` | `/api/auth/me` | Return the authenticated record | `200` |
@@ -33,11 +42,13 @@ curl -X POST http://localhost:8080/api/collections/users/auth-with-password \
   -d '{"email":"ada@example.com","password":"correct horse battery staple"}'
 ```
 
-Success returns `{ token, record }`, with `record` hidden-field-stripped and boolean-decoded, and sets a `mira_token` cookie: `httpOnly`, `sameSite: strict`, `path: /`, 72 hours. A malformed body returns `422`; bad credentials return `403` without revealing the cause.
+Success returns `{ token, record }`, with `record` hidden-field-stripped and boolean-decoded, and sets a `mira_token` cookie: `httpOnly`, `sameSite: strict`, `path: /`, 72 hours. A malformed body returns `422`; bad credentials return `403` without revealing the cause. If the auth collection requires login OTP, the response is `{ otpRequired: true, challengeId, expiresAt }` and no session is minted until `POST /auth-with-password/verify-otp` succeeds.
+
+Email flows use the same `challengeId` + six-digit code shape. `POST /auth-with-otp/request` and `/verify-email/request` return `202 { challengeId }` even for unknown addresses; `POST /password-reset/request` returns a generic `202`. Invalid, expired, or replayed codes return `400`, too many attempts return `429`, and a missing transport returns `503 email_not_configured`. See the [email page](../email/) for the full route list and security rules.
 
 `POST /api/auth/logout` revokes the presented `jti` best-effort and clears the cookie with `204`. `POST /api/auth/logout-all` requires a valid session, bumps the user's generation so earlier tokens are rejected, and returns `204`; without a session it returns `401`. `GET /api/auth/me` returns `{ collection, record }` with hidden fields stripped and booleans decoded.
 
-`/api/_schema` and both telemetry routes require a session belonging to a plugin-declared admin collection. An app with no admin plugin has an empty admin set, so every authenticated session gets `403`; non-admin sessions get `403`, and missing or invalid tokens get `401`. The schema payload is an array of collection entries with `name`, `kind`, `fields`, `required`, `indexes`, and `viewQuery`, preserving `x-system`, `x-hidden`, `x-generated`, and `x-kind`.
+`/api/_schema` and both telemetry routes require a session belonging to a plugin-declared admin collection. An app with no admin plugin has an empty admin set, so every authenticated session gets `403`; non-admin sessions get `403`, and missing or invalid tokens get `401`. The schema payload is an array of collection entries with `name`, `kind`, `fields`, `required`, `indexes`, `auth`, and `viewQuery`, preserving `x-system`, `x-hidden`, `x-generated`, and `x-kind`. `auth` carries the per-collection `x-auth.email` flags.
 
 The telemetry routes accept `filter`, `after`, and `limit`; spans also accept `traceId`. Their cursor direction is the reverse of collection lists, and a bad filter returns `400`, not `422`.
 

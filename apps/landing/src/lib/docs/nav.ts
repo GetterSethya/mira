@@ -155,6 +155,24 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     ]
   },
   {
+    slug: "email",
+    title: "Email and auth flows",
+    group: "Operate",
+    summary: "Configure SMTP, enable login alerts, reset, verification, and OTP flows, and test locally.",
+    contracts: [
+      "packages/mira/src/http/EGM.md",
+      "packages/mira/src/app/EGM.md",
+      "packages/mira/src/config/EGM.md",
+      "packages/mira/src/hooks/EGM.md"
+    ],
+    sourceFolders: [
+      "packages/mira/src/email",
+      "packages/mira/src/auth",
+      "packages/mira/src/http",
+      "packages/mira/src/hooks"
+    ]
+  },
+  {
     slug: "http-api",
     title: "HTTP API and files",
     group: "Operate",

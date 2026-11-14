@@ -1,4 +1,4 @@
-Mira assembles a server from four required builder steps and a few optional ones. Durable state lives in SQLite: collection definitions, configuration, and optionally logs and spans. This page covers the builder, config, storage, migrations, telemetry, and thumbnails; [plugins](../plugins/), [HTTP API](../http-api/), and the [dashboard](../dashboard/) have their own pages.
+Mira assembles a server from four required builder steps and a few optional ones. Durable state lives in SQLite: collection definitions, configuration, and optionally logs and spans. This page covers the builder, config, storage, migrations, telemetry, and thumbnails; [email](../email/), [plugins](../plugins/), [HTTP API](../http-api/), and the [dashboard](../dashboard/) have their own pages.
 
 ## What lives where
 
@@ -8,6 +8,7 @@ Mira assembles a server from four required builder steps and a few optional ones
 | `database` | yes | `SqlClient` and active `Dialect` |
 | `storage` | yes | `FileStorage` for uploads, downloads, thumbnails |
 | `collections` | yes | Base, auth, and view definitions |
+| `email` | no | SMTP `EmailService`; defaults to a no-op |
 | `rules` | no | Server-only bindings merged onto schemas |
 | `crons` | no | Scoped scheduled jobs |
 | `telemetry` | no | Tracer and logger layer; defaults to console |
@@ -19,12 +20,18 @@ The builder exposes `build()` only once all four required steps exist and re-che
 The snippet assumes `Posts`, `Users`, `PostsRules`, and `nightlyCleanup` are defined in your app; the collection and rule pages show those definitions.
 
 ```ts
-import { ConsoleTelemetryLayer, LocalFileStorage, Mira, NodePlatform, SqliteDatabase } from "@gettersethya/mira"
+import { Config } from "effect"
+import { ConsoleTelemetryLayer, LocalFileStorage, Mira, NodePlatform, SmtpEmail, SqliteDatabase } from "@gettersethya/mira"
 
 const app = Mira.builder()
   .platform(NodePlatform)
   .database(SqliteDatabase({ filename: "data.db" }))
   .storage(LocalFileStorage({ directory: "./uploads" }))
+  .email(SmtpEmail({
+    host: Config.String("SMTP_HOST"),
+    port: Config.Number("SMTP_PORT"),
+    from: "Mira <no-reply@example.com>"
+  }))
   .collections([Posts, Users])
   .rules([PostsRules])
   .crons([nightlyCleanup])
@@ -50,7 +57,7 @@ The seeded defaults are `app_name = "mira"`, `port = "8080"`, `application_url =
 
 Port and URL are mutable in-process: after a fallback, `updateBoundPort` rewrites the URL port so plugin logs and links point at the real address.
 
-The `_config` table also carries `use_s3` and `s3_*` legacy keys, but the current storage layer is activated by `.storage(S3CompatibleStorage(...))`, not by those rows. Use the builder call as the source of truth; do not assume setting `use_s3` swaps the backend.
+The `_config` table also carries `use_s3` and `s3_*` legacy keys, but the current storage layer is activated by `.storage(S3CompatibleStorage(...))`, not by those rows. Use the builder call as the source of truth; do not assume setting `use_s3` swaps the backend. An incomplete `use_s3=true` row logs a warning and yields no S3 config instead of crashing boot. Email settings are not stored in `_config`; they come from `.email(...)`, and the dashboard shows the live transport read-only.
 
 ## Storage backends
 
@@ -82,6 +89,12 @@ import { S3CompatibleStorage } from "@gettersethya/mira"
 Every field accepts a plain value or an Effect `Config`, resolved once at build, so a missing variable fails at startup rather than on first upload. Path-style is the default; set `forcePathStyle: false` for virtual-host style and `publicBaseUrl` for a CDN. The bucket must already exist; no `@aws-sdk/*` package is involved.
 
 SQLite is the only database backend today. `SqliteDatabase({ filename })` wires the `SqlClient` and `sqliteDialect`; use `":memory:"` in tests. Booleans are stored as `0`/`1` because the dialect declares it, not because the collection service hardcodes it.
+
+## Email transport
+
+`.email(SmtpEmail(...))` selects an SMTP transport; without it Mira uses a no-op `EmailService`. Host, port, TLS, auth, From, and the reset URL are resolved once at layer build; every field also accepts an Effect `Config` value. The transport is optional because local development and clients that do not use email should not need an SMTP server.
+
+`SmtpEmail` delegates socket work to the platform `MailTransport`, so the core service does not import `nodemailer`; only the Node platform does. The [email page](../email/) covers auth-collection options, routes, plugin hooks, and Mailpit.
 
 ## Migrations at boot
 

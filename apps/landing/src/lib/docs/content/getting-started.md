@@ -77,7 +77,7 @@ const app = Mira.builder()
 app.serve()
 ```
 
-The four presets are `NodePlatform`, `SqliteDatabase`, `LocalFileStorage`, and `S3CompatibleStorage`. `SqliteDatabase({ filename })` accepts a file path or `":memory:"`; `LocalFileStorage({ directory })` writes uploads under that folder. Swap in `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for any S3-compatible bucket; its config values can also be Effect `Config` values, and it is optional because local storage is enough to start. Tables and indexes are created by auto-migration during boot, before the first request.
+The core presets are `NodePlatform`, `SqliteDatabase`, `LocalFileStorage`, and `S3CompatibleStorage`. `SqliteDatabase({ filename })` accepts a file path or `":memory:"`; `LocalFileStorage({ directory })` writes uploads under that folder. Swap in `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for any S3-compatible bucket; its config values can also be Effect `Config` values, and it is optional because local storage is enough to start. Email is optional too: add `.email(SmtpEmail({ host, port, from }))` when you want login alerts, password reset, verification, or OTP login; the [email page](../email/) covers it. Tables and indexes are created by auto-migration during boot, before the first request.
 
 ## Serve the app
 
