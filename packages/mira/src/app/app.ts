@@ -5,6 +5,7 @@ import { HttpRouter } from "effect/http"
 
 import { AuthChallengeStoreLive } from "@/auth/index.js"
 import { makeCachedCollectionServiceLayer } from "@/cache/index.js"
+import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { AppConfig, AppConfigLive } from "@/config/index.js"
 import { makeHookedEmailServiceLayer } from "@/email/index.js"
 import { makeCronServiceLayer } from "@/cron/cron-service.js"
@@ -34,7 +35,7 @@ import {
   SqliteRateLimitStoreLive
 } from "@/rate-limit/sqlite.js"
 import { RepositoryLive } from "@/repository/repository.js"
-import { ThumbnailServicePhotonLive } from "@/thumbnail/index.js"
+import { ThumbnailServiceNoopLive, ThumbnailServicePhotonLive } from "@/thumbnail/index.js"
 
 import type { MiraAppConfig } from "./builder.js"
 import type { RuleBinding } from "./define-rule.js"
@@ -226,8 +227,16 @@ export class MiraApp<R = never, Telemetry = never> {
     const extrasLayer = pluginLayers.length > 0 ? pluginLayers.reduce((acc, l) => Layer.merge(acc, l)) : Layer.empty
 
     // Foundation: database + storage + thumbnails + telemetry, wired on platform.
-    // Platforms may supply a native thumbnail backend; Photon is the default.
-    const thumbnailLayer = platform.thumbnailLayer ?? ThumbnailServicePhotonLive
+    // Platforms may supply a native thumbnail backend; Photon is the default,
+    // but there is no reason to load an image backend when no collection can
+    // store a file. TODO: the Photon module is still imported statically, so its
+    // module-init cost is paid regardless; true lazy loading would need a
+    // dynamic import, which this codebase forbids.
+    const hasFileFields = allCollections.some((collection) =>
+      Object.values(collection.schema.properties).some((prop) => prop["x-kind"] === "file")
+    )
+    const thumbnailLayer =
+      platform.thumbnailLayer ?? (hasFileFields ? ThumbnailServicePhotonLive : ThumbnailServiceNoopLive)
     const foundation = Layer.mergeAll(database.layer, storage.layer, thumbnailLayer, telemetry).pipe(
       Layer.provideMerge(platform.layer)
     )
@@ -286,12 +295,17 @@ export class MiraApp<R = never, Telemetry = never> {
       }).pipe(Effect.orDie)
     ).pipe(Layer.provide(fullMid))
 
-    // Core collection service (cached)
-    const cachedCollectionLayer = makeCachedCollectionServiceLayer(allCollections)
+    // Core collection service: cached by default, or uncached when the app
+    // explicitly disables the cache. The hook decorator wraps either one.
+    const cacheConfig = this.#config.cache ?? {}
+    const collectionServiceLayer =
+      cacheConfig.enabled === false
+        ? makeCollectionServiceLayer(allCollections)
+        : makeCachedCollectionServiceLayer(allCollections, cacheConfig)
 
-    // Hook collection service decorator: wraps cached collection service with hooks
+    // Hook collection service decorator: wraps the selected collection service with hooks
     const hookCollectionLayer = makeHookCollectionServiceLayer().pipe(
-      Layer.provide(Layer.mergeAll(cachedCollectionLayer, hookServiceLayer))
+      Layer.provide(Layer.mergeAll(collectionServiceLayer, hookServiceLayer))
     )
 
     // Full top layer: hook-wrapped collection service + all mid services + auto-migration side effect

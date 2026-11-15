@@ -170,6 +170,42 @@ describe("MiraBuilder.migrations()", () => {
   })
 })
 
+describe("MiraBuilder.cache()", () => {
+  it("stores cache config on builder config", () => {
+    const b = fullBuilder().cache({ enabled: false })
+    expect(b._getPartialConfig().cache).toEqual({ enabled: false })
+  })
+
+  it("defaults to the cache enabled when .cache() is not called", () => {
+    const app = fullBuilder().build()
+    expect(app._getConfig().cache).toEqual({ enabled: true })
+  })
+
+  it("enabled: false is preserved through build", () => {
+    const app = fullBuilder().cache({ enabled: false }).build()
+    expect(app._getConfig().cache?.enabled).toBe(false)
+  })
+
+  it("tuning values are preserved through build", () => {
+    const app = fullBuilder()
+      .cache({ recordTtlMs: 1_000, listTtlMs: 500, maxRecords: 10, maxLists: 5 })
+      .build()
+    expect(app._getConfig().cache).toEqual({
+      recordTtlMs: 1_000,
+      listTtlMs: 500,
+      maxRecords: 10,
+      maxLists: 5
+    })
+  })
+
+  it("returns a new builder (immutable)", () => {
+    const b0 = fullBuilder()
+    const b1 = b0.cache({ enabled: false })
+    expect(b0).not.toBe(b1)
+    expect(b0._getPartialConfig().cache).toBeUndefined()
+  })
+})
+
 describe("MiraPlugin.adminCollections", () => {
   const adminDef = AuthCollection.define("_admin", {})
 

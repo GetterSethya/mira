@@ -13,7 +13,7 @@ import type { FileStorage } from "@/storage/storage.js"
 
 import { CollectionCache, makeCollectionCacheLayer } from "./collection-cache.js"
 import { buildCtxCacheTag } from "./ctx-key.js"
-import type { CollectionCacheConfigValues } from "./types.js"
+import { resolveCollectionCacheConfig, type CollectionCacheConfigValues } from "./types.js"
 
 function serializeFilterNode(node: FilterNode): string {
   switch (node.op) {
@@ -65,15 +65,12 @@ function stableListKey(
   return `${cursor ?? ""}|${perPage}|${filterPart}|${sortPart}|${selectPart}|${expandPart}`
 }
 
-const defaultConfig: CollectionCacheConfigValues = {
-  recordTtlMs: 30_000,
-  listTtlMs: 10_000,
-  maxRecords: 50_000,
-  maxLists: 5_000,
-}
-
 /**
  * Create a cached `CollectionService` layer that wraps the standard collection service.
+ *
+ * The cache trades process memory for repeated-read speed. It is not a
+ * substitute for fixing a slow read path — fix missing indexes and expensive
+ * queries first, then use the cache to absorb remaining read volume.
  *
  * The cache is transparent — it implements the same `CollectionService` tag.
  * List results and individual records are cached with a configurable TTL.
@@ -83,7 +80,8 @@ const defaultConfig: CollectionCacheConfigValues = {
  * `makeCollectionServiceLayer` is wrapped by this function internally.
  *
  * @param allCollections - Array of collection definitions
- * @param config - Optional cache configuration (record TTL, list TTL, max entries)
+ * @param config - Optional partial cache configuration (record TTL, list TTL,
+ *   max entries); unset values fall back to `defaultCollectionCacheConfig`
  * @returns A Layer providing CollectionService with caching
  *
  * @example
@@ -95,8 +93,9 @@ const defaultConfig: CollectionCacheConfigValues = {
  */
 export function makeCachedCollectionServiceLayer(
   allCollections: ReadonlyArray<AnyCollectionDef>,
-  config: CollectionCacheConfigValues = defaultConfig
+  config: Partial<CollectionCacheConfigValues> = {}
 ): Layer.Layer<CollectionService, never, Repository | SqlClient.SqlClient | FileStorage | Dialect | AuthService> {
+  const resolved = resolveCollectionCacheConfig(config)
   return Layer.effect(
     CollectionService,
     Effect.gen(function* () {
@@ -217,7 +216,7 @@ export function makeCachedCollectionServiceLayer(
     })
   ).pipe(
     Layer.provide(
-      Layer.merge(makeCollectionServiceLayer(allCollections), makeCollectionCacheLayer(config))
+      Layer.merge(makeCollectionServiceLayer(allCollections), makeCollectionCacheLayer(resolved))
     )
   )
 }

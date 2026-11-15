@@ -28,6 +28,7 @@ export const Mira = {
 }
 
 export type { MigrateOptions } from "../migrator/types.js"
+export type { MiraCacheConfig } from "../cache/types.js"
 export type { MiraApp, ServeOptions } from "./app.js"
 export { applyRulesToCollections } from "./app.js"
 export type { MiraAppConfig } from "./builder.js"

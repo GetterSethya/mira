@@ -1,6 +1,7 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { Layer } from "effect"
 
+import type { MiraCacheConfig } from "@/cache/types.js"
 import type { CronDef } from "@/cron/types.js"
 import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
@@ -39,6 +40,7 @@ export interface MiraAppConfig<Telemetry = never> {
   cors: CorsConfig
   migrations?: MigrateOptions
   rateLimits?: MiraRateLimits
+  cache?: MiraCacheConfig
 }
 
 function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraAppConfig<any> {
@@ -70,6 +72,9 @@ function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraApp
  *
  * Optional step: `.migrations(m)` — schema-migration options (e.g.
  * `allowDestructive: true` to permit drop-column/drop-table steps)
+ *
+ * Optional step: `.cache(c)` — in-memory collection cache tuning, or
+ * `{ enabled: false }` to read straight from the database
  *
  * @example
  * const app = Mira.builder()
@@ -154,6 +159,38 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    */
   rateLimits(r: MiraRateLimits): MiraBuilder<Has, R, Telemetry> {
     return new MiraBuilder({ ...this.#config, rateLimits: r })
+  }
+
+  /**
+   * Set in-memory collection cache options (optional).
+   *
+   * The cache trades process memory for repeated-read speed: list pages and
+   * single records are kept until their TTL expires or a write invalidates
+   * them. It is **not** a substitute for fixing a slow read path — add the
+   * missing index or rewrite the expensive query first.
+   *
+   * Pass `{ enabled: false }` to bypass the cache entirely and read straight
+   * from the database. Unset tuning values fall back to
+   * `defaultCollectionCacheConfig` (30 s record TTL, 10 s list TTL, 50 000
+   * records / 5 000 lists).
+   *
+   * @param c - A `MiraCacheConfig` (`enabled`, `recordTtlMs`, `listTtlMs`,
+   *   `maxRecords`, `maxLists`)
+   * @returns A new builder (same phantom type — cache is optional)
+   *
+   * @example
+   * Mira.builder()
+   *   // ... required steps
+   *   .cache({ recordTtlMs: 60_000 })
+   *
+   * @example
+   * // Measure raw query cost — no cache layer at all
+   * Mira.builder()
+   *   // ... required steps
+   *   .cache({ enabled: false })
+   */
+  cache(c: MiraCacheConfig): MiraBuilder<Has, R, Telemetry> {
+    return new MiraBuilder({ ...this.#config, cache: c })
   }
 
   /**
@@ -274,7 +311,8 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
       telemetry: config.telemetry ?? ConsoleTelemetryLayer,
       cors: config.cors ?? defaultCorsConfig,
       migrations: config.migrations ?? {},
-      rateLimits: config.rateLimits ?? {}
+      rateLimits: config.rateLimits ?? {},
+      cache: config.cache ?? { enabled: true }
     })
   }
 }
