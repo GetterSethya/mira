@@ -21,6 +21,7 @@ export type { CursorPage,RequestCtx } from "./collection-service/index.js"
 export {
   CollectionService,
   MAX_BULK_CREATE_RECORDS,
+  MAX_BULK_RECORDS,
   makeCollectionServiceLayer
 } from "./collection-service/index.js"
 export { AppConfig, AppConfigLive } from "./config/index.js"

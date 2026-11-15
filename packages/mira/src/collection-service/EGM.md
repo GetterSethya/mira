@@ -11,7 +11,9 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - `CollectionService.view(collection, id, ctx, select?, expand?)` — returns one `RepoRecord` or `NotFoundError`: `[collection-service.ts:CollectionService]`
 - `CollectionService.create(collection, data, ctx)` / `update(collection, id, data, ctx)` / `delete(collection, id, ctx)`: `[collection-service.ts:CollectionService]`
 - `CollectionService.createMany(collection, records, ctx)` — inserts every record through the `create` path inside one `sql.withTransaction`; returns the created rows in input order: `[collection-service.ts:CollectionService]`
-- `MAX_BULK_CREATE_RECORDS` — 1 000; the HTTP bulk route's maximum batch size: `[collection-service.ts:MAX_BULK_CREATE_RECORDS]`
+- `CollectionService.updateMany(collection, updates, ctx)` — updates `{ id, data }` entries through the `update` path inside one transaction; returns updated rows in input order: `[collection-service.ts:CollectionService]`
+- `CollectionService.deleteMany(collection, ids, ctx)` — deletes every id through the `delete` path inside one transaction; returns the ids deleted, in input order: `[collection-service.ts:CollectionService]`
+- `MAX_BULK_RECORDS` — 1 000; the shared maximum batch size for bulk create/update/delete. `MAX_BULK_CREATE_RECORDS` remains as a deprecated alias: `[collection-service.ts:MAX_BULK_RECORDS]`
 - `makeCollectionServiceLayer(allCollections)` — builds the layer; requires `Repository`, `SqlClient`, `FileStorage`, `Dialect`, `AuthService`: `[collection-service.ts:makeCollectionServiceLayer]`
 - `CollectionServiceLive` — deprecated empty-collection layer kept for compatibility: `[collection-service.ts:CollectionServiceLive]`
 - `RequestCtx` (type) — `auth?`, `headers`, `query`, `body?`, `admin?`: `[context.ts:RequestCtx]`
@@ -40,8 +42,9 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 
 ## Invariants
 
-- View collections are read-only: `create`, `createMany`, `update`, and `delete` fail with `ReadOnlyError`: `[collection-service.ts:create]`
+- View collections are read-only: `create`, `createMany`, `update`, `updateMany`, `delete`, and `deleteMany` fail with `ReadOnlyError`: `[collection-service.ts:create]`
 - `createMany` runs each record through the same `createOne` pipeline (validation, rule pre-check, credential enforcement, password hashing, id/timestamp generation, hidden-field stripping) inside one transaction, so any failure rolls the whole batch back: `[collection-service.ts:CollectionService]`
+- `updateMany` and `deleteMany` wrap `updateOne`/`deleteOne` in one transaction with concurrency 1; a missing id, rule denial or validation failure rolls back every earlier write in the batch, and `deleteMany` only returns ids after the commit: `[collection-service.ts:CollectionService]`
 - Fields annotated `x-generated` may never be supplied by a caller: `[collection-service.ts:rejectSystemFields]`
 - Non-admin calls with no rule for `list`/`view`/`create`/`update`/`delete` fail with `ForbiddenError`; `update`/`delete` check this before loading the row so absence is not leaked: `[collection-service.ts:compileRule]`
 - `create` evaluates the rule against the validated payload (with `body` set) before inserting: `[collection-service.ts:create]`
@@ -67,7 +70,7 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 ## Side Effects
 
 - SQL reads/writes through `Repository` (`list`, `view`, `viewFilter`, `create`, `update`, `delete`): `[collection-service.ts:CollectionService]`
-- SQL transaction around the whole `createMany` batch (`BEGIN`/`COMMIT`, rolled back on any failure): `[collection-service.ts:CollectionService]`
+- SQL transaction around the whole `createMany`/`updateMany`/`deleteMany` batch (`BEGIN`/`COMMIT`, rolled back on any failure): `[collection-service.ts:CollectionService]`
 - SQL rule pre-check `SELECT 1 AS ok WHERE <payload-bound rule>` before insert: `[collection-service.ts:create]`
 - SQL rule check `SELECT 1 AS ok WHERE <ctx-bound manage rule>` for `canManagePayload`: `[collection-service.ts:canManagePayload]`
 - Filesystem: file deletion and thumbnail-directory listing/deletion via `FileStorage`: `[collection-service.ts:CollectionService]`

@@ -91,18 +91,50 @@ export class CollectionService extends Context.Service<
       ctx: RequestCtx
     ): Effect.Effect<RepoRecord, CollectionError>
 
+    /**
+     * Update several records in one database transaction.
+     *
+     * Each entry runs through the same path as {@link update} — validation,
+     * rule enforcement against the effective post-write row, credential checks,
+     * password hashing, timestamps and hidden-field stripping. A missing id, a
+     * denied rule or an invalid payload rolls the whole batch back.
+     */
+    updateMany(
+      collection: AnyCollectionDef,
+      updates: ReadonlyArray<{ id: string; data: RepoRecord }>,
+      ctx: RequestCtx
+    ): Effect.Effect<ReadonlyArray<RepoRecord>, CollectionError>
+
     delete(collection: AnyCollectionDef, id: string, ctx: RequestCtx): Effect.Effect<void, CollectionError>
+
+    /**
+     * Delete several records in one database transaction.
+     *
+     * Each id runs through the same path as {@link delete} — existence check,
+     * rule enforcement, file/thumbnail cleanup. A missing id or a denied rule
+     * rolls the whole batch back, so the returned ids are exactly the rows that
+     * were deleted.
+     */
+    deleteMany(
+      collection: AnyCollectionDef,
+      ids: ReadonlyArray<string>,
+      ctx: RequestCtx
+    ): Effect.Effect<ReadonlyArray<string>, CollectionError>
   }
 >()("CollectionService") {}
 
 /**
- * Maximum number of records accepted by a single bulk-create request.
+ * Maximum number of records accepted by a single bulk create/update/delete
+ * request.
  *
- * The whole batch is inserted inside one transaction, so it buffers every
- * record's payload, hooks and result in memory. 1 000 keeps that bounded while
- * remaining large enough for realistic seeding and import jobs.
+ * The whole batch runs inside one transaction, so it buffers every record's
+ * payload, hooks and result in memory. 1 000 keeps that bounded while remaining
+ * large enough for realistic seeding, import and cleanup jobs.
  */
-export const MAX_BULK_CREATE_RECORDS = 1_000
+export const MAX_BULK_RECORDS = 1_000
+
+/** @deprecated Use {@link MAX_BULK_RECORDS}. Kept as a compatibility alias. */
+export const MAX_BULK_CREATE_RECORDS = MAX_BULK_RECORDS
 
 function resolveFields(schema: CollectionSchema, userSelect: ReadonlyArray<string> | null, admin = false): ReadonlyArray<string> {
   const properties = schema.properties
@@ -656,7 +688,7 @@ export function makeCollectionServiceLayer(
           }, { captureStackTrace: false })
         )
 
-      const update = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
+      const updateOne = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
         Effect.gen(function* () {
           if (collection.schema["x-collection-kind"] === "view") {
             return yield* new ReadOnlyError({ collection: collection.name })
@@ -747,7 +779,35 @@ export function makeCollectionServiceLayer(
           }, { captureStackTrace: false })
         )
 
-      const deleteImpl = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
+      const update = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
+        updateOne(collection, id, data, ctx)
+
+      // Same transaction contract as createMany: one BEGIN, every per-record
+      // update (validation, rule check against the merged row, credentials,
+      // hashing, file cleanup), COMMIT only if all succeed. A 404/403/422 on any
+      // entry rolls back the updates already applied.
+      const updateMany = (
+        collection: AnyCollectionDef,
+        updates: ReadonlyArray<{ id: string; data: RepoRecord }>,
+        ctx: RequestCtx
+      ) =>
+        Effect.gen(function* () {
+          if (collection.schema["x-collection-kind"] === "view") {
+            return yield* new ReadOnlyError({ collection: collection.name })
+          }
+          return yield* sql.withTransaction(
+            Effect.forEach(updates, (update) => updateOne(collection, update.id, update.data, ctx), {
+              concurrency: 1
+            })
+          )
+        }).pipe(
+          Effect.withSpan("collection.updateMany", {
+            kind: "internal",
+            attributes: { collection: collection.name }
+          }, { captureStackTrace: false })
+        )
+
+      const deleteOne = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
         Effect.gen(function* () {
           if (collection.schema["x-collection-kind"] === "view") {
             return yield* new ReadOnlyError({ collection: collection.name })
@@ -800,7 +860,25 @@ export function makeCollectionServiceLayer(
           }, { captureStackTrace: false })
         )
 
-      return { list, view, create, createMany, update, delete: deleteImpl }
+      const deleteMany = (collection: AnyCollectionDef, ids: ReadonlyArray<string>, ctx: RequestCtx) =>
+        Effect.gen(function* () {
+          if (collection.schema["x-collection-kind"] === "view") {
+            return yield* new ReadOnlyError({ collection: collection.name })
+          }
+          yield* sql.withTransaction(
+            Effect.forEach(ids, (id) => deleteOne(collection, id, ctx), { concurrency: 1 })
+          )
+          // Every id succeeded (otherwise the transaction rolled back), so the
+          // input order is also the order of the rows that were actually deleted.
+          return ids
+        }).pipe(
+          Effect.withSpan("collection.deleteMany", {
+            kind: "internal",
+            attributes: { collection: collection.name }
+          }, { captureStackTrace: false })
+        )
+
+      return { list, view, create, createMany, update, updateMany, delete: deleteOne, deleteMany }
     })
   )
 }

@@ -32,6 +32,12 @@ describe("withCollections({ adapter })", () => {
     expect(typeof opts.mutationFn).toBe("function")
   })
 
+  it("enriches bulk mutations with mutationOptions", () => {
+    expect(typeof Mira.Todo.createMany().mutationOptions.mutationFn).toBe("function")
+    expect(typeof Mira.Todo.updateMany().mutationOptions.mutationFn).toBe("function")
+    expect(typeof Mira.Todo.deleteMany().mutationOptions.mutationFn).toBe("function")
+  })
+
   it("preserves auth accessors on auth collections", () => {
     expect(typeof Mira.User.authWithPassword().mutationOptions.mutationFn).toBe("function")
     expect(typeof Mira.User.register().mutationOptions.mutationFn).toBe("function")

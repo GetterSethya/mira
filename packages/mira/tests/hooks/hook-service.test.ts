@@ -17,7 +17,9 @@ const TestCollectionService = Layer.succeed(
     createMany: () => Effect.die("stub"),
     view: () => Effect.die("stub"),
     update: () => Effect.die("stub"),
+    updateMany: () => Effect.die("stub"),
     delete: () => Effect.die("stub"),
+    deleteMany: () => Effect.die("stub"),
     list: () => Effect.die("stub")
   })
 )

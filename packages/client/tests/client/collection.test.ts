@@ -232,6 +232,63 @@ describe("CollectionClient", () => {
     expect(records.map((r) => r.title)).toEqual(["A", "B"])
   })
 
+  it("updateMany → PATCH /bulk and unwraps the records envelope", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+      Effect.sync(() => {
+        captured.push({ method: req.method, url: req.url })
+        return {
+          records: [
+            { id: "1", created: "", updated: "", title: "A2" },
+            { id: "2", created: "", updated: "", title: "B2" }
+          ]
+        } as T
+      })
+    const client = makeCollectionClient({
+      collectionName: "tasks",
+      schema: TestCollection.schema,
+      fields: TestCollection.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: false,
+    })
+
+    const records = await client
+      .updateMany()
+      .raw([{ id: "1", data: { title: "A2" } }, { id: "2", data: { title: "B2" } }])
+    expect(captured[0].method).toBe("PATCH")
+    expect(captured[0].url).toBe("/api/collections/tasks/bulk")
+    expect(records.map((r) => r.title)).toEqual(["A2", "B2"])
+  })
+
+  it("deleteMany → DELETE /bulk and unwraps the ids envelope", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+      Effect.sync(() => {
+        captured.push({ method: req.method, url: req.url })
+        return { ids: ["a", "b"] } as T
+      })
+    const client = makeCollectionClient({
+      collectionName: "tasks",
+      schema: TestCollection.schema,
+      fields: TestCollection.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: false,
+    })
+
+    const deleted = await client.deleteMany().raw(["a", "b"])
+    expect(captured[0].method).toBe("DELETE")
+    expect(captured[0].url).toBe("/api/collections/tasks/bulk")
+    expect(deleted).toEqual(["a", "b"])
+  })
+
   it("update → PATCH with JSON body", async () => {
     const captured: Array<{ method: string; url: string }> = []
     const execute = makeTestExecute(captured)

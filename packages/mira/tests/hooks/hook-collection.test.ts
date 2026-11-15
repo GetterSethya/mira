@@ -130,6 +130,58 @@ describe("HookCollectionService", () => {
     ])))
   )
 
+  it.effect("intercepts updateMany per record and returns the hook-rewritten records", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const created = yield* svc.createMany(Posts, [{ title: "a" }, { title: "b" }], noCtx)
+      const ids = created.map((record) => String(record["id"]))
+      const records = yield* svc.updateMany(
+        Posts,
+        [
+          { id: ids[0], data: { title: "x" } },
+          { id: ids[1], data: { title: "y" } }
+        ],
+        noCtx
+      )
+      expect(records.map((r) => r["title"])).toEqual(["Hooked: x", "Hooked: y"])
+      const page = yield* svc.list(Posts, null, 10, noCtx)
+      expect(page.items.length).toBe(4)
+    }).pipe(Effect.provide(makeTestLayer([
+      MiraPlugin.define({
+        onRecordUpdate: {
+          handler: (ctx) =>
+            Effect.succeed({
+              ...ctx,
+              data: { ...ctx.data, title: "Hooked: " + ctx.data["title"] },
+            }),
+        },
+      })
+    ])))
+  )
+
+  it.effect("intercepts deleteMany per record with the stored row", () => {
+    const seen: Array<string> = []
+    return Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const deleted = yield* svc.deleteMany(Posts, ["1", "2"], noCtx)
+      expect(deleted).toEqual(["1", "2"])
+      expect(seen).toEqual(["Hello", "World"])
+      const page = yield* svc.list(Posts, null, 10, noCtx)
+      expect(page.items.length).toBe(0)
+    }).pipe(Effect.provide(makeTestLayer([
+      MiraPlugin.define({
+        onRecordDelete: {
+          handler: (ctx) => {
+            seen.push(String(ctx.data["title"]))
+            return Effect.succeed(ctx)
+          },
+        },
+      })
+    ])))
+  })
+
   it.effect("intercepts list and modifies params via hook", () =>
     Effect.gen(function* () {
       yield* setupPostsTable

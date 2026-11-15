@@ -11,6 +11,8 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `GET /api/collections/:name` — list with `filter`, `sort`, `order`, `select`, `expand`, `after`, `limit`: `[router.ts:listRoute]`
 - `POST /api/collections/:name` — create (JSON or multipart), 201: `[router.ts:createRoute]`
 - `POST /api/collections/:name/bulk` — create a batch of records in one transaction, `{ records: [...] }` → 201 `{ records: [...] }`; empty/missing `records` or > 1 000 records → 422: `[router.ts:bulkCreateRoute]`
+- `PATCH /api/collections/:name/bulk` — update a batch, `{ records: [{ id, data }] }` → 200 `{ records: [...] }`: `[router.ts:bulkUpdateRoute]`
+- `DELETE /api/collections/:name/bulk` — delete a batch, JSON body `{ ids: string[] }` → 200 `{ ids }`; the DELETE body is intentional (up to 1 000 ids, not cacheable): `[router.ts:bulkDeleteRoute]`
 - `GET /api/collections/:name/:id` — view one record with `select`/`expand`: `[router.ts:viewRoute]`
 - `PATCH /api/collections/:name/:id` — update: `[router.ts:updateRoute]`
 - `DELETE /api/collections/:name/:id` — delete, 204: `[router.ts:deleteRoute]`
@@ -72,8 +74,11 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - Login rate-limit store errors fail closed with 503; a blocked login returns 429 with `Retry-After`: `[auth-rate-limit.ts:consumeLoginRequestLimits]` `[errors.ts:catchAuthEmailErrors]`
 - Rehash-on-login is best-effort. A hash or write failure logs and keeps the old row; the returned record carries the effective hash so `pwf` matches storage: `[auth.ts:maybeRehashPassword]`
 - JSON request bodies over 32 MiB are rejected from `Content-Length` before reading: `[router.ts:MAX_JSON_BODY_BYTES]`
-- Bulk create accepts only JSON `{ records: [...] }`; empty arrays, non-array `records`, non-object elements and batches above `MAX_BULK_CREATE_RECORDS` (1 000) return 422 before any write: `[router.ts:bulkCreateRoute]`
+- Bulk create accepts only JSON `{ records: [...] }`; empty arrays, non-array `records`, non-object elements and batches above `MAX_BULK_RECORDS` (1 000) return 422 before any write: `[router.ts:bulkCreateRoute]`
+- Bulk update/delete require non-empty, within-limit batches of unique, non-empty ids; duplicate ids are rejected with 422 instead of de-duplicated so a batch can never be partially applied: `[router.ts:validateBulkIds]`
 - Bulk create runs the whole batch in one transaction and applies every per-record create semantic (rules, credential checks, hashing, hidden-field stripping); a failing record rolls the batch back. Auth-collection verification emails are not issued for bulk creates: `[router.ts:bulkCreateRoute]`
+- Bulk update runs every `{ id, data }` through the normal update path (including update-rule checks against the merged row); bulk delete runs every id through the normal delete path (existence + delete rule). Any 404/403/422 rolls the batch back, so `{ ids }` is exactly the set removed: `[router.ts:bulkUpdateRoute]` `[router.ts:bulkDeleteRoute]`
+- Bulk routes are registered before `/:id` routes so a record whose id is literally `bulk` is shadowed by the batch endpoint for PATCH/DELETE: `[router.ts:makeCollectionRouter]`
 - Multipart budget = `min(64 MiB, 1 MiB overhead + Σ per-file x-maxSize)`, defaulting each file field to 8 MiB; per-file overflow drains the rest of the stream and then 422s: `[files.ts:uploadBudget]`
 - At most 64 multipart parts and 64 KiB per non-file field; unknown fields and non-file fields are rejected: `[files.ts:processMultipartUpload]`
 - File MIME types must be in the field's `x-mimeTypes` allowlist when declared: `[files.ts:processMultipartUpload]`

@@ -3,7 +3,7 @@ import type { Tracer } from "effect";
 import { Cause, Duration, Effect, Option, Redacted, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 
-import { CollectionService, MAX_BULK_CREATE_RECORDS } from "@/collection-service/collection-service.js"
+import { CollectionService, MAX_BULK_RECORDS } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { toPublicRecord } from "@/collection-service/decode.js"
 import { PayloadTooLargeError, ValidationError } from "@/collection-service/errors.js"
@@ -68,6 +68,75 @@ const ConfirmEmailChangeSchema = Schema.Struct({ token: Schema.String })
 const BulkCreateBodySchema = Schema.Struct({
   records: Schema.Array(Schema.Record(Schema.String, Schema.Unknown))
 })
+
+/**
+ * Bulk-update body: `{ "records": [{ "id": string, "data": {...} }, ...] }`.
+ * `data` is a patch, decoded per record by the collection's update codec.
+ */
+const BulkUpdateBodySchema = Schema.Struct({
+  records: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      data: Schema.Record(Schema.String, Schema.Unknown)
+    })
+  )
+})
+
+/**
+ * Bulk-delete body: `{ "ids": string[] }`.
+ *
+ * DELETE carries a JSON body deliberately: the id list can exceed a practical
+ * URL length (up to 1 000 ids), and the endpoint is not a cacheable resource
+ * read. Proxies that strip DELETE bodies will surface as a 422 instead of
+ * silently deleting nothing.
+ */
+const BulkDeleteBodySchema = Schema.Struct({
+  ids: Schema.Array(Schema.String)
+})
+
+/** First id that occurs more than once, or `null` when every id is unique. */
+function firstDuplicateId(ids: ReadonlyArray<string>): string | null {
+  const seen = new Set<string>()
+  for (const id of ids) {
+    if (seen.has(id)) return id
+    seen.add(id)
+  }
+  return null
+}
+
+/**
+ * Shared batch envelope validation for update/delete: non-empty, within
+ * `MAX_BULK_RECORDS`, no empty id strings, and no duplicate ids. Duplicates are
+ * rejected instead of de-duplicated so a batch can never be partially applied
+ * (e.g. updating the same row twice with different patches).
+ */
+function validateBulkIds(
+  collection: string,
+  field: "records" | "ids",
+  ids: ReadonlyArray<string>
+): Effect.Effect<void, ValidationError> {
+  return Effect.gen(function* () {
+    if (ids.length === 0) {
+      return yield* new ValidationError({ collection, issues: [`${field} must not be empty`] })
+    }
+    if (ids.length > MAX_BULK_RECORDS) {
+      return yield* new ValidationError({
+        collection,
+        issues: [`Batch size ${ids.length} exceeds the ${MAX_BULK_RECORDS} record limit`]
+      })
+    }
+    if (ids.some((id) => id.length === 0)) {
+      return yield* new ValidationError({ collection, issues: [`${field} must contain non-empty ids`] })
+    }
+    const duplicate = firstDuplicateId(ids)
+    if (duplicate !== null) {
+      return yield* new ValidationError({
+        collection,
+        issues: [`Duplicate id "${duplicate}" in batch; duplicate ids are not allowed`]
+      })
+    }
+  })
+}
 
 const decodeBody = <S extends Schema.Constraint>(
   req: HttpServerRequest.HttpServerRequest,
@@ -411,8 +480,8 @@ export function makeCollectionRouter(
   )
 
   /**
-   * `POST /api/collections/:name/bulk` — create up to
-   * `MAX_BULK_CREATE_RECORDS` records in a single transaction.
+   * `POST /api/collections/:name/bulk` — create up to `MAX_BULK_RECORDS`
+   * records in a single transaction.
    *
    * Auth-collection email-verification challenges are not issued for bulk
    * creates (unlike a single create): a batch is a data-import/seed operation,
@@ -439,15 +508,75 @@ export function makeCollectionRouter(
           issues: ["records must not be empty"]
         }).pipe(catchCollectionErrors)
       }
-      if (body.records.length > MAX_BULK_CREATE_RECORDS) {
+      if (body.records.length > MAX_BULK_RECORDS) {
         return yield* new ValidationError({
           collection: col.name,
-          issues: [`Batch size ${body.records.length} exceeds the ${MAX_BULK_CREATE_RECORDS} record limit`]
+          issues: [`Batch size ${body.records.length} exceeds the ${MAX_BULK_RECORDS} record limit`]
         }).pipe(catchCollectionErrors)
       }
       const svc = yield* CollectionService
       const records = yield* svc.createMany(col, body.records, ctx).pipe(catchCollectionErrors)
       return HttpServerResponse.jsonUnsafe({ records }, { status: 201 })
+    })
+  )
+
+  /**
+   * `PATCH /api/collections/:name/bulk` — update up to `MAX_BULK_RECORDS`
+   * records in one transaction, 200 `{ records }` in input order.
+   *
+   * Each entry is `{ id, data }` and runs the normal `update` path, so rules are
+   * evaluated against the effective post-write row. A missing id, denied rule or
+   * invalid patch rolls the whole batch back.
+   */
+  const bulkUpdateRoute = collectionRoute("bulk-update", (col, ctx, req) =>
+    Effect.gen(function* () {
+      const raw = yield* readJsonBody(req, col).pipe(catchCollectionErrors)
+      const body = yield* Schema.decodeUnknownEffect(BulkUpdateBodySchema)(raw).pipe(
+        Effect.mapError(
+          () =>
+            new ValidationError({
+              collection: col.name,
+              issues: ['Body must be { "records": [{ "id": string, "data": {...} }] }']
+            })
+        ),
+        catchCollectionErrors
+      )
+      yield* validateBulkIds(
+        col.name,
+        "records",
+        body.records.map((record) => record.id)
+      ).pipe(catchCollectionErrors)
+      const svc = yield* CollectionService
+      const records = yield* svc.updateMany(col, body.records, ctx).pipe(catchCollectionErrors)
+      return HttpServerResponse.jsonUnsafe({ records }, { status: 200 })
+    })
+  )
+
+  /**
+   * `DELETE /api/collections/:name/bulk` — delete up to `MAX_BULK_RECORDS`
+   * records in one transaction, 200 `{ ids }` in input order.
+   *
+   * The JSON body (`{ ids }`) is intentional — see `BulkDeleteBodySchema`. A
+   * missing id or denied rule rolls the whole batch back, so `ids` is exactly the
+   * set of rows removed.
+   */
+  const bulkDeleteRoute = collectionRoute("bulk-delete", (col, ctx, req) =>
+    Effect.gen(function* () {
+      const raw = yield* readJsonBody(req, col).pipe(catchCollectionErrors)
+      const body = yield* Schema.decodeUnknownEffect(BulkDeleteBodySchema)(raw).pipe(
+        Effect.mapError(
+          () =>
+            new ValidationError({
+              collection: col.name,
+              issues: ['Body must be { "ids": string[] }']
+            })
+        ),
+        catchCollectionErrors
+      )
+      yield* validateBulkIds(col.name, "ids", body.ids).pipe(catchCollectionErrors)
+      const svc = yield* CollectionService
+      const ids = yield* svc.deleteMany(col, body.ids, ctx).pipe(catchCollectionErrors)
+      return HttpServerResponse.jsonUnsafe({ ids }, { status: 200 })
     })
   )
 
@@ -935,6 +1064,9 @@ export function makeCollectionRouter(
     HttpRouter.route("GET", "/api/collections/:name", listRoute),
     HttpRouter.route("POST", "/api/collections/:name", createRoute),
     HttpRouter.route("POST", "/api/collections/:name/bulk", bulkCreateRoute),
+    // Bulk routes must precede `/:id` routes so `bulk` is never parsed as an id.
+    HttpRouter.route("PATCH", "/api/collections/:name/bulk", bulkUpdateRoute),
+    HttpRouter.route("DELETE", "/api/collections/:name/bulk", bulkDeleteRoute),
     HttpRouter.route("GET", "/api/collections/:name/:id", viewRoute),
     HttpRouter.route("PATCH", "/api/collections/:name/:id", updateRoute),
     HttpRouter.route("DELETE", "/api/collections/:name/:id", deleteRoute),

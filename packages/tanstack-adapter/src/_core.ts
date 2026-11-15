@@ -210,7 +210,9 @@ export function createCollectionAdapter() {
       create: () => enrichMutation(client.create()),
       createMany: () => enrichMutation(client.createMany()),
       update: () => enrichMutation(client.update()),
+      updateMany: () => enrichMutation(client.updateMany()),
       delete: () => enrichMutation(client.delete()),
+      deleteMany: () => enrichMutation(client.deleteMany()),
 
       /**
        * Invalidates all cached queries for this collection.

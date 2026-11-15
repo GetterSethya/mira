@@ -330,12 +330,41 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
   update(): ClientHandler<InferRecord<F>, UpdateInput<F, K>>
 
   /**
+   * Update several records in one request.
+   *
+   * The server applies every entry in one database transaction: a missing id,
+   * denied rule or invalid patch rolls the whole batch back. The request is
+   * JSON-only — file fields cannot be uploaded through this method.
+   *
+   * @example
+   * const records = await posts.updateMany().raw([
+   *   { id: "1", data: { title: "one" } },
+   *   { id: "2", data: { title: "two" } }
+   * ])
+   *
+   * @returns A mutation ClientHandler — call `.raw(entries)` with `[{ id, data }]`
+   */
+  updateMany(): ClientHandler<ReadonlyArray<InferRecord<F>>, ReadonlyArray<UpdateInput<F, K>>>
+
+  /**
    * Delete a record by ID.
    * Returns `void` on success. Throws `MiraError` (404) if the record does not exist.
    *
    * @returns A mutation ClientHandler — call `.raw(id)` with the record ID
    */
   delete(): ClientHandler<void, string>
+
+  /**
+   * Delete several records in one request.
+   *
+   * The server deletes every id in one database transaction: a missing id or
+   * denied rule rolls the whole batch back. The id list is sent in a JSON body
+   * on the DELETE request (up to 1 000 ids).
+   *
+   * @returns A mutation ClientHandler — call `.raw(ids)`; resolves to the ids
+   *   actually deleted, in input order
+   */
+  deleteMany(): ClientHandler<ReadonlyArray<string>, ReadonlyArray<string>>
 
   /**
    * Authenticate with email and password on an auth collection.
@@ -557,7 +586,9 @@ export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"
   | "create"
   | "createMany"
   | "update"
+  | "updateMany"
   | "delete"
+  | "deleteMany"
   | "register"
   | "authWithPassword"
   | "me"
@@ -590,7 +621,11 @@ export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"
     ClientHandler<ReadonlyArray<InferRecord<F>>, ReadonlyArray<CreateInput<F, K>>>
   >
   update(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, UpdateInput<F, K>>>
+  updateMany(): EnrichedMutationHandler<
+    ClientHandler<ReadonlyArray<InferRecord<F>>, ReadonlyArray<UpdateInput<F, K>>>
+  >
   delete(): EnrichedMutationHandler<ClientHandler<void, string>>
+  deleteMany(): EnrichedMutationHandler<ClientHandler<ReadonlyArray<string>, ReadonlyArray<string>>>
   invalidateAll(queryClient: { invalidateQueries(opts: { queryKey: QueryKey }): unknown }): unknown
   invalidateOne(queryClient: { invalidateQueries(opts: { queryKey: QueryKey }): unknown }, id: string): unknown
 }
@@ -750,6 +785,32 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     return makeMutationHandler<void, string>((id) => {
       const effect = execute<void>(HCR.delete(`/api/collections/${collectionName}/${id}`))
       return withRetry(effect)
+    })
+  }
+
+  function updateMany() {
+    return makeMutationHandler<ReadonlyArray<InferRecord<F>>, ReadonlyArray<UpdateInput<F, K>>>((entries) => {
+      const reqEffect: RequestWithBody = HCR.bodyJson(HCR.patch(`/api/collections/${collectionName}/bulk`), {
+        records: entries
+      })
+      return withRetry(
+        toExecuteEffect<{ records: ReadonlyArray<InferRecord<F>> }>(reqEffect, execute).pipe(
+          Effect.map((response) => response.records)
+        )
+      )
+    })
+  }
+
+  function deleteMany() {
+    return makeMutationHandler<ReadonlyArray<string>, ReadonlyArray<string>>((ids) => {
+      const reqEffect: RequestWithBody = HCR.bodyJson(HCR.delete(`/api/collections/${collectionName}/bulk`), {
+        ids
+      })
+      return withRetry(
+        toExecuteEffect<{ ids: ReadonlyArray<string> }>(reqEffect, execute).pipe(
+          Effect.map((response) => response.ids)
+        )
+      )
     })
   }
 
@@ -927,7 +988,9 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     create,
     createMany,
     update,
+    updateMany,
     delete: deleteFn,
+    deleteMany,
     ...(isAuth
       ? {
           authWithPassword,

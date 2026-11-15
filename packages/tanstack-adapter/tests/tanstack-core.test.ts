@@ -12,6 +12,10 @@ const Posts = BaseCollection.define("posts", { title: Field.text() })
 function makeTestClient() {
   const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
     Effect.gen(function* () {
+      if (req.url.endsWith("/bulk")) {
+        if (req.method === "DELETE") return { ids: ["a", "b"] } as T
+        return { records: [{ id: "1", created: "", updated: "", title: "bulk" }] } as T
+      }
       if (req.method === "DELETE") return undefined as T
       if (req.url.includes("auth-with-password")) return { token: "tok", record: { id: "1", created: "", updated: "", title: "" } } as T
       if (req.method === "GET") return { items: [], nextCursor: null } as T
@@ -104,19 +108,36 @@ describe("createCollectionAdapter / collectionAdapter", () => {
     expect(handler.queryKey).toEqual(["posts", ActionKeys.GetFullList, {}])
   })
 
-  it("create — mutationOptions.mutationFn delegates to handler.raw", async () => {
+  it("create - mutationOptions.mutationFn delegates to handler.raw", async () => {
     const result = await adapted.create().mutationOptions.mutationFn({ title: "hi" })
     expect(result).toEqual(expect.objectContaining({ id: "1" }))
   })
 
-  it("update — mutationOptions.mutationFn delegates to handler.raw", async () => {
+  it("createMany - mutationOptions.mutationFn delegates to handler.raw", async () => {
+    const result = await adapted.createMany().mutationOptions.mutationFn([{ title: "hi" }])
+    expect(result).toEqual(expect.arrayContaining([expect.objectContaining({ id: "1" })]))
+  })
+
+  it("update - mutationOptions.mutationFn delegates to handler.raw", async () => {
     const result = await adapted.update().mutationOptions.mutationFn({ id: "x", data: { title: "new" } })
     expect(result).toEqual(expect.objectContaining({ id: "1" }))
   })
 
-  it("delete — mutationOptions.mutationFn delegates to handler.raw", async () => {
+  it("updateMany - mutationOptions.mutationFn delegates to handler.raw", async () => {
+    const result = await adapted
+      .updateMany()
+      .mutationOptions.mutationFn([{ id: "x", data: { title: "new" } }])
+    expect(result).toEqual(expect.arrayContaining([expect.objectContaining({ id: "1" })]))
+  })
+
+  it("delete - mutationOptions.mutationFn delegates to handler.raw", async () => {
     const result = await adapted.delete().mutationOptions.mutationFn("abc")
     expect(result).toBeUndefined()
+  })
+
+  it("deleteMany - mutationOptions.mutationFn delegates to handler.raw", async () => {
+    const result = await adapted.deleteMany().mutationOptions.mutationFn(["a", "b"])
+    expect(result).toEqual(["a", "b"])
   })
 
   it("invalidateAll calls invalidateQueries with collection key", () => {

@@ -210,6 +210,27 @@ export function makeCachedCollectionServiceLayer(
             )
           ),
 
+        // Bulk update/delete commit or roll back together, so every affected
+        // record key and the collection's lists are invalidated once, after the
+        // transaction succeeds — never per record.
+        updateMany: (collection, updates, ctx) =>
+          svc.updateMany(collection, updates, ctx).pipe(
+            Effect.tap(() =>
+              Effect.all(
+                [
+                  ...updates.map((update) => cache.invalidateRecord(collection.name, update.id)),
+                  cache.nukeListsFor(collection.name)
+                ],
+                { concurrency: "unbounded" }
+              )
+            ),
+            Effect.withSpan(
+              "cache.updateMany",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
+          ),
+
         delete: (collection, id, ctx) =>
           svc.delete(collection, id, ctx).pipe(
             Effect.tap(() =>
@@ -220,6 +241,24 @@ export function makeCachedCollectionServiceLayer(
             ),
             Effect.withSpan(
               "cache.delete",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
+          ),
+
+        deleteMany: (collection, ids, ctx) =>
+          svc.deleteMany(collection, ids, ctx).pipe(
+            Effect.tap(() =>
+              Effect.all(
+                [
+                  ...ids.map((id) => cache.invalidateRecord(collection.name, id)),
+                  cache.nukeListsFor(collection.name)
+                ],
+                { concurrency: "unbounded" }
+              )
+            ),
+            Effect.withSpan(
+              "cache.deleteMany",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
             )

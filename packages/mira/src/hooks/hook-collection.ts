@@ -192,6 +192,62 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             )
           ),
 
+        // Bulk update keeps the per-record hooks: pre/execute stages (including
+        // the stored-row view that `update` exposes as `record`) run per entry
+        // before the transaction opens, the updates run as one transaction in
+        // the inner service, and success observers fire per updated record.
+        updateMany: (
+          collection: AnyCollectionDef,
+          updates: ReadonlyArray<{ id: string; data: RepoRecord }>,
+          ctx: RequestCtx
+        ) =>
+          Effect.gen(function* () {
+            const auth = toAuth(ctx.auth)
+            const prepared = yield* Effect.forEach(
+              updates,
+              (update) =>
+                Effect.gen(function* () {
+                  const existing = yield* inner.view(collection, update.id, ctx)
+                  const hookCtx = yield* hooks.runRecordUpdate({
+                    collection,
+                    data: update.data,
+                    record: existing,
+                    auth
+                  })
+                  return yield* hooks.runRecordUpdateExecute(hookCtx)
+                }),
+              { concurrency: 1 }
+            )
+            const results = yield* inner.updateMany(
+              collection,
+              prepared.map((execCtx, index) => ({ id: updates[index].id, data: execCtx.data })),
+              ctx
+            )
+            yield* Effect.forEach(
+              results.map((result, index) => ({ execCtx: prepared[index], result })),
+              ({ execCtx, result }) =>
+                hooks.runRecordUpdateSuccess({ ...execCtx, result }).pipe(Effect.catch(() => Effect.void)),
+              { concurrency: "unbounded" }
+            )
+            return results
+          }).pipe(
+            Effect.catch((error: CollectionError) =>
+              Effect.forEach(
+                updates,
+                () =>
+                  hooks
+                    .runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) })
+                    .pipe(Effect.catch(() => Effect.void)),
+                { concurrency: "unbounded" }
+              ).pipe(Effect.andThen(Effect.fail(error)))
+            ),
+            Effect.withSpan(
+              "hook.updateMany",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
+          ),
+
         delete: (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
           Effect.gen(function* () {
             const auth = toAuth(ctx.auth)
@@ -208,6 +264,56 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             ),
             Effect.withSpan(
               "hook.delete",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
+          ),
+
+        // Bulk delete keeps the per-record hooks: the stored-row view and the
+        // delete pre/execute stages run per id before the transaction opens, the
+        // deletes run as one transaction in the inner service, and success
+        // observers fire per deleted record.
+        deleteMany: (collection: AnyCollectionDef, ids: ReadonlyArray<string>, ctx: RequestCtx) =>
+          Effect.gen(function* () {
+            const auth = toAuth(ctx.auth)
+            const prepared = yield* Effect.forEach(
+              ids,
+              (id) =>
+                Effect.gen(function* () {
+                  const existing = yield* inner.view(collection, id, ctx)
+                  const hookCtx = yield* hooks.runRecordDelete({
+                    collection,
+                    data: existing,
+                    record: existing,
+                    auth
+                  })
+                  return yield* hooks.runRecordDeleteExecute(hookCtx)
+                }),
+              { concurrency: 1 }
+            )
+            const deleted = yield* inner.deleteMany(collection, ids, ctx)
+            yield* Effect.forEach(
+              deleted.map((id, index) => ({ execCtx: prepared[index], id })),
+              ({ execCtx }) =>
+                hooks
+                  .runRecordDeleteSuccess({ ...execCtx, result: execCtx.data })
+                  .pipe(Effect.catch(() => Effect.void)),
+              { concurrency: "unbounded" }
+            )
+            return deleted
+          }).pipe(
+            Effect.catch((error: CollectionError) =>
+              Effect.forEach(
+                ids,
+                () =>
+                  hooks
+                    .runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) })
+                    .pipe(Effect.catch(() => Effect.void)),
+                { concurrency: "unbounded" }
+              ).pipe(Effect.andThen(Effect.fail(error)))
+            ),
+            Effect.withSpan(
+              "hook.deleteMany",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
             )

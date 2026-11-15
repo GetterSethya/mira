@@ -17,6 +17,18 @@ published by CI.
 
 ### Added
 
+- **Transactional bulk update and delete.** `PATCH /api/collections/:name/bulk` accepts
+  `{ "records": [{ "id": string, "data": { ... } }, ...] }` and returns `200 { "records": [...] }`;
+  `DELETE /api/collections/:name/bulk` accepts a JSON `{ "ids": string[] }` body (intentional —
+  up to 1 000 ids do not fit a URL) and returns `200 { "ids": [...] }` in input order. Both run
+  every entry through the normal `CollectionService.update`/`delete` path inside one SQLite
+  transaction, so a missing id, denied rule or invalid patch rolls the whole batch back; empty
+  batches, non-unique or empty ids, malformed bodies and batches over `MAX_BULK_RECORDS`
+  (1 000, the shared limit; `MAX_BULK_CREATE_RECORDS` stays as a deprecated alias) return
+  `422`. Hooks run per record, the cache invalidates every affected record and the list cache
+  once after commit, and the client SDK gains `updateMany().raw([{ id, data }])` /
+  `deleteMany().raw(ids)` with TanStack `mutationOptions` enrichment. Bulk routes are
+  registered before `/:id`, so a record id literally named `bulk` is shadowed.
 - **Transactional bulk create.** `POST /api/collections/:name/bulk` accepts
   `{ "records": [...] }` and creates up to 1 000 records inside a single SQLite transaction,
   returning `201 { "records": [...] }`. Every record still goes through the normal

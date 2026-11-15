@@ -379,6 +379,65 @@ describe("CachedCollectionService", () => {
       expect(second.items.length).toBe(3)
     }).pipe(Effect.provide(testLayer)))
 
+  it.effect("updateMany invalidates every updated record and the collection lists", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+
+      const created = yield* svc.createMany(Posts, [{ title: "A" }, { title: "B" }], noCtx)
+      const ids = created.map((record) => {
+        const id = record["id"]
+        return typeof id === "string" ? id : ""
+      })
+
+      // Prime the list and both record cache entries.
+      yield* svc.list(Posts, null, 10, noCtx)
+      for (const id of ids) yield* svc.view(Posts, id, noCtx)
+
+      const updated = yield* svc.updateMany(
+        Posts,
+        [
+          { id: ids[0], data: { title: "A2" } },
+          { id: ids[1], data: { title: "B2" } }
+        ],
+        noCtx
+      )
+      expect(updated.map((record) => record["title"])).toEqual(["A2", "B2"])
+
+      // Record cache entries are gone → fresh reads, list cache nuked once.
+      const list = yield* svc.list(Posts, null, 10, noCtx)
+      expect(list.items.map((item) => item["title"])).toEqual(["A2", "B2"])
+      const first = yield* svc.view(Posts, ids[0], noCtx)
+      expect(first["title"]).toBe("A2")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("deleteMany invalidates every deleted record and the collection lists", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+
+      const created = yield* svc.createMany(Posts, [{ title: "A" }, { title: "B" }, { title: "C" }], noCtx)
+      const ids = created.map((record) => {
+        const id = record["id"]
+        return typeof id === "string" ? id : ""
+      })
+
+      // Prime the list and the record cache entry that is about to be deleted.
+      yield* svc.list(Posts, null, 10, noCtx)
+      yield* svc.view(Posts, ids[0], noCtx)
+
+      const deleted = yield* svc.deleteMany(Posts, [ids[0], ids[1]], noCtx)
+      expect(deleted).toEqual([ids[0], ids[1]])
+
+      const list = yield* svc.list(Posts, null, 10, noCtx)
+      expect(list.items.length).toBe(1)
+      expect(list.items[0]["title"]).toBe("C")
+
+      const result = yield* Effect.result(svc.view(Posts, ids[0], noCtx))
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) expect(result.failure._tag).toBe("NotFoundError")
+    }).pipe(Effect.provide(testLayer)))
+
   it.effect("list cache invalidated by update — returns updated record in list", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
