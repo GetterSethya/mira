@@ -16,7 +16,9 @@ SQLite ships for both Node (`@effect/sql-sqlite-node`) and Bun
 
 ## Invariants
 
-- Both presets accept exactly `{ filename: string }`; `":memory:"` selects an ephemeral test database [sqlite.ts:SqliteDatabase] [sqlite-bun.ts:BunSqliteDatabase]
+- Both presets accept `{ filename: string, synchronous?: "FULL" | "NORMAL" | "OFF" }`; `":memory:"` selects an ephemeral test database [sqlite.ts:SqliteDatabase] [sqlite-bun.ts:BunSqliteDatabase]
+- `synchronous` is applied as `PRAGMA synchronous = …` through the layer's own `SqlClient` (via `Layer.tap`) right after the connection opens and before the app serves requests; the pragma is connection-level, so it must use that client. Omitted means no statement is issued and the driver default (`FULL`) stays in effect [synchronous.ts:withSynchronousMode]
+- `NORMAL` is durable across process crashes but can lose recent transactions on power loss; `OFF` is unsafe for production [synchronous.ts:SqliteSynchronousMode]
 - The returned object's only property is `layer`, matching the `MiraDatabase` interface (`{ layer }`) declared in `packages/mira/src/app/types.ts` [sqlite.ts:SqliteDatabase]
 - Each layer is `Layer.mergeAll` of its `SqliteClient.layer({ filename })` and `Layer.succeed(Dialect, sqliteDialect)` — the SQL client and its dialect are always paired [sqlite.ts:SqliteDatabase] [sqlite-bun.ts:BunSqliteDatabase]
 - `Layer.orDie` turns a config error into a defect, so bad database config panics at startup instead of surfacing as a typed error callers must handle [sqlite.ts:SqliteDatabase]
