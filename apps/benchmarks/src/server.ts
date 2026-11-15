@@ -9,7 +9,6 @@ import {
 } from "@gettersethya/mira"
 import { Effect, Layer } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
-import { SqlClient } from "effect/sql"
 
 if (process.env.BENCH_STACK_TRACES === "off") {
   Error.stackTraceLimit = 0
@@ -93,29 +92,18 @@ const benchPlugin = MiraPlugin.define<Repository>({
   routes: [pingRoute, repoListRoute, memoryRoute, exitRoute]
 })
 
-const database = platform.database({ filename: dbPath })
-const synchronous = process.env.BENCH_SYNCHRONOUS
-const databaseWithPragma =
-  synchronous === "NORMAL" || synchronous === "OFF"
-    ? {
-        layer: Layer.provideMerge(
-          Layer.effectDiscard(
-            Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              yield* sql`PRAGMA synchronous = ${sql.literal(synchronous)}`
-            })
-          ).pipe(Layer.orDie),
-          database.layer
-        )
-      }
-    : database
+const syncEnv = process.env.BENCH_SYNCHRONOUS
+const synchronous =
+  syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : undefined
+const cacheEnabled = process.env.BENCH_CACHE !== "off"
 
 Mira.builder()
   .platform(platform.preset)
-  .database(databaseWithPragma)
+  .database(platform.database({ filename: dbPath, synchronous }))
   .storage(LocalFileStorage({ directory: uploads }))
   .collections([Posts])
   .rules([postsRules])
+  .cache({ enabled: cacheEnabled })
   .telemetry(Layer.empty)
   .build()
   .extend(benchPlugin)

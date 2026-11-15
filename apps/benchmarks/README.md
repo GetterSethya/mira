@@ -73,6 +73,7 @@ Useful controls:
 - `AUDIT_PLATFORMS=node` runs one platform.
 - `AUDIT_OUT=<dir>` writes results elsewhere.
 - `BENCH_SYNCHRONOUS=NORMAL` tests the SQLite durability trade-off.
+- `BENCH_CACHE=off` disables the collection cache; `list-hit` repeats the same URL to measure the cache-hit path.
 - `BENCH_TRACING=on` re-enables tracing; `BENCH_STACK_TRACES=off` disables span stack capture.
 - `AUDIT_INDEX_TITLE=1` adds a benchmark-only `posts_title_idx` index (see below).
 

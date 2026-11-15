@@ -21,6 +21,7 @@ import { Schema } from "effect"
 type PlatformName = "node" | "bun"
 type Scenario =
   | "list"
+  | "list-hit"
   | "list-nocache"
   | "list-nofilter-nocache"
   | "list-scan"
@@ -85,6 +86,10 @@ const BODY = "x".repeat(180)
 // and once as an index seek. It is never part of the production collection
 // definition; leave it unset for the platform comparison runs.
 const titleIndexEnabled = process.env.AUDIT_INDEX_TITLE === "1"
+const cacheEnabled = process.env.BENCH_CACHE !== "off"
+const syncEnv = process.env.BENCH_SYNCHRONOUS
+const synchronous =
+  syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : "default"
 
 const MemorySchema = Schema.Struct({
   rss: Schema.Number,
@@ -177,8 +182,7 @@ const startServer = (
       BENCH_PLATFORM: platform,
       BENCH_PORT: options.port,
       BENCH_DB: options.dbPath,
-      BENCH_UPLOADS: options.uploads,
-      BENCH_STACK_TRACES: "off"
+      BENCH_UPLOADS: options.uploads
     },
     stdio: ["ignore", "pipe", "pipe"]
   })
@@ -302,6 +306,13 @@ const listUrl = (baseUrl: string, prefix: string, index: number) => {
 // `title = <missing>` matches no row, so without an index on `title` SQLite must
 // read the whole table for every request. `list-selective-fullscan` is the case
 // name that says so; `list-scan` is the older name for the same probe.
+const listHitUrl = (baseUrl: string) => {
+  const filter = encodeURIComponent(
+    JSON.stringify({ op: "neq", field: "title", value: "cache-hit" })
+  )
+  return `${baseUrl}/api/collections/posts?limit=30&filter=${filter}`
+}
+
 const scanUrl = (baseUrl: string, prefix: string, index: number) => {
   const filter = encodeURIComponent(
     JSON.stringify({ op: "eq", field: "title", value: `${prefix}-${index}` })
@@ -336,6 +347,8 @@ const requestFor = (
   switch (scenario) {
     case "list":
       return fetch(listUrl(baseUrl, prefix, index))
+    case "list-hit":
+      return fetch(listHitUrl(baseUrl))
     case "list-nocache":
       return fetch(listNoCacheUrl(baseUrl, prefix, index))
     case "list-nofilter-nocache":
@@ -453,6 +466,15 @@ const loadCases = (platform: PlatformName): ReadonlyArray<AuditCase> => {
   }
   for (const rows of [550, 50_000]) {
     cases.push({
+      name: `list-hit-${rows}-c50`,
+      platform,
+      scenario: "list-hit",
+      rows,
+      concurrency: 50,
+      requests: 2_000,
+      profile: false
+    })
+    cases.push({
       name: `list-nocache-${rows}-c50`,
       platform,
       scenario: "list-nocache",
@@ -546,7 +568,19 @@ mkdirSync(outDir, { recursive: true })
 const tempPath = `${outputPath}.tmp`
 writeFileSync(
   tempPath,
-  `${JSON.stringify({ mode, method: { titleIndex: titleIndexEnabled }, results }, null, 2)}\n`
+  `${JSON.stringify(
+    {
+      mode,
+      method: {
+        titleIndex: titleIndexEnabled,
+        cache: cacheEnabled ? "enabled" : "disabled",
+        synchronous
+      },
+      results
+    },
+    null,
+    2
+  )}\n`
 )
 renameSync(tempPath, outputPath)
 console.log(`Wrote ${outputPath}`)
