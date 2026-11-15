@@ -165,7 +165,7 @@ const synchronous =
   syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : undefined
 const cacheEnabled = process.env.BENCH_CACHE !== "off"
 
-const createBatchEnabled = process.env.BENCH_CREATE_BATCH === "on"
+const createBatchEnabled = process.env.BENCH_CREATE_BATCH !== "off"
 const createBatchWindowMs = Number(process.env.BENCH_CREATE_BATCH_WINDOW_MS ?? "0")
 const createBatchMax = Number(process.env.BENCH_CREATE_BATCH_MAX ?? "100")
 

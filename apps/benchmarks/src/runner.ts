@@ -42,6 +42,9 @@ const SEED_RECORDS = Number(process.env.BENCH_SEED_RECORDS ?? "50")
 const LIST_REQUESTS = Number(process.env.BENCH_LIST_REQUESTS ?? "2000")
 const CONCURRENCY = Number(process.env.BENCH_CONCURRENCY ?? "50")
 const BODY = "x".repeat(180)
+const BATCH_MUTATION_ENABLED = process.env.BENCH_CREATE_BATCH !== "off"
+const BATCH_MUTATION_WINDOW_MS = Number(process.env.BENCH_CREATE_BATCH_WINDOW_MS ?? "0")
+const BATCH_MUTATION_MAX = Number(process.env.BENCH_CREATE_BATCH_MAX ?? "100")
 const ListBodySchema = Schema.Struct({ items: Schema.Array(Schema.Unknown) })
 
 if (!Number.isInteger(RUNS) || RUNS < 1) {
@@ -330,6 +333,13 @@ const data = {
     responseLimit: 30,
     payloadBytes: BODY.length,
     listFilter: "unique title neq value per request (cache bypass)",
+    batchMutation: {
+      create: {
+        enabled: BATCH_MUTATION_ENABLED,
+        windowMs: BATCH_MUTATION_WINDOW_MS,
+        maxBatchSize: BATCH_MUTATION_MAX
+      }
+    },
     cache: { listTtlMs: 10_000, maxLists: 5_000 },
     telemetry: "off",
     validation: {

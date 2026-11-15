@@ -101,7 +101,7 @@ AUDIT_FAST=1 pnpm --filter mira-benchmarks create-batch:audit   # reduced smoke 
 
 The server enables batching with `.batchMutation({ create: { enabled, windowMs, maxBatchSize } })`, driven by:
 
-- `BENCH_CREATE_BATCH=off|on` (default `off`)
+- `BENCH_CREATE_BATCH=off|on` (default `on`; the published platform benchmark runs with batching enabled, set `off` for the unbatched baseline)
 - `BENCH_CREATE_BATCH_WINDOW_MS` (default `0`)
 - `BENCH_CREATE_BATCH_MAX` (default `100`)
 

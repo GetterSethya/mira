@@ -405,6 +405,7 @@
           <div><dt>List load</dt><dd>{number.format(method.listRequests)} unique-filter requests</dd></div>
           <div><dt>Concurrency</dt><dd>{method.concurrency} measured; {method.seedConcurrency} seed / {method.warmupConcurrency} warm-up</dd></div>
           <div><dt>Request body</dt><dd>{method.payloadBytes}-byte <code>body</code> field on create</dd></div>
+          <div><dt>Create batching</dt><dd>{method.batchMutation.create.enabled ? `enabled (${method.batchMutation.create.windowMs} ms window, max ${method.batchMutation.create.maxBatchSize})` : 'disabled'}</dd></div>
           <div><dt>List response</dt><dd>limit {method.responseLimit} rows</dd></div>
           <div><dt>Host</dt><dd>{environment.cores} threads · ~{environment.memoryGb} GB RAM</dd></div>
           <div><dt>Node TS</dt><dd>{method.nodeLoader === 'native' ? 'native type stripping' : 'tsx loader'}</dd></div>
