@@ -90,6 +90,53 @@ compares 500 sequential `POST /api/collections/posts` requests with one
 `POST /api/collections/posts/bulk` carrying the same 500 records. It is not part of the
 published platform benchmark; it exists to show the cost of 500 commits versus one.
 
+## Create batching: transparent single-create batching
+
+A one-feature evidence run for the opt-in create batcher:
+
+```bash
+pnpm --filter mira-benchmarks create-batch:audit
+AUDIT_FAST=1 pnpm --filter mira-benchmarks create-batch:audit   # reduced smoke run
+```
+
+The server enables batching with `.createBatch({ enabled, windowMs, maxBatchSize })`, driven by:
+
+- `BENCH_CREATE_BATCH=off|on` (default `off`)
+- `BENCH_CREATE_BATCH_WINDOW_MS` (default `0`)
+- `BENCH_CREATE_BATCH_MAX` (default `100`)
+
+The audit spawns four server configurations (`{FULL, NORMAL} × {off, on}`), each cell in a fresh
+temporary directory and database, and reports:
+
+- concurrency 1/10/50/100 with 200/1 000/5 000/5 000 measured creates per cell, 50 warm-ups, three
+  repeats, medians and p50/p99;
+- `/__bench/batch-stats` counters (`batches`, `commits`, `records`, `maxBatchSize`,
+  `lastBatchSizes`, `rejected`, `consecutiveDefects`) reset after warm-up, so `commits / requests`
+  is the real commit ratio and `records === requests` is checked;
+- `/__bench/count` row-count checks (`rows === measured + warm-ups`);
+- a concurrent read arm during each create cell (target: 500 completed reads; check 8 reports
+  `insufficient-data` when a cell misses it), plus read-at-rest on the same database file;
+- an open-loop arm at 600 and 1 200 req/s for 5 s with a 1 000 in-flight cap, measuring from the
+  scheduled send time; runs that hit the cap are marked `capped` and excluded from check 9, and
+  503s are split into `batch_unavailable` vs other failures;
+- a window sweep (`0/1/2/5/10` ms) and a batch-size sweep (`25/50/100/200`) at c50;
+- payload→response verification (each response's `title` must equal the title sent) and a
+  success-rate gate. `rps` is successful (2xx) throughput; the success rate is reported alongside.
+
+`AUDIT_OUT` selects the output directory; the raw JSON and a Markdown summary are written there.
+The script exits non-zero when an acceptance criterion fails, so a failed experiment is not
+mistaken for a pass.
+
+**Windows timer granularity.** The default window is `0`, which drains what is already queued
+after one scheduler yield and never sleeps. Positive windows use a real timer:
+`Effect.sleep(2)` can take ~15.6 ms on Windows, so a positive window makes every sequential (c1)
+create pay that cost. The window sweep starts at `0` for exactly this reason; read it before
+choosing an operating point.
+
+**Create retries can duplicate rows.** A request whose insert committed after the client timed out
+never receives a response, and there is no idempotency key on the create route. Do not blindly
+retry a create that returned `503 batch_unavailable` or timed out; the row may already exist.
+
 ## Selective filter: full scan vs title index
 
 The list benchmark's filter is `title neq <value>`, which matches every seeded row, so

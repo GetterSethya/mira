@@ -29,6 +29,7 @@ export const Mira = {
 
 export type { MigrateOptions } from "../migrator/types.js"
 export type { MiraCacheConfig } from "../cache/types.js"
+export type { MiraCreateBatchConfig } from "@/collection-service/create-batcher.js"
 export type { MiraApp, ServeOptions } from "./app.js"
 export { applyRulesToCollections } from "./app.js"
 export type { MiraAppConfig } from "./builder.js"
@@ -40,6 +41,7 @@ export type {
   EmailObserverHook,
   ListHook,
   ListSuccessHook,
+  PluginRouteServices,
   RecordHook,
   RecordSuccessHook
 } from "./plugin.js"

@@ -1,8 +1,10 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { Effect, Layer } from "effect"
 import type { HttpRouter } from "effect/http"
+import type { SqlClient } from "effect/sql"
 
 import type { CollectionService } from "@/collection-service/collection-service.js"
+import type { CreateBatchStats } from "@/collection-service/create-batcher.js"
 import type { AppConfig } from "@/config/index.js"
 import type { CronDef } from "@/cron/types.js"
 import type {
@@ -73,6 +75,26 @@ export const onCollectionSuccess = <T>(
   collections: ReadonlyArray<string>,
   handler: (ctx: T) => Effect.Effect<void, never, never>
 ): RecordSuccessHook<T> => ({ collections, handler })
+
+/**
+ * Services a plugin route may require.
+ *
+ * `MiraApp.buildLayer()` provides this whole set to plugin routes. A plugin
+ * that needs something outside it (its own layer, for example) must supply it
+ * through the plugin's `layer`.
+ *
+ * `CreateBatchStats` and `SqlClient` are included for benchmark and
+ * introspection routes; they are available because the service layer is
+ * merged into the router's context, not because a plugin should write to the
+ * database directly.
+ */
+export type PluginRouteServices =
+  | PlatformServices
+  | AppConfig
+  | Repository
+  | CollectionService
+  | CreateBatchStats
+  | SqlClient.SqlClient
 
 export interface MiraPlugin<R = never> {
   readonly onBootstrap?: () => Effect.Effect<void, never, AppConfig | CollectionService>

@@ -20,8 +20,16 @@ import type { FileStorageError } from "@/storage/storage.js"
  * | `ValidationError` | 422 |
  * | `ReadOnlyError` | 405 |
  * | `PayloadTooLargeError` | 413 |
+ * | `CreateBatchClosedError` | 503 |
+ * | `CreateBatchQueueFullError` | 503 |
+ * | `CreateBatchTimeoutError` | 503 |
+ * | `CreateBatchNestedTransactionError` | 500 |
  * | `FileStorageError` | 502 |
  * | `SqlError` | 500 |
+ *
+ * The create-batch 503s share `{ error: "batch_unavailable", retryable: false }`
+ * and deliberately carry no `Retry-After`: a create is not idempotent, so an
+ * automatic retry can duplicate a row.
  *
  * Use this as a final `.pipe()` call in route handlers to convert domain errors
  * to HTTP responses.
@@ -66,6 +74,37 @@ export const catchCollectionErrors = <A, R>(
         HttpServerResponse.jsonUnsafe(
           { error: "payload_too_large", detail: e.detail, limit: e.limit },
           { status: 413 as const }
+        )
+      ),
+    // Batch-unavailable family: 503 without `Retry-After`. A timed-out or
+    // rejected create may still have committed; automatic retries duplicate.
+    CreateBatchClosedError: () =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "batch_unavailable", retryable: false },
+          { status: 503 as const }
+        )
+      ),
+    CreateBatchQueueFullError: () =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "batch_unavailable", retryable: false },
+          { status: 503 as const }
+        )
+      ),
+    CreateBatchTimeoutError: () =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "batch_unavailable", retryable: false },
+          { status: 503 as const }
+        )
+      ),
+    // Programmer error: `create` ran inside an open SQL transaction.
+    CreateBatchNestedTransactionError: () =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "create_inside_transaction" },
+          { status: 500 as const }
         )
       ),
     FileStorageError: (e) =>

@@ -17,6 +17,33 @@ published by CI.
 
 ### Added
 
+- **Opt-in transparent create batching (spike).** `Mira.builder().createBatch({ enabled, windowMs,
+  maxBatchSize, maxQueueSize, maxQueueBytes, submitTimeoutMs })` merges concurrent single
+  `POST /api/collections/:name` creates into one SQLite transaction: each request still validates,
+  checks its create rule, enforces credentials and hashes passwords in its own fiber, while only
+  the insert is queued. A background flusher runs every insert inside a nested savepoint, isolates
+  statement-level failures, probes for transaction-fatal rollbacks, and completes each request's
+  `Deferred` only after the outer `COMMIT` returns (post-commit completion is uninterruptible).
+  Admission is fail-fast on an explicit count/byte budget (`CreateBatchQueueFullError`), request
+  waits are bounded (`CreateBatchTimeoutError`), flusher defects are counted and close the batcher
+  after three consecutive failures, and layer shutdown fails every uncommitted entry with
+  `CreateBatchClosedError` before the SQL client is released. All three map to `503
+  { error: "batch_unavailable", retryable: false }` without `Retry-After` (a create is not
+  idempotent); calling `create` inside an open transaction fails fast with a 500
+  `{ error: "create_inside_transaction" }` instead of deadlocking. Off by default — the disabled
+  batcher runs inserts inline, so the default path is unchanged. The window defaults to `0`, which
+  drains whatever is already queued after one scheduler yield and never sleeps; a positive
+  `windowMs` opts into a real timer (Windows rounds a 2 ms sleep up to ~15 ms), and the window
+  sweep in the audit measures that trade-off. `createMany` now prepares every
+  record *before* opening its transaction and never touches the queue; as a result a create rule
+  that uses `Rule.subquery()` over the same collection no longer sees rows inserted earlier in the
+  same bulk call. `CreateBatchStats`
+  (`batches`, `commits`, `records`, `maxBatchSize`, `lastBatchSizes`, `rejected`,
+  `consecutiveDefects`, `timedOut`, `admitted`) is available to plugins; `records` counts rows
+  actually written, `timedOut` counts requests that gave up, and stats are best-effort — a counter
+  failure never changes a request's outcome. `pnpm --filter mira-benchmarks
+  create-batch:audit` measures `on` vs `off` across `synchronous=FULL|NORMAL`, c1/c10/c50/c100,
+  with a read arm and an open-loop arm. See `.plans/create-batch-spike-plan.md`.
 - **Transactional bulk update and delete.** `PATCH /api/collections/:name/bulk` accepts
   `{ "records": [{ "id": string, "data": { ... } }, ...] }` and returns `200 { "records": [...] }`;
   `DELETE /api/collections/:name/bulk` accepts a JSON `{ "ids": string[] }` body (intentional —

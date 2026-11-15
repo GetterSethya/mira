@@ -1,7 +1,7 @@
 import type { AnyCollectionDef, CollectionSchema } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
 import { filterNodeToWhereClause } from "@gettersethya/mira-client"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { literal } from "effect/sql/Statement"
 
@@ -14,6 +14,8 @@ import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage } from "@/storage/storage.js"
 
 import type { CursorPage, RequestCtx } from "./context.js"
+import { CreateBatcher, CreateBatcherDisabledLive, estimateRowBytes, makeCreateBatcherLayer } from "./create-batcher.js"
+import type { CreateBatchStats, PreparedCreate, ResolvedCreateBatchConfig } from "./create-batcher.js"
 import type { RowDecoder, RowDecoderSync, RowEncoder } from "./decode.js"
 import { makeListRowMapper, makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
 import type { CollectionError } from "./errors.js"
@@ -300,9 +302,18 @@ function compileRule(
 }
 
 /**
+ * Dependencies the collection service layer needs from the app.
+ */
+type CollectionServiceDeps = Repository | SqlClient.SqlClient | FileStorage | Dialect | AuthService
+
+/**
  * Create a `CollectionService` layer for a given set of collection definitions.
  * Each collection gets its own validated service instance with per-collection
  * rules, field schemas, and system field handling.
+ *
+ * Create batching is provided internally as the disabled (inline) batcher, so
+ * this signature and the layer's requirements are unchanged. Use
+ * `makeBatchedCollectionServiceLayer` to enable transparent create batching.
  *
  * The layer depends on `Repository`, `SqlClient`, and `FileStorage`.
  *
@@ -314,15 +325,44 @@ function compileRule(
  *
  * @see CollectionService — the service tag
  * @see makeCachedCollectionServiceLayer — wrapping layer that adds caching
+ * @see makeBatchedCollectionServiceLayer — same layer with create batching enabled
  */
 export function makeCollectionServiceLayer(
   allCollections: ReadonlyArray<AnyCollectionDef>
-): Layer.Layer<CollectionService, never, Repository | SqlClient.SqlClient | FileStorage | Dialect | AuthService> {
+): Layer.Layer<CollectionService, never, CollectionServiceDeps> {
+  return makeCollectionServiceLayerWith(allCollections, CreateBatcherDisabledLive)
+}
+
+/**
+ * Create a `CollectionService` layer whose `create` inserts go through the
+ * shared create batcher.
+ *
+ * The batcher merges concurrent single creates into one transaction per flush.
+ * Preparation (validation, rules, credentials, password hashing) still runs in
+ * the caller's fiber before queueing.
+ *
+ * @param allCollections - Array of collection definitions
+ * @param config - A resolved (validated) batching configuration
+ * @param statsLayer - The app's single `CreateBatchStats` layer value
+ */
+export function makeBatchedCollectionServiceLayer(
+  allCollections: ReadonlyArray<AnyCollectionDef>,
+  config: ResolvedCreateBatchConfig,
+  statsLayer: Layer.Layer<CreateBatchStats>
+): Layer.Layer<CollectionService, never, CollectionServiceDeps> {
+  return makeCollectionServiceLayerWith(allCollections, makeCreateBatcherLayer(config, statsLayer))
+}
+
+function makeCollectionServiceLayerWith(
+  allCollections: ReadonlyArray<AnyCollectionDef>,
+  batcherLayer: Layer.Layer<CreateBatcher, never, SqlClient.SqlClient>
+): Layer.Layer<CollectionService, never, CollectionServiceDeps> {
   return Layer.effect(
     CollectionService,
     Effect.gen(function* () {
       const repo = yield* Repository
       const sql = yield* SqlClient.SqlClient
+      const batcher = yield* CreateBatcher
       const fileStorage = yield* FileStorage
       const dialect = yield* Dialect
       const authService = yield* AuthService
@@ -623,7 +663,18 @@ export function makeCollectionServiceLayer(
           }, { captureStackTrace: false })
         )
 
-      const createOne = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
+      /**
+       * Request-specific half of a create: everything that must run in the
+       * caller's fiber before an insert may be queued.
+       *
+       * Order matters: credentials compare the *plaintext* password with
+       * `passwordConfirm`, so hashing happens last.
+       */
+      const prepareCreate = (
+        collection: AnyCollectionDef,
+        data: RepoRecord,
+        ctx: RequestCtx
+      ): Effect.Effect<PreparedCreate, CollectionError> =>
         Effect.gen(function* () {
           if (collection.schema["x-collection-kind"] === "view") {
             return yield* new ReadOnlyError({ collection: collection.name })
@@ -652,11 +703,44 @@ export function makeCollectionServiceLayer(
           const canManage = yield* canManagePayload(collection, cleaned, { ...ctx, body: cleaned })
           yield* enforceCreateCredentials(collection, data, cleaned, canManage, ctx)
 
-          const row = yield* repo.create(
-            collection.name,
-            getEncoder(collection)(yield* hashAuthPassword(collection, cleaned, false))
-          )
-          return stripHidden(collection, yield* decodeRow(collection, row), ctx.admin === true)
+          const hashed = yield* hashAuthPassword(collection, cleaned, false)
+          return {
+            collection,
+            row: getEncoder(collection)(hashed),
+            admin: ctx.admin === true
+          }
+        })
+
+      /**
+       * Mergeable half of a create: the insert, decode and hidden-field strip.
+       *
+       * `admin` comes from the entry, never from a batch-wide flag, and the
+       * returned row is paired with its request only through the entry's
+       * `Deferred`.
+       */
+      const insertPrepared = (prepared: PreparedCreate): Effect.Effect<RepoRecord, CollectionError> =>
+        Effect.gen(function* () {
+          const row = yield* repo.create(prepared.collection.name, prepared.row)
+          const decoded = yield* decodeRow(prepared.collection, row)
+          return stripHidden(prepared.collection, decoded, prepared.admin)
+        })
+
+      const create = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepareCreate(collection, data, ctx)
+          const startedAt = yield* Clock.currentTimeMillis
+          const row = yield* batcher.submit({
+            collection,
+            insert: insertPrepared(prepared),
+            estimatedBytes: estimateRowBytes(prepared.row)
+          })
+          // `batch.size` is deliberately absent: the request fiber does not
+          // know its batch until the deferred resolves. The flusher's
+          // `collection.createBatch` span carries the size.
+          yield* Effect.annotateCurrentSpan({
+            "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
+          })
+          return row
         }).pipe(
           Effect.withSpan("collection.create", {
             kind: "internal",
@@ -664,22 +748,30 @@ export function makeCollectionServiceLayer(
           }, { captureStackTrace: false })
         )
 
-      const create = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
-        createOne(collection, data, ctx)
-
-      // One transaction for the whole batch: SQLite opens BEGIN, runs every
-      // per-record insert, and only commits if all of them succeed. Any
-      // validation/rule/credential failure propagates out of `withTransaction`,
-      // which rolls back every insert already made. Each record still executes
-      // the exact `collection.create` path (span included), so service-level
-      // semantics are identical to N individual calls.
+      // Prepare outside the transaction, then insert everything in one
+      // transaction: validation, rules and password hashing no longer run while
+      // the write lock is held, and a prepare failure writes nothing. The
+      // queue is never consulted, so `createMany` keeps its all-or-nothing
+      // contract and is safe to call from code that already holds a
+      // transaction.
+      //
+      // Semantic delta: because rules now evaluate before any row is inserted,
+      // a create rule that reads the same table (for example
+      // `Rule.subquery()`) no longer sees rows inserted earlier in the same
+      // bulk call. The explicit bulk endpoint is one caller's unit; rules that
+      // need intra-batch visibility must not use subqueries over their own
+      // collection.
       const createMany = (collection: AnyCollectionDef, records: ReadonlyArray<RepoRecord>, ctx: RequestCtx) =>
         Effect.gen(function* () {
           if (collection.schema["x-collection-kind"] === "view") {
             return yield* new ReadOnlyError({ collection: collection.name })
           }
+          const prepared = yield* Effect.forEach(records, (data) => prepareCreate(collection, data, ctx), {
+            concurrency: 1
+          })
+          if (prepared.length === 0) return []
           return yield* sql.withTransaction(
-            Effect.forEach(records, (data) => createOne(collection, data, ctx), { concurrency: 1 })
+            Effect.forEach(prepared, insertPrepared, { concurrency: 1 })
           )
         }).pipe(
           Effect.withSpan("collection.createMany", {
@@ -880,7 +972,7 @@ export function makeCollectionServiceLayer(
 
       return { list, view, create, createMany, update, updateMany, delete: deleteOne, deleteMany }
     })
-  )
+  ).pipe(Layer.provide(batcherLayer))
 }
 
 /** @deprecated Use makeCollectionServiceLayer(allCollections) */

@@ -2,6 +2,7 @@ import {
   BaseCollection,
   Field,
   Repository,
+  CreateBatchStats,
   defineRule,
   LocalFileStorage,
   Mira,
@@ -9,6 +10,7 @@ import {
 } from "@gettersethya/mira"
 import { Effect, Layer } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { SqlClient } from "effect/sql"
 
 if (process.env.BENCH_STACK_TRACES === "off") {
   Error.stackTraceLimit = 0
@@ -79,6 +81,64 @@ const memoryRoute = HttpRouter.route(
   Effect.sync(() => HttpServerResponse.jsonUnsafe(process.memoryUsage()))
 )
 
+// Create-batch observability: counters are recorded at the transaction
+// chokepoint, so `commits` is the real number of outer commits, never derived
+// from the flush count.
+const batchStatsRoute = HttpRouter.route(
+  "GET",
+  "/__bench/batch-stats",
+  Effect.gen(function* () {
+    const stats = yield* CreateBatchStats
+    return HttpServerResponse.jsonUnsafe(yield* stats.snapshot)
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(
+        HttpServerResponse.jsonUnsafe(
+          { error: "batch_stats_unavailable" },
+          { status: 503 }
+        )
+      )
+    )
+  )
+)
+
+// Reset the counters after warm-up so `records === measuredRequests` and the
+// commit ratio cover the measured phase only.
+const resetBatchStatsRoute = HttpRouter.route(
+  "POST",
+  "/__bench/batch-stats/reset",
+  Effect.gen(function* () {
+    const stats = yield* CreateBatchStats
+    yield* stats.reset
+    return HttpServerResponse.jsonUnsafe({ ok: true })
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(
+        HttpServerResponse.jsonUnsafe(
+          { error: "batch_stats_unavailable" },
+          { status: 503 }
+        )
+      )
+    )
+  )
+)
+
+// Exact row count for the cell self-checks. `Repository.list` is paginated, so
+// this uses COUNT(*) directly.
+const countRoute = HttpRouter.route(
+  "GET",
+  "/__bench/count",
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM ${sql("posts")}`
+    return HttpServerResponse.jsonUnsafe({ count: Number(rows[0]?.count ?? 0) })
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "count failed" }, { status: 500 }))
+    )
+  )
+)
+
 const exitRoute = HttpRouter.route(
   "GET",
   "/__bench/exit",
@@ -88,14 +148,26 @@ const exitRoute = HttpRouter.route(
   })
 )
 
-const benchPlugin = MiraPlugin.define<Repository>({
-  routes: [pingRoute, repoListRoute, memoryRoute, exitRoute]
+const benchPlugin = MiraPlugin.define<Repository | CreateBatchStats | SqlClient.SqlClient>({
+  routes: [
+    pingRoute,
+    repoListRoute,
+    memoryRoute,
+    batchStatsRoute,
+    resetBatchStatsRoute,
+    countRoute,
+    exitRoute
+  ]
 })
 
 const syncEnv = process.env.BENCH_SYNCHRONOUS
 const synchronous =
   syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : undefined
 const cacheEnabled = process.env.BENCH_CACHE !== "off"
+
+const createBatchEnabled = process.env.BENCH_CREATE_BATCH === "on"
+const createBatchWindowMs = Number(process.env.BENCH_CREATE_BATCH_WINDOW_MS ?? "0")
+const createBatchMax = Number(process.env.BENCH_CREATE_BATCH_MAX ?? "100")
 
 Mira.builder()
   .platform(platform.preset)
@@ -104,6 +176,11 @@ Mira.builder()
   .collections([Posts])
   .rules([postsRules])
   .cache({ enabled: cacheEnabled })
+  .createBatch({
+    enabled: createBatchEnabled,
+    windowMs: createBatchWindowMs,
+    maxBatchSize: createBatchMax
+  })
   .telemetry(Layer.empty)
   .build()
   .extend(benchPlugin)

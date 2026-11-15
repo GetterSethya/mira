@@ -6,6 +6,11 @@ import { HttpRouter } from "effect/http"
 import { AuthChallengeStoreLive } from "@/auth/index.js"
 import { makeCachedCollectionServiceLayer } from "@/cache/index.js"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
+import {
+  makeBatchedCollectionServiceLayer,
+  makeCreateBatchStatsLayer,
+  resolveCreateBatchConfig
+} from "@/collection-service/index.js"
 import { AppConfig, AppConfigLive } from "@/config/index.js"
 import { makeHookedEmailServiceLayer } from "@/email/index.js"
 import { makeCronServiceLayer } from "@/cron/cron-service.js"
@@ -296,21 +301,40 @@ export class MiraApp<R = never, Telemetry = never> {
       }).pipe(Effect.orDie)
     ).pipe(Layer.provide(fullMid))
 
+    // Create batching. One stats value per app build: it is merged below (so
+    // plugin routes can read it) and passed to the batched base service.
+    // `null` from the resolver means the feature is off — the disabled batcher
+    // runs inserts inline and no queue/fiber is created.
+    const createBatchConfig = resolveCreateBatchConfig(this.#config.createBatch)
+    const createBatchStatsLayer = makeCreateBatchStatsLayer()
+
     // Core collection service: cached by default, or uncached when the app
     // explicitly disables the cache. The hook decorator wraps either one.
     const cacheConfig = this.#config.cache ?? {}
     const collectionServiceLayer =
       cacheConfig.enabled === false
-        ? makeCollectionServiceLayer(allCollections)
-        : makeCachedCollectionServiceLayer(allCollections, cacheConfig)
+        ? createBatchConfig === null
+          ? makeCollectionServiceLayer(allCollections)
+          : makeBatchedCollectionServiceLayer(allCollections, createBatchConfig, createBatchStatsLayer)
+        : makeCachedCollectionServiceLayer(
+            allCollections,
+            cacheConfig,
+            createBatchConfig === null
+              ? {}
+              : { createBatch: createBatchConfig, statsLayer: createBatchStatsLayer }
+          )
 
     // Hook collection service decorator: wraps the selected collection service with hooks
     const hookCollectionLayer = makeHookCollectionServiceLayer().pipe(
       Layer.provide(Layer.mergeAll(collectionServiceLayer, hookServiceLayer))
     )
 
-    // Full top layer: hook-wrapped collection service + all mid services + auto-migration side effect
-    const topLayer = hookCollectionLayer.pipe(Layer.provideMerge(Layer.merge(fullMid, autoMigrateLayer)))
+    // Full top layer: hook-wrapped collection service + all mid services +
+    // auto-migration side effect + the app-wide create-batch stats value (so
+    // plugin routes can resolve `CreateBatchStats`).
+    const topLayer = hookCollectionLayer.pipe(
+      Layer.provideMerge(Layer.mergeAll(fullMid, autoMigrateLayer, createBatchStatsLayer))
+    )
 
     // Cron service: scoped fibers die when server stops; provided with full service stack + hook service
     const cronServiceLayer = makeCronServiceLayer(allCronDefs).pipe(

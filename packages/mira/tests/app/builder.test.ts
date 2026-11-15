@@ -68,6 +68,17 @@ describe("MiraBuilder", () => {
     const b1 = b0.platform(stubPlatform)
     expect(b0).not.toBe(b1)
   })
+
+  it("defaults createBatch to disabled when .createBatch() is not called", () => {
+    const app = fullBuilder().build()
+    expect(app._getConfig().createBatch).toEqual({ enabled: false })
+  })
+
+  it("threads .createBatch() through build()'s config literal", () => {
+    const createBatch = { enabled: true, windowMs: 5, maxBatchSize: 25 }
+    const app = fullBuilder().createBatch(createBatch).build()
+    expect(app._getConfig().createBatch).toEqual(createBatch)
+  })
 })
 
 describe("MiraApp.extend()", () => {

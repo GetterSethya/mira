@@ -2,6 +2,7 @@ import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { Layer } from "effect"
 
 import type { MiraCacheConfig } from "@/cache/types.js"
+import type { MiraCreateBatchConfig } from "@/collection-service/create-batcher.js"
 import type { CronDef } from "@/cron/types.js"
 import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
@@ -41,6 +42,7 @@ export interface MiraAppConfig<Telemetry = never> {
   migrations?: MigrateOptions
   rateLimits?: MiraRateLimits
   cache?: MiraCacheConfig
+  createBatch?: MiraCreateBatchConfig
 }
 
 function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraAppConfig<any> {
@@ -194,6 +196,31 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
   }
 
   /**
+   * Enable transparent server-side create batching (optional, **off by
+   * default**).
+   *
+   * Concurrent single creates are merged into one SQLite transaction: each
+   * request still validates, checks rules and hashes passwords in its own
+   * fiber, but only the insert is queued and committed together. This reduces
+   * commit/fsync count under load at the cost of a small fixed latency
+   * (`windowMs`) at low concurrency, and it widens the window in which a
+   * committed row can exist without the client receiving the response — do
+   * not blindly retry a timed-out create.
+   *
+   * @param c - A `MiraCreateBatchConfig` (`enabled`, `windowMs`,
+   *   `maxBatchSize`, `maxQueueSize`, `maxQueueBytes`, `submitTimeoutMs`)
+   * @returns A new builder (same phantom type — batching is optional)
+   *
+   * @example
+   * Mira.builder()
+   *   // ... required steps
+   *   .createBatch({ enabled: true, windowMs: 2, maxBatchSize: 100 })
+   */
+  createBatch(c: MiraCreateBatchConfig): MiraBuilder<Has, R, Telemetry> {
+    return new MiraBuilder({ ...this.#config, createBatch: c })
+  }
+
+  /**
    * Set the collection definitions.
    * Required step. The collections define the schema for all entities.
    *
@@ -312,7 +339,8 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
       cors: config.cors ?? defaultCorsConfig,
       migrations: config.migrations ?? {},
       rateLimits: config.rateLimits ?? {},
-      cache: config.cache ?? { enabled: true }
+      cache: config.cache ?? { enabled: true },
+      createBatch: config.createBatch ?? { enabled: false }
     })
   }
 }
