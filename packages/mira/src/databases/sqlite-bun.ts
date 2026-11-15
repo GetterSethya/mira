@@ -2,8 +2,8 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Layer } from "effect"
 
 import type { MiraDatabase } from "@/app/types.js"
-import { withSynchronousMode } from "@/databases/synchronous.js"
-import type { SqliteSynchronousMode } from "@/databases/synchronous.js"
+import { withSqlitePragmas } from "@/databases/pragmas.js"
+import type { SqliteSynchronousMode } from "@/databases/pragmas.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
@@ -11,7 +11,8 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
  * SQLite database preset using `@effect/sql-sqlite-bun` (`bun:sqlite`).
  *
  * The SQL dialect, migrations, and internal tables are the same as the Node
- * preset. The Bun driver enables WAL and a busy timeout by default.
+ * preset. WAL is enabled explicitly when the connection opens, so it does not
+ * depend on a driver default changing; the driver's busy timeout remains.
  *
  * @param config.filename - Path to the SQLite database file (`":memory:"` for tests)
  * @param config.synchronous - Optional durability mode, applied with
@@ -32,11 +33,11 @@ export const BunSqliteDatabase = (config: {
   filename: string
   synchronous?: SqliteSynchronousMode
 }): MiraDatabase => ({
-  layer: withSynchronousMode(
+  layer: withSqlitePragmas(
     Layer.mergeAll(
       SqliteClient.layer({ filename: config.filename }).pipe(Layer.orDie),
       Layer.succeed(Dialect, sqliteDialect)
     ),
-    config.synchronous
+    { synchronous: config.synchronous }
   )
 })

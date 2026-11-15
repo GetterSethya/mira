@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { SMTPServer } from "smtp-server"
 import { Context, Effect, Layer, Result, Stream } from "effect"
+import { SqlClient } from "effect/sql"
 import {
   AppConfig,
   AuthService,
@@ -130,6 +131,17 @@ const program = Effect.gen(function* () {
   yield* Effect.void.pipe(Effect.withSpan("bun-smoke-span"))
   yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 250)))
   const telemetrySql = Context.get(context, TelemetrySqlClient)
+  const mainSql = Context.get(context, SqlClient.SqlClient)
+  const mainJournal = yield* mainSql<{ journal_mode: string }>`PRAGMA journal_mode`
+  const telemetryJournal = yield* telemetrySql<{ journal_mode: string }>`PRAGMA journal_mode`
+  if (mainJournal[0]?.journal_mode !== "wal") {
+    throw new Error(`main SQLite database is not in WAL mode: ${mainJournal[0]?.journal_mode ?? "missing"}`)
+  }
+  if (telemetryJournal[0]?.journal_mode !== "wal") {
+    throw new Error(
+      `telemetry SQLite database is not in WAL mode: ${telemetryJournal[0]?.journal_mode ?? "missing"}`
+    )
+  }
   const logRows = yield* telemetrySql<{ count: number }>`SELECT COUNT(*) AS count FROM logs`
   const spanRows = yield* telemetrySql<{ count: number }>`SELECT COUNT(*) AS count FROM spans`
   const logCount = Number(logRows[0]?.count ?? 0)
@@ -323,6 +335,10 @@ const program = Effect.gen(function* () {
     },
     emailReceived: startedSmtp.received.length,
     storage: { key, listed: listedKeys.length },
+    sqlite: {
+      mainJournal: mainJournal[0]?.journal_mode,
+      telemetryJournal: telemetryJournal[0]?.journal_mode
+    },
     telemetry: { logs: logCount, spans: spanCount },
     port: requestPort,
     rateLimit: { first: first.blocked === null, second: second.blocked?.policy }
@@ -355,6 +371,10 @@ type SmokeResult = {
   }
   readonly emailReceived: number
   readonly storage: { readonly key: string; readonly listed: number }
+  readonly sqlite: {
+    readonly mainJournal: string | undefined
+    readonly telemetryJournal: string | undefined
+  }
   readonly telemetry: { readonly logs: number; readonly spans: number }
   readonly port: number
   readonly rateLimit: { readonly first: boolean; readonly second: string | undefined }

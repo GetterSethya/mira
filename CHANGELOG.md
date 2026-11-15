@@ -87,6 +87,14 @@ published by CI.
 
 ### Changed
 
+- **SQLite WAL is explicit for Node and Bun.** `SqliteDatabase` and `BunSqliteDatabase`
+  now issue `PRAGMA journal_mode = WAL` themselves when the connection opens, immediately
+  before the optional `PRAGMA synchronous` mode. The Effect SQLite drivers already default
+  writable connections to WAL; issuing it in Mira keeps that guarantee independent of a
+  driver default change. `":memory:"` reports `memory` (WAL is not available there). The
+  telemetry database already applies WAL explicitly and is unchanged. Node tests assert
+  `journal_mode = wal`; the Bun smoke test asserts it for both the main and telemetry
+  databases.
 - **Breaking: driver-neutral SQLite telemetry.** `makeSqliteTelemetryLayer` no longer
   accepts `dbPath` and no longer opens the database itself. Pass a `SqlClient` layer for a
   dedicated telemetry database:

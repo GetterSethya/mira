@@ -2,8 +2,8 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Layer } from "effect"
 
 import type { MiraDatabase } from "@/app/types.js"
-import { withSynchronousMode } from "@/databases/synchronous.js"
-import type { SqliteSynchronousMode } from "@/databases/synchronous.js"
+import { withSqlitePragmas } from "@/databases/pragmas.js"
+import type { SqliteSynchronousMode } from "@/databases/pragmas.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
@@ -11,7 +11,9 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
  * SQLite database preset using `@effect/sql-sqlite-node`.
  *
  * Creates a `MiraDatabase` that provides both the SQLite `SqlClient`
- * and the `Dialect` (for schema generation). The layer uses `Layer.orDie`
+ * and the `Dialect` (for schema generation). WAL is enabled explicitly when
+ * the connection opens, so it does not depend on a driver default changing.
+ * The layer uses `Layer.orDie`
  * to convert `ConfigError` into a runtime panic — if the config is wrong,
  * the server should not start.
  *
@@ -46,11 +48,11 @@ export const SqliteDatabase = (config: {
   filename: string
   synchronous?: SqliteSynchronousMode
 }): MiraDatabase => ({
-  layer: withSynchronousMode(
+  layer: withSqlitePragmas(
     Layer.mergeAll(
       SqliteClient.layer({ filename: config.filename }).pipe(Layer.orDie),
       Layer.succeed(Dialect, sqliteDialect)
     ),
-    config.synchronous
+    { synchronous: config.synchronous }
   )
 })
