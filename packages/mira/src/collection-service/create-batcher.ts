@@ -29,10 +29,10 @@ import {
  * @example
  * Mira.builder()
  *   // ... required steps
- *   .createBatch({ enabled: true, windowMs: 2, maxBatchSize: 100 })
+ *   .batchMutation({ create: { windowMs: 2, maxBatchSize: 100 } })
  */
-export interface MiraCreateBatchConfig {
-  /** Master switch. Defaults to `false`. */
+export interface MiraBatchOperationConfig {
+  /** Master switch for this operation. Defaults to `true` when the operation is present. */
   readonly enabled?: boolean
   /**
    * How long the flusher waits for more entries after the first one. Defaults
@@ -51,17 +51,51 @@ export interface MiraCreateBatchConfig {
   readonly submitTimeoutMs?: number
 }
 
+export interface MiraBatchMutationConfig {
+  /** Shared defaults applied to every operation, overridden per operation. */
+  readonly windowMs?: number
+  readonly maxBatchSize?: number
+  readonly maxQueueSize?: number
+  readonly maxQueueBytes?: number
+  readonly submitTimeoutMs?: number
+  /**
+   * Create batching. Present means enabled unless `enabled: false` is set.
+   * An empty object enables it with the shared defaults.
+   */
+  readonly create?: MiraBatchOperationConfig
+  /**
+   * Update batching. Reserved for a future release; enabling it currently
+   * throws at startup so a config cannot silently do nothing.
+   */
+  readonly update?: MiraBatchOperationConfig
+  /**
+   * Delete batching. Reserved for a future release; enabling it currently
+   * throws at startup so a config cannot silently do nothing.
+   */
+  readonly delete?: MiraBatchOperationConfig
+}
+
 /**
- * A validated, fully-defaulted {@link MiraCreateBatchConfig}.
+ * A validated, fully-defaulted {@link MiraBatchOperationConfig}.
  *
  * Only produced when batching is enabled.
  */
-export interface ResolvedCreateBatchConfig {
+export interface ResolvedBatchOperationConfig {
   readonly windowMs: number
   readonly maxBatchSize: number
   readonly maxQueueSize: number
   readonly maxQueueBytes: number
   readonly submitTimeoutMs: number
+}
+
+/**
+ * Resolved application-level mutation batching. Only `create` is implemented
+ * today; `update` and `delete` stay `null` until their batching lands.
+ */
+export interface ResolvedBatchMutationConfig {
+  readonly create: ResolvedBatchOperationConfig | null
+  readonly update: null
+  readonly delete: null
 }
 
 const DEFAULT_WINDOW_MS = 0
@@ -75,7 +109,7 @@ function resolveInteger(field: string, value: number | undefined, fallback: numb
   if (!Number.isInteger(value) || value < min) {
     // Startup configuration validation, not Effect business logic — a plain
     // thrown Error is the contract here (matching `assertValidCorsConfig`).
-    throw new Error(`MiraCreateBatchConfig.${field} must be an integer >= ${min} (received ${String(value)})`)
+    throw new Error(`MiraBatchOperationConfig.${field} must be an integer >= ${min} (received ${String(value)})`)
   }
   return value
 }
@@ -88,24 +122,26 @@ function resolveWindowMs(value: number | undefined, fallback: number) {
   if (value === undefined) return fallback
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(
-      `MiraCreateBatchConfig.windowMs must be a finite number >= 0 (received ${String(value)})`
+      `MiraBatchOperationConfig.windowMs must be a finite number >= 0 (received ${String(value)})`
     )
   }
   return value
 }
 
 /**
- * Validate a {@link MiraCreateBatchConfig} and fill in defaults.
+ * Validate a {@link MiraBatchOperationConfig} and fill in defaults.
  *
  * Returns `null` when batching is not explicitly enabled, so callers can
  * branch on a single value. Invalid values throw at startup, before any server
  * is bound.
  *
  * @example
- * resolveCreateBatchConfig({ enabled: true })  // => { windowMs: 2, maxBatchSize: 100, ... }
- * resolveCreateBatchConfig({ enabled: false }) // => null
+ * resolveBatchOperationConfig({ enabled: true })  // => { windowMs: 0, maxBatchSize: 100, ... }
+ * resolveBatchOperationConfig({ enabled: false }) // => null
  */
-export function resolveCreateBatchConfig(config?: MiraCreateBatchConfig): ResolvedCreateBatchConfig | null {
+export function resolveBatchOperationConfig(
+  config?: MiraBatchOperationConfig
+): ResolvedBatchOperationConfig | null {
   if (config?.enabled !== true) return null
   return {
     windowMs: resolveWindowMs(config.windowMs, DEFAULT_WINDOW_MS),
@@ -114,6 +150,53 @@ export function resolveCreateBatchConfig(config?: MiraCreateBatchConfig): Resolv
     maxQueueBytes: resolveInteger("maxQueueBytes", config.maxQueueBytes, DEFAULT_MAX_QUEUE_BYTES, 1),
     submitTimeoutMs: resolveInteger("submitTimeoutMs", config.submitTimeoutMs, DEFAULT_SUBMIT_TIMEOUT_MS, 1)
   }
+}
+
+function operationDefaults(config: MiraBatchMutationConfig): MiraBatchOperationConfig {
+  return {
+    ...(config.windowMs !== undefined ? { windowMs: config.windowMs } : {}),
+    ...(config.maxBatchSize !== undefined ? { maxBatchSize: config.maxBatchSize } : {}),
+    ...(config.maxQueueSize !== undefined ? { maxQueueSize: config.maxQueueSize } : {}),
+    ...(config.maxQueueBytes !== undefined ? { maxQueueBytes: config.maxQueueBytes } : {}),
+    ...(config.submitTimeoutMs !== undefined ? { submitTimeoutMs: config.submitTimeoutMs } : {})
+  }
+}
+
+function resolveOperation(
+  operation: "create" | "update" | "delete",
+  config: MiraBatchMutationConfig
+): ResolvedBatchOperationConfig | null {
+  const operationConfig = config[operation]
+  if (operationConfig === undefined) return null
+  if (operation !== "create" && operationConfig.enabled !== false) {
+    throw new Error(
+      `MiraBatchMutationConfig.${operation} batching is not implemented yet; omit it or set enabled: false`
+    )
+  }
+  return resolveBatchOperationConfig({
+    ...operationDefaults(config),
+    ...operationConfig,
+    enabled: operationConfig.enabled ?? true
+  })
+}
+
+/**
+ * Validate a {@link MiraBatchMutationConfig} and fill in defaults.
+ *
+ * `create` is the only implemented operation. `update` and `delete` are
+ * accepted by the type now so adding them later does not change the builder
+ * surface; enabling either today throws rather than silently doing nothing.
+ */
+export function resolveBatchMutationConfig(
+  config?: MiraBatchMutationConfig
+): ResolvedBatchMutationConfig {
+  if (config === undefined) return { create: null, update: null, delete: null }
+  const create = resolveOperation("create", config)
+  // Validate the reserved operations now: an enabled update/delete must fail
+  // loudly instead of being silently ignored.
+  resolveOperation("update", config)
+  resolveOperation("delete", config)
+  return { create, update: null, delete: null }
 }
 
 const ESTIMATE_DEPTH_LIMIT = 32
@@ -346,7 +429,7 @@ export function makeCreateBatchStatsLayer(): Layer.Layer<CreateBatchStats> {
 
 /**
  * Batcher used when create batching is disabled: run the insert inline, record
- * one commit, create no queue and fork no fiber. This is the pre-spike
+ * one commit, create no queue and fork no fiber. This is the pre-batching
  * behaviour, byte for byte.
  */
 export const CreateBatcherDisabledLive: Layer.Layer<CreateBatcher> = Layer.effect(
@@ -440,7 +523,7 @@ const waitForWindow = (windowMs: number, flushSignal: Queue.Dequeue<void>): Effe
  * @param statsLayer - The app's single `CreateBatchStats` layer value
  */
 export function makeCreateBatcherLayer(
-  config: ResolvedCreateBatchConfig,
+  config: ResolvedBatchOperationConfig,
   statsLayer: Layer.Layer<CreateBatchStats>
 ): Layer.Layer<CreateBatcher, never, SqlClient.SqlClient> {
   return Layer.effect(

@@ -21,9 +21,11 @@ export type { CursorPage,RequestCtx } from "./collection-service/index.js"
 export type {
   CreateBatchEntry,
   CreateBatchStatsSnapshot,
-  MiraCreateBatchConfig,
+  MiraBatchMutationConfig,
+  MiraBatchOperationConfig,
   PreparedCreate,
-  ResolvedCreateBatchConfig
+  ResolvedBatchMutationConfig,
+  ResolvedBatchOperationConfig
 } from "./collection-service/index.js"
 export {
   CollectionService,
@@ -37,7 +39,8 @@ export {
   makeCreateBatchStatsLayer,
   MAX_BULK_CREATE_RECORDS,
   MAX_BULK_RECORDS,
-  resolveCreateBatchConfig
+  resolveBatchMutationConfig,
+  resolveBatchOperationConfig
 } from "./collection-service/index.js"
 export { AppConfig, AppConfigLive } from "./config/index.js"
 export {

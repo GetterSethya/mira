@@ -69,15 +69,20 @@ describe("MiraBuilder", () => {
     expect(b0).not.toBe(b1)
   })
 
-  it("defaults createBatch to disabled when .createBatch() is not called", () => {
+  it("defaults batchMutation to create disabled when .batchMutation() is not called", () => {
     const app = fullBuilder().build()
-    expect(app._getConfig().createBatch).toEqual({ enabled: false })
+    expect(app._getConfig().batchMutation).toEqual({ create: { enabled: false } })
   })
 
-  it("threads .createBatch() through build()'s config literal", () => {
-    const createBatch = { enabled: true, windowMs: 5, maxBatchSize: 25 }
-    const app = fullBuilder().createBatch(createBatch).build()
-    expect(app._getConfig().createBatch).toEqual(createBatch)
+  it("threads .batchMutation() through build()'s config literal", () => {
+    const batchMutation = { windowMs: 5, create: { maxBatchSize: 25 } }
+    const app = fullBuilder().batchMutation(batchMutation).build()
+    expect(app._getConfig().batchMutation).toEqual(batchMutation)
+  })
+
+  it("accepts an empty create object as enabled", () => {
+    const app = fullBuilder().batchMutation({ create: {} }).build()
+    expect(app._getConfig().batchMutation).toEqual({ create: {} })
   })
 })
 

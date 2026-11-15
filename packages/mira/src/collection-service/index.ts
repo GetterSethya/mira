@@ -10,9 +10,11 @@ export type { CursorPage, RequestCtx } from "./context.js"
 export type {
   CreateBatchEntry,
   CreateBatchStatsSnapshot,
-  MiraCreateBatchConfig,
+  MiraBatchMutationConfig,
+  MiraBatchOperationConfig,
   PreparedCreate,
-  ResolvedCreateBatchConfig
+  ResolvedBatchMutationConfig,
+  ResolvedBatchOperationConfig
 } from "./create-batcher.js"
 export {
   CreateBatcher,
@@ -21,7 +23,8 @@ export {
   estimateRowBytes,
   makeCreateBatcherLayer,
   makeCreateBatchStatsLayer,
-  resolveCreateBatchConfig
+  resolveBatchMutationConfig,
+  resolveBatchOperationConfig
 } from "./create-batcher.js"
 export type { CollectionError } from "./errors.js"
 export {

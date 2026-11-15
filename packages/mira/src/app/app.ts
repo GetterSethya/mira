@@ -9,7 +9,7 @@ import { makeCollectionServiceLayer } from "@/collection-service/collection-serv
 import {
   makeBatchedCollectionServiceLayer,
   makeCreateBatchStatsLayer,
-  resolveCreateBatchConfig
+  resolveBatchMutationConfig
 } from "@/collection-service/index.js"
 import { AppConfig, AppConfigLive } from "@/config/index.js"
 import { makeHookedEmailServiceLayer } from "@/email/index.js"
@@ -305,7 +305,8 @@ export class MiraApp<R = never, Telemetry = never> {
     // plugin routes can read it) and passed to the batched base service.
     // `null` from the resolver means the feature is off — the disabled batcher
     // runs inserts inline and no queue/fiber is created.
-    const createBatchConfig = resolveCreateBatchConfig(this.#config.createBatch)
+    const batchMutation = resolveBatchMutationConfig(this.#config.batchMutation)
+    const createBatchConfig = batchMutation.create
     const createBatchStatsLayer = makeCreateBatchStatsLayer()
 
     // Core collection service: cached by default, or uncached when the app
@@ -321,7 +322,10 @@ export class MiraApp<R = never, Telemetry = never> {
             cacheConfig,
             createBatchConfig === null
               ? {}
-              : { createBatch: createBatchConfig, statsLayer: createBatchStatsLayer }
+              : {
+                  batchMutation: { ...batchMutation, create: createBatchConfig },
+                  statsLayer: createBatchStatsLayer
+                }
           )
 
     // Hook collection service decorator: wraps the selected collection service with hooks

@@ -17,8 +17,8 @@ published by CI.
 
 ### Added
 
-- **Opt-in transparent create batching (spike).** `Mira.builder().createBatch({ enabled, windowMs,
-  maxBatchSize, maxQueueSize, maxQueueBytes, submitTimeoutMs })` merges concurrent single
+- **Opt-in transparent mutation batching (create first).** `Mira.builder().batchMutation({ create: {
+  enabled, windowMs, maxBatchSize, maxQueueSize, maxQueueBytes, submitTimeoutMs } })` merges concurrent single
   `POST /api/collections/:name` creates into one SQLite transaction: each request still validates,
   checks its create rule, enforces credentials and hashes passwords in its own fiber, while only
   the insert is queued. A background flusher runs every insert inside a nested savepoint, isolates
@@ -37,7 +37,9 @@ published by CI.
   sweep in the audit measures that trade-off. `createMany` now prepares every
   record *before* opening its transaction and never touches the queue; as a result a create rule
   that uses `Rule.subquery()` over the same collection no longer sees rows inserted earlier in the
-  same bulk call. `CreateBatchStats`
+  same bulk call. The operation-keyed `batchMutation` shape reserves `update` and `delete`; enabling
+  either today throws at startup instead of silently doing nothing, so adding them later will not
+  change the builder surface. `CreateBatchStats`
   (`batches`, `commits`, `records`, `maxBatchSize`, `lastBatchSizes`, `rejected`,
   `consecutiveDefects`, `timedOut`, `admitted`) is available to plugins; `records` counts rows
   actually written, `timedOut` counts requests that gave up, and stats are best-effort — a counter

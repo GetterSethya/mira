@@ -15,7 +15,7 @@ import { FileStorage } from "@/storage/storage.js"
 
 import type { CursorPage, RequestCtx } from "./context.js"
 import { CreateBatcher, CreateBatcherDisabledLive, estimateRowBytes, makeCreateBatcherLayer } from "./create-batcher.js"
-import type { CreateBatchStats, PreparedCreate, ResolvedCreateBatchConfig } from "./create-batcher.js"
+import type { CreateBatchStats, PreparedCreate, ResolvedBatchOperationConfig } from "./create-batcher.js"
 import type { RowDecoder, RowDecoderSync, RowEncoder } from "./decode.js"
 import { makeListRowMapper, makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
 import type { CollectionError } from "./errors.js"
@@ -347,7 +347,7 @@ export function makeCollectionServiceLayer(
  */
 export function makeBatchedCollectionServiceLayer(
   allCollections: ReadonlyArray<AnyCollectionDef>,
-  config: ResolvedCreateBatchConfig,
+  config: ResolvedBatchOperationConfig,
   statsLayer: Layer.Layer<CreateBatchStats>
 ): Layer.Layer<CollectionService, never, CollectionServiceDeps> {
   return makeCollectionServiceLayerWith(allCollections, makeCreateBatcherLayer(config, statsLayer))

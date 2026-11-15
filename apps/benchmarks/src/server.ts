@@ -176,10 +176,12 @@ Mira.builder()
   .collections([Posts])
   .rules([postsRules])
   .cache({ enabled: cacheEnabled })
-  .createBatch({
-    enabled: createBatchEnabled,
-    windowMs: createBatchWindowMs,
-    maxBatchSize: createBatchMax
+  .batchMutation({
+    create: {
+      enabled: createBatchEnabled,
+      windowMs: createBatchWindowMs,
+      maxBatchSize: createBatchMax
+    }
   })
   .telemetry(Layer.empty)
   .build()

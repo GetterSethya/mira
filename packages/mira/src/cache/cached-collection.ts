@@ -5,7 +5,10 @@ import { Effect, Layer, Option } from "effect"
 import type { SqlClient } from "effect/sql"
 
 import { CollectionService, makeBatchedCollectionServiceLayer, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
-import type { CreateBatchStats, ResolvedCreateBatchConfig } from "@/collection-service/create-batcher.js"
+import type {
+  CreateBatchStats,
+  ResolvedBatchOperationConfig
+} from "@/collection-service/create-batcher.js"
 import type { Dialect } from "@/dialect/dialect.js"
 import type { AuthService } from "@/http/auth.js"
 import type { Repository } from "@/repository/repository.js"
@@ -73,8 +76,15 @@ function stableListKey(
  * single `CreateBatchStats` value, so enabling batching requires both fields.
  */
 export type CachedCollectionServiceOptions =
-  | { readonly createBatch?: null | undefined; readonly statsLayer?: never }
-  | { readonly createBatch: ResolvedCreateBatchConfig; readonly statsLayer: Layer.Layer<CreateBatchStats> }
+  | { readonly batchMutation?: null | undefined; readonly statsLayer?: never }
+  | {
+      readonly batchMutation: {
+        readonly create: ResolvedBatchOperationConfig
+        readonly update: null
+        readonly delete: null
+      }
+      readonly statsLayer: Layer.Layer<CreateBatchStats>
+    }
 
 /**
  * Create a cached `CollectionService` layer that wraps the standard collection service.
@@ -94,14 +104,14 @@ export type CachedCollectionServiceOptions =
  * @param config - Optional partial cache configuration (record TTL, list TTL,
  *   max entries); unset values fall back to `defaultCollectionCacheConfig`
  * @param serviceOptions - Optional base-service selection. Pass
- *   `{ createBatch, statsLayer }` to enable transparent create batching; omit
- *   it (or pass `{ createBatch: null }`) for the inline path.
+ *   `{ batchMutation, statsLayer }` to enable transparent mutation batching;
+ *   omit it (or pass `{ batchMutation: null }`) for the inline path.
  * @returns A Layer providing CollectionService with caching
  *
  * @example
  * makeCachedCollectionServiceLayer([Posts, Users])
  * makeCachedCollectionServiceLayer([Posts], { recordTtlMs: 60_000 })
- * makeCachedCollectionServiceLayer([Posts], {}, { createBatch: resolved, statsLayer })
+ * makeCachedCollectionServiceLayer([Posts], {}, { batchMutation: resolved, statsLayer })
  *
  * @see CollectionService — the service tag
  * @see makeCollectionServiceLayer — the underlying uncached service
@@ -114,8 +124,12 @@ export function makeCachedCollectionServiceLayer(
 ): Layer.Layer<CollectionService, never, Repository | SqlClient.SqlClient | FileStorage | Dialect | AuthService> {
   const resolved = resolveCollectionCacheConfig(config)
   const baseLayer =
-    serviceOptions.createBatch != null
-      ? makeBatchedCollectionServiceLayer(allCollections, serviceOptions.createBatch, serviceOptions.statsLayer)
+    serviceOptions.batchMutation != null && "statsLayer" in serviceOptions
+      ? makeBatchedCollectionServiceLayer(
+          allCollections,
+          serviceOptions.batchMutation.create,
+          serviceOptions.statsLayer
+        )
       : makeCollectionServiceLayer(allCollections)
   return Layer.effect(
     CollectionService,

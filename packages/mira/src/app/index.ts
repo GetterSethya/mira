@@ -29,7 +29,10 @@ export const Mira = {
 
 export type { MigrateOptions } from "../migrator/types.js"
 export type { MiraCacheConfig } from "../cache/types.js"
-export type { MiraCreateBatchConfig } from "@/collection-service/create-batcher.js"
+export type {
+  MiraBatchMutationConfig,
+  MiraBatchOperationConfig
+} from "@/collection-service/create-batcher.js"
 export type { MiraApp, ServeOptions } from "./app.js"
 export { applyRulesToCollections } from "./app.js"
 export type { MiraAppConfig } from "./builder.js"

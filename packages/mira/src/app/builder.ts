@@ -2,7 +2,7 @@ import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { Layer } from "effect"
 
 import type { MiraCacheConfig } from "@/cache/types.js"
-import type { MiraCreateBatchConfig } from "@/collection-service/create-batcher.js"
+import type { MiraBatchMutationConfig } from "@/collection-service/create-batcher.js"
 import type { CronDef } from "@/cron/types.js"
 import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
@@ -42,7 +42,7 @@ export interface MiraAppConfig<Telemetry = never> {
   migrations?: MigrateOptions
   rateLimits?: MiraRateLimits
   cache?: MiraCacheConfig
-  createBatch?: MiraCreateBatchConfig
+  batchMutation?: MiraBatchMutationConfig
 }
 
 function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraAppConfig<any> {
@@ -196,8 +196,19 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
   }
 
   /**
-   * Enable transparent server-side create batching (optional, **off by
-   * default**).
+   * Configure transparent mutation batching (optional, **off by default**).
+   *
+   * The shape is operation-keyed so update/delete can be added later without
+   * another builder method:
+   *
+   * ```ts
+   * .batchMutation({ create: {} })                 // create batching on
+   * .batchMutation({ create: { enabled: false } }) // explicitly off
+   * .batchMutation({ windowMs: 2, create: {} })    // shared defaults
+   * ```
+   *
+   * Only `create` is implemented today. `update`/`delete` are accepted by the
+   * type but throw at startup if enabled, rather than silently doing nothing.
    *
    * Concurrent single creates are merged into one SQLite transaction: each
    * request still validates, checks rules and hashes passwords in its own
@@ -207,17 +218,16 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    * committed row can exist without the client receiving the response — do
    * not blindly retry a timed-out create.
    *
-   * @param c - A `MiraCreateBatchConfig` (`enabled`, `windowMs`,
-   *   `maxBatchSize`, `maxQueueSize`, `maxQueueBytes`, `submitTimeoutMs`)
+   * @param c - A `MiraBatchMutationConfig`
    * @returns A new builder (same phantom type — batching is optional)
    *
    * @example
    * Mira.builder()
    *   // ... required steps
-   *   .createBatch({ enabled: true, windowMs: 2, maxBatchSize: 100 })
+   *   .batchMutation({ create: { windowMs: 2, maxBatchSize: 100 } })
    */
-  createBatch(c: MiraCreateBatchConfig): MiraBuilder<Has, R, Telemetry> {
-    return new MiraBuilder({ ...this.#config, createBatch: c })
+  batchMutation(c: MiraBatchMutationConfig): MiraBuilder<Has, R, Telemetry> {
+    return new MiraBuilder({ ...this.#config, batchMutation: c })
   }
 
   /**
@@ -340,7 +350,7 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
       migrations: config.migrations ?? {},
       rateLimits: config.rateLimits ?? {},
       cache: config.cache ?? { enabled: true },
-      createBatch: config.createBatch ?? { enabled: false }
+      batchMutation: config.batchMutation ?? { create: { enabled: false } }
     })
   }
 }

@@ -99,7 +99,7 @@ pnpm --filter mira-benchmarks create-batch:audit
 AUDIT_FAST=1 pnpm --filter mira-benchmarks create-batch:audit   # reduced smoke run
 ```
 
-The server enables batching with `.createBatch({ enabled, windowMs, maxBatchSize })`, driven by:
+The server enables batching with `.batchMutation({ create: { enabled, windowMs, maxBatchSize } })`, driven by:
 
 - `BENCH_CREATE_BATCH=off|on` (default `off`)
 - `BENCH_CREATE_BATCH_WINDOW_MS` (default `0`)

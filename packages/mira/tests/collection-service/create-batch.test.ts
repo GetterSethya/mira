@@ -17,7 +17,7 @@ import {
   makeCollectionServiceLayer
 } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
-import type { CreateBatchStatsSnapshot, ResolvedCreateBatchConfig } from "@/collection-service/create-batcher.js"
+import type { CreateBatchStatsSnapshot, ResolvedBatchOperationConfig } from "@/collection-service/create-batcher.js"
 import {
   CreateBatcher,
   CreateBatchStats,
@@ -25,7 +25,8 @@ import {
   makeCreateBatcherLayer,
   makeCreateBatchStatsLayer,
   probeTransactionAlive,
-  resolveCreateBatchConfig
+  resolveBatchMutationConfig,
+  resolveBatchOperationConfig
 } from "@/collection-service/create-batcher.js"
 import type { CollectionError } from "@/collection-service/errors.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
@@ -94,7 +95,7 @@ const usersRules = defineRule(usersDef, (R) => ({
 const Users = applyRulesToCollections([usersDef], [usersRules])[0]
 
 /** Long windows so only an explicit `flushNow` releases a batch under TestClock. */
-const batchedConfig: ResolvedCreateBatchConfig = {
+const batchedConfig: ResolvedBatchOperationConfig = {
   windowMs: 60_000,
   maxBatchSize: 100,
   maxQueueSize: 1_000,
@@ -119,7 +120,7 @@ function serviceDeps<A, E>(
 
 function batchedLayer(
   collections: ReadonlyArray<AnyCollectionDef> = [Posts],
-  config: ResolvedCreateBatchConfig = batchedConfig,
+  config: ResolvedBatchOperationConfig = batchedConfig,
   statsLayer: Layer.Layer<CreateBatchStats> = makeCreateBatchStatsLayer()
 ) {
   const service = serviceDeps(makeBatchedCollectionServiceLayer(collections, config, statsLayer))
@@ -318,18 +319,18 @@ function makeInstrumentedStatsLayer(options: {
 // Configuration
 // ---------------------------------------------------------------------------
 
-describe("resolveCreateBatchConfig", () => {
+describe("resolveBatchOperationConfig", () => {
   it.effect("returns null unless batching is explicitly enabled", () =>
     Effect.sync(() => {
-      expect(resolveCreateBatchConfig()).toBeNull()
-      expect(resolveCreateBatchConfig({})).toBeNull()
-      expect(resolveCreateBatchConfig({ enabled: false, windowMs: 10 })).toBeNull()
+      expect(resolveBatchOperationConfig()).toBeNull()
+      expect(resolveBatchOperationConfig({})).toBeNull()
+      expect(resolveBatchOperationConfig({ enabled: false, windowMs: 10 })).toBeNull()
     })
   )
 
   it.effect("applies the documented defaults when enabled", () =>
     Effect.sync(() => {
-      expect(resolveCreateBatchConfig({ enabled: true })).toEqual({
+      expect(resolveBatchOperationConfig({ enabled: true })).toEqual({
         windowMs: 0,
         maxBatchSize: 100,
         maxQueueSize: 1_000,
@@ -341,9 +342,9 @@ describe("resolveCreateBatchConfig", () => {
 
   it.effect("accepts a fractional window (0.5 ms) and keeps integer counts", () =>
     Effect.sync(() => {
-      const resolved = resolveCreateBatchConfig({ enabled: true, windowMs: 0.5 })
+      const resolved = resolveBatchOperationConfig({ enabled: true, windowMs: 0.5 })
       expect(resolved?.windowMs).toBe(0.5)
-      expect(() => resolveCreateBatchConfig({ enabled: true, maxBatchSize: 1.5 })).toThrowError(
+      expect(() => resolveBatchOperationConfig({ enabled: true, maxBatchSize: 1.5 })).toThrowError(
         /maxBatchSize/
       )
     })
@@ -352,7 +353,7 @@ describe("resolveCreateBatchConfig", () => {
   it.effect("keeps explicit overrides", () =>
     Effect.sync(() => {
       expect(
-        resolveCreateBatchConfig({
+        resolveBatchOperationConfig({
           enabled: true,
           windowMs: 0,
           maxBatchSize: 5,
@@ -366,14 +367,14 @@ describe("resolveCreateBatchConfig", () => {
 
   it.effect("rejects invalid values and names the field", () =>
     Effect.sync(() => {
-      expect(() => resolveCreateBatchConfig({ enabled: true, windowMs: -1 })).toThrowError(/windowMs/)
-      expect(() => resolveCreateBatchConfig({ enabled: true, maxBatchSize: 0 })).toThrowError(/maxBatchSize/)
-      expect(() => resolveCreateBatchConfig({ enabled: true, maxQueueSize: 0 })).toThrowError(/maxQueueSize/)
-      expect(() => resolveCreateBatchConfig({ enabled: true, maxQueueBytes: 0 })).toThrowError(/maxQueueBytes/)
-      expect(() => resolveCreateBatchConfig({ enabled: true, submitTimeoutMs: 0 })).toThrowError(
+      expect(() => resolveBatchOperationConfig({ enabled: true, windowMs: -1 })).toThrowError(/windowMs/)
+      expect(() => resolveBatchOperationConfig({ enabled: true, maxBatchSize: 0 })).toThrowError(/maxBatchSize/)
+      expect(() => resolveBatchOperationConfig({ enabled: true, maxQueueSize: 0 })).toThrowError(/maxQueueSize/)
+      expect(() => resolveBatchOperationConfig({ enabled: true, maxQueueBytes: 0 })).toThrowError(/maxQueueBytes/)
+      expect(() => resolveBatchOperationConfig({ enabled: true, submitTimeoutMs: 0 })).toThrowError(
         /submitTimeoutMs/
       )
-      expect(() => resolveCreateBatchConfig({ enabled: true, maxBatchSize: 1.5 })).toThrowError(/maxBatchSize/)
+      expect(() => resolveBatchOperationConfig({ enabled: true, maxBatchSize: 1.5 })).toThrowError(/maxBatchSize/)
     })
   )
 
@@ -383,6 +384,53 @@ describe("resolveCreateBatchConfig", () => {
       expect(estimateRowBytes({ published: true })).toBe(16 + 9 * 2 + 1)
       expect(estimateRowBytes([1, 2])).toBe(8 + 8 + 8)
       expect(estimateRowBytes(null)).toBe(0)
+    })
+  )
+})
+
+describe("resolveBatchMutationConfig", () => {
+  it.effect("is fully disabled when no mutation operation is configured", () =>
+    Effect.sync(() => {
+      expect(resolveBatchMutationConfig()).toEqual({ create: null, update: null, delete: null })
+      expect(resolveBatchMutationConfig({})).toEqual({ create: null, update: null, delete: null })
+    })
+  )
+
+  it.effect("enables create for an empty create object", () =>
+    Effect.sync(() => {
+      expect(resolveBatchMutationConfig({ create: {} }).create).toEqual({
+        windowMs: 0,
+        maxBatchSize: 100,
+        maxQueueSize: 1_000,
+        maxQueueBytes: 32 * 1024 * 1024,
+        submitTimeoutMs: 10_000
+      })
+    })
+  )
+
+  it.effect("lets per-operation values override shared defaults", () =>
+    Effect.sync(() => {
+      const resolved = resolveBatchMutationConfig({
+        windowMs: 5,
+        maxBatchSize: 20,
+        create: { windowMs: 1, maxBatchSize: 10 }
+      })
+      expect(resolved.create?.windowMs).toBe(1)
+      expect(resolved.create?.maxBatchSize).toBe(10)
+    })
+  )
+
+  it.effect("respects enabled: false", () =>
+    Effect.sync(() => {
+      expect(resolveBatchMutationConfig({ create: { enabled: false } }).create).toBeNull()
+    })
+  )
+
+  it.effect("rejects update/delete until their batching is implemented", () =>
+    Effect.sync(() => {
+      expect(() => resolveBatchMutationConfig({ update: {} })).toThrowError(/update.*not implemented/)
+      expect(() => resolveBatchMutationConfig({ delete: {} })).toThrowError(/delete.*not implemented/)
+      expect(() => resolveBatchMutationConfig({ update: { enabled: false } })).not.toThrow()
     })
   )
 })
@@ -604,7 +652,7 @@ describe("create batching", () => {
           .collections([Posts])
           .rules([postsRules])
           .cache({ enabled: false })
-          .createBatch({ enabled: true, windowMs })
+          .batchMutation({ create: { windowMs } })
           .telemetry(Layer.empty)
           .build()
 
@@ -997,7 +1045,7 @@ describe("create batcher shutdown", () => {
 
 /** Real batcher exposed as an output, for tests that submit entries directly. */
 function batcherOnlyLayer(
-  config: ResolvedCreateBatchConfig = batchedConfig,
+  config: ResolvedBatchOperationConfig = batchedConfig,
   statsLayer: Layer.Layer<CreateBatchStats> = makeCreateBatchStatsLayer()
 ) {
   return Layer.merge(
@@ -1116,7 +1164,7 @@ describe("create batching with decorators", () => {
         (() => {
           const statsLayer = makeCreateBatchStatsLayer()
           const service = serviceDeps(
-            makeCachedCollectionServiceLayer([Posts], {}, { createBatch: batchedConfig, statsLayer })
+            makeCachedCollectionServiceLayer([Posts], {}, { batchMutation: { create: batchedConfig, update: null, delete: null }, statsLayer })
           )
           return Layer.mergeAll(service, statsLayer, sqliteLayer, FileStorageTest, NodeCryptoLayer)
         })()
@@ -1220,7 +1268,7 @@ describe("create batching instrumentation", () => {
 // ---------------------------------------------------------------------------
 
 describe("MiraApp create batching wiring", () => {
-  it.live("serves creates through the batched base when .createBatch() is enabled", () =>
+  it.live("serves creates through the batched base when .batchMutation() enables create", () =>
     Effect.gen(function* () {
       const app = Mira.builder()
         .platform(NodePlatform)
@@ -1229,7 +1277,7 @@ describe("MiraApp create batching wiring", () => {
         .collections([Posts])
         .rules([postsRules])
         .cache({ enabled: false })
-        .createBatch({ enabled: true, windowMs: 1 })
+        .batchMutation({ create: { windowMs: 1 } })
         .telemetry(Layer.empty)
         .build()
 
@@ -1282,7 +1330,7 @@ describe("MiraApp create batching wiring", () => {
         .collections([Posts])
         .rules([postsRules])
         .cache({ enabled: true })
-        .createBatch({ enabled: true })
+        .batchMutation({ create: {} })
         .telemetry(Layer.empty)
         .build()
 
