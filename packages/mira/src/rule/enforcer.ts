@@ -54,17 +54,21 @@ export function enforceRule(rule: ExprNode, overrides?: Partial<CompileCtx>): En
 }
 
 /**
- * Resolves and compiles the rule for a specific action on a collection schema.
- * Returns `null` if the collection has no `x-rules` or the action has no rule defined.
+ * Per-schema compiled-rule cache. A collection schema is a stable object created
+ * once per app boot, so a WeakMap keyed by it holds at most one entry per live
+ * collection. Each entry maps action → compiled result (or `null` when no rule
+ * exists), so repeated requests never recompile.
  *
- * @example
- * const schema = Posts.schema // CollectionSchema with x-rules
- * const result = enforcerForAction(schema, "list")
- * if (result) {
- *   sql.unsafe(`SELECT * FROM posts WHERE ${result.sql}`, result.params)
- * }
+ * The cached objects are shared, so callers must treat them as immutable — the
+ * compilation output is already read-only by contract (`sql` string, `params`
+ * `ReadonlyArray`), and nothing in the codebase mutates it.
  */
-export function enforcerForAction(
+const compiledRuleCache = new WeakMap<
+  CollectionSchema,
+  Map<keyof NonNullable<CollectionSchema["x-rules"]>, EnforceResult | null>
+>()
+
+function compileForAction(
   collection: CollectionSchema,
   action: keyof NonNullable<CollectionSchema["x-rules"]>
 ): EnforceResult | null {
@@ -77,4 +81,41 @@ export function enforcerForAction(
     return null
   }
   return enforceRule(rule)
+}
+
+/**
+ * Resolves and compiles the rule for a specific action on a collection schema.
+ * Returns `null` if the collection has no `x-rules` or the action has no rule defined.
+ *
+ * Results are memoized per schema object and action, so the compilation runs once
+ * per collection/action for the lifetime of the collection schema. The returned
+ * object is shared: do not mutate `sql` or `params`.
+ *
+ * @example
+ * const schema = Posts.schema // CollectionSchema with x-rules
+ * const result = enforcerForAction(schema, "list")
+ * if (result) {
+ *   sql.unsafe(`SELECT * FROM posts WHERE ${result.sql}`, result.params)
+ * }
+ */
+export function enforcerForAction(
+  collection: CollectionSchema,
+  action: keyof NonNullable<CollectionSchema["x-rules"]>
+): EnforceResult | null {
+  let byAction = compiledRuleCache.get(collection)
+  if (byAction === undefined) {
+    byAction = new Map()
+    compiledRuleCache.set(collection, byAction)
+  }
+
+  // `null` is a legitimate cached value (rule absent) — `has` distinguishes it
+  // from "not compiled yet".
+  if (byAction.has(action)) {
+    const cached = byAction.get(action)
+    return cached === undefined ? null : cached
+  }
+
+  const compiled = compileForAction(collection, action)
+  byAction.set(action, compiled)
+  return compiled
 }

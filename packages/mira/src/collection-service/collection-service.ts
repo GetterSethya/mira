@@ -14,8 +14,8 @@ import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage } from "@/storage/storage.js"
 
 import type { CursorPage, RequestCtx } from "./context.js"
-import type { RowDecoder, RowEncoder } from "./decode.js"
-import { makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
+import type { RowDecoder, RowDecoderSync, RowEncoder } from "./decode.js"
+import { makeListRowMapper, makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
 import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
@@ -319,6 +319,9 @@ export function makeCollectionServiceLayer(
       const decoderMap = new Map<string, RowDecoder>(
         allCollections.map((c) => [c.name, makeRowDecoder(c.schema, dialect.storesBooleanAsInteger)])
       )
+      const listRowMapperMap = new Map<string, RowDecoderSync>(
+        allCollections.map((c) => [c.name, makeListRowMapper(c.schema, dialect.storesBooleanAsInteger)])
+      )
       const encoderMap = new Map<string, RowEncoder>(
         allCollections.map((c) => [c.name, makeRowEncoder(c.schema, dialect.storesBooleanAsInteger)])
       )
@@ -326,6 +329,9 @@ export function makeCollectionServiceLayer(
       const getInputSchemas = (col: AnyCollectionDef) => inputSchemaMap.get(col.name) ?? buildInputSchemas(col)
       const decodeRow = (collection: AnyCollectionDef, record: RepoRecord): Effect.Effect<RepoRecord> =>
         (decoderMap.get(collection.name) ?? Effect.succeed)(record)
+      const getListRowMapper = (collection: AnyCollectionDef): RowDecoderSync =>
+        listRowMapperMap.get(collection.name) ??
+        makeListRowMapper(collection.schema, dialect.storesBooleanAsInteger)
       const getEncoder = (collection: AnyCollectionDef): RowEncoder => encoderMap.get(collection.name) ?? ((r) => r)
 
       // create/update return the stored row directly (no `resolveFields` pass), so
@@ -516,21 +522,17 @@ export function makeCollectionServiceLayer(
           const lastSeqId = typeof rawSeqId === "number" ? rawSeqId : null
           const nextCursor = rows.items.length === perPage ? lastSeqId : null
 
-          // Strip seqId — it's internal and must not appear in API responses
-          const items = yield* Effect.forEach(
-            rows.items.map((r) => {
-              const copy: RepoRecord = { ...r }
-              delete copy["seqId"]
-              return copy
-            }),
-            (r) => decodeRow(collection, r)
-          )
+          // One synchronous pass per row: strip seqId (internal pagination column,
+          // must not appear in API responses) and decode booleans together. Each
+          // item is a fresh object, so the repository result is never mutated.
+          const mapRow = getListRowMapper(collection)
+          const items = rows.items.map(mapRow)
           return { items, nextCursor }
         }).pipe(
           Effect.withSpan("collection.list", {
             kind: "internal",
             attributes: { collection: collection.name }
-          })
+          }, { captureStackTrace: false })
         )
 
       const view = (
@@ -562,7 +564,7 @@ export function makeCollectionServiceLayer(
           Effect.withSpan("collection.view", {
             kind: "internal",
             attributes: { collection: collection.name }
-          })
+          }, { captureStackTrace: false })
         )
 
       const create = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
@@ -603,7 +605,7 @@ export function makeCollectionServiceLayer(
           Effect.withSpan("collection.create", {
             kind: "internal",
             attributes: { collection: collection.name }
-          })
+          }, { captureStackTrace: false })
         )
 
       const update = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
@@ -694,7 +696,7 @@ export function makeCollectionServiceLayer(
           Effect.withSpan("collection.update", {
             kind: "internal",
             attributes: { collection: collection.name }
-          })
+          }, { captureStackTrace: false })
         )
 
       const deleteImpl = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
@@ -747,7 +749,7 @@ export function makeCollectionServiceLayer(
           Effect.withSpan("collection.delete", {
             kind: "internal",
             attributes: { collection: collection.name }
-          })
+          }, { captureStackTrace: false })
         )
 
       return { list, view, create, update, delete: deleteImpl }

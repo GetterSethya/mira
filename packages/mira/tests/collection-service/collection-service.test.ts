@@ -264,6 +264,18 @@ describe("list", () => {
       expect("seqId" in result.items[0]).toBe(false)
     }).pipe(Effect.provide(testLayer)))
 
+  it.effect("list items decode booleans and omit seqId in the same pass", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      yield* svc.create(Posts, { title: "Published", published: true }, noCtx)
+      yield* svc.create(Posts, { title: "Draft", published: false }, noCtx)
+      const result = yield* svc.list(Posts, null, 10, noCtx)
+      if (!isCursorPage(result)) throw new Error("expected CursorPage")
+      expect(result.items.map((r) => r["published"])).toEqual([true, false])
+      expect(result.items.some((r) => "seqId" in r)).toBe(false)
+    }).pipe(Effect.provide(testLayer)))
+
   it.effect("nextCursor is null when page is not full", () =>
     Effect.gen(function* () {
       yield* setupPostsTable

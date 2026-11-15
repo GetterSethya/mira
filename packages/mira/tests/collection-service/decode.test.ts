@@ -3,7 +3,14 @@ import { AuthCollection, BaseCollection, Field } from "@gettersethya/mira-client
 import { Effect } from "effect"
 import { expect } from "vitest"
 
-import { makeRowDecoder, makeRowEncoder, stripHiddenFields, toPublicRecord } from "@/collection-service/decode.js"
+import {
+  makeListRowMapper,
+  makeRowDecoder,
+  makeRowDecoderSync,
+  makeRowEncoder,
+  stripHiddenFields,
+  toPublicRecord
+} from "@/collection-service/decode.js"
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text(),
@@ -31,6 +38,50 @@ describe("makeRowDecoder", () => {
       expect(result).toBe(record)
     })
   )
+})
+
+describe("makeRowDecoderSync", () => {
+  it("converts stored 0/1 to booleans, preserves other fields, and does not mutate the input", () => {
+    const decode = makeRowDecoderSync(Posts.schema, true)
+    const original = { id: "1", seqId: 7, title: "X", published: 1, score: 0 }
+
+    const result = decode(original)
+
+    expect(result).toEqual({ id: "1", seqId: 7, title: "X", published: true, score: 0 })
+    expect(result).not.toBe(original)
+    expect(original["published"]).toBe(1)
+  })
+
+  it("leaves a non-boolean column that happens to hold 0/1 untouched", () => {
+    const decode = makeRowDecoderSync(Posts.schema, true)
+    const result = decode({ title: "X", published: 0, score: 1 })
+    expect(result["published"]).toBe(false)
+    expect(result["score"]).toBe(1)
+  })
+
+  it("is the identity function when the dialect does not store booleans as integers", () => {
+    const decode = makeRowDecoderSync(Posts.schema, false)
+    const record = { title: "X", published: true }
+    expect(decode(record)).toBe(record)
+  })
+})
+
+describe("makeListRowMapper", () => {
+  it("strips seqId and decodes booleans in one pass without mutating the source row", () => {
+    const mapRow = makeListRowMapper(Posts.schema, true)
+    const row = { id: "1", seqId: 3, title: "X", published: 1 }
+
+    const item = mapRow(row)
+
+    expect(item).toEqual({ id: "1", title: "X", published: true })
+    expect("seqId" in item).toBe(false)
+    expect(row).toEqual({ id: "1", seqId: 3, title: "X", published: 1 })
+  })
+
+  it("still strips seqId when booleans need no conversion", () => {
+    const mapRow = makeListRowMapper(Posts.schema, false)
+    expect(mapRow({ id: "1", seqId: 3, published: false })).toEqual({ id: "1", published: false })
+  })
 })
 
 describe("makeRowEncoder", () => {

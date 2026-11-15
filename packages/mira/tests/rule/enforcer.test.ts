@@ -259,4 +259,57 @@ describe("enforcerForAction", () => {
     const result = enforcerForAction(schema, "list")!
     expect(result.params).toEqual([1, "hello", true])
   })
+
+  it("memoizes per schema and action: same schema/action returns the same object", () => {
+    const schema: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: {},
+      "x-rules": {
+        list: Rule.public(),
+        view: Rule.field("ownerId").eq(Rule.literal("user1"))
+      }
+    }
+
+    const first = enforcerForAction(schema, "list")
+    const second = enforcerForAction(schema, "list")
+    expect(second).toBe(first)
+    expect(first?.sql).toBe("1 = 1")
+
+    // Different action on the same schema is a different cached entry.
+    expect(enforcerForAction(schema, "view")).not.toBe(first)
+    expect(enforcerForAction(schema, "view")).toBe(enforcerForAction(schema, "view"))
+  })
+
+  it("memoizes the absent-rule (null) result too", () => {
+    const schema: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: {},
+      "x-rules": { list: Rule.public() }
+    }
+    expect(enforcerForAction(schema, "view")).toBeNull()
+    expect(enforcerForAction(schema, "view")).toBeNull()
+  })
+
+  it("does not share cache entries across distinct schema objects", () => {
+    const rules = { list: Rule.public() }
+    const a: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: {},
+      "x-rules": rules
+    }
+    const b: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: {},
+      "x-rules": rules
+    }
+
+    const first = enforcerForAction(a, "list")
+    const second = enforcerForAction(b, "list")
+    expect(second).not.toBe(first)
+    expect(second).toEqual(first)
+  })
 })

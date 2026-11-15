@@ -4,6 +4,8 @@ import { Effect } from "effect"
 import type { RepoRecord } from "@/repository/types.js"
 
 export type RowDecoder = (record: RepoRecord) => Effect.Effect<RepoRecord>
+/** Synchronous row decoder: pure, allocates one new row, never mutates its input. */
+export type RowDecoderSync = (record: RepoRecord) => RepoRecord
 export type RowEncoder = (record: RepoRecord) => RepoRecord
 
 function booleanKeys(colSchema: CollectionSchema) {
@@ -14,21 +16,58 @@ function booleanKeys(colSchema: CollectionSchema) {
   return boolKeys
 }
 
-export function makeRowDecoder(colSchema: CollectionSchema, storesBooleanAsInteger: boolean): RowDecoder {
-  if (!storesBooleanAsInteger) return Effect.succeed
+/** Shared no-op decoder so `makeRowDecoderSync` can report "nothing to do" by identity. */
+const identityRow: RowDecoderSync = (record) => record
+
+/**
+ * Synchronous counterpart to {@link makeRowDecoder}. When the dialect stores
+ * booleans as integers, `0`/`1` are converted in a single pass; the input row is
+ * never mutated (the caller gets a fresh object). Returns the shared identity
+ * function when no conversion is needed, so hot paths can skip the work.
+ */
+export function makeRowDecoderSync(colSchema: CollectionSchema, storesBooleanAsInteger: boolean): RowDecoderSync {
+  if (!storesBooleanAsInteger) return identityRow
 
   const boolKeys = booleanKeys(colSchema)
-  if (boolKeys.size === 0) return Effect.succeed
+  if (boolKeys.size === 0) return identityRow
 
-  return (record) =>
-    Effect.sync(() => {
-      const result = { ...record }
-      for (const key of boolKeys) {
-        const v = result[key]
-        if (v === 0 || v === 1) result[key] = v === 1
-      }
-      return result
-    })
+  return (record) => {
+    const result = { ...record }
+    for (const key of boolKeys) {
+      const v = result[key]
+      if (v === 0 || v === 1) result[key] = v === 1
+    }
+    return result
+  }
+}
+
+export function makeRowDecoder(colSchema: CollectionSchema, storesBooleanAsInteger: boolean): RowDecoder {
+  const syncDecode = makeRowDecoderSync(colSchema, storesBooleanAsInteger)
+  if (syncDecode === identityRow) return Effect.succeed
+
+  return (record) => Effect.sync(() => syncDecode(record))
+}
+
+/**
+ * Builds the single-pass mapper used by `CollectionService.list`: it turns a
+ * repository row into a public list item, dropping `seqId` (the internal cursor
+ * column) and decoding boolean storage representation at the same time.
+ *
+ * The source row is never mutated — the response item is a fresh object, so the
+ * repository result cannot leak `seqId` back through the cache or another caller.
+ */
+export function makeListRowMapper(colSchema: CollectionSchema, storesBooleanAsInteger: boolean) {
+  const boolKeys = storesBooleanAsInteger ? booleanKeys(colSchema) : undefined
+
+  return (record: RepoRecord): RepoRecord => {
+    const out: RepoRecord = {}
+    for (const key of Object.keys(record)) {
+      if (key === "seqId") continue
+      const value = record[key]
+      out[key] = boolKeys !== undefined && boolKeys.has(key) && (value === 0 || value === 1) ? value === 1 : value
+    }
+    return out
+  }
 }
 
 export function makeRowEncoder(colSchema: CollectionSchema, storesBooleanAsInteger: boolean): RowEncoder {

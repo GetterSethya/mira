@@ -109,11 +109,26 @@ export type CtxRefs = {
 }
 
 /**
+ * Memoizes {@link extractCtxRefs} by compiled SQL string. The number of distinct
+ * rule compilations is bounded by the number of collection/action rules in the
+ * app, so the map stays small; a regex scan per request is avoided entirely.
+ *
+ * The returned refs (and their arrays) are frozen because they are shared across
+ * requests.
+ */
+const ctxRefsCache = new Map<string, CtxRefs>()
+
+/**
  * Scans compiled rule SQL for `@auth_<field>` / `@request_<source>_<key>` placeholders
  * and returns exactly which `RequestCtx` fields they reference — used to build a cache
  * key that captures everything a rule could depend on without serializing all of `ctx`.
+ *
+ * Results are memoized by `sql` and frozen; do not mutate them.
  */
 export function extractCtxRefs(sql: string): CtxRefs {
+  const cached = ctxRefsCache.get(sql)
+  if (cached !== undefined) return cached
+
   const authFields = new Set<string>()
   const queryKeys = new Set<string>()
   const headerKeys = new Set<string>()
@@ -134,12 +149,14 @@ export function extractCtxRefs(sql: string): CtxRefs {
     }
   }
 
-  return {
-    authFields: [...authFields].sort(),
-    queryKeys: [...queryKeys].sort(),
-    headerKeys: [...headerKeys].sort(),
-    bodyKeys: [...bodyKeys].sort()
-  }
+  const refs: CtxRefs = Object.freeze({
+    authFields: Object.freeze([...authFields].sort()),
+    queryKeys: Object.freeze([...queryKeys].sort()),
+    headerKeys: Object.freeze([...headerKeys].sort()),
+    bodyKeys: Object.freeze([...bodyKeys].sort())
+  })
+  ctxRefsCache.set(sql, refs)
+  return refs
 }
 
 /**
