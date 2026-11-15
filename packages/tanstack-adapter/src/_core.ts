@@ -208,6 +208,7 @@ export function createCollectionAdapter() {
       ) => enrichQuery(client.getFullList(options), [name, ActionKeys.GetFullList, options ?? {}]),
 
       create: () => enrichMutation(client.create()),
+      createMany: () => enrichMutation(client.createMany()),
       update: () => enrichMutation(client.update()),
       delete: () => enrichMutation(client.delete()),
 

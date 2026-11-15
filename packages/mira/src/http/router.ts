@@ -3,7 +3,7 @@ import type { Tracer } from "effect";
 import { Cause, Duration, Effect, Option, Redacted, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 
-import { CollectionService } from "@/collection-service/collection-service.js"
+import { CollectionService, MAX_BULK_CREATE_RECORDS } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { toPublicRecord } from "@/collection-service/decode.js"
 import { PayloadTooLargeError, ValidationError } from "@/collection-service/errors.js"
@@ -59,6 +59,15 @@ const EmailChangeRequestSchema = Schema.Struct({
   oldPassword: Schema.String
 })
 const ConfirmEmailChangeSchema = Schema.Struct({ token: Schema.String })
+
+/**
+ * Bulk-create body: `{ "records": [ {...}, ... ] }`. Each element is validated
+ * individually by the collection service, so the outer schema only enforces the
+ * envelope shape.
+ */
+const BulkCreateBodySchema = Schema.Struct({
+  records: Schema.Array(Schema.Record(Schema.String, Schema.Unknown))
+})
 
 const decodeBody = <S extends Schema.Constraint>(
   req: HttpServerRequest.HttpServerRequest,
@@ -168,17 +177,7 @@ function extractToken(req: HttpServerRequest.HttpServerRequest) {
   return req.cookies["mira_token"] ?? null
 }
 
-function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollectionDef) {
-  const ct = req.headers["content-type"] ?? ""
-  if (ct.includes("multipart/form-data")) {
-    return processMultipartUpload(req, collection.schema, collection.name).pipe(
-      Effect.withSpan(
-        "http.body.parse",
-        { kind: "internal", attributes: { content_type: "multipart" } },
-        { captureStackTrace: false }
-      )
-    )
-  }
+function readJsonBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollectionDef) {
   return Effect.gen(function* () {
     // Reject an over-size JSON body from the declared length, before reading it.
     const declared = Number(req.headers["content-length"] ?? "")
@@ -211,6 +210,20 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
       { captureStackTrace: false }
     )
   )
+}
+
+function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollectionDef) {
+  const ct = req.headers["content-type"] ?? ""
+  if (ct.includes("multipart/form-data")) {
+    return processMultipartUpload(req, collection.schema, collection.name).pipe(
+      Effect.withSpan(
+        "http.body.parse",
+        { kind: "internal", attributes: { content_type: "multipart" } },
+        { captureStackTrace: false }
+      )
+    )
+  }
+  return readJsonBody(req, collection)
 }
 
 export function makeCollectionRouter(
@@ -394,6 +407,47 @@ export function makeCollectionRouter(
         }
       }
       return HttpServerResponse.jsonUnsafe(record, { status: 201 })
+    })
+  )
+
+  /**
+   * `POST /api/collections/:name/bulk` — create up to
+   * `MAX_BULK_CREATE_RECORDS` records in a single transaction.
+   *
+   * Auth-collection email-verification challenges are not issued for bulk
+   * creates (unlike a single create): a batch is a data-import/seed operation,
+   * not an interactive signup. Every other create semantic — rules, credential
+   * checks, password hashing, hidden-field stripping — is applied per record by
+   * `CollectionService.createMany`, and any failure rolls the whole batch back.
+   */
+  const bulkCreateRoute = collectionRoute("bulk-create", (col, ctx, req) =>
+    Effect.gen(function* () {
+      const raw = yield* readJsonBody(req, col).pipe(catchCollectionErrors)
+      const body = yield* Schema.decodeUnknownEffect(BulkCreateBodySchema)(raw).pipe(
+        Effect.mapError(
+          () =>
+            new ValidationError({
+              collection: col.name,
+              issues: ['Body must be an object with a "records" array']
+            })
+        ),
+        catchCollectionErrors
+      )
+      if (body.records.length === 0) {
+        return yield* new ValidationError({
+          collection: col.name,
+          issues: ["records must not be empty"]
+        }).pipe(catchCollectionErrors)
+      }
+      if (body.records.length > MAX_BULK_CREATE_RECORDS) {
+        return yield* new ValidationError({
+          collection: col.name,
+          issues: [`Batch size ${body.records.length} exceeds the ${MAX_BULK_CREATE_RECORDS} record limit`]
+        }).pipe(catchCollectionErrors)
+      }
+      const svc = yield* CollectionService
+      const records = yield* svc.createMany(col, body.records, ctx).pipe(catchCollectionErrors)
+      return HttpServerResponse.jsonUnsafe({ records }, { status: 201 })
     })
   )
 
@@ -880,6 +934,7 @@ export function makeCollectionRouter(
   return [
     HttpRouter.route("GET", "/api/collections/:name", listRoute),
     HttpRouter.route("POST", "/api/collections/:name", createRoute),
+    HttpRouter.route("POST", "/api/collections/:name/bulk", bulkCreateRoute),
     HttpRouter.route("GET", "/api/collections/:name/:id", viewRoute),
     HttpRouter.route("PATCH", "/api/collections/:name/:id", updateRoute),
     HttpRouter.route("DELETE", "/api/collections/:name/:id", deleteRoute),

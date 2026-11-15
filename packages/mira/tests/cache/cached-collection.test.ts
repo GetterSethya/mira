@@ -363,6 +363,22 @@ describe("CachedCollectionService", () => {
       expect(second.items.length).toBe(3)
     }).pipe(Effect.provide(testLayer)))
 
+  it.effect("list cache invalidated by createMany — returns every created record", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+
+      // Prime the list cache with the empty table
+      const first = yield* svc.list(Posts, null, 10, noCtx)
+      expect(first.items.length).toBe(0)
+
+      const created = yield* svc.createMany(Posts, [{ title: "A" }, { title: "B" }, { title: "C" }], noCtx)
+      expect(created.length).toBe(3)
+
+      const second = yield* svc.list(Posts, null, 10, noCtx)
+      expect(second.items.length).toBe(3)
+    }).pipe(Effect.provide(testLayer)))
+
   it.effect("list cache invalidated by update — returns updated record in list", () =>
     Effect.gen(function* () {
       yield* setupPostsTable

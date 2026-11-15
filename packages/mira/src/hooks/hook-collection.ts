@@ -122,6 +122,54 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             )
           ),
 
+        // Bulk create keeps the record hooks: the pre/execute stages run per
+        // record before the transaction opens (so a hook can still rewrite or
+        // veto an item), the inserts then run as one transaction in the inner
+        // service, and success hooks fire per created record afterwards.
+        createMany: (collection: AnyCollectionDef, records: ReadonlyArray<RepoRecord>, ctx: RequestCtx) =>
+          Effect.gen(function* () {
+            const auth = toAuth(ctx.auth)
+            const prepared = yield* Effect.forEach(
+              records,
+              (data) =>
+                Effect.gen(function* () {
+                  const hookCtx = yield* hooks.runRecordCreate({ collection, data, record: undefined, auth })
+                  return yield* hooks.runRecordCreateExecute(hookCtx)
+                }),
+              { concurrency: 1 }
+            )
+            const results = yield* inner.createMany(
+              collection,
+              prepared.map((hookCtx) => hookCtx.data),
+              ctx
+            )
+            yield* Effect.forEach(
+              results,
+              (result) =>
+                hooks
+                  .runRecordCreateSuccess({ collection, data: result, record: undefined, auth, result })
+                  .pipe(Effect.catch(() => Effect.void)),
+              { concurrency: "unbounded" }
+            )
+            return results
+          }).pipe(
+            Effect.catch((error: CollectionError) =>
+              Effect.forEach(
+                records,
+                () =>
+                  hooks
+                    .runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) })
+                    .pipe(Effect.catch(() => Effect.void)),
+                { concurrency: "unbounded" }
+              ).pipe(Effect.andThen(Effect.fail(error)))
+            ),
+            Effect.withSpan(
+              "hook.createMany",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
+          ),
+
         update: (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
           Effect.gen(function* () {
             const auth = toAuth(ctx.auth)

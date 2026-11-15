@@ -17,6 +17,18 @@ published by CI.
 
 ### Added
 
+- **Transactional bulk create.** `POST /api/collections/:name/bulk` accepts
+  `{ "records": [...] }` and creates up to 1 000 records inside a single SQLite transaction,
+  returning `201 { "records": [...] }`. Every record still goes through the normal
+  `CollectionService.create` path — Effect Schema validation, create-rule enforcement,
+  credential checks, password hashing, id/timestamp generation, and hidden-field stripping — so
+  a single invalid or denied record rolls the whole batch back. Empty/non-array `records`,
+  malformed elements, and batches over the limit return `422`. Record lifecycle hooks run per
+  item (pre/execute before the transaction, success observers per created record), the list
+  cache is nuked once after commit, and the client SDK gains
+  `createMany().raw(records)` plus an enriched `mutationOptions` through the TanStack adapter.
+  `pnpm --filter mira-benchmarks bulk-create:audit` compares 500 individual creates with one
+  500-record batch under `BENCH_SYNCHRONOUS=FULL`.
 - **Self-service email change.** Auth collections can opt in with
   `email: { emailChange: true }`. An authenticated user calls
   `POST /api/collections/:name/request-email-change` with `{ newEmail, oldPassword }`; Mira

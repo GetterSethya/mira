@@ -109,6 +109,27 @@ describe("HookCollectionService", () => {
     ])))
   )
 
+  it.effect("intercepts createMany per record and inserts each transformed record", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const records = yield* svc.createMany(Posts, [{ title: "a" }, { title: "b" }], noCtx)
+      expect(records.map((r) => r["title"])).toEqual(["Hooked: a", "Hooked: b"])
+      const page = yield* svc.list(Posts, null, 10, noCtx)
+      expect(page.items.length).toBe(4)
+    }).pipe(Effect.provide(makeTestLayer([
+      MiraPlugin.define({
+        onRecordCreate: {
+          handler: (ctx) =>
+            Effect.succeed({
+              ...ctx,
+              data: { ...ctx.data, title: "Hooked: " + ctx.data["title"] },
+            }),
+        },
+      })
+    ])))
+  )
+
   it.effect("intercepts list and modifies params via hook", () =>
     Effect.gen(function* () {
       yield* setupPostsTable

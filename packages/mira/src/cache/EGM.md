@@ -28,6 +28,7 @@ compiled row-level rule references, preventing a cached row from leaking across 
 - Record keys are `col:id:<select>|<expand>::<ctxTag>`; `invalidateRecord(col, id)` removes every key starting with `col:id:` [cached-collection.ts:stableViewKey] [collection-cache.ts:makeCollectionCacheLayer]
 - List keys start with `col:` and end with `::<ctxTag>`; `nukeListsFor(col)` removes every key starting with `col:` [cached-collection.ts:stableListKey] [collection-cache.ts:makeCollectionCacheLayer]
 - `create` nukes the collection's lists; `update` and `delete` invalidate the record and nuke the lists, both after the underlying write succeeds [cached-collection.ts:makeCachedCollectionServiceLayer]
+- `createMany` delegates the transactional batch and nukes the collection's lists exactly once, after the whole batch commits [cached-collection.ts:makeCachedCollectionServiceLayer]
 - Any read with a non-empty `expand` bypasses the cache entirely and is marked `cache.bypass: true` [cached-collection.ts:makeCachedCollectionServiceLayer]
 - The ctx tag is `"admin"` when `ctx.admin === true`, `"denied"` when the action has no rule, and `"public"` when the rule references no context value [ctx-key.ts:buildCtxCacheTag]
 - Only the auth/query/header/body keys the compiled rule references (via `extractCtxRefs`) contribute to the tag; the whole `ctx` is never encoded [ctx-key.ts:buildCtxCacheTag]

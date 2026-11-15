@@ -69,6 +69,21 @@ export class CollectionService extends Context.Service<
 
     create(collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx): Effect.Effect<RepoRecord, CollectionError>
 
+    /**
+     * Create several records in one database transaction.
+     *
+     * Every record goes through the same path as {@link create} — validation,
+     * rule enforcement, credential checks, password hashing, id/timestamp
+     * generation and hidden-field stripping — so batch semantics never diverge
+     * from single-record semantics. A failure on any record rolls the whole
+     * batch back.
+     */
+    createMany(
+      collection: AnyCollectionDef,
+      records: ReadonlyArray<RepoRecord>,
+      ctx: RequestCtx
+    ): Effect.Effect<ReadonlyArray<RepoRecord>, CollectionError>
+
     update(
       collection: AnyCollectionDef,
       id: string,
@@ -79,6 +94,15 @@ export class CollectionService extends Context.Service<
     delete(collection: AnyCollectionDef, id: string, ctx: RequestCtx): Effect.Effect<void, CollectionError>
   }
 >()("CollectionService") {}
+
+/**
+ * Maximum number of records accepted by a single bulk-create request.
+ *
+ * The whole batch is inserted inside one transaction, so it buffers every
+ * record's payload, hooks and result in memory. 1 000 keeps that bounded while
+ * remaining large enough for realistic seeding and import jobs.
+ */
+export const MAX_BULK_CREATE_RECORDS = 1_000
 
 function resolveFields(schema: CollectionSchema, userSelect: ReadonlyArray<string> | null, admin = false): ReadonlyArray<string> {
   const properties = schema.properties
@@ -567,7 +591,7 @@ export function makeCollectionServiceLayer(
           }, { captureStackTrace: false })
         )
 
-      const create = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
+      const createOne = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
         Effect.gen(function* () {
           if (collection.schema["x-collection-kind"] === "view") {
             return yield* new ReadOnlyError({ collection: collection.name })
@@ -603,6 +627,30 @@ export function makeCollectionServiceLayer(
           return stripHidden(collection, yield* decodeRow(collection, row), ctx.admin === true)
         }).pipe(
           Effect.withSpan("collection.create", {
+            kind: "internal",
+            attributes: { collection: collection.name }
+          }, { captureStackTrace: false })
+        )
+
+      const create = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
+        createOne(collection, data, ctx)
+
+      // One transaction for the whole batch: SQLite opens BEGIN, runs every
+      // per-record insert, and only commits if all of them succeed. Any
+      // validation/rule/credential failure propagates out of `withTransaction`,
+      // which rolls back every insert already made. Each record still executes
+      // the exact `collection.create` path (span included), so service-level
+      // semantics are identical to N individual calls.
+      const createMany = (collection: AnyCollectionDef, records: ReadonlyArray<RepoRecord>, ctx: RequestCtx) =>
+        Effect.gen(function* () {
+          if (collection.schema["x-collection-kind"] === "view") {
+            return yield* new ReadOnlyError({ collection: collection.name })
+          }
+          return yield* sql.withTransaction(
+            Effect.forEach(records, (data) => createOne(collection, data, ctx), { concurrency: 1 })
+          )
+        }).pipe(
+          Effect.withSpan("collection.createMany", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -752,7 +800,7 @@ export function makeCollectionServiceLayer(
           }, { captureStackTrace: false })
         )
 
-      return { list, view, create, update, delete: deleteImpl }
+      return { list, view, create, createMany, update, delete: deleteImpl }
     })
   )
 }

@@ -18,7 +18,11 @@ export * from "./hooks/index.js"
 
 // Server services (for plugins and advanced usage)
 export type { CursorPage,RequestCtx } from "./collection-service/index.js"
-export { CollectionService, makeCollectionServiceLayer } from "./collection-service/index.js"
+export {
+  CollectionService,
+  MAX_BULK_CREATE_RECORDS,
+  makeCollectionServiceLayer
+} from "./collection-service/index.js"
 export { AppConfig, AppConfigLive } from "./config/index.js"
 export {
   bytesToBase64Url,

@@ -77,6 +77,19 @@ Useful controls:
 - `BENCH_TRACING=on` re-enables tracing; `BENCH_STACK_TRACES=off` disables span stack capture.
 - `AUDIT_INDEX_TITLE=1` adds a benchmark-only `posts_title_idx` index (see below).
 
+## Bulk create: transactional batch vs individual creates
+
+A focused evidence run for the transactional bulk-create endpoint:
+
+```bash
+pnpm --filter mira-benchmarks bulk-create:audit
+```
+
+It spawns the benchmark server with `BENCH_SYNCHRONOUS=FULL` and a throwaway database, then
+compares 500 sequential `POST /api/collections/posts` requests with one
+`POST /api/collections/posts/bulk` carrying the same 500 records. It is not part of the
+published platform benchmark; it exists to show the cost of 500 commits versus one.
+
 ## Selective filter: full scan vs title index
 
 The list benchmark's filter is `title neq <value>`, which matches every seeded row, so

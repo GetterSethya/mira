@@ -301,6 +301,24 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
   create(): ClientHandler<InferRecord<F>, CreateInput<F, K>>
 
   /**
+   * Create several records in one request.
+   *
+   * The server validates, rule-checks and inserts the whole batch inside one
+   * database transaction: if any record is invalid (or denied by the create
+   * rule) nothing is written. The request is JSON-only — file fields cannot be
+   * uploaded through this method.
+   *
+   * @example
+   * const records = await posts.createMany().raw([
+   *   { title: "one" },
+   *   { title: "two" }
+   * ])
+   *
+   * @returns A mutation ClientHandler — call `.raw(inputs)` with an array of records
+   */
+  createMany(): ClientHandler<ReadonlyArray<InferRecord<F>>, ReadonlyArray<CreateInput<F, K>>>
+
+  /**
    * Update an existing record by ID.
    * Only the fields present in `data` are updated (partial/patch semantics).
    *
@@ -537,6 +555,7 @@ export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"
   | "getFirstOrNone"
   | "getFullList"
   | "create"
+  | "createMany"
   | "update"
   | "delete"
   | "register"
@@ -567,6 +586,9 @@ export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"
     options?: O
   ): EnrichedQueryHandler<ClientHandler<Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>>>
   create(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, CreateInput<F, K>>>
+  createMany(): EnrichedMutationHandler<
+    ClientHandler<ReadonlyArray<InferRecord<F>>, ReadonlyArray<CreateInput<F, K>>>
+  >
   update(): EnrichedMutationHandler<ClientHandler<InferRecord<F>, UpdateInput<F, K>>>
   delete(): EnrichedMutationHandler<ClientHandler<void, string>>
   invalidateAll(queryClient: { invalidateQueries(opts: { queryKey: QueryKey }): unknown }): unknown
@@ -699,6 +721,19 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
         ? Effect.succeed(HCR.bodyFormData(HCR.post(`/api/collections/${collectionName}`), buildFormData(input)))
         : HCR.bodyJson(HCR.post(`/api/collections/${collectionName}`), input)
       return withRetry(toExecuteEffect<InferRecord<F>>(reqEffect, execute))
+    })
+  }
+
+  function createMany() {
+    return makeMutationHandler<ReadonlyArray<InferRecord<F>>, ReadonlyArray<CreateInput<F, K>>>((inputs) => {
+      const reqEffect: RequestWithBody = HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/bulk`), {
+        records: inputs
+      })
+      return withRetry(
+        toExecuteEffect<{ records: ReadonlyArray<InferRecord<F>> }>(reqEffect, execute).pipe(
+          Effect.map((response) => response.records)
+        )
+      )
     })
   }
 
@@ -890,6 +925,7 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     getFullList,
     getOne,
     create,
+    createMany,
     update,
     delete: deleteFn,
     ...(isAuth

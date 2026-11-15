@@ -24,7 +24,7 @@ re-exported from `@gettersethya/mira`.
 
 ### `hook-collection.ts`
 
-- `makeHookCollectionServiceLayer()` — decorator layer that produces `CollectionService` from `CollectionService | HookService`, injecting hooks around `list`/`view`/`create`/`update`/`delete`. [hook-collection.ts:makeHookCollectionServiceLayer]
+- `makeHookCollectionServiceLayer()` — decorator layer that produces `CollectionService` from `CollectionService | HookService`, injecting hooks around `list`/`view`/`create`/`createMany`/`update`/`delete`. [hook-collection.ts:makeHookCollectionServiceLayer]
 
 ### `types.ts`
 
@@ -54,6 +54,7 @@ No subdirectories.
 - Any hook whose `collections` list omits the target collection name is skipped; a hook with no `collections` runs for every collection. [hook-service.ts:matchesCollection]
 - Cron hooks obey the same rule via `crons`, defaulting to all crons. [hook-service.ts:matchesCron]
 - `create` order is pre-hook → execute-hook → `inner.create` → success observer, and the inner call receives `execCtx.data`. [hook-collection.ts:makeHookCollectionServiceLayer]
+- `createMany` runs the pre/execute stages once per record before the transaction opens, passes the rewritten payloads to `inner.createMany` (one transaction), then dispatches success observers per created record; a failed batch dispatches the create error observer once per input record. [hook-collection.ts:makeHookCollectionServiceLayer]
 - The decorator forwards hook rewrites selectively: list uses `hookCtx.limit`/`filter`/`sort`/`select`/`expand` but the original `cursor` and `ctx`; view uses `hookCtx.select`/`expand` but the original `id` and `ctx`; create/update use `execCtx.data`; delete uses the original `id` and `ctx`. [hook-collection.ts:makeHookCollectionServiceLayer]
 - `update` and `delete` first load the stored record with `inner.view`, pass it as `record` (delete also as `data`) to the pre-hooks, then call the inner mutation. [hook-collection.ts:makeHookCollectionServiceLayer]
 - On failure the matching error observer runs before the original `CollectionError` is re-raised (`Effect.andThen(Effect.fail(error))`), so observers cannot mask or replace the failure. [hook-collection.ts:makeHookCollectionServiceLayer]

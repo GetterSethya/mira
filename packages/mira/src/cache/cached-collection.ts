@@ -183,6 +183,18 @@ export function makeCachedCollectionServiceLayer(
             )
           ),
 
+        // The whole batch commits or rolls back together, so the cache is
+        // invalidated exactly once — after the transaction succeeds.
+        createMany: (collection, records, ctx) =>
+          svc.createMany(collection, records, ctx).pipe(
+            Effect.tap(() => cache.nukeListsFor(collection.name)),
+            Effect.withSpan(
+              "cache.createMany",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
+          ),
+
         update: (collection, id, data, ctx) =>
           svc.update(collection, id, data, ctx).pipe(
             Effect.tap(() =>
