@@ -1,4 +1,4 @@
-export type DocsGroup = "Start" | "Core" | "Build" | "Operate" | "Reference";
+export type DocsGroup = "Start" | "Basics" | "Guides" | "Reference";
 
 export type DocsPage = {
   readonly slug: string;
@@ -11,9 +11,8 @@ export type DocsPage = {
 
 export const docsGroups: ReadonlyArray<DocsGroup> = [
   "Start",
-  "Core",
-  "Build",
-  "Operate",
+  "Basics",
+  "Guides",
   "Reference"
 ];
 
@@ -22,29 +21,53 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     slug: "getting-started",
     title: "Getting started",
     group: "Start",
-    summary: "Install Mira, define a collection, run the server, and make the first request.",
+    summary: "Start a server from one file, create a post over HTTP, and read it back.",
     contracts: [
       "packages/mira/EGM.md",
-      "packages/mira/src/app/EGM.md",
-      "packages/mira/src/http/EGM.md",
       "packages/collection/src/collection/EGM.md",
-      "packages/client/src/client/EGM.md"
+      "packages/mira/src/app/EGM.md",
+      "packages/mira/src/http/EGM.md"
     ],
     sourceFolders: [
+      "packages/collection/src/collection",
       "packages/mira/src/app",
+      "packages/mira/src/http",
       "packages/mira/src/databases",
       "packages/mira/src/platforms",
-      "packages/mira/src/storage",
-      "packages/mira/src/http",
+      "packages/mira/src/storage"
+    ]
+  },
+  {
+    slug: "how-mira-works",
+    title: "How Mira works",
+    group: "Start",
+    summary: "Trace one request from a collection definition to a SQL row and back.",
+    contracts: [
+      "packages/collection/src/collection/EGM.md",
+      "packages/mira/src/app/EGM.md",
+      "packages/mira/src/http/EGM.md",
+      "packages/mira/src/collection-service/EGM.md",
+      "packages/mira/src/repository/EGM.md",
+      "packages/mira/src/migrator/EGM.md",
+      "packages/mira/src/dialect/EGM.md",
+      "packages/mira/src/rule/EGM.md"
+    ],
+    sourceFolders: [
       "packages/collection/src/collection",
-      "packages/client/src/client"
+      "packages/mira/src/app",
+      "packages/mira/src/http",
+      "packages/mira/src/collection-service",
+      "packages/mira/src/repository",
+      "packages/mira/src/migrator",
+      "packages/mira/src/dialect",
+      "packages/mira/src/rule"
     ]
   },
   {
     slug: "collections",
     title: "Collections and fields",
-    group: "Core",
-    summary: "Define base, auth, and view collections with fields, relations, files, and indexes.",
+    group: "Basics",
+    summary: "Define base, auth, and view collections and see the fields, indexes, and tables they generate.",
     contracts: [
       "packages/collection/EGM.md",
       "packages/collection/src/collection/EGM.md"
@@ -52,28 +75,10 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     sourceFolders: ["packages/collection/src/collection"]
   },
   {
-    slug: "auth",
-    title: "Auth collections and sessions",
-    group: "Core",
-    summary: "Add users, passwords, registration, login, JWT/cookie sessions, and manager access.",
-    contracts: [
-      "packages/collection/src/collection/EGM.md",
-      "packages/mira/src/collection-service/EGM.md",
-      "packages/mira/src/http/EGM.md",
-      "packages/client/src/client/EGM.md"
-    ],
-    sourceFolders: [
-      "packages/collection/src/collection",
-      "packages/mira/src/collection-service",
-      "packages/mira/src/http",
-      "packages/client/src/client"
-    ]
-  },
-  {
     slug: "rules",
     title: "Access rules",
-    group: "Core",
-    summary: "Control which actions each caller can perform with server-side rules.",
+    group: "Basics",
+    summary: "Attach per-action rules that decide which rows each caller can read or write.",
     contracts: [
       "packages/collection/src/rule/EGM.md",
       "packages/mira/src/rule/EGM.md",
@@ -88,10 +93,28 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     ]
   },
   {
+    slug: "auth",
+    title: "Auth collections and sessions",
+    group: "Basics",
+    summary: "Add users who can register, log in, and carry a session across requests.",
+    contracts: [
+      "packages/collection/src/collection/EGM.md",
+      "packages/mira/src/collection-service/EGM.md",
+      "packages/mira/src/http/EGM.md",
+      "packages/client/src/client/EGM.md"
+    ],
+    sourceFolders: [
+      "packages/collection/src/collection",
+      "packages/mira/src/collection-service",
+      "packages/mira/src/http",
+      "packages/client/src/client"
+    ]
+  },
+  {
     slug: "querying",
     title: "Querying and pagination",
-    group: "Core",
-    summary: "Filter, sort, select, expand relations, and page through records with a cursor.",
+    group: "Basics",
+    summary: "Filter, sort, select, expand, and page through records without skipping rows.",
     contracts: [
       "packages/collection/src/filter/EGM.md",
       "packages/mira/src/repository/EGM.md",
@@ -110,8 +133,8 @@ export const docsPages: ReadonlyArray<DocsPage> = [
   {
     slug: "client-sdk",
     title: "Client SDK and TanStack",
-    group: "Build",
-    summary: "Call collections from TypeScript with typed handlers, auth, files, and TanStack options.",
+    group: "Guides",
+    summary: "Call your collections from TypeScript with typed handlers, files, and TanStack options.",
     contracts: [
       "packages/client/src/client/EGM.md",
       "packages/tanstack-adapter/src/EGM.md"
@@ -121,8 +144,8 @@ export const docsPages: ReadonlyArray<DocsPage> = [
   {
     slug: "plugins",
     title: "Plugins, hooks, and crons",
-    group: "Build",
-    summary: "Add lifecycle and record hooks, admin collections, and scheduled jobs.",
+    group: "Guides",
+    summary: "Add lifecycle and record hooks, admin collections, and scheduled jobs to a running app.",
     contracts: [
       "packages/mira/src/hooks/EGM.md",
       "packages/mira/src/app/EGM.md",
@@ -135,26 +158,10 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     ]
   },
   {
-    slug: "bun",
-    title: "Bun runtime",
-    group: "Operate",
-    summary: "Run Mira on Bun with the native platform preset, Bun SQLite, and the Bun package entry.",
-    contracts: [
-      "packages/mira/src/platforms/EGM.md",
-      "packages/mira/src/databases/EGM.md",
-      "packages/mira/src/app/EGM.md"
-    ],
-    sourceFolders: [
-      "packages/mira/src/platforms",
-      "packages/mira/src/databases",
-      "packages/mira/src/http"
-    ]
-  },
-  {
     slug: "server",
     title: "Server and operations",
-    group: "Operate",
-    summary: "Configure the builder, storage, auto-migration, logging, and the running process.",
+    group: "Guides",
+    summary: "Configure the builder, storage, migrations, telemetry, and the running process.",
     contracts: [
       "packages/mira/src/app/EGM.md",
       "packages/mira/src/config/EGM.md",
@@ -177,10 +184,26 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     ]
   },
   {
+    slug: "bun",
+    title: "Bun runtime",
+    group: "Guides",
+    summary: "Run the same app on Bun with native filesystem, HTTP, SQLite, hashing, and images.",
+    contracts: [
+      "packages/mira/src/platforms/EGM.md",
+      "packages/mira/src/databases/EGM.md",
+      "packages/mira/src/app/EGM.md"
+    ],
+    sourceFolders: [
+      "packages/mira/src/platforms",
+      "packages/mira/src/databases",
+      "packages/mira/src/http"
+    ]
+  },
+  {
     slug: "email",
     title: "Email and auth flows",
-    group: "Operate",
-    summary: "Configure SMTP, enable login alerts, reset, verification, and OTP flows, and test locally.",
+    group: "Guides",
+    summary: "Turn on SMTP and the login alert, reset, verification, email-change, and OTP flows it powers.",
     contracts: [
       "packages/mira/src/http/EGM.md",
       "packages/mira/src/app/EGM.md",
@@ -195,18 +218,10 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     ]
   },
   {
-    slug: "http-api",
-    title: "HTTP API and files",
-    group: "Operate",
-    summary: "Use the generated REST routes, auth headers, file uploads, and status codes.",
-    contracts: ["packages/mira/src/http/EGM.md"],
-    sourceFolders: ["packages/mira/src/http"]
-  },
-  {
     slug: "dashboard",
     title: "Dashboard plugin",
-    group: "Operate",
-    summary: "Install the admin dashboard, register the first superadmin, and use its API.",
+    group: "Guides",
+    summary: "Install the admin dashboard, register the first superadmin, and call its API.",
     contracts: [
       "packages/dashboard/src/EGM.md",
       "packages/dashboard/src/api/EGM.md"
@@ -214,10 +229,18 @@ export const docsPages: ReadonlyArray<DocsPage> = [
     sourceFolders: ["packages/dashboard/src", "packages/dashboard/src/api"]
   },
   {
+    slug: "http-api",
+    title: "HTTP API and files",
+    group: "Reference",
+    summary: "Look up every generated route, status code, upload limit, and file rule.",
+    contracts: ["packages/mira/src/http/EGM.md"],
+    sourceFolders: ["packages/mira/src/http"]
+  },
+  {
     slug: "api",
     title: "API reference",
     group: "Reference",
-    summary: "Browse the generated TypeScript reference for every package, entry point, and Bun export.",
+    summary: "Find the export, signature, and source location of any public symbol.",
     contracts: [
       "typedoc.json",
       "packages/collection/src/index.ts",

@@ -1,4 +1,4 @@
-An auth collection adds users, passwords, and sessions to a Mira app. It is a normal collection with three extra system fields, server-side password hashing, credential checks at the write path, and a login route that mints a session token. This page covers defining the collection, the credential rules, registration and login, session transport, and the additive `manage` rule. Rule evaluation itself is covered on the [rules page](../rules/) and the client auth methods on the [client SDK page](../client-sdk/).
+Give your app sign-up, login, and a session a client can carry between requests. An auth collection is a normal collection with `email`, a hidden write-only `password`, and `emailVerified` added to its schema, and the credential checks run at the collection service write path.
 
 ## Define an auth collection
 
@@ -17,14 +17,11 @@ The builder injects `email` (unique index), `password` (hidden, write-only, `x-k
 
 ## Passwords and credential checks
 
-A non-empty password is hashed server-side on create and update, at the collection service write path, and the plaintext is never stored. An empty `password` on update is dropped before hashing, so a blank edit form keeps the existing hash; do not create an account with an empty password. Write-time credential failures come back as `422` validation errors with an `issues` array.
+A non-empty password is hashed server-side on create and update, at the collection service write path, and the plaintext is never stored. Write-time credential failures come back as `422` validation errors with an `issues` array.
 
-The checks depend on who is calling:
+Create with a non-empty password requires `passwordConfirm`, and it must equal `password`. `emailVerified` is manager-only: a non-manager cannot set it to `true` on create.
 
-- Create with a non-empty password requires `passwordConfirm`, and it must equal `password`.
-- Update that changes the password requires `passwordConfirm`.
-- A caller without manager access who changes the password or the email must also supply `oldPassword`.
-- `emailVerified` is manager-only: a non-manager cannot set it to `true` on create or change it on update.
+Update that changes the password requires `passwordConfirm`. A caller without manager access who changes the password or the email must also supply `oldPassword`. An empty `password` on update is dropped before hashing, so a blank edit form keeps the existing hash; do not create an account with an empty password.
 
 Who counts as a manager is either an admin request context (used by the dashboard plugin) or an authenticated actor matching the collection's `manage` rule. Admins bypass the credential checks entirely.
 
@@ -88,9 +85,13 @@ curl http://localhost:8080/api/auth/me -H "authorization: Bearer $TOKEN"
 
 ## Sessions
 
-A session is a signed JWT with `typ: "session"`, HS256, and a 72-hour expiry, carrying the user id (`sub`), the collection (`col`), a token id (`jti`), and a password fingerprint (`pwf`) plus a per-user generation (`gen`). Every request resolves the token against the `TokenStore`: the `jti` must not be revoked, the auth record must still exist, `pwf` must match the current stored hash, and `gen` must match the current generation. Any store error denies the request, so authentication fails closed. Because `pwf` is derived from the password hash, changing a password invalidates every token minted before the change.
+A session is a signed JWT with `typ: "session"`, HS256, and a 72-hour expiry. It carries the user id (`sub`), the collection (`col`), a token id (`jti`), a password fingerprint (`pwf`), and a per-user generation (`gen`).
 
-The token is read from the `Authorization: Bearer` header first, then from the `mira_token` cookie. Login sets that cookie as `httpOnly`, `sameSite: "strict"`, `path: "/"`, for 72 hours. That is the browser path: the client never reads the cookie, `createMiraClient(url)` sends `credentials: "include"`, and `auth.ensureSession()` revalidates it against `/api/auth/me` on page load. For server-side rendering use `createMiraClient(url, { type: "server" })`, which authenticates with a bearer token you supply through `auth.setToken(token)`; `auth.isValid()` checks only the JWT expiry, not the signature.
+Every request resolves the token against the `TokenStore`: the `jti` must not be revoked, the auth record must still exist, `pwf` must match the current stored hash, and `gen` must match the current generation. Any store error denies the request, so authentication fails closed. Because `pwf` is derived from the password hash, changing a password invalidates every token minted before the change.
+
+The token is read from the `Authorization: Bearer` header first, then from the `mira_token` cookie. Login sets that cookie as `httpOnly`, `sameSite: "strict"`, `path: "/"`, for 72 hours.
+
+That is the browser path: the client never reads the cookie, `createMiraClient(url)` sends `credentials: "include"`, and `auth.ensureSession()` revalidates it against `/api/auth/me` on page load. For server-side rendering use `createMiraClient(url, { type: "server" })`, which authenticates with a bearer token you supply through `auth.setToken(token)`; `auth.isValid()` checks only the JWT expiry, not the signature.
 
 Logout revokes the presented token id and clears the cookie:
 
@@ -106,42 +107,13 @@ curl -X POST http://localhost:8080/api/auth/logout-all -H "authorization: Bearer
 
 Both routes answer `204` on success. Tokens minted before a `logout-all` are rejected afterwards.
 
-## Email flows
+## Manager access
 
-An auth collection can opt into email verification, login alerts, login OTP, passwordless login, and self-service email changes with the third `AuthCollection.define()` argument:
-
-```ts
-const Users = AuthCollection.define("users", {
-  name: Field.text()
-}, {
-  email: {
-    verification: true,
-    loginAlerts: true,
-    loginOtp: "required",
-    passwordless: true,
-    emailChange: true
-  }
-})
-```
-
-`POST /auth-with-password` returns `{ otpRequired: true, challengeId, expiresAt }` instead of a token when `loginOtp` is required; the client completes it with `verify-otp`. Passwordless login starts at `POST /auth-with-otp/request` and completes at `POST /auth-with-otp`. Password reset uses `POST /password-reset/request` and `POST /password-reset`; email verification uses `POST /verify-email/request` and `POST /verify-email`. All OTP endpoints take `{ challengeId, code }`.
-
-Email change is a confirmation round-trip. An authenticated user calls `POST /request-email-change` with `{ newEmail, oldPassword }`; Mira sends a 30-minute link to the new address and returns a generic `202`. If the address belongs to another account, no mail is sent and the response is unchanged, so the endpoint does not reveal whether an address exists. The client posts the link token to `POST /confirm-email-change`, which sets `email`, sets `emailVerified: true`, invalidates every existing session, and consumes the user's other outstanding challenges. The current address is rejected with `422 email_unchanged`; confirmation can return `409 email_taken` if the address became taken in the meantime.
-
-Registration sends a verification OTP when enabled; the create response includes `emailVerification: { challengeId, expiresAt }`. If the verification mail is rate-limited, the account is still created and the response carries `verificationDeferred: true` and `verificationRetryAfterSeconds`; the client can call `verify-email/request` later. Password login remains allowed while `emailVerified` is false. To restrict an app, use a rule such as `R.auth(Users, "emailVerified").eq(R.literal(true))`.
-
-The transport is selected in the builder with `.email(SmtpEmail(...))`; without it the flows are disabled and request endpoints return `503 email_not_configured`. Request, cooldown, and send limits can return `429` with `retryAfterSeconds`; a limiter store failure on a send returns `503 rate_limit_unavailable`. See the [email page](../email/) for the SMTP config, route table, rate limits, plugin hooks, and local Mailpit testing.
-
-## Grant manager access with the manage rule
-
-`manage` is an additive rule. It never bypasses the base create or update rule; it only escalates what a caller already allowed to do. It applies to auth collections only, and a `manage` key on a base or view collection is a compile error. The complete rule set, with a manager path:
+`manage` is an additive rule. It never bypasses the base create or update rule; it only escalates what a caller is already allowed to do. It applies to auth collections only, and a `manage` key on a base or view collection is a compile error. Add it to the binding whose other actions are on the [rules page](../rules/):
 
 ```ts
 export const usersRules = defineRule(Users, (R) => ({
-  list: R.public(),
-  view: R.field("id").eq(R.selfId()),
-  create: R.public(),
-  update: R.field("id").eq(R.selfId()),
+  // other actions, as on the rules page
   manage: R.and(
     R.authCollection().eq(R.literal("users")),
     R.auth(Users, "role").eq(R.literal("admin")),
@@ -149,14 +121,27 @@ export const usersRules = defineRule(Users, (R) => ({
 }))
 ```
 
-On create, the rule is evaluated against the incoming payload with `emailVerified` forced to `false`, so the field it guards cannot be used to satisfy the rule. On update, it is evaluated against the stored record by id. A matching manager may set `email` and `emailVerified` and change a password without `oldPassword`; `passwordConfirm` is still required for password changes. The base `update` rule still decides which rows a manager can reach, so `manage` adds privileges rather than granting access. `manage` has no effect on `list`, `view`, or `delete`.
+`manage` is not a substitute for the create rule: open signup still needs `create: R.public()` from the registration section above.
+
+On create, `manage` is evaluated against the incoming payload with `emailVerified` forced to `false`, so the field it guards cannot be used to satisfy the rule. On update, it is evaluated against the stored record by id. A matching manager may set `email` and `emailVerified` and change a password without `oldPassword`; `passwordConfirm` is still required for password changes. `manage` has no effect on `list`, `view`, or `delete`.
 
 The `authCollection` check matters when an app has more than one auth collection: `R.auth(Users, "role")` reads a role field from the authenticated actor, but the rule engine does not use the collection argument to verify which auth collection issued the token. Pairing it with `R.authCollection()` prevents a token from another auth collection with a matching role from satisfying the rule.
 
-Do not let public signup choose a privileged role. A client-writable `role` field combined with `create: R.public()` lets a signup send `"role": "admin"`. Make the field server-managed, or set it in a plugin hook, and test the create rule before opening signup.
+## Email flows
 
-## Next steps
+An auth collection opts into verification, login alerts, login OTP, passwordless login, and email changes with the third `AuthCollection.define()` argument, and every option defaults to off. The transport is selected in the builder with `.email(SmtpEmail(...))`; without it the flows are disabled and request endpoints return `503 email_not_configured`.
 
-- [Access rules](../rules/) for per-action evaluation and rule syntax.
+For a self-service address change, an authenticated user posts `{ newEmail, oldPassword }` to `POST /request-email-change` and confirms the mailed token at `POST /confirm-email-change`.
+
+The flags, the transport config, the route table, the rate-limit budgets, and local testing are all on the [email page](../email/).
+
+## Common mistakes
+
+- A registration request returns 403: no `create` rule is attached, and a detached `defineRule` result does nothing until it is passed to `.rules([...])`.
+- A create with an empty `password` fails validation, because `password` is required on create. An empty `password` on update is dropped instead, so a blank edit form keeps the existing hash.
+- A signup that sends `role: "admin"` succeeds: public signup plus a client-writable role field hands out the role. Make the field server-managed, or set it in a plugin hook.
+
+## Next
+
+- [Querying and pagination](../querying/) to read the rows those sessions are allowed to see.
 - [Client SDK and TanStack](../client-sdk/) for `raw`/`toEffect`, browser and server auth, and adapter options.
-- [HTTP API and files](../http-api/) for route details, cookies, and file tokens.

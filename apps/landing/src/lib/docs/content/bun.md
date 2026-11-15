@@ -1,4 +1,6 @@
-Mira runs on Bun through a native platform preset. Filesystem, path, HTTP server, runtime, SQLite, hashing, password hashing, UUIDs, and the common thumbnail paths use Bun's native APIs. SMTP reuses `nodemailer` (backed by Bun's native sockets), and `cover` thumbnails fall back to Photon because `Bun.Image` has no centre-crop primitive yet.
+Run the same app on Bun with native filesystem, HTTP, SQLite, hashing, and images. The platform preset swaps runtime services; your collection definitions and builder chain stay as they are.
+
+This page assumes the builder from [server](../server/); only the platform and database presets change.
 
 ## Requirements
 
@@ -12,17 +14,11 @@ Install the same packages you would on Node. `@gettersethya/mira` includes the B
 bun add @gettersethya/mira effect@4.0.0
 ```
 
-Import from the Bun entry so TypeScript sees the Bun declarations:
+Import the Bun presets from the Bun entry so TypeScript sees the Bun declarations, and collection builders from the server root:
 
 ```typescript
-import {
-  BaseCollection,
-  BunPlatform,
-  BunSqliteDatabase,
-  Field,
-  LocalFileStorage,
-  Mira
-} from "@gettersethya/mira/bun"
+import { BunPlatform, BunSqliteDatabase, LocalFileStorage, Mira } from "@gettersethya/mira/bun"
+import { BaseCollection, Field } from "@gettersethya/mira"
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text({ required: true })
@@ -157,3 +153,8 @@ The smoke is the runtime proof. It does not replace the Node test suite; run `pn
 - Automatic Bun → Node password portability. Use `BunPortablePlatform` if you need it.
 - A full Node/Bun CI matrix. CI runs typecheck, the Node test suite, the package build, a packed-tarball install smoke, the Bun smoke, and an example boot on one runner.
 - Dashboard telemetry pages that depend on the SQLite log store. The dashboard core and its public bootstrap route work on Bun; the SQLite telemetry backend also works there once you pass a Bun `SqliteClient` layer, but it still needs a dedicated telemetry database.
+
+## Next
+
+- [Email and auth flows](../email/) for SMTP setup, verification, reset, and the email-change flow.
+- [Dashboard plugin](../dashboard/) for the admin UI, `_superadmin`, and the connect sheet.

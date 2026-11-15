@@ -1,4 +1,6 @@
-Mira assembles a server from four required builder steps and a few optional ones. Durable state lives in SQLite: collection definitions, configuration, and optionally logs and spans. Node and Bun are both supported; [Bun](../bun/) has its own runtime page. This page covers the builder, config, storage, migrations, telemetry, and thumbnails; [email](../email/), [plugins](../plugins/), [HTTP API](../http-api/), and the [dashboard](../dashboard/) have their own pages.
+Turn a set of collection definitions into a configured, migrating, observable server process. Four builder steps are required; the optional steps tune storage, email, rate limits, telemetry, and CORS.
+
+Bun has its own [runtime page](../bun/). [Email](../email/), [plugins](../plugins/), the [HTTP API](../http-api/), and the [dashboard](../dashboard/) have their own pages too.
 
 ## What lives where
 
@@ -18,7 +20,7 @@ Mira assembles a server from four required builder steps and a few optional ones
 
 The builder exposes `build()` only once all four required steps exist and re-checks at runtime. A collection with no rule denies ordinary callers; see [access rules](../rules/).
 
-The snippet assumes `Posts`, `Users`, `PostsRules`, and `nightlyCleanup` are defined in your app; the collection and rule pages show those definitions.
+The snippet assumes `Posts`, `Users`, `postsRules`, and `nightlyCleanup` are defined in your app; the collection and rule pages show those definitions.
 
 ```ts
 import { Config } from "effect"
@@ -34,7 +36,7 @@ const app = Mira.builder()
     from: "Mira <no-reply@example.com>"
   }))
   .collections([Posts, Users])
-  .rules([PostsRules])
+  .rules([postsRules])
   .crons([nightlyCleanup])
   .telemetry(ConsoleTelemetryLayer)
   .cors({ allowedOrigins: ["https://app.example.com"], credentials: true })
@@ -48,6 +50,14 @@ For Bun, import `BunPlatform` and `BunSqliteDatabase` from `@gettersethya/mira/b
 
 `serve()` accepts optional `port` and `maxPortAttempts` (default 10). On a busy port it retries upward and reports the bound port to `AppConfig`, keeping `applicationUrl` accurate.
 
+## Boot sequence
+
+Building the app assembles the layer graph in a fixed order. The foundation binds the platform, database, storage, thumbnails, and telemetry; the mid layer adds `Repository`, the migrator, `AppConfig`, the token store, and the rate-limit stores. The email transport, plugin layers, the cached collection service, and the hook decorator sit on top.
+
+Auto-migration is a side effect of that graph, so the plan completes before the server binds. The server layer then adds the router — generated collection routes plus plugin routes — and the port-retry binding.
+
+Plugin `onBootstrap` hooks run during that startup, after the socket binds and before requests are handled. [Plugins](../plugins/) covers the hook order and the stages that never run.
+
 ## Configuration in `_config`
 
 There is no config-file layer. `AppConfig` seeds a `_config` table on first boot and reads it on every start; some values, such as S3 credentials, can also be supplied as Effect `Config` values.
@@ -60,7 +70,7 @@ The seeded defaults are `app_name = "mira"`, `port = "8080"`, `application_url =
 
 Port and URL are mutable in-process: after a fallback, `updateBoundPort` rewrites the URL port so plugin logs and links point at the real address.
 
-The `_config` table also carries `use_s3` and `s3_*` legacy keys, but the current storage layer is activated by `.storage(S3CompatibleStorage(...))`, not by those rows. Use the builder call as the source of truth; do not assume setting `use_s3` swaps the backend. An incomplete `use_s3=true` row logs a warning and yields no S3 config instead of crashing boot. Email settings are not stored in `_config`; they come from `.email(...)`, and the dashboard shows the live transport read-only.
+Email settings are not stored in `_config`; they come from `.email(...)`, and the dashboard shows the live transport read-only.
 
 ## Storage backends
 
@@ -91,13 +101,15 @@ import { S3CompatibleStorage } from "@gettersethya/mira"
 
 Every field accepts a plain value or an Effect `Config`, resolved once at build, so a missing variable fails at startup rather than on first upload. Path-style is the default; set `forcePathStyle: false` for virtual-host style and `publicBaseUrl` for a CDN. The bucket must already exist; no `@aws-sdk/*` package is involved.
 
+The `_config` table also carries `use_s3` and `s3_*` legacy keys, but the current storage layer is activated by `.storage(S3CompatibleStorage(...))`, not by those rows. Use the builder call as the source of truth; do not assume setting `use_s3` swaps the backend. An incomplete `use_s3=true` row logs a warning and yields no S3 config instead of crashing boot.
+
 SQLite is the only database backend today. `SqliteDatabase({ filename })` wires the `SqlClient` and `sqliteDialect`; use `":memory:"` in tests. Booleans are stored as `0`/`1` because the dialect declares it, not because the collection service hardcodes it.
 
 ## Email transport
 
-`.email(SmtpEmail(...))` selects an SMTP transport; without it Mira uses a no-op `EmailService`. Host, port, TLS, auth, From, and the reset URL are resolved once at layer build; every field also accepts an Effect `Config` value. The transport is optional because local development and clients that do not use email should not need an SMTP server.
+`.email(SmtpEmail(...))` selects an SMTP transport; without it Mira uses a no-op `EmailService`. Host, port, TLS, auth, From, and the reset URL are resolved once at layer build, and every field also accepts an Effect `Config` value. The transport is optional because local development and clients that do not use email should not need an SMTP server; the [email page](../email/) covers auth-collection options, routes, rate limits, plugin hooks, and Mailpit.
 
-`SmtpEmail` delegates socket work to the platform `MailTransport`, so the core service does not import `nodemailer`; only the Node platform does. The [email page](../email/) covers auth-collection options, routes, rate limits, plugin hooks, and Mailpit.
+## Rate limits
 
 Rate limits use a `RateLimitStore` service. The app's default store is SQLite (`_rate_limits`); tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQLite store is single-node; a multi-instance deployment needs a shared store. Request policies fail open on store errors; send policies fail closed with `503 rate_limit_unavailable`.
 
@@ -133,7 +145,9 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 
 On Bun, import `SqliteClient` from `@effect/sql-sqlite-bun` and keep the same shape. Both the Node entry and `@gettersethya/mira/bun` export `makeSqliteTelemetryLayer`, `SqliteLoggerConfig`, `TelemetrySqlClient`, and `logCleanupCronDef`. There is no `dbPath` option: the caller owns the driver and supplies the layer, so neither entry carries a runtime-specific SQLite dependency for telemetry.
 
-The layer applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` at construction, then migrates `logs` and `spans`. Both tables index `created`, so retention scans do not read the whole table. The connection is re-provided as `TelemetrySqlClient` for the admin telemetry routes. Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-entry queue, each drained by a scoped fiber, so span and record completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports log rows dropped because the bounded queue was full. `logConsole` echoes to stdout; `pretty` affects only that echo, never the stored rows.
+The layer applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` at construction, then migrates `logs` and `spans`. Both tables index `created`, so retention scans do not read the whole table. The connection is re-provided as `TelemetrySqlClient` for the admin telemetry routes.
+
+Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-entry queue, each drained by a scoped fiber, so span and record completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports log rows dropped because the bounded queue was full. `logConsole` echoes to stdout; `pretty` affects only that echo, never the stored rows.
 
 `logCleanupCronDef` is a daily `0 0 * * *` job deleting `logs` and `spans` older than `AppConfig.logRetentionDays`; add it to `.crons([...])`. Deletes run in batches of 1,000 using the `created` index, then the job runs `PRAGMA wal_checkpoint(TRUNCATE)` and logs a warning when the checkpoint is busy. It requires `TelemetrySqlClient`, so use it only with `makeSqliteTelemetryLayer`; the default console telemetry does not provide the table client. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
 
@@ -141,4 +155,13 @@ The layer applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=50
 
 `ThumbnailServicePhotonLive` is wired into the foundation layer and supports JPEG, PNG, and WebP through `@cf-wasm/photon`. The file-serving route accepts a `thumb` spec in `WxH[tbf]` form: `t` is cover, `b` is contain, `f` is fill, and no suffix defaults to cover. A `0` axis scales proportionally; `0x0` returns the source size. Results are cached best-effort at `_thumbs/<filename>/<spec>`, and a resize failure falls back to the original. The app hardcodes the Photon layer; `ThumbnailServiceNoopLive` exists internally for tests and is not a public builder option.
 
-`NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. `BunPlatform` does the same with native Bun filesystem, path, HTTP server, and runtime; it reuses the Node-compatible crypto, password, and SMTP layers. `BunSqliteDatabase` pairs Bun SQLite with the same dialect. Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic; Photon works under both runtimes, and SQLite telemetry works on both when you pass the matching `SqlClient` layer. For hook ordering and cron state see [plugins](../plugins/); for routes and status codes see the [HTTP API](../http-api/); for the admin UI see the [dashboard](../dashboard/).
+`NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. `BunPlatform` does the same with native Bun filesystem, path, HTTP server, and runtime; it reuses the Node-compatible crypto, password, and SMTP layers. `BunSqliteDatabase` pairs Bun SQLite with the same dialect.
+
+Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic. Photon works under both runtimes, and SQLite telemetry works on both when you pass the matching `SqlClient` layer.
+
+For hook ordering and cron state see [plugins](../plugins/); for routes and status codes see the [HTTP API](../http-api/); for the admin UI see the [dashboard](../dashboard/).
+
+## Next
+
+- [Bun runtime](../bun/) for the native platform preset, Bun SQLite, and password hashing.
+- [Email and auth flows](../email/) for SMTP setup, verification, reset, and the email-change flow.

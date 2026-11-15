@@ -1,15 +1,15 @@
-Every list route in Mira shares one query model: a filter expression, one sort field, a field projection, optional relation expansion, and cursor pagination. The typed client and raw HTTP speak the same parameters — the client renames `after` to `cursor` — and a list always answers with `{ items, nextCursor }`. There is no offset pagination and no `COUNT(*)`: a page is a window over the collection's internal `seqId` sequence.
+Ask a list route for exactly the rows you want, and walk a whole collection without skipping one. Every list route shares one query model — a filter expression, one sort field, a field projection, optional relation expansion, and cursor pagination — and always answers with `{ items, nextCursor }`.
 
 ## Filters
 
 `Filter` builds `FilterNode` values. Inside a client callback you get a `FilterBuilder<F>` with the same methods, narrowed to the collection's field names and each field's value type.
 
 ```ts
-import { Filter } from "@gettersethya/mira-client"
+import { Filter } from "@gettersethya/mira"
 
 Filter.field("status").eq("published")
-Filter.field("views").gte(100)
-Filter.field("views").between(10, 100)
+Filter.field("viewCount").gte(100)
+Filter.field("viewCount").between(10, 100)
 Filter.field("status").in(["draft", "review"])
 Filter.field("title").like("%effect%")
 Filter.field("deletedAt").null()
@@ -18,7 +18,7 @@ Filter.field("deletedAt").notNull()
 Filter.and(
   Filter.field("status").eq("published"),
   Filter.or(
-    Filter.field("views").gte(100),
+    Filter.field("viewCount").gte(100),
     Filter.not(Filter.field("title").like("%draft%"))
   )
 )
@@ -28,7 +28,7 @@ The comparison surface is `.eq`, `.neq`, `.gt`, `.gte`, `.lt`, `.lte`, `.in`, `.
 
 Comparison values must be a string, a number, or `null`; boolean values are rejected by the filter compiler. An empty `.in([])` list compiles to `1 = 0` and matches nothing. Unknown fields — and fields marked hidden, unless the caller is an admin — fail with 422.
 
-### Raw JSON shape
+## Raw JSON shape
 
 The `filter` query parameter is one JSON-encoded `FilterNode`:
 
@@ -45,7 +45,7 @@ A nested example:
 {
   "op": "and",
   "left": { "op": "eq", "field": "status", "value": "published" },
-  "right": { "op": "gte", "field": "views", "value": 100 }
+  "right": { "op": "like", "field": "title", "value": "%effect%" }
 }
 ```
 
@@ -65,7 +65,7 @@ If the JSON does not decode to a valid node the request fails with 422, so build
 
 Sorting uses the collection schema as an allowlist. A non-admin caller cannot sort by a hidden field — that request is a 422 — while an unknown field name is silently ignored and the list keeps its default order. `select` is also an allowlist; for base and auth collections, `id`, `created`, and `updated` are returned whether or not you name them. View collections only return the columns their query exposes. Hidden fields are never selected for ordinary callers.
 
-`expand` fills in related records that a plain join would leave as bare ids. The related row arrives under `expand.<field>`, and a relation that does not resolve is simply absent — a left-join miss and a denied read look the same. For non-admin callers the target collection's `view` rule is applied to the join, so expanding a record you cannot read yields nothing rather than a leak.
+`expand` fills in related records that a plain join would leave as bare ids. The related row arrives under `expand.<field>`, and a relation that does not resolve is absent — a left-join miss and a denied read look the same. For non-admin callers the target collection's `view` rule is applied to the join, so expanding a record you cannot read yields nothing rather than a leak.
 
 Expansion joins the target's `id` column. A relation declared with a different target field, such as `Field.relation(Users, { field: "email" })`, stores and validates that value but is not expanded by the current join; use the related record's `id` when you need `expand`.
 
@@ -86,27 +86,33 @@ For ordinary list callers, `seqId` is not part of the response payload; admin co
 
 ## Worked client query
 
+The client SDK is a separate install for browser code:
+
+```install
+pnpm add @gettersethya/mira-client
+```
+
 ```ts
 import { createMiraClient } from "@gettersethya/mira-client"
 import { Posts } from "./collections.js"
 
-const mira = createMiraClient("http://localhost:3000").withCollections({ posts: Posts })
+const mira = createMiraClient("http://localhost:8080").withCollections({ posts: Posts })
 
 const { items, nextCursor } = await mira.posts
   .getList({
     filter: (f) =>
       f.and(
         f.field("status").eq("published"),
-        f.field("views").gte(100)
+        f.field("title").like("%effect%")
       ),
     limit: 10,
-    select: ["title", "views"],
+    select: ["title", "status"],
     expand: ["author"]
   })
   .raw()
 ```
 
-This example deliberately uses the default `seqId` order so the cursor walk stays complete. If you add `sort`, do it for a one-shot read rather than while paging; sorting by another field while using `after` can skip or repeat rows.
+This query keeps the default `seqId` order, so following `nextCursor` visits every row once.
 
 The client serializes the filter callback to the same JSON node shown above and maps `cursor` to `after`. A typed callback rejects unknown field names and mismatched value types at compile time. To fetch the next page, call `getList({ cursor: nextCursor, limit: 10 }).raw()`.
 
@@ -114,12 +120,12 @@ The client serializes the filter callback to the same JSON node shown above and 
 
 ```bash
 # Obtain $TOKEN from the login route; see ../auth/.
-curl -G "http://localhost:3000/api/collections/posts" \
+curl -G "http://localhost:8080/api/collections/posts" \
   -H "Authorization: Bearer $TOKEN" \
-  --data-urlencode 'filter={"op":"and","left":{"op":"eq","field":"status","value":"published"},"right":{"op":"gte","field":"views","value":100}}' \
+  --data-urlencode 'filter={"op":"and","left":{"op":"eq","field":"status","value":"published"},"right":{"op":"like","field":"title","value":"%effect%"}}' \
   --data-urlencode 'sort=created' \
   --data-urlencode 'order=desc' \
-  --data-urlencode 'select=title,views' \
+  --data-urlencode 'select=title,status' \
   --data-urlencode 'expand=author' \
   --data-urlencode 'limit=10'
 ```
@@ -132,6 +138,7 @@ Filters never widen access. A collection's `list` rule is ANDed with your filter
 
 List and record reads pass through an in-memory cache: list entries live 10 seconds and record entries 30 seconds by default, and every key is suffixed with exactly the auth, query, header, and body values the compiled rule references. Two callers with different authorization therefore cannot share a cached page. Writes nuke the collection's list entries and invalidate the affected record; reads that request `expand` bypass the cache entirely.
 
-## Where next
+## Next
 
-Handlers, `getFirstOrNone`, `getFullList`, and the Effect path are covered in [client-sdk](../client-sdk/). Parameter parsing, encoding details, and the full status-code mapping live in [http-api](../http-api/).
+- [Client SDK and TanStack](../client-sdk/) for handlers, `getFirstOrNone`, `getFullList`, and the Effect path.
+- [HTTP API and files](../http-api/) for parameter parsing, encoding details, and the full status-code mapping.

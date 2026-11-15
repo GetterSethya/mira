@@ -12,15 +12,15 @@
   <title>Mira docs</title>
   <meta
     name="description"
-    content="Install Mira, define collections, add auth and rules, query records, and call the API."
+    content="Install Mira, start a server from one file, shape data, decide access, and call the API from TypeScript."
   />
 </svelte:head>
 
 <div class="docs-index">
   <h1>Mira documentation</h1>
   <p class="docs-lede">
-    Start with the install path, then move through collections, auth, rules, and queries.
-    Mira runs on Node or Bun 1.3.14+; the Bun runtime page covers the native preset, SQLite path, Bun.CryptoHasher, Bun.password, and Bun.Image thumbnails.
+    Start with the install path, then shape data, decide access, and call the API.
+    Mira runs on Node or Bun 1.3.14+.
     Each page is checked against the package contracts and the source it documents. The API reference is generated from the same source with TypeDoc.
   </p>
 

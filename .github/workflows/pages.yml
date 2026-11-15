@@ -62,6 +62,9 @@ jobs:
       - name: Typecheck landing
         run: pnpm --filter @gettersethya/mira-landing check
 
+      - name: Check docs
+        run: pnpm --filter @gettersethya/mira-landing check:docs
+
       - name: Build landing
         run: pnpm --filter @gettersethya/mira-landing build
 

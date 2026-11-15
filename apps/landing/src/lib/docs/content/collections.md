@@ -1,12 +1,14 @@
-A collection is the schema source of truth: you declare it in TypeScript, and Mira serializes it to JSON Schema with `x-` annotations that drive validation, rules, routes, and tables. This page covers the three collection kinds, field builders and options, indexes, relations, files, system fields, and the serialized form. Auth credential fields live on the [auth page](../auth/); filtering lives on the [querying page](../querying/).
+Declare a collection once in TypeScript and Mira derives the table, the routes, and the schema from it. The definition is the source of truth: the server serializes it to JSON Schema with `x-` annotations, and validation, rules, routes, and tables all read that serialized form.
 
 ## Collection kinds
 
 ### Base collections
 
-`BaseCollection.define(name, fields)` returns a `BaseCollectionBuilder` for a physical table with full create, read, update, and delete support. Use it for the records your app owns. You supply only your own fields; `id` and `seqId` are rejected in the field map because the system set is injected. Chain `.indexes()` to add collection-level indexes.
+`BaseCollection.define(name, fields)` returns a `BaseCollectionBuilder` for a physical table with full create, read, update, and delete support. Use it for the records your app owns. You supply only your own fields; `id` and `seqId` are rejected in the field map because the system set is injected.
 
 ```ts
+import { BaseCollection, Field } from "@gettersethya/mira"
+
 const Posts = BaseCollection.define("posts", {
   title: Field.text(),
   published: Field.boolean({ default: false }),
@@ -15,15 +17,19 @@ const Posts = BaseCollection.define("posts", {
 
 ### Auth collections
 
-`AuthCollection.define(name, extraFields)` returns an auth collection with `email` and `emailVerified` in its public field map plus a hidden, write-only `password` field in the serialized schema, and a unique index on `email`. Use one when records sign in. Only extra fields are yours, and every system field name is rejected in `extraFields`. Auth collections are base collections at runtime: full CRUD, rules, and indexes apply. See [auth](../auth/) for the credential lifecycle.
+`AuthCollection.define(name, extraFields)` adds `email`, `emailVerified`, and a hidden, write-only `password` to the schema, plus a unique index on `email`. Use one when records sign in. Only extra fields are yours, and every system field name is rejected in `extraFields`. Auth collections are base collections at runtime, so full CRUD, rules, and indexes apply; see [auth](../auth/) for the credential lifecycle.
 
 ### View collections
 
-`ViewCollection.define(name, query, fields)` returns a read-only collection backed by a raw SQL query. Use it to expose a join or projection without duplicating rows. It has no physical table of its own and no `.indexes()`. The migrator turns the query into a SQL `VIEW`, so listing a view collection reads from the query result. Writes fail with `405`, and a view collection's rule map only accepts `list` and `view`.
+`ViewCollection.define(name, query, fields)` returns a read-only collection backed by a raw SQL query. Use it to expose a join or projection without duplicating rows. It has no physical table of its own and no `.indexes()`, and the migrator turns the query into a SQL `VIEW`. Writes fail with `405`, and a view collection's rule map only accepts `list` and `view`.
+
+## Where definitions and rules live
+
+Keep collection definitions in a module that both the server and the client import, and keep rules in a module that only the server imports. A definition carries only data — names, fields, options — so a frontend can import it to type its client calls. `defineRule` ships in `@gettersethya/mira`, which is Node-only and must never reach a browser bundle.
 
 ## Fields
 
-`Field.*` builders return a `FieldDef`. Every builder except `Field.seqId` also exposes `.view()`.
+`Field.*` builders return a `FieldDef`; every builder except `Field.seqId` also exposes `.view()`, which marks a field a view query produces rather than a table column.
 
 | Builder | Value | Kind-specific options |
 |---|---|---|
@@ -39,12 +45,14 @@ const Posts = BaseCollection.define("posts", {
 | `Field.relation` | target record value | `field` (defaults to `"id"`) |
 | `Field.seqId` | integer | system-managed, no `.view()` |
 
-The shared options are `name` (override the column name), `required`, `default`, `hidden`, `unique`, `indexed`, and `error` (a callback that maps a constraint kind to your own validation message). A field is required unless `required: false` or a `default` is set. `hidden: true` keeps the field out of non-admin responses and out of `select` at the type level.
+The shared options are `name` (override the column name), `required`, `default`, `hidden`, `unique`, `indexed`, and `error` (a callback that maps a constraint kind to your own validation message).
+
+A field is required unless `required: false` or a `default` is set. `hidden: true` keeps the field out of non-admin responses and out of `select` at the type level.
 
 A complete definition, with a relation to `Users` from the [auth page](../auth/):
 
 ```ts
-import { BaseCollection, Bytes, Field } from "@gettersethya/mira-collection"
+import { BaseCollection, Bytes, Field } from "@gettersethya/mira"
 import { Users } from "./auth.js"
 
 export const Posts = BaseCollection.define("posts", {
@@ -71,9 +79,9 @@ slug: Field.text({ unique: true }),
 author: Field.relation(Users, { indexed: true }),
 ```
 
-Collection-level indexes use the typed `I` callback, which only accepts field names that exist on the collection; the example above passes `I.on("status")` and `I.unique("author", "slug")`.
+Collection-level indexes use the typed `I` callback, which accepts only field names that exist on the collection; the complete definition above ends with `.indexes((I) => [I.on("status"), I.unique("author", "slug")])`.
 
-`Index.on(...fields)` makes a non-unique index and `Index.unique(...fields)` makes a unique one; composite column order matters. The flags and the callback both end up in the same serialized index list. Auth collections already carry a unique index on `email`, and view collections have no indexes.
+`Index.on(...fields)` makes a non-unique index and `Index.unique(...fields)` makes a unique one; composite column order matters. The flags and the callback both end up in the same serialized index list, so `unique` and `indexed` never appear on a property. Auth collections already carry a unique index on `email`, and view collections have no indexes.
 
 ## Relations
 
@@ -84,11 +92,13 @@ author: Field.relation(Users),                    // stores users.id
 ownerEmail: Field.relation(Users, { field: "email" }),
 ```
 
-## System fields and serialization
+## System fields
 
-Base and auth collections gain `id`, `seqId`, `created`, and `updated`; all four carry `x-generated`, so the server rejects them in create and update payloads. `seqId` is the cursor column, hidden from responses, and monotonic. View collections inherit none of them; their values come from the query.
+Base and auth collections gain `id`, `seqId`, `created`, and `updated`; all four carry `x-generated`, so the server rejects them in create and update payloads. `seqId` is the cursor column: hidden from responses, and monotonic. View collections inherit none of them; their values come from the query.
 
-Serialization adds the annotations for you; you never write `x-*` keys yourself. The internal serialized schema uses `x-*` properties. `GET /api/_schema` is admin-gated and returns a normalized view of each collection (top-level `kind`, `fields`, `indexes`, `rules`, `viewQuery`), so do not assume the raw `x-*` names appear there unchanged. Inspect the endpoint's response instead.
+## What gets serialized
+
+Serialization adds the annotations for you; you never write `x-*` keys yourself. The internal serialized schema uses these `x-*` properties:
 
 - `x-collection-kind` — `"base"`, `"auth"`, or `"view"`.
 - `x-system` and `x-generated` — server-managed fields.
@@ -101,12 +111,14 @@ Serialization adds the annotations for you; you never write `x-*` keys yourself.
 - `x-indexes` — normalized unique and non-unique indexes; `unique` and `indexed` never appear as property flags.
 - `x-view-query` — the raw SQL for a view collection.
 
-## View collections in full
+`GET /api/_schema` is admin-gated and returns a normalized view of each collection (top-level `kind`, `fields`, `indexes`, `rules`, `viewQuery`), so do not assume the raw `x-*` names appear there unchanged. Inspect the endpoint's response instead.
+
+## View collections
 
 A view collection requires `id` and `seqId` in its field map, both declared with `.view()`; `define()` throws if either is missing or declared without it. List the exact columns your query returns.
 
 ```ts
-import { Field, ViewCollection } from "@gettersethya/mira-collection"
+import { Field, ViewCollection } from "@gettersethya/mira"
 
 const PublishedPosts = ViewCollection.define(
   "published_posts",
@@ -124,8 +136,12 @@ const PublishedPosts = ViewCollection.define(
 
 Because `seqId` drives cursor pagination, the query must return a monotonic integer per row. `id` must be unique. Filters, sort, select, and expand work; create, update, and delete return `405`.
 
-## Next steps
+## Common mistakes
 
-- [Auth collections and sessions](../auth/) for users, passwords, and sessions.
-- [Querying and pagination](../querying/) for filters, sort, select, and expand.
-- [Access rules](../rules/) to gate `list`, `view`, and the write actions.
+- `define()` throws about `id` and `seqId`: a view collection's field map is missing one of them, or one is declared without `.view()`.
+- `unique: true` or `indexed: true` does not appear on the serialized property: both are TypeScript-only and normalize into `x-indexes`. Check the index list, not the property, to confirm an index.
+
+## Next
+
+- [Access rules](../rules/) to decide which callers may read or write a row.
+- [Auth collections and sessions](../auth/) for the credential side of a `Users` collection.

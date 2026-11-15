@@ -1,4 +1,4 @@
-The Mira client SDK gives you a typed accessor for every collection definition you use on the server. Every operation is a handler you can run as a Promise with `.raw()` or as an Effect with `.toEffect()`, so the same code fits a browser app, an SSR loader, or a background Effect job.
+Give a frontend typed accessors for the collections it talks to. Every operation is a handler you can run as a Promise with `.raw()` or as an Effect with `.toEffect()`, so one client fits a browser app, an SSR loader, or a background Effect job.
 
 ## Install and create a client
 
@@ -11,27 +11,29 @@ pnpm add @gettersethya/mira-tanstack-adapter   # optional
 
 ```ts
 import { createMiraClient } from "@gettersethya/mira-client"
-import { PostCollection, UserCollection } from "./collections.js"
+import { Posts, Users } from "./collections.js"
 
-const client = createMiraClient("http://localhost:3000")
+const client = createMiraClient("http://localhost:8080")
 ```
 
 `createMiraClient(baseUrl)` prefixes every request with the base URL. The default is `"/"` for a same-origin browser app. Pass `{ type: "server" }` when you run it in SSR or a server process and want to manage the JWT yourself.
+
+`Posts` and `Users` are the definitions from your shared collections module; [collections](../collections/) shows them.
 
 ## Attach collections
 
 `collection(def)` creates one accessor:
 
 ```ts
-const posts = client.collection(PostCollection)
+const posts = client.collection(Posts)
 ```
 
 `withCollections(map)` creates several accessors at once. The base client returned by `createMiraClient` also exposes `auth`, `telemetry`, and `collection`; `withCollections` adds the per-collection accessors:
 
 ```ts
 const mira = createMiraClient("/").withCollections({
-  posts: PostCollection,
-  users: UserCollection
+  posts: Posts,
+  users: Users
 })
 
 const page = await mira.posts.getList().raw()
@@ -55,10 +57,10 @@ Queries take their arguments at the call site and their terminal call is zero-ar
 
 ```ts
 const page = await mira.posts.getList({ limit: 20 }).raw()
-// Promise<{ items: PostRecord[]; nextCursor: number | null }>
+// Promise<{ items: PostsRecord[]; nextCursor: number | null }>
 
 const one = mira.posts.getOne("abc123").toEffect()
-// Effect<PostRecord, MiraError, HttpClient.HttpClient>
+// Effect<PostsRecord, MiraError, HttpClient.HttpClient>
 ```
 
 `.raw()` supplies the fetch-based HTTP client and rejects with the unwrapped `MiraError`, which carries `status`, `body`, and `retryAfterSeconds` when the server supplied one. `.toEffect()` leaves the `HttpClient` requirement to you, so you can provide a test client or a different transport.
@@ -76,12 +78,12 @@ let cursor: number | null = null
 
 do {
   const page = await mira.posts.getList({
-    filter: (f) => f.and(f.field("published").eq(true), f.field("views").gte(100)),
+    filter: (f) => f.and(f.field("status").eq("published"), f.field("viewCount").gte(100)),
     sort: "created",
     order: "desc",
     cursor,
     limit: 20,
-    select: ["id", "title", "views"],
+    select: ["id", "title", "viewCount"],
     expand: ["author"]
   }).raw()
 
@@ -93,7 +95,7 @@ do {
 
 ```json
 {
-  "items": [{ "id": "post_1", "title": "Hello", "views": 120 }],
+  "items": [{ "id": "post_1", "title": "Hello", "viewCount": 120 }],
   "nextCursor": 42
 }
 ```
@@ -146,9 +148,13 @@ const user = await mira.users.register().raw({
 })
 ```
 
-`authWithPassword()` returns either `{ token, record }` or `{ otpRequired: true, challengeId, expiresAt }`. `register()` does not log the user in; call `authWithPassword()` afterwards. It wraps the collection's create endpoint, so open signup requires the collection's `create` rule to allow it. If the verification mail is blocked, `register()` returns the record with `verificationDeferred: true` and, for a rate limit, `verificationRetryAfterSeconds` instead of `emailVerification`. `me()` unwraps the `{ collection, record }` envelope and rejects with a 401 `MiraError` if the token belongs to another collection.
+`authWithPassword()` returns either `{ token, record }` or `{ otpRequired: true, challengeId, expiresAt }`. `register()` does not log the user in; call `authWithPassword()` afterwards. It wraps the collection's create endpoint, so open signup requires the collection's `create` rule to allow it.
 
-Email flows add `authConfig()`, `requestPasswordReset()`, `resetPassword()`, `requestEmailVerification()`, `verifyEmail()`, `requestEmailChange()`, `confirmEmailChange()`, `requestPasswordlessLogin()`, `loginWithPasswordlessOtp()`, `verifyLoginOtp()`, and `resendLoginOtp()`. They are required only for auth collections and are enriched by the TanStack adapter like every other mutation or query. `requestEmailChange()` takes `{ newEmail, oldPassword }`; `confirmEmailChange()` takes `{ token }` and clears the local session after the server invalidates every token for that user. Request methods can reject with a `429` `MiraError`; read `retryAfterSeconds` before retrying. The [email page](../email/) lists the routes, payloads, and limits.
+If the verification mail is blocked, `register()` returns the record with `verificationDeferred: true` and, for a rate limit, `verificationRetryAfterSeconds` instead of `emailVerification`. `me()` unwraps the `{ collection, record }` envelope and rejects with a 401 `MiraError` if the token belongs to another collection.
+
+Email flows add `authConfig()`, `requestPasswordReset()`, `resetPassword()`, `requestEmailVerification()`, `verifyEmail()`, `requestEmailChange()`, `confirmEmailChange()`, `requestPasswordlessLogin()`, `loginWithPasswordlessOtp()`, `verifyLoginOtp()`, and `resendLoginOtp()`. They are required only for auth collections and are enriched by the TanStack adapter like every other mutation or query.
+
+`requestEmailChange()` takes `{ newEmail, oldPassword }`; `confirmEmailChange()` takes `{ token }` and clears the local session after the server invalidates every token for that user. Request methods can reject with a `429` `MiraError`; read `retryAfterSeconds` before retrying. The [email page](../email/) lists the routes, payloads, and limits.
 
 ### Browser sessions
 
@@ -168,7 +174,7 @@ mira.auth.clear()              // logs out and flips the flag
 In server mode there is no cookie. Set the token from your SSR context and check its expiry locally:
 
 ```ts
-const mira = createMiraClient("http://localhost:3000", { type: "server" })
+const mira = createMiraClient("http://localhost:8080", { type: "server" })
 
 mira.auth.setToken(tokenFromRequest)
 mira.auth.isValid() // checks the JWT exp claim, not the signature
@@ -181,13 +187,11 @@ See [Auth collections and sessions](../auth/) for credential rules and the sessi
 
 The adapter package produces plain `{ queryKey, queryFn }` and `{ mutationFn }` objects; it has no TanStack runtime dependency, so React, Solid, and Svelte bindings all consume the same adapter.
 
-The snippets use `PostCollection` and `UserCollection` as placeholders for your own definitions; import them from the shared collections module (see [collections](../collections/)).
-
 ```ts
 import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter"
 
 const mira = createMiraClient("/").withCollections(
-  { posts: PostCollection, users: UserCollection },
+  { posts: Posts, users: Users },
   { adapter: collectionAdapter }
 )
 
@@ -197,11 +201,11 @@ const createOptions = mira.posts.create().mutationOptions
 // or the equivalent binding. The adapter imports no framework.
 ```
 
-Query handlers expose `queryKey` and `queryOptions`. Mutation handlers expose `mutationOptions`. Query keys follow `[collectionName, action, ...params]`, with `getOne` inserting the record id and `me` using `[name, "me"]`. The v1 key for `getFirstOrNone` does not include its filter, so use `getList` with a filter when the filter must be part of the cache identity. To invalidate the cache after a write, use the accessor helpers:
+Query handlers expose `queryKey` and `queryOptions`. Mutation handlers expose `mutationOptions`. Query keys follow `[collectionName, action, ...params]`, with `getOne` inserting the record id and `me` using `[name, "me"]`. To invalidate the cache after a write, use the accessor helpers:
 
 ```ts
-await mira.posts.invalidateAll(queryClient)          // [name] prefix
-await mira.posts.invalidateOne(queryClient, created.id) // [name, "getOne", id]
+await mira.posts.invalidateAll(queryClient)             // [name] prefix
+await mira.posts.invalidateOne(queryClient, "abc123")   // [name, "getOne", id]
 ```
 
 ## Worked example
@@ -209,23 +213,22 @@ await mira.posts.invalidateOne(queryClient, created.id) // [name, "getOne", id]
 ```ts
 import { createMiraClient } from "@gettersethya/mira-client"
 import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter"
-import { PostCollection, UserCollection } from "./collections.js"
+import { Posts, Users } from "./collections.js"
 
 const mira = createMiraClient("https://api.example.com").withCollections(
-  { posts: PostCollection, users: UserCollection },
+  { posts: Posts, users: Users },
   { adapter: collectionAdapter }
 )
 
-// Log in and confirm the session.
+// Log in.
 await mira.users.authWithPassword().raw({
   email: "user@example.com",
   password: "secret123"
 })
-const me = await mira.users.me().raw()
 
-// List published posts, newest first.
+// List published posts by title.
 const page = await mira.posts.getList({
-  filter: (f) => f.field("published").eq(true),
+  filter: (f) => f.field("status").eq("published"),
   sort: "title",
   order: "asc",
   limit: 20
@@ -236,13 +239,13 @@ const created = await mira.posts.create().raw({
   title: "Hello",
   cover: new File(["binary"], "cover.png", { type: "image/png" })
 })
-
-// TanStack options for a component.
-const listOptions = mira.posts.getList({ limit: 10 }).queryOptions
-const createOptions = mira.posts.create().mutationOptions
 ```
 
-## Next steps
+## Common mistakes
 
-- [Querying and pagination](../querying/) for filter operators, sorting, and cursors.
-- [Auth collections and sessions](../auth/) for credential lifecycle and `manage` access.
+- `getFirstOrNone` omits its filter from the TanStack cache key, so two different filters share one cache entry. Use `getList` with a filter when the filter must be part of the cache identity.
+
+## Next
+
+- [Plugins, hooks, and crons](../plugins/) for lifecycle hooks, admin collections, and scheduled jobs.
+- [HTTP API and files](../http-api/) for the routes behind every handler.

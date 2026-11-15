@@ -1,4 +1,4 @@
-Mira exposes one generated REST surface for every collection, plus shared auth, file, schema, and telemetry routes. Collection routes at `/api/collections/:name` enforce the action's rule before touching data. This page covers routes, sessions, query parameters, upload limits, and status codes; [querying](../querying/) covers filtering and cursors and [auth](../auth/) covers credentials.
+Every Mira collection gets a generated REST surface, plus shared auth, file, schema, and telemetry routes that enforce the action's rule before touching data. Use this page to look up a route, a status code, an upload limit, or a file rule.
 
 ## Route table
 
@@ -32,52 +32,27 @@ Mira exposes one generated REST surface for every collection, plus shared auth, 
 
 Unknown collections return `404`. View collections reject create, update, and delete with `405 read_only`; login against a non-auth collection is also `405`.
 
-## Authentication and sessions
+## Sessions
 
-Send `Authorization: Bearer <token>`; if absent, Mira uses the `mira_token` cookie. Both paths run the same fail-closed check: session type, non-revoked `jti`, existing record, matching password fingerprint (`pwf`), and current generation. Any token-store error denies.
+Send `Authorization: Bearer <token>`; if the header is absent, Mira uses the `mira_token` cookie. [Auth collections and sessions](../auth/) owns credential checks, session lifetime, and token invalidation.
 
-Log in with a JSON body:
+## Admin and telemetry routes
 
-```bash
-curl -X POST http://localhost:8080/api/collections/users/auth-with-password \
-  -H "Content-Type: application/json" \
-  -d '{"email":"ada@example.com","password":"correct horse battery staple"}'
-```
+`/api/_schema` and both telemetry routes require a session belonging to a plugin-declared admin collection. An app with no admin plugin has an empty admin set, so every authenticated session gets `403`; missing or invalid tokens get `401`.
 
-Success returns `{ token, record }`, with `record` hidden-field-stripped and boolean-decoded, and sets a `mira_token` cookie: `httpOnly`, `sameSite: strict`, `path: /`, 72 hours. A malformed body returns `422`; bad credentials return `403` without revealing the cause. If the auth collection requires login OTP, the response is `{ otpRequired: true, challengeId, expiresAt }` and no session is minted until `POST /auth-with-password/verify-otp` succeeds.
+The schema payload lists each collection's name, kind, fields, required names, indexes, auth flags, and view query; [Collections and fields](../collections/) owns the annotations.
 
-Email flows use the same `challengeId` + six-digit code shape. `POST /auth-with-otp/request` and `/verify-email/request` return `202 { challengeId, expiresAt }` even for unknown addresses; `POST /password-reset/request` returns a generic `202 { message }`. Invalid, expired, or replayed codes return `400`; too many attempts return `429 { error: "too_many_attempts", retryAfterSeconds, restart: true }`; request or cooldown limits return `429 { error: "rate_limited", retryAfterSeconds, scope }`; and a missing transport returns `503 email_not_configured`. Both 429 bodies are accompanied by a `Retry-After` header. See the [email page](../email/) for the full route list and rate-limit rules.
-
-`POST /api/auth/logout` revokes the presented `jti` best-effort and clears the cookie with `204`. `POST /api/auth/logout-all` requires a valid session, bumps the user's generation so earlier tokens are rejected, and returns `204`; without a session it returns `401`. `GET /api/auth/me` returns `{ collection, record }` with hidden fields stripped and booleans decoded.
-
-`/api/_schema` and both telemetry routes require a session belonging to a plugin-declared admin collection. An app with no admin plugin has an empty admin set, so every authenticated session gets `403`; non-admin sessions get `403`, and missing or invalid tokens get `401`. The schema payload is an array of collection entries with `name`, `kind`, `fields`, `required`, `indexes`, `auth`, and `viewQuery`, preserving `x-system`, `x-hidden`, `x-generated`, and `x-kind`. `auth` carries the per-collection `x-auth.email` flags.
-
-The telemetry routes accept `filter`, `after`, and `limit`; spans also accept `traceId`. Their cursor direction is the reverse of collection lists, and a bad filter returns `400`, not `422`.
+The telemetry routes accept `filter`, `after`, and `limit` (spans also accept `traceId`), run newest-first, and return `400` rather than `422` for a bad filter.
 
 ## List parameters
 
-`GET /api/collections/:name` accepts:
+`GET /api/collections/:name` accepts three groups of list parameters:
 
-| Parameter | Meaning |
-|---|---|
-| `filter` | URL-encoded JSON `FilterNode`; invalid JSON or schema mismatch returns `422` |
-| `sort` | Schema field name; unknown names are ignored |
-| `order` | `asc` (default) or `desc` |
-| `select` | Comma-separated field names to return |
-| `expand` | Comma-separated relation field names to embed |
-| `after` | `seqId` from the last page; non-negative integer |
-| `limit` | Page size; default `30`, clamped to `100`; values below `1` fall back to `30` |
+- `filter` — a URL-encoded JSON `FilterNode`.
+- `sort`, `order`, `select`, `expand` — the sort field and direction, the field projection, and relation embedding.
+- `after`, `limit` — the `seqId` cursor and page size; `limit` defaults to `30` and is clamped to `100`.
 
-The response is a cursor page:
-
-```json
-{
-  "items": [{ "id": "abc123", "title": "Hello" }],
-  "nextCursor": 41
-}
-```
-
-`seqId` is not included in ordinary list items; `nextCursor` carries it. Pass `nextCursor` as `after` for the next page. A full final page can still return a non-null cursor, so keep requesting until you get `null`; reads never run `COUNT(*)`. `after` always filters the internal `seqId`, even when `sort` names another field, so use the default order for a complete paged walk.
+The response is `{ items, nextCursor }`. [Querying and pagination](../querying/) owns the full parameter table, the filter AST, cursor semantics, and caching.
 
 ## Writes and uploads
 
@@ -90,22 +65,25 @@ curl -X POST http://localhost:8080/api/collections/posts \
   -F 'cover=@./cover.png'
 ```
 
-There is no separate upload endpoint. A multipart create returns `201`; an update returns `200`. Files are stored as `<uuid>.<extension>` (or `.bin`), and failed uploads delete every allocated key.
+There is no separate upload endpoint. A multipart create returns `201`; an update returns `200`.
+
+Files are stored as `<uuid>.<extension>` (or `.bin`), and failed uploads delete every allocated key.
 
 Multipart limits are fixed:
 
 - Budget: `min(64 MiB, 1 MiB overhead + Σ x-maxSize)`, defaulting each file field to 8 MiB.
 - At most 64 parts; non-file fields cap at 64 KiB.
-- MIME types must be in the field's `x-mimeTypes` allowlist when declared.
 - JSON `Content-Length` over 32 MiB is rejected before reading.
 
-Over-budget or too many parts returns `413`; a bad field, unusable part, or a file over its own `x-maxSize` returns `422`. A chunked JSON body without `Content-Length` is not rejected by the pre-read size check.
+File field constraints such as `x-maxSize`, `x-mimeTypes`, and `x-protected` are documented with the field definitions in [Collections and fields](../collections/).
+
+Over-budget or too many parts returns `413`; a bad field, unusable part, or a file over its field limit returns `422`. A chunked JSON body without `Content-Length` is not rejected by the pre-read size check.
 
 ## File serving
 
 `GET /api/files/:collection/:id/:filename` requires a plain `filename` (no `/`, `\`, `..`, NUL) that exactly matches a file field on the record; otherwise `404`.
 
-Unprotected fields are served directly. Protected fields (`x-protected`) need a `token` query parameter: a 5-minute file JWT whose `filecol` matches the collection, plus a passing `view` rule. Missing, invalid, or cross-collection tokens return `403`, as does a collection without a view rule. Admin-collection tokens bypass the rule.
+Unprotected fields are served directly. Protected fields need a `token` query parameter: a 5-minute file JWT whose `filecol` matches the collection, plus a passing `view` rule. Missing, invalid, or cross-collection tokens return `403`, as does a collection without a view rule. Admin-collection tokens bypass the rule.
 
 Mint a file token for the current session:
 
@@ -127,7 +105,7 @@ curl -s "http://localhost:8080/api/collections/posts?limit=10&sort=created&order
   -H "Authorization: Bearer $MIRA_TOKEN"
 ```
 
-Build nested filters with the filter builder and let the client SDK encode them; hand-written JSON is easy to get wrong. See [querying](../querying/) for the AST and [auth](../auth/) for sessions.
+Build nested filters with the filter builder and let the client SDK encode them; hand-written JSON is easy to get wrong. See [Querying and pagination](../querying/) for the AST.
 
 ## Status codes
 
@@ -137,14 +115,21 @@ Domain errors map to a fixed set of responses:
 |---|---|
 | `400` | Bad telemetry filter or query parameter |
 | `401` | Missing or invalid session where an admin session is required |
-| `404` | Record, collection, file, or route target not found |
 | `403` | Rule denial, failed credentials, missing or invalid file token |
-| `422` | Schema validation failure, malformed JSON, bad filter, bad multipart field, or a file over its own `x-maxSize` |
+| `404` | Record, collection, file, or route target not found |
 | `405` | Write against a view collection, or login against a non-auth collection |
+| `409` | Email change target became taken in the meantime |
 | `413` | JSON body, multipart budget, or part count over its limit |
+| `422` | Schema validation failure, malformed JSON, bad filter, bad multipart field, a file over its own field limit, or an unchanged email change |
 | `429` | Auth email request/cooldown limit (`rate_limited`) or an exhausted OTP attempt budget (`too_many_attempts`); includes `retryAfterSeconds` and `Retry-After` |
+| `500` | SQL error or an unexpected defect |
 | `502` | Storage backend failure, or a dashboard test email the transport rejected |
 | `503` | `email_not_configured`, `email_unavailable`, or `rate_limit_unavailable` |
-| `500` | SQL error or an unexpected defect |
 
-Errors are JSON with an `error` string and, where useful, `message`, `issues`, `retryAfterSeconds`, or `scope`. CORS headers appear on errors too. The default CORS config exposes `Retry-After`; a custom config must list it in `exposedHeaders` for browser clients to read the header. Collection and auth handlers emit server spans and annotate auth results as `anonymous`, `invalid_token`, or `authenticated`; file and logout routes are not guaranteed to carry the same annotations.
+Errors are JSON with an `error` string and, where useful, `message`, `issues`, `retryAfterSeconds`, or `scope`. CORS headers appear on errors too.
+
+The default CORS config exposes `Retry-After`; a custom config must list it in `exposedHeaders` for browser clients to read the header. Collection and auth handlers emit server spans and annotate auth results as `anonymous`, `invalid_token`, or `authenticated`; file and logout routes are not guaranteed to carry the same annotations.
+
+## Next
+
+Look up a symbol in [API reference](../api/), or return to [Getting started](../getting-started/) for a fresh app.
