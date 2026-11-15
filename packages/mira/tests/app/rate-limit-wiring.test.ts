@@ -33,7 +33,8 @@ const fakeEmail: EmailServiceShape = {
     from: "mira@example.com",
     replyTo: null,
     hasAuth: false,
-    passwordResetUrl: "http://localhost/reset?token={{token}}&collection={{collection}}"
+    passwordResetUrl: "http://localhost/reset?token={{token}}&collection={{collection}}",
+    emailChangeUrl: "http://localhost/email-change?token={{token}}&collection={{collection}}"
   })
 }
 

@@ -234,7 +234,7 @@ Mira.builder()
   .serve()
 ```
 
-Every setting accepts a plain value or an Effect `Config`, resolved once at layer build. Without `.email(...)`, a no-op `EmailService` is used and email-dependent request endpoints return `email_not_configured`.
+Every setting accepts a plain value or an Effect `Config`, resolved once at layer build. Without `.email(...)`, a no-op `EmailService` is used and email-dependent request endpoints return `email_not_configured`. `passwordResetUrl` and `emailChangeUrl` default to `${applicationUrl}/reset-password` and `${applicationUrl}/email-change` with `{{token}}` / `{{collection}}` placeholders.
 
 Auth collections opt into each flow with a third argument:
 
@@ -246,7 +246,8 @@ const Users = AuthCollection.define("users", {
     verification: true,     // send an OTP after registration
     loginAlerts: true,      // alert after a successful login
     loginOtp: "required",   // require an OTP after a correct password
-    passwordless: true      // allow email-OTP login
+    passwordless: true,     // allow email-OTP login
+    emailChange: true       // allow confirmed self-service email changes
   }
 })
 ```
@@ -262,6 +263,8 @@ New auth routes:
 | `POST` | `/api/collections/:name/auth-with-otp` | Complete passwordless login |
 | `POST` | `/api/collections/:name/verify-email/request` | Request/resend an email verification code |
 | `POST` | `/api/collections/:name/verify-email` | Verify email by `challengeId` + code |
+| `POST` | `/api/collections/:name/request-email-change` | Send a confirmation link to a new address; requires `newEmail` + `oldPassword` |
+| `POST` | `/api/collections/:name/confirm-email-change` | Complete the change by token; sets `emailVerified` and invalidates old sessions |
 | `POST` | `/api/collections/:name/password-reset/request` | Request a reset link |
 | `POST` | `/api/collections/:name/password-reset` | Complete reset by token |
 | `GET` | `/api/collections/:name/auth-config` | Public auth capability flags |
@@ -271,7 +274,7 @@ Plugins can use `EmailService` directly and observe sends with `onEmailSend`, `o
 For local testing, Mailpit is enough — no paid provider is required:
 
 ```bash
-docker compose -f docker-compose.mailpit.yml up -d
+docker run -d --name mira-mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit
 # SMTP: localhost:1025, inbox: http://localhost:8025
 ```
 

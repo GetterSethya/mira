@@ -17,7 +17,7 @@ import type { RepoRecord } from "@/repository/types.js"
 import type { FileStorage } from "@/storage/storage.js"
 import type { ThumbnailService } from "@/thumbnail/types.js"
 
-import { clientIp, emailOptionsOf, issueLoginOtp, loginWithPasswordless, requestEmailVerification, requestPasswordReset, requestPasswordlessLogin, resendLoginOtp, resetPassword, sendLoginAlert, verifyEmail, verifyLoginOtp } from "./auth-email.js"
+import { clientIp, confirmEmailChange, emailOptionsOf, issueLoginOtp, loginWithPasswordless, requestEmailChange, requestEmailVerification, requestPasswordReset, requestPasswordlessLogin, resendLoginOtp, resetPassword, sendLoginAlert, verifyEmail, verifyLoginOtp } from "./auth-email.js"
 import type { AuthService} from "./auth.js";
 import { authenticateSession, maybeRehashPassword, mintSession as mintSessionFromAuth, verifyJwt, verifyPassword } from "./auth.js"
 import { consumeLoginRequestLimits } from "./auth-rate-limit.js"
@@ -54,6 +54,11 @@ const ResetBodySchema = Schema.Struct({
   password: Schema.String,
   passwordConfirm: Schema.String
 })
+const EmailChangeRequestSchema = Schema.Struct({
+  newEmail: Schema.String,
+  oldPassword: Schema.String
+})
+const ConfirmEmailChangeSchema = Schema.Struct({ token: Schema.String })
 
 const decodeBody = <S extends Schema.Constraint>(
   req: HttpServerRequest.HttpServerRequest,
@@ -69,21 +74,47 @@ const decodeBody = <S extends Schema.Constraint>(
     )
   )
 
+const normalizeEmail = (email: string): string | null => {
+  const trimmed = email.trim()
+  if (trimmed.length === 0 || !trimmed.includes("@") || /\s/.test(trimmed)) return null
+  return trimmed
+}
+
+const invalidEmail = () =>
+  HttpServerResponse.jsonUnsafe(
+    { error: "validation_failed", issues: ["Invalid email address"] },
+    { status: 422 }
+  )
+
 const decodeEmailBody = (
   req: HttpServerRequest.HttpServerRequest
 ): Effect.Effect<{ readonly email: string }, HttpServerResponse.HttpServerResponse> =>
   decodeBody(req, AuthEmailBodySchema).pipe(
     Effect.flatMap(({ email }) => {
-      const trimmed = email.trim()
-      if (trimmed.length === 0 || !trimmed.includes("@") || /\s/.test(trimmed)) {
+      const normalized = normalizeEmail(email)
+      return normalized === null ? Effect.fail(invalidEmail()) : Effect.succeed({ email: normalized })
+    })
+  )
+
+const decodeEmailChangeBody = (
+  req: HttpServerRequest.HttpServerRequest
+): Effect.Effect<
+  { readonly newEmail: string; readonly oldPassword: string },
+  HttpServerResponse.HttpServerResponse
+> =>
+  decodeBody(req, EmailChangeRequestSchema).pipe(
+    Effect.flatMap(({ newEmail, oldPassword }) => {
+      const normalized = normalizeEmail(newEmail)
+      if (normalized === null) return Effect.fail(invalidEmail())
+      if (oldPassword.length === 0) {
         return Effect.fail(
           HttpServerResponse.jsonUnsafe(
-            { error: "validation_failed", issues: ["Invalid email address"] },
+            { error: "validation_failed", issues: ["oldPassword is required"] },
             { status: 422 }
           )
         )
       }
-      return Effect.succeed({ email: trimmed })
+      return Effect.succeed({ newEmail: normalized, oldPassword })
     })
   )
 
@@ -540,6 +571,51 @@ export function makeCollectionRouter(
     })
   )
 
+  const requestEmailChangeRoute = collectionRoute("request-email-change", (col, ctx, req) =>
+    Effect.gen(function* () {
+      if (col.schema["x-collection-kind"] !== "auth") {
+        return HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
+      }
+      const auth = ctx.auth
+      if (auth === undefined) {
+        return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
+      }
+      if (auth.collection !== col.name) {
+        return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
+      }
+      const body = yield* decodeEmailChangeBody(req)
+      yield* requestEmailChange(
+        col,
+        auth.record,
+        body.newEmail,
+        body.oldPassword,
+        clientIp(req)
+      ).pipe(catchAuthEmailErrors)
+      return HttpServerResponse.jsonUnsafe(
+        { message: "If the address can be changed, a confirmation link has been sent." },
+        { status: 202 }
+      )
+    })
+  )
+
+  const confirmEmailChangeRoute = collectionRoute("confirm-email-change", (col, _ctx, req) =>
+    Effect.gen(function* () {
+      if (col.schema["x-collection-kind"] !== "auth") {
+        return HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
+      }
+      const body = yield* decodeBody(req, ConfirmEmailChangeSchema)
+      const result = yield* confirmEmailChange(col, body.token).pipe(catchAuthEmailErrors)
+      return HttpServerResponse.jsonUnsafe(result, { status: 200 }).pipe(
+        HttpServerResponse.setCookieUnsafe("mira_token", "", {
+          httpOnly: true,
+          sameSite: "strict",
+          path: "/",
+          maxAge: Duration.zero
+        })
+      )
+    })
+  )
+
   const passwordlessRequestRoute = collectionRoute("passwordless-request", (col, _ctx, req) =>
     Effect.gen(function* () {
       const { email } = yield* decodeEmailBody(req)
@@ -781,6 +857,8 @@ export function makeCollectionRouter(
     HttpRouter.route("POST", "/api/collections/:name/auth-with-otp", passwordlessLoginRoute),
     HttpRouter.route("POST", "/api/collections/:name/verify-email/request", verifyEmailRequestRoute),
     HttpRouter.route("POST", "/api/collections/:name/verify-email", verifyEmailRoute),
+    HttpRouter.route("POST", "/api/collections/:name/request-email-change", requestEmailChangeRoute),
+    HttpRouter.route("POST", "/api/collections/:name/confirm-email-change", confirmEmailChangeRoute),
     HttpRouter.route("POST", "/api/collections/:name/password-reset/request", passwordResetRequestRoute),
     HttpRouter.route("POST", "/api/collections/:name/password-reset", passwordResetRoute),
     HttpRouter.route("GET", "/api/collections/:name/auth-config", authConfigRoute),

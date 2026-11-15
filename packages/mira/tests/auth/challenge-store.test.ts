@@ -20,6 +20,7 @@ const record = (overrides: Partial<ChallengeRecord> = {}): ChallengeRecord => ({
   consumedAt: null,
   attempts: 0,
   createdAt: Date.now(),
+  newEmail: null,
   ...overrides
 })
 
@@ -59,6 +60,25 @@ describe("AuthChallengeStore", () => {
     Effect.gen(function* () {
       const store = yield* AuthChallengeStore
       yield* exercise("sql")(store)
+    }).pipe(Effect.provide(storeLayer))
+  )
+
+  it.effect("stores the target address for change_email challenges", () =>
+    Effect.gen(function* () {
+      const store = yield* AuthChallengeStore
+      const now = Date.now()
+      yield* store.create(
+        record({
+          id: "change-email",
+          purpose: "change_email",
+          tokenHash: "change-hash",
+          newEmail: "new@example.com",
+          createdAt: now,
+          expiresAt: now + 60_000
+        })
+      )
+      const found = yield* store.findByTokenHash("users", "change_email", "change-hash")
+      expect(found?.newEmail).toBe("new@example.com")
     }).pipe(Effect.provide(storeLayer))
   )
 })

@@ -293,6 +293,7 @@ export type AuthConfig = {
     readonly loginAlerts: boolean
     readonly loginOtp: "off" | "required"
     readonly passwordless: boolean
+    readonly emailChange: boolean
   }
 }
 
@@ -313,3 +314,13 @@ export type PasswordResetInput = {
 export type VerifyEmailRequestInput = { readonly email: string }
 export type VerifyEmailInput = { readonly challengeId: string; readonly code: string }
 export type VerifyEmailResult = { readonly verified: true }
+export type RequestEmailChangeInput = {
+  readonly newEmail: string
+  /** The account's current password. Required for self-service changes. */
+  readonly oldPassword: string
+}
+export type ConfirmEmailChangeInput = { readonly token: string }
+export type ConfirmEmailChangeResult<F extends FieldsMap> = {
+  readonly changed: true
+  readonly record: InferRecord<F>
+}

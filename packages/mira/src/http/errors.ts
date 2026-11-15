@@ -149,6 +149,14 @@ export const catchAuthEmailErrors = <A, R>(
       ),
     EmailFlowDisabledError: () =>
       Effect.fail(HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 as const })),
+    EmailUnchangedError: (e) =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe({ error: "email_unchanged", message: e.message }, { status: 422 as const })
+      ),
+    EmailTakenError: (e) =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe({ error: "email_taken", message: e.message }, { status: 409 as const })
+      ),
     EmailUnavailableError: () =>
       Effect.fail(
         HttpServerResponse.jsonUnsafe({ error: "email_unavailable" }, { status: 503 as const })

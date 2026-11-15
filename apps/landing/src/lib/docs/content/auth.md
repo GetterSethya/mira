@@ -108,7 +108,7 @@ Both routes answer `204` on success. Tokens minted before a `logout-all` are rej
 
 ## Email flows
 
-An auth collection can opt into email verification, login alerts, login OTP, and passwordless login with the third `AuthCollection.define()` argument:
+An auth collection can opt into email verification, login alerts, login OTP, passwordless login, and self-service email changes with the third `AuthCollection.define()` argument:
 
 ```ts
 const Users = AuthCollection.define("users", {
@@ -118,12 +118,15 @@ const Users = AuthCollection.define("users", {
     verification: true,
     loginAlerts: true,
     loginOtp: "required",
-    passwordless: true
+    passwordless: true,
+    emailChange: true
   }
 })
 ```
 
 `POST /auth-with-password` returns `{ otpRequired: true, challengeId, expiresAt }` instead of a token when `loginOtp` is required; the client completes it with `verify-otp`. Passwordless login starts at `POST /auth-with-otp/request` and completes at `POST /auth-with-otp`. Password reset uses `POST /password-reset/request` and `POST /password-reset`; email verification uses `POST /verify-email/request` and `POST /verify-email`. All OTP endpoints take `{ challengeId, code }`.
+
+Email change is a confirmation round-trip. An authenticated user calls `POST /request-email-change` with `{ newEmail, oldPassword }`; Mira sends a 30-minute link to the new address and returns a generic `202`. If the address belongs to another account, no mail is sent and the response is unchanged, so the endpoint does not reveal whether an address exists. The client posts the link token to `POST /confirm-email-change`, which sets `email`, sets `emailVerified: true`, invalidates every existing session, and consumes the user's other outstanding challenges. The current address is rejected with `422 email_unchanged`; confirmation can return `409 email_taken` if the address became taken in the meantime.
 
 Registration sends a verification OTP when enabled; the create response includes `emailVerification: { challengeId, expiresAt }`. If the verification mail is rate-limited, the account is still created and the response carries `verificationDeferred: true` and `verificationRetryAfterSeconds`; the client can call `verify-email/request` later. Password login remains allowed while `emailVerified` is false. To restrict an app, use a rule such as `R.auth(Users, "emailVerified").eq(R.literal(true))`.
 

@@ -23,6 +23,7 @@ export interface SmtpEmailConfig {
   readonly replyTo?: SmtpConfigValue<string>
   readonly appUrl?: SmtpConfigValue<string>
   readonly passwordResetUrl?: SmtpConfigValue<string>
+  readonly emailChangeUrl?: SmtpConfigValue<string>
   readonly connectionTimeoutMs?: SmtpConfigValue<number>
   readonly greetingTimeoutMs?: SmtpConfigValue<number>
   readonly socketTimeoutMs?: SmtpConfigValue<number>
@@ -39,10 +40,10 @@ const DEFAULT_SOCKET_TIMEOUT_MS = 30_000
 const resolve = <A>(value: ConfigValue<A> | undefined, fallback: A) =>
   value === undefined ? Effect.succeed(fallback) : resolveConfigValue(value)
 
-const requireResetPlaceholders = (template: string) => {
+const requirePlaceholders = (template: string, name: string) => {
   if (!template.includes("{{token}}") || !template.includes("{{collection}}")) {
     throw new Error(
-      "SmtpEmail.passwordResetUrl must contain both {{token}} and {{collection}} placeholders"
+      `SmtpEmail.${name} must contain both {{token}} and {{collection}} placeholders`
     )
   }
   return template
@@ -74,6 +75,10 @@ export const SmtpEmail = (config: SmtpEmailConfig): MiraEmail => ({
         config.passwordResetUrl === undefined
           ? undefined
           : yield* resolveConfigValue(config.passwordResetUrl)
+      const configuredChangeUrl =
+        config.emailChangeUrl === undefined
+          ? undefined
+          : yield* resolveConfigValue(config.emailChangeUrl)
       const connectionTimeoutMs = yield* resolve(
         config.connectionTimeoutMs,
         DEFAULT_CONNECTION_TIMEOUT_MS
@@ -114,11 +119,23 @@ export const SmtpEmail = (config: SmtpEmailConfig): MiraEmail => ({
 
       const resetUrl = () => {
         if (configuredResetUrl !== undefined) {
-          return requireResetPlaceholders(configuredResetUrl)
+          return requirePlaceholders(configuredResetUrl, "passwordResetUrl")
         }
         const appUrl = configuredAppUrl ?? appConfig.applicationUrl
-        return requireResetPlaceholders(
-          `${appUrl}/reset-password?token={{token}}&collection={{collection}}`
+        return requirePlaceholders(
+          `${appUrl}/reset-password?token={{token}}&collection={{collection}}`,
+          "passwordResetUrl"
+        )
+      }
+
+      const changeUrl = () => {
+        if (configuredChangeUrl !== undefined) {
+          return requirePlaceholders(configuredChangeUrl, "emailChangeUrl")
+        }
+        const appUrl = configuredAppUrl ?? appConfig.applicationUrl
+        return requirePlaceholders(
+          `${appUrl}/email-change?token={{token}}&collection={{collection}}`,
+          "emailChangeUrl"
         )
       }
 
@@ -132,7 +149,8 @@ export const SmtpEmail = (config: SmtpEmailConfig): MiraEmail => ({
         from,
         replyTo: replyTo ?? null,
         hasAuth: transportConfig.auth !== null,
-        passwordResetUrl: resetUrl()
+        passwordResetUrl: resetUrl(),
+        emailChangeUrl: changeUrl()
       })
 
       return {

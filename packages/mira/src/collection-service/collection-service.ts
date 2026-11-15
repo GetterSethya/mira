@@ -433,13 +433,15 @@ export function makeCollectionServiceLayer(
       ) =>
         Effect.gen(function* () {
           if (!isAuthCollection(collection)) return
-          if (ctx.internal === "auth-flow") {
-            const disallowed = Object.keys(cleaned).filter(
-              (key) => key !== "password" && key !== "emailVerified"
-            )
+          if (ctx.internal === "auth-flow" || ctx.internal === "email-change") {
+            const allowed =
+              ctx.internal === "email-change"
+                ? new Set(["email", "emailVerified"])
+                : new Set(["password", "emailVerified"])
+            const disallowed = Object.keys(cleaned).filter((key) => !allowed.has(key))
             if (disallowed.length > 0) {
               return yield* Effect.fail(
-                credentialError(collection, `auth-flow cannot update: ${disallowed.join(", ")}`)
+                credentialError(collection, `${ctx.internal} cannot update: ${disallowed.join(", ")}`)
               )
             }
             return
@@ -617,7 +619,7 @@ export function makeCollectionServiceLayer(
           )
 
           // If the collection has no rules at all, deny immediately (don't leak existence)
-          if (!ctx.admin && ctx.internal !== "auth-flow") {
+          if (!ctx.admin && ctx.internal === undefined) {
             const enforcerResult = enforcerForAction(collection.schema, "update")
             if (enforcerResult === null) {
               return yield* new ForbiddenError({ collection: collection.name, action: "update" })
@@ -634,7 +636,7 @@ export function makeCollectionServiceLayer(
           // record's value, otherwise to null.
           const ctxWithBody: RequestCtx = { ...ctx, body: { ...existing.value, ...cleaned } }
 
-          if (!ctx.admin && ctx.internal !== "auth-flow") {
+          if (!ctx.admin && ctx.internal === undefined) {
             const ruleWhere = yield* compileRule(collection, "update", ctxWithBody, resolveOptions)
 
             // Rule check against this specific row

@@ -25,6 +25,8 @@ export interface EmailDescription {
   readonly hasAuth: boolean
   /** Template with `{{token}}` / `{{collection}}`, or null when disabled. */
   readonly passwordResetUrl: string | null
+  /** Template with `{{token}}` / `{{collection}}`, or null when disabled. */
+  readonly emailChangeUrl: string | null
 }
 
 export interface EmailSendResult {
@@ -87,7 +89,8 @@ const defaultEmailService: EmailServiceShape = {
     from: null,
     replyTo: null,
     hasAuth: false,
-    passwordResetUrl: null
+    passwordResetUrl: null,
+    emailChangeUrl: null
   })
 }
 

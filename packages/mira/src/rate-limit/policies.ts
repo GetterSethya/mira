@@ -135,6 +135,7 @@ export const emailPurposeClass = (purpose: string): EmailPurposeClass => {
   switch (purpose) {
     case "password_reset":
     case "verify_email":
+    case "change_email":
       return "recovery"
     case "login_otp":
     case "passwordless_otp":

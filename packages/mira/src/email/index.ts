@@ -3,6 +3,7 @@ export { NoopEmail } from "./noop.js"
 export { SmtpEmail } from "./smtp.js"
 export type { SmtpConfigValue, SmtpEmailConfig } from "./smtp.js"
 export {
+  emailChangeEmail,
   loginAlertEmail,
   loginOtpEmail,
   passwordlessOtpEmail,
@@ -10,6 +11,7 @@ export {
   verificationOtpEmail
 } from "./templates.js"
 export type {
+  EmailChangeEmailInput,
   LoginAlertEmailInput,
   LoginOtpEmailInput,
   PasswordResetEmailInput,

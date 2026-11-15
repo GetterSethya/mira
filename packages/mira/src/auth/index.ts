@@ -6,6 +6,7 @@ export {
 export type { AuthChallengeStoreShape, ChallengePurpose, ChallengeRecord } from "./challenge-store.js"
 export {
   constantTimeEqual,
+  CHANGE_EMAIL_TTL_MS,
   generateChallengeId,
   generateOtp,
   generateResetToken,
@@ -20,6 +21,8 @@ export {
 export {
   ChallengeCryptoError,
   EmailFlowDisabledError,
+  EmailTakenError,
+  EmailUnchangedError,
   EmailUnavailableError,
   InvalidCodeError,
   InvalidResetTokenError,

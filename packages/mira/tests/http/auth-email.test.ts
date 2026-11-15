@@ -30,7 +30,8 @@ const UsersDef = AuthCollection.define(
       verification: true,
       loginAlerts: true,
       loginOtp: "required",
-      passwordless: true
+      passwordless: true,
+      emailChange: true
     }
   }
 )
@@ -82,7 +83,8 @@ const fakeEmail: EmailServiceShape = {
     from: "no-reply@test.local",
     replyTo: null,
     hasAuth: false,
-    passwordResetUrl: "http://localhost/reset?token={{token}}&collection={{collection}}"
+    passwordResetUrl: "http://localhost/reset?token={{token}}&collection={{collection}}",
+    emailChangeUrl: "http://localhost/email-change?token={{token}}&collection={{collection}}"
   })
 }
 
@@ -152,6 +154,24 @@ const post = (path: string, body: unknown) =>
     HttpClientRequest.post(path).pipe(HttpClientRequest.bodyJsonUnsafe(body))
   )
 
+const postAuth = (path: string, body: unknown, token: string) =>
+  HttpClient.execute(
+    HttpClientRequest.post(path).pipe(
+      HttpClientRequest.bodyJsonUnsafe(body),
+      HttpClientRequest.setHeader("Authorization", `Bearer ${token}`)
+    )
+  )
+
+const getAuth = (path: string, token: string) =>
+  HttpClient.execute(
+    HttpClientRequest.get(path).pipe(
+      HttpClientRequest.setHeader("Authorization", `Bearer ${token}`)
+    )
+  )
+
+const linkFrom = (message: EmailMessage) =>
+  message.text.match(/https?:\/\/\S+/)?.[0] ?? ""
+
 const responseBody = <S extends Schema.Constraint>(schema: S) => (res: HttpClientResponse.HttpClientResponse) =>
   res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
 
@@ -175,6 +195,18 @@ const codeFrom = (message: EmailMessage) => {
   return match[1]
 }
 
+const loginForToken = (email: string, password: string) =>
+  Effect.gen(function* () {
+    const res = yield* post("/api/collections/users/auth-with-password", { email, password })
+    const challenge = yield* responseBody(ChallengeResponse)(res)
+    const code = codeFrom(firstEmail())
+    const verified = yield* post("/api/collections/users/auth-with-password/verify-otp", {
+      challengeId: challenge.challengeId,
+      code
+    })
+    return yield* responseBody(TokenResponse)(verified)
+  })
+
 describe("auth email HTTP flows", () => {
   it.effect("returns auth-config and sends a verification OTP on registration", () =>
     Effect.gen(function* () {
@@ -190,12 +222,14 @@ describe("auth email HTTP flows", () => {
             verification: Schema.Boolean,
             loginAlerts: Schema.Boolean,
             loginOtp: Schema.String,
-            passwordless: Schema.Boolean
+            passwordless: Schema.Boolean,
+            emailChange: Schema.Boolean
           })
         })
       )(configRes)
       expect(config.emailConfigured).toBe(true)
       expect(config.email.verification).toBe(true)
+      expect(config.email.emailChange).toBe(true)
 
       const createRes = yield* post("/api/collections/users", {
         email: "user@example.com",
@@ -311,6 +345,134 @@ describe("auth email HTTP flows", () => {
       expect(passwordlessRes.status).toBe(200)
       const passwordlessToken = yield* responseBody(TokenResponse)(passwordlessRes)
       expect(passwordlessToken.token.length).toBeGreaterThan(0)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("completes the email-change round-trip and invalidates old sessions", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* serve
+
+      yield* post("/api/collections/users", {
+        email: "change@example.com",
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "Change"
+      })
+      sent = []
+
+      const session = yield* loginForToken("change@example.com", "password123")
+      sent = []
+
+      const wrong = yield* postAuth(
+        "/api/collections/users/request-email-change",
+        { newEmail: "new@example.com", oldPassword: "wrong" },
+        session.token
+      )
+      expect(wrong.status).toBe(403)
+      expect(sent).toHaveLength(0)
+
+      const request = yield* postAuth(
+        "/api/collections/users/request-email-change",
+        { newEmail: "new@example.com", oldPassword: "password123" },
+        session.token
+      )
+      expect(request.status).toBe(202)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.to).toBe("new@example.com")
+      expect(sent[0]?.subject).toContain("Confirm")
+      const token = new URL(linkFrom(firstEmail())).searchParams.get("token")
+      expect(token).not.toBeNull()
+
+      const confirm = yield* post("/api/collections/users/confirm-email-change", { token })
+      expect(confirm.status).toBe(200)
+      const changed = yield* responseBody(
+        Schema.Struct({
+          changed: Schema.Boolean,
+          record: Schema.Struct({
+            email: Schema.String,
+            emailVerified: Schema.Boolean
+          })
+        })
+      )(confirm)
+      expect(changed.changed).toBe(true)
+      expect(changed.record.email).toBe("new@example.com")
+      expect(changed.record.emailVerified).toBe(true)
+
+      const me = yield* getAuth("/api/auth/me", session.token)
+      expect(me.status).toBe(401)
+
+      const reuse = yield* post("/api/collections/users/confirm-email-change", { token })
+      expect(reuse.status).toBe(400)
+
+      const oldLogin = yield* post("/api/collections/users/auth-with-password", {
+        email: "change@example.com",
+        password: "password123"
+      })
+      expect(oldLogin.status).toBe(403)
+
+      sent = []
+      const newLogin = yield* post("/api/collections/users/auth-with-password", {
+        email: "new@example.com",
+        password: "password123"
+      })
+      expect(newLogin.status).toBe(200)
+      const newChallenge = yield* responseBody(ChallengeResponse)(newLogin)
+      const newCode = codeFrom(firstEmail())
+      const newVerified = yield* post(
+        "/api/collections/users/auth-with-password/verify-otp",
+        { challengeId: newChallenge.challengeId, code: newCode }
+      )
+      expect(newVerified.status).toBe(200)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("rejects unauthenticated, unchanged, taken, and invalid email-change requests", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* serve
+
+      yield* post("/api/collections/users", {
+        email: "first@example.com",
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "First"
+      })
+      yield* post("/api/collections/users", {
+        email: "second@example.com",
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "Second"
+      })
+      sent = []
+      const session = yield* loginForToken("first@example.com", "password123")
+      sent = []
+
+      const unauth = yield* post("/api/collections/users/request-email-change", {
+        newEmail: "third@example.com",
+        oldPassword: "password123"
+      })
+      expect(unauth.status).toBe(401)
+
+      const unchanged = yield* postAuth(
+        "/api/collections/users/request-email-change",
+        { newEmail: "first@example.com", oldPassword: "password123" },
+        session.token
+      )
+      expect(unchanged.status).toBe(422)
+
+      const taken = yield* postAuth(
+        "/api/collections/users/request-email-change",
+        { newEmail: "second@example.com", oldPassword: "password123" },
+        session.token
+      )
+      expect(taken.status).toBe(202)
+      expect(sent).toHaveLength(0)
+
+      const invalidConfirm = yield* post("/api/collections/users/confirm-email-change", {
+        token: "not-a-token"
+      })
+      expect(invalidConfirm.status).toBe(400)
     }).pipe(Effect.provide(testLayer))
   )
 })

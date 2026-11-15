@@ -14,6 +14,8 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `PATCH /api/collections/:name/:id` — update: `[router.ts:updateRoute]`
 - `DELETE /api/collections/:name/:id` — delete, 204: `[router.ts:deleteRoute]`
 - `POST /api/collections/:name/auth-with-password` — auth-collection login, returns `{ token, record }` and sets the session cookie: `[router.ts:authRoute]`
+- `POST /api/collections/:name/request-email-change` — authenticated self-service email change; requires `{ newEmail, oldPassword }`, returns generic 202: `[router.ts:requestEmailChangeRoute]`
+- `POST /api/collections/:name/confirm-email-change` — token-only confirmation; sets `email` + `emailVerified`, bumps generation, clears the cookie: `[router.ts:confirmEmailChangeRoute]`
 - `POST /api/auth/logout` — revokes the presented token's `jti` and clears the cookie: `[router.ts:logoutRoute]`
 - `POST /api/auth/logout-all` — bumps the user's generation and clears the cookie: `[router.ts:logoutAllRoute]`
 - `GET /api/auth/me` — authenticated record with hidden fields stripped and booleans decoded: `[router.ts:meRoute]`
@@ -61,8 +63,10 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 ## Invariants
 
 - Status mapping: `NotFoundError` 404, `ForbiddenError` 403, `ValidationError` 422, `ReadOnlyError` 405, `PayloadTooLargeError` 413, `FileStorageError` 502, `SqlError` 500: `[errors.ts:catchCollectionErrors]`
-- Auth email mapping: `RateLimitedError`/`TooManyAttemptsError` 429 with `Retry-After`, `RateLimitUnavailableError`/`EmailNotConfiguredError`/`EmailUnavailableError`/`EmailSendError` 503, `EmailFlowDisabledError` 404, `InvalidCodeError`/`InvalidResetTokenError` 400: `[errors.ts:catchAuthEmailErrors]`
+- Auth email mapping: `RateLimitedError`/`TooManyAttemptsError` 429 with `Retry-After`, `RateLimitUnavailableError`/`EmailNotConfiguredError`/`EmailUnavailableError`/`EmailSendError` 503, `EmailFlowDisabledError` 404, `InvalidCodeError`/`InvalidResetTokenError` 400, `EmailUnchangedError` 422, `EmailTakenError` 409: `[errors.ts:catchAuthEmailErrors]`
 - Auth email request order: feature and transport check -> cooldown -> request limits (IP, recipient) -> user lookup -> challenge -> send. The cooldown and pre-lookup checks are account-agnostic: `[auth-email.ts:consumeEmailRequestLimits]`
+- Email change request order: feature + transport + `emailChangeUrl` check -> authenticated collection match -> current-password verification under login budgets -> unchanged check -> request limits -> taken address returns generic success without a challenge/mail -> challenge (purpose `change_email`, target address in `new_email`) -> detached send: `[auth-email.ts:requestEmailChange]`
+- Email change confirmation consumes the link token, rejects a target address owned by another user, updates `email` + `emailVerified` through the `email-change` internal context, bumps the user's token generation, and consumes all outstanding challenges: `[auth-email.ts:confirmEmailChange]`
 - Password login order: auth-kind check -> body validation -> login budgets (IP + submitted recipient) -> user lookup -> password verify -> optional rehash -> OTP/session. The recipient budget is charged for unknown addresses too: `[router.ts:authRoute]` `[auth-rate-limit.ts:consumeLoginRequestLimits]`
 - Login rate-limit store errors fail closed with 503; a blocked login returns 429 with `Retry-After`: `[auth-rate-limit.ts:consumeLoginRequestLimits]` `[errors.ts:catchAuthEmailErrors]`
 - Rehash-on-login is best-effort. A hash or write failure logs and keeps the old row; the returned record carries the effective hash so `pwf` matches storage: `[auth.ts:maybeRehashPassword]`

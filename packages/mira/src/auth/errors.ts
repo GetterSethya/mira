@@ -22,6 +22,14 @@ export class EmailFlowDisabledError extends Data.TaggedError("EmailFlowDisabledE
   readonly collection: string
 }> {}
 
+export class EmailUnchangedError extends Data.TaggedError("EmailUnchangedError")<{
+  readonly message: string
+}> {}
+
+export class EmailTakenError extends Data.TaggedError("EmailTakenError")<{
+  readonly message: string
+}> {}
+
 export class EmailUnavailableError extends Data.TaggedError("EmailUnavailableError")<{
   readonly message: string
 }> {}
@@ -34,4 +42,6 @@ export type AuthEmailError =
   | RateLimitedError
   | RateLimitUnavailableError
   | EmailFlowDisabledError
+  | EmailUnchangedError
+  | EmailTakenError
   | EmailUnavailableError

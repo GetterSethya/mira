@@ -16,6 +16,8 @@ Mira exposes one generated REST surface for every collection, plus shared auth, 
 | `POST` | `/api/collections/:name/auth-with-otp` | Complete passwordless login | `200` |
 | `POST` | `/api/collections/:name/verify-email/request` | Request or resend a verification code | `202` |
 | `POST` | `/api/collections/:name/verify-email` | Verify an email address | `200` |
+| `POST` | `/api/collections/:name/request-email-change` | Send a confirmation link to a new address | `202` |
+| `POST` | `/api/collections/:name/confirm-email-change` | Complete an email change by token | `200` |
 | `POST` | `/api/collections/:name/password-reset/request` | Request a reset link | `202` |
 | `POST` | `/api/collections/:name/password-reset` | Complete a password reset | `200` |
 | `GET` | `/api/collections/:name/auth-config` | Public auth capability flags | `200` |

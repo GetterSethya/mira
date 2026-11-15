@@ -63,13 +63,15 @@ const normalizeEmailOptions = (
     verification: options.email.verification ?? false,
     loginAlerts: options.email.loginAlerts ?? false,
     loginOtp: options.email.loginOtp ?? "off",
-    passwordless: options.email.passwordless ?? false
+    passwordless: options.email.passwordless ?? false,
+    emailChange: options.email.emailChange ?? false
   }
   if (
     email.verification === false &&
     email.loginAlerts === false &&
     email.loginOtp === "off" &&
-    email.passwordless === false
+    email.passwordless === false &&
+    email.emailChange === false
   ) {
     return undefined
   }

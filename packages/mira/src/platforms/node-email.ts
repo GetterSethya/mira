@@ -60,7 +60,8 @@ const describe = (config: MailTransportConfig): EmailDescription => ({
   from: config.from,
   replyTo: config.replyTo,
   hasAuth: config.auth !== null,
-  passwordResetUrl: null
+  passwordResetUrl: null,
+  emailChangeUrl: null
 })
 
 const send = (config: MailTransportConfig, message: EmailMessage) =>

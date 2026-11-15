@@ -102,6 +102,8 @@ export type AuthCollectionEmailOptions = {
   readonly loginOtp?: "off" | "required"
   /** Allow passwordless login through an email OTP. Default false. */
   readonly passwordless?: boolean
+  /** Allow self-service email changes through a confirmation link. Default false. */
+  readonly emailChange?: boolean
 }
 
 export type AuthCollectionOptions = {

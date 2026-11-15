@@ -287,6 +287,52 @@ describe("CollectionClient", () => {
     expect(captured[0].url).toBe("/api/collections/users")
   })
 
+  it("requestEmailChange → POST to the request endpoint", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute = makeTestExecute(captured)
+    const client = makeCollectionClient({
+      collectionName: "users",
+      schema: AuthCollectionDef.schema,
+      fields: AuthCollectionDef.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: true,
+    })
+
+    const requestEmailChange = client.requestEmailChange
+    if (!requestEmailChange) throw new Error("requestEmailChange should be defined when isAuth=true")
+    await requestEmailChange().raw({ newEmail: "new@example.com", oldPassword: "secret" })
+    expect(captured[0].method).toBe("POST")
+    expect(captured[0].url).toBe("/api/collections/users/request-email-change")
+  })
+
+  it("confirmEmailChange → POST to the confirm endpoint and clears the session", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute = makeTestExecute(captured)
+    const authTokenRef = MutableRef.make<string | null>("token")
+    const client = makeCollectionClient({
+      collectionName: "users",
+      schema: AuthCollectionDef.schema,
+      fields: AuthCollectionDef.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: true,
+    })
+
+    const confirmEmailChange = client.confirmEmailChange
+    if (!confirmEmailChange) throw new Error("confirmEmailChange should be defined when isAuth=true")
+    await confirmEmailChange().raw({ token: "confirm-token" })
+    expect(captured[0].method).toBe("POST")
+    expect(captured[0].url).toBe("/api/collections/users/confirm-email-change")
+    expect(MutableRef.get(authTokenRef)).toBeNull()
+  })
+
   it("register is undefined on non-auth collections", async () => {
     const captured: Array<{ method: string; url: string }> = []
     const execute = makeTestExecute(captured)

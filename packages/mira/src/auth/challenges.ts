@@ -9,6 +9,7 @@ export const OTP_LENGTH = 6
 export const OTP_TTL_MS = 10 * 60 * 1000
 export const VERIFY_EMAIL_TTL_MS = 15 * 60 * 1000
 export const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000
+export const CHANGE_EMAIL_TTL_MS = 30 * 60 * 1000
 export const MAX_ATTEMPTS = 5
 
 /** Constant-time compare for fixed-length HMAC/base64 strings. */

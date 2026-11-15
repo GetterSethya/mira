@@ -25,7 +25,8 @@ export const NoopEmail: MiraEmail = {
       from: null,
       replyTo: null,
       hasAuth: false,
-      passwordResetUrl: null
+      passwordResetUrl: null,
+      emailChangeUrl: null
     })
   })
 }

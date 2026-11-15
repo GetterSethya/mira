@@ -2,7 +2,12 @@ import { Context, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql"
 import { SqlClient } from "effect/sql"
 
-export type ChallengePurpose = "password_reset" | "verify_email" | "login_otp" | "passwordless"
+export type ChallengePurpose =
+  | "password_reset"
+  | "verify_email"
+  | "change_email"
+  | "login_otp"
+  | "passwordless"
 
 export interface ChallengeRecord {
   readonly id: string
@@ -14,6 +19,8 @@ export interface ChallengeRecord {
   readonly consumedAt: number | null
   readonly attempts: number
   readonly createdAt: number
+  /** Target address for a `change_email` challenge; null for every other purpose. */
+  readonly newEmail: string | null
 }
 
 export interface AuthChallengeStoreShape {
@@ -165,6 +172,7 @@ interface ChallengeRow {
   readonly consumed_at: number | null
   readonly attempts: number
   readonly created_at: number
+  readonly new_email: string | null
 }
 
 const toRecord = (row: ChallengeRow): ChallengeRecord => ({
@@ -176,7 +184,8 @@ const toRecord = (row: ChallengeRow): ChallengeRecord => ({
   expiresAt: Number(row.expires_at),
   consumedAt: row.consumed_at === null ? null : Number(row.consumed_at),
   attempts: Number(row.attempts),
-  createdAt: Number(row.created_at)
+  createdAt: Number(row.created_at),
+  newEmail: row.new_email
 })
 
 export const AuthChallengeStoreLive = Layer.effect(
@@ -194,9 +203,15 @@ export const AuthChallengeStoreLive = Layer.effect(
         expires_at INTEGER NOT NULL,
         consumed_at INTEGER,
         attempts INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        new_email TEXT
       )`
     )
+
+    const challengeColumns = yield* sql<{ name: string }>`PRAGMA table_info(_auth_challenges)`
+    if (!challengeColumns.some((column) => column.name === "new_email")) {
+      yield* sql.unsafe(`ALTER TABLE _auth_challenges ADD COLUMN new_email TEXT`)
+    }
     yield* sql.unsafe(
       `CREATE UNIQUE INDEX IF NOT EXISTS _auth_challenges_live
        ON _auth_challenges (collection, user_id, purpose)
@@ -225,7 +240,8 @@ export const AuthChallengeStoreLive = Layer.effect(
           expires_at: record.expiresAt,
           consumed_at: record.consumedAt,
           attempts: record.attempts,
-          created_at: record.createdAt
+          created_at: record.createdAt,
+          new_email: record.newEmail
         })}
       `.pipe(Effect.asVoid)
 

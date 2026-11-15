@@ -97,6 +97,37 @@ export const passwordResetEmail = (input: PasswordResetEmailInput): EmailMessage
   }
 }
 
+export interface EmailChangeEmailInput {
+  readonly appName: string
+  readonly currentEmail: string
+  readonly newEmail: string
+  readonly confirmUrl: string
+  readonly expiresMinutes: number
+}
+
+export const emailChangeEmail = (input: EmailChangeEmailInput): EmailMessage => {
+  const subject = `Confirm your new ${input.appName} email`
+  const body = [
+    paragraph(`A request was made to change the email for ${input.currentEmail} to ${input.newEmail}.`),
+    button(input.confirmUrl, "Confirm new email"),
+    paragraph(`This link expires in ${input.expiresMinutes} minutes and can be used once.`),
+    paragraph("If you did not request this, ignore this message.")
+  ].join("")
+  return {
+    to: input.newEmail,
+    subject,
+    text: [
+      `A request was made to change the email for ${input.currentEmail} to ${input.newEmail}.`,
+      "",
+      input.confirmUrl,
+      "",
+      `This link expires in ${input.expiresMinutes} minutes and can be used once.`,
+      "If you did not request this, ignore this message."
+    ].join("\n"),
+    html: layout(input.appName, subject, body)
+  }
+}
+
 export interface VerificationOtpEmailInput {
   readonly appName: string
   readonly email: string

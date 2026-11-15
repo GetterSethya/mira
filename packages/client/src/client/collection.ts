@@ -20,6 +20,8 @@ import type {
   AuthWithPasswordResult,
   CollectionFileFields,
   CollectionKind,
+  ConfirmEmailChangeInput,
+  ConfirmEmailChangeResult,
   CreateInput,
   InferRecord,
   PasswordResetInput,
@@ -27,6 +29,7 @@ import type {
   RegisterInput,
   RegisterResult,
   RelationKeys,
+  RequestEmailChangeInput,
   SelectableKeys,
   UpdateInput,
   VerifyEmailInput,
@@ -373,6 +376,8 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
   resetPassword?(): ClientHandler<void, PasswordResetInput>
   requestEmailVerification?(): ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>
   verifyEmail?(): ClientHandler<VerifyEmailResult, VerifyEmailInput>
+  requestEmailChange?(): ClientHandler<void, RequestEmailChangeInput>
+  confirmEmailChange?(): ClientHandler<ConfirmEmailChangeResult<F>, ConfirmEmailChangeInput>
   requestPasswordlessLogin?(): ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>
   loginWithPasswordlessOtp?(): ClientHandler<{ token: string; record: InferRecord<F> }, AuthOtpLoginInput>
   verifyLoginOtp?(): ClientHandler<{ token: string; record: InferRecord<F> }, AuthLoginOtpVerifyInput>
@@ -420,6 +425,8 @@ export type AuthByKind<F extends FieldsMap> = {
         resetPassword(): ClientHandler<void, PasswordResetInput>
         requestEmailVerification(): ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>
         verifyEmail(): ClientHandler<VerifyEmailResult, VerifyEmailInput>
+        requestEmailChange(): ClientHandler<void, RequestEmailChangeInput>
+        confirmEmailChange(): ClientHandler<ConfirmEmailChangeResult<F>, ConfirmEmailChangeInput>
         requestPasswordlessLogin(): ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>
         loginWithPasswordlessOtp(): ClientHandler<{ token: string; record: InferRecord<F> }, AuthOtpLoginInput>
         verifyLoginOtp(): ClientHandler<{ token: string; record: InferRecord<F> }, AuthLoginOtpVerifyInput>
@@ -441,6 +448,10 @@ export type AdaptedAuthByKind<F extends FieldsMap> = {
         resetPassword(): EnrichedMutationHandler<ClientHandler<void, PasswordResetInput>>
         requestEmailVerification(): EnrichedMutationHandler<ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>>
         verifyEmail(): EnrichedMutationHandler<ClientHandler<VerifyEmailResult, VerifyEmailInput>>
+        requestEmailChange(): EnrichedMutationHandler<ClientHandler<void, RequestEmailChangeInput>>
+        confirmEmailChange(): EnrichedMutationHandler<
+          ClientHandler<ConfirmEmailChangeResult<F>, ConfirmEmailChangeInput>
+        >
         requestPasswordlessLogin(): EnrichedMutationHandler<ClientHandler<AuthOtpRequestResult, AuthOtpRequestInput>>
         loginWithPasswordlessOtp(): EnrichedMutationHandler<
           ClientHandler<{ token: string; record: InferRecord<F> }, AuthOtpLoginInput>
@@ -713,6 +724,12 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
     if (sessionMemoRef !== null) MutableRef.set(sessionMemoRef, null)
   }
 
+  function clearSession() {
+    if (authTokenRef !== null) MutableRef.set(authTokenRef, null)
+    if (loggedInRef !== null) MutableRef.set(loggedInRef, false)
+    if (sessionMemoRef !== null) MutableRef.set(sessionMemoRef, null)
+  }
+
   function authWithPassword() {
     return makeMutationHandler<AuthWithPasswordResult<F>, { email: string; password: string }>(
       ({ email, password }) =>
@@ -770,6 +787,35 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
           HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/verify-email`), input),
           execute
         )
+      )
+    )
+  }
+
+  function requestEmailChange() {
+    return makeMutationHandler<void, RequestEmailChangeInput>((input) =>
+      withRetry(
+        toExecuteEffect<void>(
+          HCR.bodyJson(HCR.post(`/api/collections/${collectionName}/request-email-change`), input),
+          execute
+        )
+      )
+    )
+  }
+
+  function confirmEmailChange() {
+    return makeMutationHandler<ConfirmEmailChangeResult<F>, ConfirmEmailChangeInput>((input) =>
+      withRetry(
+        Effect.gen(function* () {
+          const result = yield* toExecuteEffect<ConfirmEmailChangeResult<F>>(
+            HCR.bodyJson(
+              HCR.post(`/api/collections/${collectionName}/confirm-email-change`),
+              input
+            ),
+            execute
+          )
+          clearSession()
+          return result
+        })
       )
     )
   }
@@ -856,6 +902,8 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
           resetPassword,
           requestEmailVerification,
           verifyEmail,
+          requestEmailChange,
+          confirmEmailChange,
           requestPasswordlessLogin,
           loginWithPasswordlessOtp,
           verifyLoginOtp,

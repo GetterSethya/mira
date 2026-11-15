@@ -17,6 +17,21 @@ published by CI.
 
 ### Added
 
+- **Self-service email change.** Auth collections can opt in with
+  `email: { emailChange: true }`. An authenticated user calls
+  `POST /api/collections/:name/request-email-change` with `{ newEmail, oldPassword }`; Mira
+  verifies the current password with the login rate limits and sends a 30-minute confirmation
+  link to the new address. `POST /api/collections/:name/confirm-email-change` accepts the
+  token, sets `email` and `emailVerified: true`, bumps the user's token generation so existing
+  sessions are invalid, and consumes the user's other outstanding challenges. The request always
+  returns the same generic `202`; if the new address belongs to another account, no mail is sent,
+  so the endpoint does not reveal whether an address exists. The current address returns
+  `422 email_unchanged`, and confirmation returns `409 email_taken` if the address became taken
+  in the meantime. The client SDK exposes `requestEmailChange()` / `confirmEmailChange()`, the
+  TanStack adapter enriches both, and `auth-config` reports the new `emailChange` flag.
+  `SmtpEmail` accepts `emailChangeUrl` and defaults it to
+  `${applicationUrl}/email-change?token={{token}}&collection={{collection}}`.
+
 ### Changed
 
 - **Breaking: driver-neutral SQLite telemetry.** `makeSqliteTelemetryLayer` no longer

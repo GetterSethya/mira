@@ -11,10 +11,10 @@ export type RequestCtx = {
   admin?: boolean
   /**
    * Narrow trusted principal used only by internal auth-email flows. It may
-   * write `password` or `emailVerified` for the challenge's own user, nothing
-   * else.
+   * write `password` or `emailVerified` for a challenge's own user, and
+   * `email` + `emailVerified` for the email-change flow. Nothing else.
    */
-  internal?: "auth-flow"
+  internal?: "auth-flow" | "email-change"
 }
 
 /** Paginated result — cursor-based via seqId. Used for all collection kinds. */

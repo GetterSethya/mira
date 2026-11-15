@@ -107,6 +107,7 @@ export interface EmailDescription {
   replyTo: string | null
   hasAuth: boolean
   passwordResetUrl: string | null
+  emailChangeUrl: string | null
 }
 
 export interface AppConfigResponse {

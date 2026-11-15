@@ -5,6 +5,7 @@ import type { SqlError } from "effect/sql"
 
 import {
   AuthChallengeStore,
+  CHANGE_EMAIL_TTL_MS,
   generateChallengeId,
   generateOtp,
   generateResetToken,
@@ -19,6 +20,8 @@ import type { ChallengePurpose, ChallengeRecord } from "@/auth/index.js"
 import type { AuthEmailError } from "@/auth/index.js"
 import {
   EmailFlowDisabledError,
+  EmailTakenError,
+  EmailUnchangedError,
   EmailUnavailableError,
   InvalidCodeError,
   InvalidResetTokenError,
@@ -40,6 +43,7 @@ import type {
   EmailServiceShape
 } from "@/email/index.js"
 import {
+  emailChangeEmail,
   loginAlertEmail,
   loginOtpEmail,
   passwordlessOtpEmail,
@@ -59,8 +63,8 @@ import type { RateLimitRequest } from "@/rate-limit/index.js"
 import type { AuthCollectionEmailOptions } from "@gettersethya/mira-client"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
-import type { AuthError } from "./auth.js"
-import { mintSession } from "./auth.js"
+import { AuthError, AuthService, mintSession, verifyPassword } from "./auth.js"
+import { consumeLoginRequestLimits } from "./auth-rate-limit.js"
 import { TokenStore } from "./token-store.js"
 
 export type AuthEmailServices =
@@ -71,6 +75,7 @@ export type AuthEmailServices =
   | Dialect
   | RateLimiter
   | RateLimitKeySecret
+  | AuthService
 
 type FlowError =
   | AuthEmailError
@@ -85,7 +90,8 @@ export const emailOptionsOf = (collection: AnyCollectionDef): Required<AuthColle
     verification: email?.verification ?? false,
     loginAlerts: email?.loginAlerts ?? false,
     loginOtp: email?.loginOtp ?? "off",
-    passwordless: email?.passwordless ?? false
+    passwordless: email?.passwordless ?? false,
+    emailChange: email?.emailChange ?? false
   }
 }
 
@@ -117,6 +123,8 @@ const challengeTtl = (purpose: ChallengePurpose) => {
       return PASSWORD_RESET_TTL_MS
     case "verify_email":
       return VERIFY_EMAIL_TTL_MS
+    case "change_email":
+      return CHANGE_EMAIL_TTL_MS
     case "login_otp":
     case "passwordless":
       return OTP_TTL_MS
@@ -211,17 +219,18 @@ const consumeEmailRequestLimits = (
 const buildChallenge = (
   collection: AnyCollectionDef,
   userId: string,
-  purpose: ChallengePurpose
+  purpose: ChallengePurpose,
+  newEmail: string | null = null
 ) =>
   Effect.gen(function* () {
     const config = yield* AppConfig
     const secret = Redacted.value(config.jwtSecret)
     const id = yield* generateChallengeId()
-    const raw = purpose === "password_reset" ? yield* generateResetToken() : yield* generateOtp()
-    const tokenHash =
-      purpose === "password_reset"
-        ? yield* hashResetToken(raw)
-        : yield* hashOtp(secret, id, raw, purpose)
+    const usesLinkToken = purpose === "password_reset" || purpose === "change_email"
+    const raw = usesLinkToken ? yield* generateResetToken() : yield* generateOtp()
+    const tokenHash = usesLinkToken
+      ? yield* hashResetToken(raw)
+      : yield* hashOtp(secret, id, raw, purpose)
     const createdAt = nowMs()
     const record: ChallengeRecord = {
       id,
@@ -232,7 +241,8 @@ const buildChallenge = (
       expiresAt: createdAt + challengeTtl(purpose),
       consumedAt: null,
       attempts: 0,
-      createdAt
+      createdAt,
+      newEmail
     }
     return { record, secret: raw }
   })
@@ -450,6 +460,142 @@ export const verifyEmail = (
       )
     )
     return { verified: true as const }
+  })
+
+export const requestEmailChange = (
+  collection: AnyCollectionDef,
+  user: RepoRecord,
+  newEmail: string,
+  oldPassword: string,
+  ip: string | null
+): Effect.Effect<{ readonly requested: true }, FlowError, AuthEmailServices> =>
+  Effect.gen(function* () {
+    const options = emailOptionsOf(collection)
+    if (!options.emailChange) {
+      return yield* Effect.fail(new EmailFlowDisabledError({ collection: collection.name }))
+    }
+
+    const email = yield* requireTransport()
+    const description = email.describe()
+    if (description.emailChangeUrl === null) {
+      return yield* Effect.fail(
+        new EmailNotConfiguredError({
+          message: "Email is enabled but no emailChangeUrl is configured"
+        })
+      )
+    }
+
+    const currentEmail = user["email"]
+    if (typeof currentEmail !== "string") {
+      return yield* Effect.fail(new EmailUnavailableError({ message: "Account has no email" }))
+    }
+    const userId = String(user["id"])
+
+    // Password confirmation uses the login budgets, so a stolen session cannot
+    // brute-force the account password through this endpoint.
+    yield* consumeLoginRequestLimits(currentEmail, ip)
+    const stored = user["password"]
+    const passwordOk =
+      typeof stored === "string"
+        ? yield* verifyPassword(oldPassword, stored).pipe(Effect.orElseSucceed(() => false))
+        : false
+    if (!passwordOk) {
+      return yield* Effect.fail(new AuthError({ reason: "Invalid old password" }))
+    }
+
+    if (newEmail === currentEmail) {
+      return yield* Effect.fail(new EmailUnchangedError({ message: "New email matches the current email" }))
+    }
+
+    yield* consumeEmailRequestLimits(newEmail, ip, "change_email")
+
+    // Keep the response indistinguishable from a successful request. If the
+    // address belongs to another account, no mail is sent and the caller still
+    // gets the generic 202; confirmation (the only place with the token) can
+    // report `email_taken`.
+    const existing = yield* findAuthUser(collection, newEmail)
+    if (existing !== undefined && String(existing["id"]) !== userId) {
+      return { requested: true as const }
+    }
+
+    const built = yield* buildChallenge(collection, userId, "change_email", newEmail)
+    yield* storeChallenge(built.record)
+
+    const confirmUrl = description.emailChangeUrl
+      .replaceAll("{{token}}", encodeURIComponent(built.secret))
+      .replaceAll("{{collection}}", encodeURIComponent(collection.name))
+    const message = emailChangeEmail({
+      appName: yield* appName,
+      currentEmail,
+      newEmail,
+      confirmUrl,
+      expiresMinutes: Math.round(CHANGE_EMAIL_TTL_MS / 60_000)
+    })
+    yield* detachSend(message, { purpose: "change_email", collection: collection.name, userId })
+    return { requested: true as const }
+  })
+
+export const confirmEmailChange = (
+  collection: AnyCollectionDef,
+  token: string
+): Effect.Effect<
+  { readonly changed: true; readonly record: RepoRecord },
+  FlowError,
+  AuthEmailServices
+> =>
+  Effect.gen(function* () {
+    const options = emailOptionsOf(collection)
+    if (!options.emailChange) {
+      return yield* Effect.fail(new EmailFlowDisabledError({ collection: collection.name }))
+    }
+
+    const store = yield* AuthChallengeStore
+    const tokenHash = yield* hashResetToken(token)
+    const record = yield* store.findByTokenHash(collection.name, "change_email", tokenHash)
+    if (record === undefined || record.newEmail === null) {
+      return yield* Effect.fail(new InvalidResetTokenError({ message: "Invalid or expired token" }))
+    }
+
+    const consumed = yield* store.consumeToken(collection.name, "change_email", tokenHash, nowMs())
+    if (!consumed) {
+      return yield* Effect.fail(new InvalidResetTokenError({ message: "Invalid or expired token" }))
+    }
+
+    const repo = yield* Repository
+    const rows = yield* repo.view(collection.name, record.userId)
+    if (Option.isNone(rows)) {
+      return yield* Effect.fail(new InvalidResetTokenError({ message: "Invalid or expired token" }))
+    }
+
+    const existing = yield* findAuthUser(collection, record.newEmail)
+    if (existing !== undefined && String(existing["id"]) !== record.userId) {
+      return yield* Effect.fail(new EmailTakenError({ message: "That email is already in use" }))
+    }
+
+    const svc = yield* CollectionService
+    const updated = yield* svc
+      .update(
+        collection,
+        record.userId,
+        { email: record.newEmail, emailVerified: true },
+        { headers: {}, query: {}, internal: "email-change" }
+      )
+      .pipe(
+        Effect.mapError((error) => {
+          if (
+            error._tag === "SqlError" &&
+            /UNIQUE constraint failed.*email/i.test(error.message)
+          ) {
+            return new EmailTakenError({ message: "That email is already in use" })
+          }
+          return new EmailUnavailableError({ message: `Email change failed: ${error._tag}` })
+        })
+      )
+
+    const tokens = yield* TokenStore
+    yield* tokens.bumpGeneration(collection.name, record.userId)
+    yield* store.consumeAllForUser(collection.name, record.userId, nowMs())
+    return { changed: true as const, record: updated }
   })
 
 export const requestPasswordlessLogin = (

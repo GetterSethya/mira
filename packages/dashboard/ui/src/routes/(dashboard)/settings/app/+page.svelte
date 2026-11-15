@@ -309,6 +309,10 @@
               <dt class="text-muted-foreground">Password reset URL</dt>
               <dd class="font-mono break-all">{data.email.passwordResetUrl}</dd>
             {/if}
+            {#if data.email.emailChangeUrl}
+              <dt class="text-muted-foreground">Email change URL</dt>
+              <dd class="font-mono break-all">{data.email.emailChangeUrl}</dd>
+            {/if}
           </dl>
 
           <p class="text-xs text-muted-foreground">
