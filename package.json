@@ -10,6 +10,7 @@
     "test":           "pnpm -r test",
     "bun:smoke":      "bun run apps/example-bun/src/smoke.ts",
     "pack:smoke":     "node scripts/pack-smoke.mjs",
+    "benchmark:platforms": "pnpm --filter mira-benchmarks bench",
     "lint":           "pnpm -r lint",
     "release:alpha":  "node scripts/release.ts alpha",
     "release:stable": "node scripts/release.ts stable",

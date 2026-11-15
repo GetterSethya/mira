@@ -17,6 +17,7 @@
           <h3>Product</h3>
           <a href={`${home}#features`}>Features</a>
           <a href={`${home}#how-it-works`}>How it works</a>
+          <a href={resolve('/benchmarks/')}>Benchmarks</a>
           <a href={resolve('/changelog/')}>Changelog</a>
         </div>
         <div class="col">

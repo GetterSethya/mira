@@ -1,0 +1,22 @@
+{
+  "name": "mira-benchmarks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "tsx src/runner.ts",
+    "server:node": "tsx src/server.ts",
+    "server:bun": "bun run src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/sql-sqlite-bun": "4.0.0",
+    "@effect/sql-sqlite-node": "4.0.0",
+    "@gettersethya/mira": "workspace:*",
+    "effect": "4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.7.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1602,6 +1602,9 @@ pnpm -r test
 # Rebuild the dashboard SPA bundle (not part of `pnpm build`)
 pnpm build:ui
 
+# Refresh the Node vs Bun benchmark data shown on the landing /benchmarks page
+pnpm benchmark:platforms
+
 # Build individual packages
 pnpm --filter @gettersethya/mira-collection build
 pnpm --filter @gettersethya/mira-client build

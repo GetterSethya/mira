@@ -16,6 +16,7 @@
     { href: `${home}#quickstart`, label: 'Quickstart' },
     { href: `${home}#faq`, label: 'FAQ' },
     { href: resolve('/docs/'), label: 'Docs' },
+    { href: resolve('/benchmarks/'), label: 'Benchmarks' },
     { href: resolve('/changelog/'), label: 'Changelog' }
   ];
 
