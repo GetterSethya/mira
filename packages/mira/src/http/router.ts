@@ -172,7 +172,11 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
   const ct = req.headers["content-type"] ?? ""
   if (ct.includes("multipart/form-data")) {
     return processMultipartUpload(req, collection.schema, collection.name).pipe(
-      Effect.withSpan("http.body.parse", { kind: "internal", attributes: { content_type: "multipart" } })
+      Effect.withSpan(
+        "http.body.parse",
+        { kind: "internal", attributes: { content_type: "multipart" } },
+        { captureStackTrace: false }
+      )
     )
   }
   return Effect.gen(function* () {
@@ -200,7 +204,13 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
       }
     }
     return result
-  }).pipe(Effect.withSpan("http.body.parse", { kind: "internal", attributes: { content_type: "json" } }))
+  }).pipe(
+    Effect.withSpan(
+      "http.body.parse",
+      { kind: "internal", attributes: { content_type: "json" } },
+      { captureStackTrace: false }
+    )
+  )
 }
 
 export function makeCollectionRouter(
@@ -265,10 +275,15 @@ export function makeCollectionRouter(
             return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
           })
         }).pipe(
-          Effect.withSpan("http.handler", {
-            kind: "server",
-            attributes: { collection: col.name, operation }
-          })
+          // Request-path spans opt out of stack capture (`{ captureStackTrace: false }`
+          // as the third argument): the captured stack is never exported, and taking
+          // it on every request costs measurable CPU. The other request-path spans
+          // here and in the repository/cache/hook layers do the same.
+          Effect.withSpan(
+            "http.handler",
+            { kind: "server", attributes: { collection: col.name, operation } },
+            { captureStackTrace: false }
+          )
         )
       )
     })
@@ -293,7 +308,7 @@ export function makeCollectionRouter(
       // file-token mint route: session typ + jti deny-list + record existence +
       // `pwf` credential binding + generation check.
       const auth = yield* authenticateSession(token, isAuthCol).pipe(
-        Effect.withSpan("http.session-auth", { kind: "internal" })
+        Effect.withSpan("http.session-auth", { kind: "internal" }, { captureStackTrace: false })
       )
       if (auth === undefined) {
         yield* annotate("auth.result", "invalid_token")
@@ -303,7 +318,7 @@ export function makeCollectionRouter(
       yield* annotate("auth.result", "authenticated")
       yield* annotate("auth.collection", auth.collection)
       return { collection: auth.collection, record: auth.record }
-    }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))
+    }).pipe(Effect.withSpan("http.auth", { kind: "internal" }, { captureStackTrace: false }))
   }
 
   const listRoute = collectionRoute("list", (col, ctx) =>
@@ -731,7 +746,13 @@ export function makeCollectionRouter(
       const store = yield* TokenStore
       yield* store.bumpGeneration(auth.collection, userId).pipe(Effect.orElseSucceed(() => undefined))
       return clearCookie
-    }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation: "logout_all" } }))
+    }).pipe(
+      Effect.withSpan(
+        "http.handler",
+        { kind: "server", attributes: { operation: "logout_all" } },
+        { captureStackTrace: false }
+      )
+    )
   })
 
   const meRoute = Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
@@ -771,7 +792,13 @@ export function makeCollectionRouter(
         { collection: auth.collection, record: publicRecord },
         { status: 200 }
       )
-    }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation: "me" } }))
+    }).pipe(
+      Effect.withSpan(
+        "http.handler",
+        { kind: "server", attributes: { operation: "me" } },
+        { captureStackTrace: false }
+      )
+    )
   )
 
   const fileServeRoute = makeFileServeRoute(collections, adminCollections)
@@ -799,7 +826,7 @@ export function makeCollectionRouter(
         // revoked token, a token for a deleted user, a stale `pwf`, or a
         // pre-`logout-all` generation all land here as `undefined` → 401.
         const auth = yield* authenticateSession(token, isAuthCol).pipe(
-          Effect.withSpan("http.session-auth", { kind: "internal" })
+          Effect.withSpan("http.session-auth", { kind: "internal" }, { captureStackTrace: false })
         )
         if (auth === undefined) {
           yield* annotate("auth.result", "invalid_token")
@@ -826,7 +853,7 @@ export function makeCollectionRouter(
           Effect.ignore
         )
         return "ok" as const
-      }).pipe(Effect.withSpan("http.auth", { kind: "internal" }))
+      }).pipe(Effect.withSpan("http.auth", { kind: "internal" }, { captureStackTrace: false }))
 
       if (gate === "forbidden") {
         return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
@@ -838,7 +865,13 @@ export function makeCollectionRouter(
       return yield* effect.pipe(
         Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })))
       )
-    }).pipe(Effect.withSpan("http.handler", { kind: "server", attributes: { operation } }))
+    }).pipe(
+      Effect.withSpan(
+        "http.handler",
+        { kind: "server", attributes: { operation } },
+        { captureStackTrace: false }
+      )
+    )
   }
 
   const telemetryLogs = requireApiAuth("telemetry_logs", telemetryLogsRoute)

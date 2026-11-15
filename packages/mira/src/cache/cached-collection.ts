@@ -108,10 +108,11 @@ export function makeCachedCollectionServiceLayer(
           // Reads that expand a relation are not cached.
           if (expand != null && expand.length > 0) {
             return svc.list(collection, cursor, perPage, ctx, filter, sort, select, expand).pipe(
-              Effect.withSpan("cache.list", {
-                kind: "internal",
-                attributes: { collection: collection.name, "cache.bypass": true },
-              })
+              Effect.withSpan(
+                "cache.list",
+                { kind: "internal", attributes: { collection: collection.name, "cache.bypass": true } },
+                { captureStackTrace: false }
+              )
             )
           }
 
@@ -130,10 +131,11 @@ export function makeCachedCollectionServiceLayer(
             yield* cache.putList(key, page)
             return page
           }).pipe(
-            Effect.withSpan("cache.list", {
-              kind: "internal",
-              attributes: { collection: collection.name },
-            })
+            Effect.withSpan(
+              "cache.list",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
           )
         },
 
@@ -141,10 +143,11 @@ export function makeCachedCollectionServiceLayer(
           // Reads that expand a relation are not cached.
           if (expand != null && expand.length > 0) {
             return svc.view(collection, id, ctx, select, expand).pipe(
-              Effect.withSpan("cache.view", {
-                kind: "internal",
-                attributes: { collection: collection.name, "cache.bypass": true },
-              })
+              Effect.withSpan(
+                "cache.view",
+                { kind: "internal", attributes: { collection: collection.name, "cache.bypass": true } },
+                { captureStackTrace: false }
+              )
             )
           }
 
@@ -163,17 +166,22 @@ export function makeCachedCollectionServiceLayer(
             yield* cache.putRecord(key, record)
             return record
           }).pipe(
-            Effect.withSpan("cache.view", {
-              kind: "internal",
-              attributes: { collection: collection.name },
-            })
+            Effect.withSpan(
+              "cache.view",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
           )
         },
 
         create: (collection, data, ctx) =>
           svc.create(collection, data, ctx).pipe(
             Effect.tap(() => cache.nukeListsFor(collection.name)),
-            Effect.withSpan("cache.create", { kind: "internal", attributes: { collection: collection.name } })
+            Effect.withSpan(
+              "cache.create",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
           ),
 
         update: (collection, id, data, ctx) =>
@@ -184,7 +192,11 @@ export function makeCachedCollectionServiceLayer(
                 { concurrency: "unbounded" }
               )
             ),
-            Effect.withSpan("cache.update", { kind: "internal", attributes: { collection: collection.name } })
+            Effect.withSpan(
+              "cache.update",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
           ),
 
         delete: (collection, id, ctx) =>
@@ -195,7 +207,11 @@ export function makeCachedCollectionServiceLayer(
                 { concurrency: "unbounded" }
               )
             ),
-            Effect.withSpan("cache.delete", { kind: "internal", attributes: { collection: collection.name } })
+            Effect.withSpan(
+              "cache.delete",
+              { kind: "internal", attributes: { collection: collection.name } },
+              { captureStackTrace: false }
+            )
           ),
       })
     })
