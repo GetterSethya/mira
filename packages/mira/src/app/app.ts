@@ -35,7 +35,8 @@ import {
   SqliteRateLimitStoreLive
 } from "@/rate-limit/sqlite.js"
 import { RepositoryLive } from "@/repository/repository.js"
-import { ThumbnailServiceNoopLive, ThumbnailServicePhotonLive } from "@/thumbnail/index.js"
+import { ThumbnailServicePhotonLive } from "@/thumbnail/lazy.js"
+import { ThumbnailServiceNoopLive } from "@/thumbnail/types.js"
 
 import type { MiraAppConfig } from "./builder.js"
 import type { RuleBinding } from "./define-rule.js"
@@ -229,9 +230,9 @@ export class MiraApp<R = never, Telemetry = never> {
     // Foundation: database + storage + thumbnails + telemetry, wired on platform.
     // Platforms may supply a native thumbnail backend; Photon is the default,
     // but there is no reason to load an image backend when no collection can
-    // store a file. TODO: the Photon module is still imported statically, so its
-    // module-init cost is paid regardless; true lazy loading would need a
-    // dynamic import, which this codebase forbids.
+    // store a file. `ThumbnailServicePhotonLive` is the lazy layer: it imports
+    // `@cf-wasm/photon` only when the layer is actually built, so an app with no
+    // file fields never pays the WASM module-init cost.
     const hasFileFields = allCollections.some((collection) =>
       Object.values(collection.schema.properties).some((prop) => prop["x-kind"] === "file")
     )

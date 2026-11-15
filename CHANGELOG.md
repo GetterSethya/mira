@@ -53,6 +53,14 @@ published by CI.
   when the checkpoint is busy. Upgrading an existing telemetry database builds the `created`
   indexes once on the first boot after upgrade, which can pause startup on a large `logs` or
   `spans` table.
+- **Lazy Photon thumbnails.** Importing `@gettersethya/mira` no longer loads
+  `@cf-wasm/photon`; the WASM backend is imported through `thumbnail/lazy.ts` only when the
+  thumbnail layer is built, and the app builder builds `ThumbnailServiceNoopLive` when no
+  collection declares a file field. `BunPlatform` no longer statically imports Photon either:
+  the Bun layer's `cover`/fallback path loads it on the first fallback resize. The Photon
+  layers and factories exported from the package keep their names and behavior, and
+  `computeDimensions` moved to `thumbnail/dimensions.ts` (still re-exported from
+  `thumbnail/photon.ts`).
 
 ### Fixed
 

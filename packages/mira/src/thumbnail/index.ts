@@ -9,8 +9,8 @@ export {
   makeResizePhoton,
   makeThumbnailServicePhotonLive,
   ThumbnailServicePhotonLive
-} from "./photon.js"
-export type { PhotonThumbnailOptions } from "./photon.js"
+} from "./lazy.js"
+export type { PhotonThumbnailOptions } from "./lazy.js"
 export type { ThumbSpec } from "./types.js"
 export {
   DEFAULT_THUMBNAIL_MAX_PIXELS,

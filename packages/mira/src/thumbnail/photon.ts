@@ -1,7 +1,10 @@
 import { crop, PhotonImage, resize, SamplingFilter } from "@cf-wasm/photon/node"
 import { Effect, Layer, Match } from "effect"
 
-import { assertImageWithinPixelBudget } from "./dimensions.js"
+import {
+  assertImageWithinPixelBudget,
+  computeDimensions
+} from "./dimensions.js"
 import {
   DEFAULT_THUMBNAIL_MAX_PIXELS,
   SUPPORTED_THUMBNAIL_MIME_TYPES,
@@ -13,44 +16,6 @@ import {
 export interface PhotonThumbnailOptions {
   /** Reject images whose `width * height` exceeds this before Photon decodes. */
   readonly maxPixels?: number
-}
-
-function computeDimensions(
-  imgWidth: number,
-  imgHeight: number,
-  spec: ThumbSpec
-): { width: number; height: number } {
-  if (spec.fit === "fill") {
-    return {
-      width: spec.width === 0 ? imgWidth : spec.width,
-      height: spec.height === 0 ? imgHeight : spec.height
-    }
-  }
-
-  let targetW = spec.width
-  let targetH = spec.height
-
-  if (targetW === 0 && targetH === 0) {
-    return { width: imgWidth, height: imgHeight }
-  }
-
-  if (targetW === 0) {
-    targetW = Math.max(1, Math.round(targetH * (imgWidth / imgHeight)))
-    return { width: targetW, height: targetH }
-  }
-
-  if (targetH === 0) {
-    targetH = Math.max(1, Math.round(targetW * (imgHeight / imgWidth)))
-    return { width: targetW, height: targetH }
-  }
-
-  if (spec.fit === "cover") {
-    const scale = Math.max(targetW / imgWidth, targetH / imgHeight)
-    return { width: Math.ceil(imgWidth * scale), height: Math.ceil(imgHeight * scale) }
-  }
-
-  const scale = Math.min(targetW / imgWidth, targetH / imgHeight)
-  return { width: Math.round(imgWidth * scale), height: Math.round(imgHeight * scale) }
 }
 
 const resizePhotonDecoded = (

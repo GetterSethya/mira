@@ -1,11 +1,56 @@
 import { Effect } from "effect"
 
-import { DEFAULT_THUMBNAIL_MAX_PIXELS, ThumbnailError } from "./types.js"
+import { DEFAULT_THUMBNAIL_MAX_PIXELS, ThumbnailError, type ThumbSpec } from "./types.js"
 
 export interface ImageDimensions {
   readonly width: number
   readonly height: number
   readonly format: "png" | "jpeg" | "webp"
+}
+
+/**
+ * Pure target-size calculation shared by the Photon and `Bun.Image` backends.
+ *
+ * `fill` returns the requested box, substituting each `0` axis with the source
+ * dimension. `cover` scales by `max(...)` and rounds up so the result can be
+ * cropped back to the requested box; every other fit scales by `min(...)`.
+ */
+export function computeDimensions(
+  imgWidth: number,
+  imgHeight: number,
+  spec: ThumbSpec
+): { width: number; height: number } {
+  if (spec.fit === "fill") {
+    return {
+      width: spec.width === 0 ? imgWidth : spec.width,
+      height: spec.height === 0 ? imgHeight : spec.height
+    }
+  }
+
+  let targetW = spec.width
+  let targetH = spec.height
+
+  if (targetW === 0 && targetH === 0) {
+    return { width: imgWidth, height: imgHeight }
+  }
+
+  if (targetW === 0) {
+    targetW = Math.max(1, Math.round(targetH * (imgWidth / imgHeight)))
+    return { width: targetW, height: targetH }
+  }
+
+  if (targetH === 0) {
+    targetH = Math.max(1, Math.round(targetW * (imgHeight / imgWidth)))
+    return { width: targetW, height: targetH }
+  }
+
+  if (spec.fit === "cover") {
+    const scale = Math.max(targetW / imgWidth, targetH / imgHeight)
+    return { width: Math.ceil(imgWidth * scale), height: Math.ceil(imgHeight * scale) }
+  }
+
+  const scale = Math.min(targetW / imgWidth, targetH / imgHeight)
+  return { width: Math.round(imgWidth * scale), height: Math.round(imgHeight * scale) }
 }
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const

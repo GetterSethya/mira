@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect"
 
-import { computeDimensions, resizePhoton } from "./photon.js"
+import { computeDimensions } from "./dimensions.js"
+import { loadPhotonModule } from "./lazy.js"
 import {
   DEFAULT_THUMBNAIL_MAX_PIXELS,
   SUPPORTED_THUMBNAIL_MIME_TYPES,
@@ -61,6 +62,25 @@ const encode = (image: BunImagePipeline, mimeType: string): BunImagePipeline => 
   if (mimeType === "image/webp") return image.webp()
   return image.png()
 }
+
+/**
+ * Photon fallback. The backend is imported on the first fallback resize, never
+ * when the layer is built, so a Bun app that only uses the native path does not
+ * pay Photon's WASM module-init cost.
+ */
+const resizeWithPhoton = (
+  input: Uint8Array,
+  mimeType: string,
+  spec: ThumbSpec
+): Effect.Effect<Uint8Array, ThumbnailError> =>
+  loadPhotonModule.pipe(
+    Effect.catchTag("ThumbnailBackendLoadError", (error) =>
+      Effect.fail(
+        new ThumbnailError({ reason: `Photon backend unavailable: ${String(error.cause)}` })
+      )
+    ),
+    Effect.flatMap((photon) => photon.resizePhoton(input, mimeType, spec))
+  )
 
 type ImageInput = {
   readonly image: BunImagePipeline
@@ -133,12 +153,12 @@ const makeLayer = (options: BunThumbnailOptions): Layer.Layer<ThumbnailService> 
       supported: (mimeType) => SUPPORTED_THUMBNAIL_MIME_TYPES.has(mimeType),
       resize: (input, mimeType, spec) => {
         const Image = bunImage()
-        if (Image === undefined) return resizePhoton(input, mimeType, spec)
+        if (Image === undefined) return resizeWithPhoton(input, mimeType, spec)
         return readBoundedImage(Image, input, maxPixels).pipe(
           Effect.flatMap((bounded) => {
             if (spec.fit === "cover") {
               return allowPhotonFallback
-                ? resizePhoton(input, mimeType, spec)
+                ? resizeWithPhoton(input, mimeType, spec)
                 : Effect.fail(
                     new ThumbnailError({
                       reason: "Bun.Image cannot crop cover thumbnails"
@@ -147,7 +167,7 @@ const makeLayer = (options: BunThumbnailOptions): Layer.Layer<ThumbnailService> 
             }
             return resizeWithBunImage(bounded, mimeType, spec).pipe(
               Effect.catchTag("ThumbnailError", (error) =>
-                allowPhotonFallback ? resizePhoton(input, mimeType, spec) : Effect.fail(error)
+                allowPhotonFallback ? resizeWithPhoton(input, mimeType, spec) : Effect.fail(error)
               )
             )
           })

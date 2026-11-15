@@ -5,13 +5,18 @@
 Image-resizing abstraction used by the file-serving route. `types.ts` declares
 the `ThumbnailService` tag, the `ThumbSpec` shape, the `"WxH[tbf]"` spec parser,
 the shared supported-MIME set, and a no-op layer for environments without an
-image backend. `photon.ts` supplies the full implementation backed by
-`@cf-wasm/photon`, computing target dimensions (including cover/contain fits and
-zero-axis auto-scaling), cropping to the requested box, and encoding back to
-JPEG/WebP/PNG. `bun.ts` adds a native `Bun.Image` implementation for `contain`
-and `fill`; `cover` and native failures fall back to Photon. The package is
-deliberately I/O-free: caching (`_thumbs/<filename>/<spec>`) and persistence are
-handled by the HTTP layer and file storage, not here.
+image backend. `dimensions.ts` parses image headers, enforces the pixel budget,
+and owns the pure `computeDimensions` target-size math. `photon.ts` supplies the
+full implementation backed by `@cf-wasm/photon`, computing target dimensions
+(including cover/contain fits and zero-axis auto-scaling), cropping to the
+requested box, and encoding back to JPEG/WebP/PNG; it is the only module that
+imports the WASM backend. `lazy.ts` exposes the same Photon layers and factory
+but performs the `import("./photon.js")` only when a layer is built (or a Bun
+fallback resize runs), so importing the package never pays the WASM module-init
+cost. `bun.ts` adds a native `Bun.Image` implementation for `contain` and `fill`;
+`cover` and native failures fall back to Photon through the lazy loader. The
+package is deliberately I/O-free: caching (`_thumbs/<filename>/<spec>`) and
+persistence are handled by the HTTP layer and file storage, not here.
 
 ## Interface
 
@@ -29,24 +34,33 @@ handled by the HTTP layer and file storage, not here.
 
 - `readImageDimensions(input)` — header-only PNG/JPEG/WebP dimension parser; `null` for unrecognised or truncated input. [dimensions.ts:readImageDimensions]
 - `assertImageWithinPixelBudget(input, maxPixels)` — rejects a header whose `width * height` exceeds the budget before any decoder allocates pixels. [dimensions.ts:assertImageWithinPixelBudget]
+- `computeDimensions(imgWidth, imgHeight, spec)` — pure target-size calculation for fill/cover/contain and zero-axis specs, shared by both backends. [dimensions.ts:computeDimensions]
 
 ### `photon.ts`
 
 - `makeResizePhoton(options)` — builds a Photon resize function that checks the header budget before decoding. [photon.ts:makeResizePhoton]
 - `resizePhoton(input, mimeType, spec)` — the default Photon resize path (64 MP budget), including centre cropping for `cover`. [photon.ts:resizePhoton]
-- `makeThumbnailServicePhotonLive(options)` — Photon layer with a configurable budget. [photon.ts:makeThumbnailServicePhotonLive]
-- `ThumbnailServicePhotonLive` — default Photon layer backed by `@cf-wasm/photon/node`; supported MIME set is JPEG/PNG/WebP. [photon.ts:ThumbnailServicePhotonLive]
-- `computeDimensions(imgWidth, imgHeight, spec)` — pure target-size calculation for fill/cover/contain and zero-axis specs. [photon.ts:computeDimensions]
+- `makeThumbnailServicePhotonLive(options)` — eager Photon layer with a configurable budget. [photon.ts:makeThumbnailServicePhotonLive]
+- `ThumbnailServicePhotonLive` — eager Photon layer backed by `@cf-wasm/photon/node`; supported MIME set is JPEG/PNG/WebP. [photon.ts:ThumbnailServicePhotonLive]
+- Re-exports `computeDimensions` for callers that already load Photon. [photon.ts:computeDimensions]
+
+### `lazy.ts`
+
+- `loadPhotonModule` — the single dynamic `import("./photon.js")`; fails with `ThumbnailBackendLoadError`. [lazy.ts:loadPhotonModule]
+- `ThumbnailBackendLoadError` — tagged load failure; layer construction turns it into a defect, the Bun fallback maps it to `ThumbnailError`. [lazy.ts:ThumbnailBackendLoadError]
+- `ThumbnailServicePhotonLive` — same service as the eager layer, resolved with `Layer.unwrap` on first build. [lazy.ts:ThumbnailServicePhotonLive]
+- `makeThumbnailServicePhotonLive(options)` — lazy Photon layer with a custom budget. [lazy.ts:makeThumbnailServicePhotonLive]
+- `makeResizePhoton(options)` — resize factory that loads the backend when the returned function first runs. [lazy.ts:makeResizePhoton]
 
 ### `bun.ts`
 
-- `ThumbnailServiceBunLive` — layer that uses native `Bun.Image` for `contain`/`fill` and delegates `cover` or native failures to `resizePhoton`. [bun.ts:ThumbnailServiceBunLive]
+- `ThumbnailServiceBunLive` — layer that uses native `Bun.Image` for `contain`/`fill` and delegates `cover` or native failures to the lazily loaded Photon fallback. [bun.ts:ThumbnailServiceBunLive]
 - `makeThumbnailServiceBunLive(options)` — factory with `maxPixels` (default 64 MP) and `allowPhotonFallback` (default true); the strict mode proves the native path. [bun.ts:makeThumbnailServiceBunLive]
 - `BunThumbnailOptions` — `{ maxPixels?, allowPhotonFallback? }`. [bun.ts:BunThumbnailOptions]
 
 ### `index.ts`
 
-- Barrel re-exporting the Bun/Photon layers and factories, the header parser, `DEFAULT_THUMBNAIL_MAX_PIXELS`, `parseThumbSpec`, `SUPPORTED_THUMBNAIL_MIME_TYPES`, `ThumbnailError`, `ThumbnailService`, `ThumbnailServiceNoopLive`, and the relevant types. [index.ts:ThumbnailServiceBunLive]
+- Barrel re-exporting the Bun layers and factories, the lazy Photon layers/factories (`from lazy.js`), the header parser, `DEFAULT_THUMBNAIL_MAX_PIXELS`, `parseThumbSpec`, `SUPPORTED_THUMBNAIL_MIME_TYPES`, `ThumbnailError`, `ThumbnailService`, `ThumbnailServiceNoopLive`, and the relevant types. Importing the barrel does not load Photon. [index.ts:ThumbnailServicePhotonLive]
 
 No subdirectories.
 
@@ -54,10 +68,13 @@ No subdirectories.
 
 - Spec strings must match `^(\d+)x(\d+)([tbf]?)$`; anything else yields `null` rather than throwing. [types.ts:parseThumbSpec]
 - The trailing fit character maps `t` → `cover`, `b` → `contain`, `f` → `fill`, and no suffix defaults to `cover`. [types.ts:parseThumbSpec]
-- `fill` returns the requested box, substituting each `0` axis with the source dimension. [photon.ts:computeDimensions]
-- When both axes are `0` the source dimensions are returned unchanged. [photon.ts:computeDimensions]
-- A single `0` axis preserves aspect ratio using the other axis, clamped to at least `1` pixel. [photon.ts:computeDimensions]
-- `cover` scales by `max(targetW/imgW, targetH/imgH)` (rounded up); every other fit scales by the matching `min`. [photon.ts:computeDimensions]
+- `fill` returns the requested box, substituting each `0` axis with the source dimension. [dimensions.ts:computeDimensions]
+- When both axes are `0` the source dimensions are returned unchanged. [dimensions.ts:computeDimensions]
+- A single `0` axis preserves aspect ratio using the other axis, clamped to at least `1` pixel. [dimensions.ts:computeDimensions]
+- `cover` scales by `max(targetW/imgW, targetH/imgH)` (rounded up); every other fit scales by the matching `min`. [dimensions.ts:computeDimensions]
+- Only `photon.ts` imports `@cf-wasm/photon`; every other module reaches it through `loadPhotonModule` in `lazy.ts`. [lazy.ts:loadPhotonModule]
+- The lazy Photon layer imports the backend when the layer is built, not when a module is imported; the Bun fallback imports it only on the first `cover` or native-failure resize. [lazy.ts:ThumbnailServicePhotonLive] [bun.ts:resizeWithPhoton]
+- A failed backend load becomes `ThumbnailBackendLoadError`; layer construction dies on it, while the Bun fallback reports a `ThumbnailError`. [lazy.ts:ThumbnailBackendLoadError]
 - `supported` is true only for `SUPPORTED_THUMBNAIL_MIME_TYPES`; the no-op layer always reports `false`. [types.ts:SUPPORTED_THUMBNAIL_MIME_TYPES] [types.ts:ThumbnailServiceNoopLive]
 - Photon images are released on every path via nested `Effect.acquireUseRelease` (`img.free()`, `scaled.free()`, and `cropped.free()` on the crop branch). [photon.ts:ThumbnailServicePhotonLive]
 - `cover` crops from the centre (`Math.floor((actual - target) / 2)`) and only when the scaled image exceeds the requested box. [photon.ts:ThumbnailServicePhotonLive]
@@ -78,7 +95,7 @@ No subdirectories.
 ## Side Effects
 
 - CPU-bound decode/resize/encode of image bytes in memory; `Bun.Image` terminals run off the JavaScript thread. No filesystem, network, timers, or environment access in this package. [photon.ts:ThumbnailServicePhotonLive] [bun.ts:resizeWithBunImage]
-- Native WASM allocations from `@cf-wasm/photon` are explicitly freed (`free()`) to avoid leaks. [photon.ts:ThumbnailServicePhotonLive]
+- Native WASM allocations from `@cf-wasm/photon` are explicitly freed (`free()`) to avoid leaks. The WASM module is instantiated only when the lazy layer is built or a Bun fallback resize runs. [photon.ts:ThumbnailServicePhotonLive] [lazy.ts:loadPhotonModule]
 - Performs no caching or persistence of its own: `ThumbnailService.resize` only transforms bytes in memory, and the `_thumbs/…` cache is written elsewhere. [types.ts:ThumbnailService]
 
 ## Verification

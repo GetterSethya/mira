@@ -102,7 +102,7 @@ to `crypto/node.ts`, `http/auth-node.ts`, and `http/server-factory-node.ts`, agg
 - HTTP server binding with port retry; request handling and cookies/JWTs —
   `[app/app.ts:MiraApp.buildLayer]`, `[http/router.ts:makeCollectionRouter]`.
 - File storage reads/writes/deletes; thumbnail generation and `_thumbs` cache —
-  `[storage/storage.ts:FileStorage]`, `[thumbnail/photon.ts:ThumbnailServicePhotonLive]`.
+  `[storage/storage.ts:FileStorage]`, `[thumbnail/lazy.ts:ThumbnailServicePhotonLive]`.
 - Cron fibers, telemetry queues/spans, SQLite log persistence, and structured logging —
   `[cron/cron-service.ts:CronService]`, `[telemetry/tracer.ts:makeConsoleTracer]`,
   `[telemetry/sqlite-logger.ts:makeSqliteTelemetryLayer]`.
