@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "bench": "tsx src/runner.ts",
+    "perf:audit": "node src/audit.ts",
+    "perf:analyze": "node src/analyze-profiles.ts",
     "server:node": "node src/server.ts",
     "server:bun": "bun run src/server.ts",
     "typecheck": "tsc --noEmit"

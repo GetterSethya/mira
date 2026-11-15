@@ -1,5 +1,19 @@
-import { BaseCollection, Field, defineRule, LocalFileStorage, Mira } from "@gettersethya/mira"
-import { Layer } from "effect"
+import {
+  BaseCollection,
+  Field,
+  Repository,
+  defineRule,
+  LocalFileStorage,
+  Mira,
+  MiraPlugin
+} from "@gettersethya/mira"
+import { Effect, Layer } from "effect"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { SqlClient } from "effect/sql"
+
+if (process.env.BENCH_STACK_TRACES === "off") {
+  Error.stackTraceLimit = 0
+}
 
 const platformName = process.env.BENCH_PLATFORM
 if (platformName !== "node" && platformName !== "bun") {
@@ -33,12 +47,81 @@ const platform =
         database: m.SqliteDatabase
       }))
 
+const pingRoute = HttpRouter.route(
+  "GET",
+  "/__bench/ping",
+  Effect.succeed(HttpServerResponse.jsonUnsafe({ ok: true }))
+)
+
+const repoListRoute = HttpRouter.route(
+  "GET",
+  "/__bench/repo-list",
+  Effect.gen(function* () {
+    const repo = yield* Repository
+    const req = yield* HttpServerRequest.HttpServerRequest
+    const params = new URLSearchParams(req.url.includes("?") ? req.url.split("?")[1] : "")
+    const value = params.get("value") ?? "missing"
+    const op = params.get("op") === "eq" ? "=" : "!="
+    const page = yield* repo.list("posts", 30, {
+      fields: ["id", "seqId", "title", "body", "published", "created", "updated"],
+      where: { sql: `t."title" ${op} ?`, params: [value] }
+    })
+    return HttpServerResponse.jsonUnsafe(page)
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "repo-list failed" }, { status: 500 }))
+    )
+  )
+)
+
+const memoryRoute = HttpRouter.route(
+  "GET",
+  "/__bench/memory",
+  Effect.sync(() => HttpServerResponse.jsonUnsafe(process.memoryUsage()))
+)
+
+const exitRoute = HttpRouter.route(
+  "GET",
+  "/__bench/exit",
+  Effect.sync(() => {
+    setTimeout(() => process.exit(0), 100)
+    return HttpServerResponse.empty({ status: 204 })
+  })
+)
+
+const benchPlugin = MiraPlugin.define<Repository>({
+  routes: [pingRoute, repoListRoute, memoryRoute, exitRoute]
+})
+
+const database = platform.database({ filename: dbPath })
+const synchronous = process.env.BENCH_SYNCHRONOUS
+const databaseWithPragma =
+  synchronous === "NORMAL" || synchronous === "OFF"
+    ? {
+        layer: Layer.provideMerge(
+          Layer.effectDiscard(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              yield* sql`PRAGMA synchronous = ${sql.literal(synchronous)}`
+            })
+          ).pipe(Layer.orDie),
+          database.layer
+        )
+      }
+    : database
+
 Mira.builder()
   .platform(platform.preset)
-  .database(platform.database({ filename: dbPath }))
+  .database(databaseWithPragma)
   .storage(LocalFileStorage({ directory: uploads }))
   .collections([Posts])
   .rules([postsRules])
   .telemetry(Layer.empty)
   .build()
-  .serve({ port, maxPortAttempts: 1 })
+  .extend(benchPlugin)
+  .serve({
+    port,
+    maxPortAttempts: 1,
+    disableLogger: true,
+    disableTracing: process.env.BENCH_TRACING !== "on"
+  })

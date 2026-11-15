@@ -57,6 +57,24 @@ including the per-run spread.
   the noisiest metric; the page shows ranges and only calls a separation when the ranges do not
   overlap.
 
+## Profiling audit
+
+The audit harness runs a load curve and CPU-profile matrix with the same server:
+
+```bash
+AUDIT_MODE=profiles pnpm --filter mira-benchmarks perf:audit
+AUDIT_MODE=load     pnpm --filter mira-benchmarks perf:audit
+pnpm --filter mira-benchmarks perf:analyze .egm/perf-audit-2026-11-15
+```
+
+Useful controls:
+
+- `AUDIT_ONLY=list-small,create` selects cases.
+- `AUDIT_PLATFORMS=node` runs one platform.
+- `AUDIT_OUT=<dir>` writes results elsewhere.
+- `BENCH_SYNCHRONOUS=NORMAL` tests the SQLite durability trade-off.
+- `BENCH_TRACING=on` re-enables tracing; `BENCH_STACK_TRACES=off` disables span stack capture.
+
 ## Output
 
 The generated JSON records the environment, method, per-run samples and aggregates. The page
