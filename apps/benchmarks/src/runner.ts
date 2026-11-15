@@ -24,12 +24,14 @@ type PlatformRun = {
   readonly startupMs: number
   readonly create: LoadResult
   readonly list: LoadResult
+  readonly listCached: LoadResult
 }
 
 type PlatformSummary = {
   readonly startupMs: number
   readonly create: LoadResult
   readonly list: LoadResult
+  readonly listCached: LoadResult
   readonly runs: ReadonlyArray<PlatformRun>
 }
 
@@ -256,7 +258,18 @@ const runOnce = async (platform: PlatformName): Promise<PlatformRun> => {
       fetch(listUrl("cache-miss", index))
     )
 
-    return { startupMs, create, list }
+    // Cache-hit path: one stable URL, warmed after the write phase so the
+    // create invalidation cannot hide the cache metric.
+    const cachedListUrl = `${baseUrl}/api/collections/posts?limit=30`
+    const cachedValidation = await fetch(cachedListUrl)
+    const cachedValidationBody = Schema.decodeUnknownSync(ListBodySchema)(await cachedValidation.json())
+    if (!cachedValidation.ok || cachedValidationBody.items.length !== 30) {
+      throw new Error("Cached list validation failed: expected 30 items")
+    }
+    await runLoad(100, 10, () => fetch(cachedListUrl))
+    const listCached = await runLoad(LIST_REQUESTS, CONCURRENCY, () => fetch(cachedListUrl))
+
+    return { startupMs, create, list, listCached }
   } finally {
     await stopServer(child)
     try {
@@ -283,6 +296,13 @@ const summarize = (runs: ReadonlyArray<PlatformRun>): PlatformSummary => ({
     p95: median(runs.map((run) => run.list.p95)),
     p99: median(runs.map((run) => run.list.p99)),
     durationMs: median(runs.map((run) => run.list.durationMs))
+  },
+  listCached: {
+    throughput: median(runs.map((run) => run.listCached.throughput)),
+    p50: median(runs.map((run) => run.listCached.p50)),
+    p95: median(runs.map((run) => run.listCached.p95)),
+    p99: median(runs.map((run) => run.listCached.p99)),
+    durationMs: median(runs.map((run) => run.listCached.durationMs))
   },
   runs
 })
@@ -333,6 +353,7 @@ const data = {
     responseLimit: 30,
     payloadBytes: BODY.length,
     listFilter: "unique title neq value per request (cache bypass)",
+    listCached: "same URL repeated after warm-up (cache hit)",
     batchMutation: {
       create: {
         enabled: BATCH_MUTATION_ENABLED,
@@ -340,7 +361,11 @@ const data = {
         maxBatchSize: BATCH_MUTATION_MAX
       }
     },
-    cache: { listTtlMs: 10_000, maxLists: 5_000 },
+    cache: {
+      enabled: process.env.BENCH_CACHE !== "off",
+      listTtlMs: 10_000,
+      maxLists: 5_000
+    },
     telemetry: "off",
     validation: {
       filteredItems: 30,

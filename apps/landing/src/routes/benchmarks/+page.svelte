@@ -33,13 +33,16 @@
   const startupFaster = startup - 1;
   const create = bun.create.throughput / node.create.throughput;
   const list = bun.list.throughput / node.list.throughput;
+  const listCached = bun.listCached.throughput / node.listCached.throughput;
   const p50 = 1 - bun.list.p50 / node.list.p50;
+  const cachedP50 = 1 - bun.listCached.p50 / node.listCached.p50;
 
   const values = (
     runs: ReadonlyArray<{
       startupMs: number;
       create: { throughput: number; p50: number; p95: number };
       list: { throughput: number; p50: number; p95: number };
+      listCached: { throughput: number; p50: number; p95: number };
     }>,
     pick: (run: (typeof node.runs)[number]) => number
   ) => runs.map(pick);
@@ -87,16 +90,24 @@
   const bunCreate = values(bun.runs, (run) => run.create.throughput);
   const nodeList = values(node.runs, (run) => run.list.throughput);
   const bunList = values(bun.runs, (run) => run.list.throughput);
+  const nodeListCached = values(node.runs, (run) => run.listCached.throughput);
+  const bunListCached = values(bun.runs, (run) => run.listCached.throughput);
   const nodeCreateP95 = values(node.runs, (run) => run.create.p95);
   const bunCreateP95 = values(bun.runs, (run) => run.create.p95);
   const nodeListP50 = values(node.runs, (run) => run.list.p50);
   const bunListP50 = values(bun.runs, (run) => run.list.p50);
   const nodeListP95 = values(node.runs, (run) => run.list.p95);
   const bunListP95 = values(bun.runs, (run) => run.list.p95);
+  const nodeListCachedP50 = values(node.runs, (run) => run.listCached.p50);
+  const bunListCachedP50 = values(bun.runs, (run) => run.listCached.p50);
+  const nodeListCachedP95 = values(node.runs, (run) => run.listCached.p95);
+  const bunListCachedP95 = values(bun.runs, (run) => run.listCached.p95);
 
   const createWins = bunWins(nodeCreate, bunCreate, false);
   const listWins = bunWins(nodeList, bunList, false);
+  const listCachedWins = bunWins(nodeListCached, bunListCached, false);
   const p50Wins = bunWins(nodeListP50, bunListP50, true);
+  const cachedP50Wins = bunWins(nodeListCachedP50, bunListCachedP50, true);
 
   const summary = [
     {
@@ -120,7 +131,7 @@
         : `Bun faster in ${createWins}/${method.runs} pairs; ranges separated.`
     },
     {
-      label: 'List throughput',
+      label: 'List throughput (uncached)',
       node: `${formatRate(node.list.throughput)} (${formatRange(nodeList, (v) => number.format(v))} req/s)`,
       bun: `${formatRate(bun.list.throughput)} (${formatRange(bunList, (v) => number.format(v))} req/s)`,
       delta: overlaps(nodeList, bunList)
@@ -129,13 +140,31 @@
       note: 'Unique filter per request bypasses the in-memory list cache.'
     },
     {
-      label: 'List p50 latency',
+      label: 'List throughput (cached)',
+      node: `${formatRate(node.listCached.throughput)} (${formatRange(nodeListCached, (v) => number.format(v))} req/s)`,
+      bun: `${formatRate(bun.listCached.throughput)} (${formatRange(bunListCached, (v) => number.format(v))} req/s)`,
+      delta: overlaps(nodeListCached, bunListCached)
+        ? `mixed (${listCachedWins}/${method.runs} Bun)`
+        : `Bun ${decimal.format(listCached)}× Node`,
+      note: 'Same URL repeated after a warm-up, so the in-memory list cache serves every measured request.'
+    },
+    {
+      label: 'List p50 latency (uncached)',
       node: `${formatMs(node.list.p50)} (${formatRange(nodeListP50, (v) => decimal.format(v))} ms)`,
       bun: `${formatMs(bun.list.p50)} (${formatRange(bunListP50, (v) => decimal.format(v))} ms)`,
       delta: overlaps(nodeListP50, bunListP50)
         ? `mixed (${p50Wins}/${method.runs} Bun)`
         : `Bun ${Math.round(p50 * 100)}% lower`,
       note: 'Median of the five per-run p50s. At 50 in flight it includes queue time, not service time.'
+    },
+    {
+      label: 'List p50 latency (cached)',
+      node: `${formatMs(node.listCached.p50)} (${formatRange(nodeListCachedP50, (v) => decimal.format(v))} ms)`,
+      bun: `${formatMs(bun.listCached.p50)} (${formatRange(bunListCachedP50, (v) => decimal.format(v))} ms)`,
+      delta: overlaps(nodeListCachedP50, bunListCachedP50)
+        ? `mixed (${cachedP50Wins}/${method.runs} Bun)`
+        : `Bun ${Math.round(cachedP50 * 100)}% lower`,
+      note: 'Cache-hit path; same URL repeated after warm-up.'
     }
   ];
 
@@ -147,10 +176,16 @@
       bun: bun.create.throughput
     },
     {
-      label: 'List',
-      detail: `${method.listRequests.toLocaleString('en-US')} filtered first-page reads, limit ${method.responseLimit}, concurrency ${method.concurrency}`,
+      label: 'List (uncached)',
+      detail: `${method.listRequests.toLocaleString('en-US')} unique-filter first-page reads, limit ${method.responseLimit}, concurrency ${method.concurrency}`,
       node: node.list.throughput,
       bun: bun.list.throughput
+    },
+    {
+      label: 'List (cached)',
+      detail: `${method.listRequests.toLocaleString('en-US')} repeated-URL first-page reads after warm-up, limit ${method.responseLimit}, concurrency ${method.concurrency}`,
+      node: node.listCached.throughput,
+      bun: bun.listCached.throughput
     }
   ];
 
@@ -158,9 +193,12 @@
     { label: 'Create p50', node: node.create.p50, bun: bun.create.p50 },
     { label: 'Create p95', node: node.create.p95, bun: bun.create.p95 },
     { label: 'Create p99', node: node.create.p99, bun: bun.create.p99 },
-    { label: 'List p50', node: node.list.p50, bun: bun.list.p50 },
-    { label: 'List p95', node: node.list.p95, bun: bun.list.p95 },
-    { label: 'List p99', node: node.list.p99, bun: bun.list.p99 }
+    { label: 'List p50 (uncached)', node: node.list.p50, bun: bun.list.p50 },
+    { label: 'List p95 (uncached)', node: node.list.p95, bun: bun.list.p95 },
+    { label: 'List p99 (uncached)', node: node.list.p99, bun: bun.list.p99 },
+    { label: 'List p50 (cached)', node: node.listCached.p50, bun: bun.listCached.p50 },
+    { label: 'List p95 (cached)', node: node.listCached.p95, bun: bun.listCached.p95 },
+    { label: 'List p99 (cached)', node: node.listCached.p99, bun: bun.listCached.p99 }
   ];
 
   const spread = [
@@ -186,25 +224,46 @@
       wins: bunWins(nodeCreateP95, bunCreateP95, true)
     },
     {
-      label: 'List throughput',
+      label: 'List throughput (uncached)',
       node: `${formatRange(nodeList, (v) => number.format(v))} req/s`,
       bun: `${formatRange(bunList, (v) => number.format(v))} req/s`,
       overlaps: overlaps(nodeList, bunList),
       wins: bunWins(nodeList, bunList, false)
     },
     {
-      label: 'List p50',
+      label: 'List throughput (cached)',
+      node: `${formatRange(nodeListCached, (v) => number.format(v))} req/s`,
+      bun: `${formatRange(bunListCached, (v) => number.format(v))} req/s`,
+      overlaps: overlaps(nodeListCached, bunListCached),
+      wins: bunWins(nodeListCached, bunListCached, false)
+    },
+    {
+      label: 'List p50 (uncached)',
       node: `${formatRange(nodeListP50, (v) => decimal.format(v))} ms`,
       bun: `${formatRange(bunListP50, (v) => decimal.format(v))} ms`,
       overlaps: overlaps(nodeListP50, bunListP50),
       wins: bunWins(nodeListP50, bunListP50, true)
     },
     {
-      label: 'List p95',
+      label: 'List p95 (uncached)',
       node: `${formatRange(nodeListP95, (v) => decimal.format(v))} ms`,
       bun: `${formatRange(bunListP95, (v) => decimal.format(v))} ms`,
       overlaps: overlaps(nodeListP95, bunListP95),
       wins: bunWins(nodeListP95, bunListP95, true)
+    },
+    {
+      label: 'List p50 (cached)',
+      node: `${formatRange(nodeListCachedP50, (v) => decimal.format(v))} ms`,
+      bun: `${formatRange(bunListCachedP50, (v) => decimal.format(v))} ms`,
+      overlaps: overlaps(nodeListCachedP50, bunListCachedP50),
+      wins: bunWins(nodeListCachedP50, bunListCachedP50, true)
+    },
+    {
+      label: 'List p95 (cached)',
+      node: `${formatRange(nodeListCachedP95, (v) => decimal.format(v))} ms`,
+      bun: `${formatRange(bunListCachedP95, (v) => decimal.format(v))} ms`,
+      overlaps: overlaps(nodeListCachedP95, bunListCachedP95),
+      wins: bunWins(nodeListCachedP95, bunListCachedP95, true)
     }
   ];
 
@@ -217,7 +276,7 @@
   <title>Benchmarks — Node vs Bun — Mira</title>
   <meta
     name="description"
-    content="A single-machine HTTP benchmark of the same Mira app on Node and Bun, with startup, create, list and latency results plus run-to-run spread."
+    content="A single-machine HTTP benchmark of the same Mira app on Node and Bun, with startup, create, uncached list, cached list and latency results plus run-to-run spread."
   />
 </svelte:head>
 
@@ -276,10 +335,11 @@
         <p class="lede">
           The same generated REST routes and rule compiler run on both sides. The create
           benchmark includes validation, the public create rule, a WAL write and a list-cache
-          invalidation. The list benchmark sends a unique title filter per request so Mira's
-          in-memory list cache cannot serve it. It is an unsorted first page: the query returns
-          30 rows, so the table size above 30 does not affect its cost; each miss still writes
-          the page back to the cache.
+          invalidation. The uncached list benchmark sends a unique title filter per request so
+          Mira's in-memory list cache cannot serve it. It is an unsorted first page: the query
+          returns 30 rows, so the table size above 30 does not affect its cost; each miss still
+          writes the page back to the cache. The cached list benchmark repeats one URL after a
+          warm-up, so every measured read is served by the in-memory list cache.
         </p>
       </div>
 
@@ -402,7 +462,8 @@
         <dl class="facts">
           <div><dt>Runs</dt><dd>{method.runs} alternating pairs, median shown</dd></div>
           <div><dt>Records</dt><dd>{method.seedRecords} seed + {method.createRequests} measured creates ({number.format(method.records)} rows)</dd></div>
-          <div><dt>List load</dt><dd>{number.format(method.listRequests)} unique-filter requests</dd></div>
+          <div><dt>List load</dt><dd>{number.format(method.listRequests)} uncached (unique-filter) + {number.format(method.listRequests)} cached (repeated-URL) requests</dd></div>
+          <div><dt>List cache</dt><dd>{method.cache.enabled ? `enabled (${method.cache.listTtlMs} ms TTL)` : 'disabled'}</dd></div>
           <div><dt>Concurrency</dt><dd>{method.concurrency} measured; {method.seedConcurrency} seed / {method.warmupConcurrency} warm-up</dd></div>
           <div><dt>Request body</dt><dd>{method.payloadBytes}-byte <code>body</code> field on create</dd></div>
           <div><dt>Create batching</dt><dd>{method.batchMutation.create.enabled ? `enabled (${method.batchMutation.create.windowMs} ms window, max ${method.batchMutation.create.maxBatchSize})` : 'disabled'}</dd></div>
@@ -425,9 +486,10 @@
           </p>
           <p>
             Database files are fresh for every run, so startup includes migration. Each Node
-            and Bun run is interleaved (Node, Bun, Node, Bun…) and the list requests use a
+            and Bun run is interleaved (Node, Bun, Node, Bun…) and the uncached list requests use a
             unique title filter so the in-memory list cache cannot serve them; each miss still
-            writes the page back to the cache, so the number includes that write. Five paired
+            writes the page back to the cache, so the number includes that write. The cached
+            list repeats one URL after a warm-up and measures the cache-hit path. Five paired
             runs can reach a two-sided sign-test floor of p = 0.0625; this is not a
             significance claim. One concurrency point is not a capacity curve. The load
             generator is a small Node script with no external benchmark binary. Run it

@@ -15,16 +15,19 @@ to reduce drift from machine state.
 | Seed | 50 JSON `POST`s, concurrency 10 |
 | Create | 500 measured JSON `POST`s, concurrency 50, 180-byte `body` |
 | List warm-up | 100 unique-filter requests, concurrency 10 |
-| List | 2,000 unique-filter `GET`s over 550 rows, `limit=30`, concurrency 50 |
+| List (uncached) | 2,000 unique-filter `GET`s over 550 rows, `limit=30`, concurrency 50 |
+| Cached list warm-up | 100 repeated-URL requests, concurrency 10 |
+| List (cached) | 2,000 repeated-URL `GET`s over 550 rows, `limit=30`, concurrency 50 |
 
 Before measuring, the runner issues one filtered list request and asserts the response has 30
 items. That catches a broken filter or an empty table before the load starts.
 
-The list requests use a different `title neq <value>` filter on every request. That is
-deliberate: Mira caches list responses for 10 seconds by default, and a repeated URL would
+The uncached list requests use a different `title neq <value>` filter on every request. That
+is deliberate: Mira caches list responses for 10 seconds by default, and a repeated URL would
 measure the cache, not SQLite. The unique filter forces a cache miss and runs the normal
 generated list query. Each miss also writes the result back to the list cache, so the metric
-includes that write; it is not a pure SQLite read.
+includes that write; it is not a pure SQLite read. The cached list then repeats one fixed URL
+after a warm-up, so every measured request is served by the in-memory list cache.
 
 It repeats the whole sequence five times per runtime and writes medians to
 `apps/landing/src/lib/benchmarks.json`. The landing `/benchmarks` page renders that file,
