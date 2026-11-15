@@ -14,8 +14,13 @@ import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage } from "@/storage/storage.js"
 
 import type { CursorPage, RequestCtx } from "./context.js"
-import { CreateBatcher, CreateBatcherDisabledLive, estimateRowBytes, makeCreateBatcherLayer } from "./create-batcher.js"
-import type { CreateBatchStats, PreparedCreate, ResolvedBatchOperationConfig } from "./create-batcher.js"
+import { MutationBatcher, MutationBatcherDisabledLive, estimateRowBytes, makeMutationBatcherLayer } from "./mutation-batcher.js"
+import type {
+  BatchMutationStats,
+  MutationBatchResult,
+  PreparedCreate,
+  ResolvedBatchMutationConfig
+} from "./mutation-batcher.js"
 import type { RowDecoder, RowDecoderSync, RowEncoder } from "./decode.js"
 import { makeListRowMapper, makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
 import type { CollectionError } from "./errors.js"
@@ -330,39 +335,39 @@ type CollectionServiceDeps = Repository | SqlClient.SqlClient | FileStorage | Di
 export function makeCollectionServiceLayer(
   allCollections: ReadonlyArray<AnyCollectionDef>
 ): Layer.Layer<CollectionService, never, CollectionServiceDeps> {
-  return makeCollectionServiceLayerWith(allCollections, CreateBatcherDisabledLive)
+  return makeCollectionServiceLayerWith(allCollections, MutationBatcherDisabledLive)
 }
 
 /**
- * Create a `CollectionService` layer whose `create` inserts go through the
- * shared create batcher.
+ * Create a `CollectionService` layer whose single-record mutations go through
+ * the shared mutation batcher.
  *
- * The batcher merges concurrent single creates into one transaction per flush.
- * Preparation (validation, rules, credentials, password hashing) still runs in
- * the caller's fiber before queueing.
+ * The batcher merges concurrent creates, updates and deletes into one
+ * transaction per flush. Preparation that does not depend on the stored row
+ * still runs in the caller's fiber before queueing.
  *
  * @param allCollections - Array of collection definitions
  * @param config - A resolved (validated) batching configuration
- * @param statsLayer - The app's single `CreateBatchStats` layer value
+ * @param statsLayer - The app's single `BatchMutationStats` layer value
  */
 export function makeBatchedCollectionServiceLayer(
   allCollections: ReadonlyArray<AnyCollectionDef>,
-  config: ResolvedBatchOperationConfig,
-  statsLayer: Layer.Layer<CreateBatchStats>
+  config: ResolvedBatchMutationConfig,
+  statsLayer: Layer.Layer<BatchMutationStats>
 ): Layer.Layer<CollectionService, never, CollectionServiceDeps> {
-  return makeCollectionServiceLayerWith(allCollections, makeCreateBatcherLayer(config, statsLayer))
+  return makeCollectionServiceLayerWith(allCollections, makeMutationBatcherLayer(config, statsLayer))
 }
 
 function makeCollectionServiceLayerWith(
   allCollections: ReadonlyArray<AnyCollectionDef>,
-  batcherLayer: Layer.Layer<CreateBatcher, never, SqlClient.SqlClient>
+  batcherLayer: Layer.Layer<MutationBatcher, never, SqlClient.SqlClient>
 ): Layer.Layer<CollectionService, never, CollectionServiceDeps> {
   return Layer.effect(
     CollectionService,
     Effect.gen(function* () {
       const repo = yield* Repository
       const sql = yield* SqlClient.SqlClient
-      const batcher = yield* CreateBatcher
+      const batcher = yield* MutationBatcher
       const fileStorage = yield* FileStorage
       const dialect = yield* Dialect
       const authService = yield* AuthService
@@ -718,11 +723,16 @@ function makeCollectionServiceLayerWith(
        * returned row is paired with its request only through the entry's
        * `Deferred`.
        */
-      const insertPrepared = (prepared: PreparedCreate): Effect.Effect<RepoRecord, CollectionError> =>
+      const insertPrepared = (
+        prepared: PreparedCreate
+      ): Effect.Effect<MutationBatchResult, CollectionError> =>
         Effect.gen(function* () {
           const row = yield* repo.create(prepared.collection.name, prepared.row)
           const decoded = yield* decodeRow(prepared.collection, row)
-          return stripHidden(prepared.collection, decoded, prepared.admin)
+          return {
+            value: stripHidden(prepared.collection, decoded, prepared.admin),
+            afterCommit: Effect.void
+          }
         })
 
       const create = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
@@ -730,13 +740,14 @@ function makeCollectionServiceLayerWith(
           const prepared = yield* prepareCreate(collection, data, ctx)
           const startedAt = yield* Clock.currentTimeMillis
           const row = yield* batcher.submit({
+            operation: "create",
             collection,
-            insert: insertPrepared(prepared),
+            execute: insertPrepared(prepared),
             estimatedBytes: estimateRowBytes(prepared.row)
           })
           // `batch.size` is deliberately absent: the request fiber does not
           // know its batch until the deferred resolves. The flusher's
-          // `collection.createBatch` span carries the size.
+          // `collection.mutationBatch` span carries the size.
           yield* Effect.annotateCurrentSpan({
             "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
           })
@@ -770,9 +781,10 @@ function makeCollectionServiceLayerWith(
             concurrency: 1
           })
           if (prepared.length === 0) return []
-          return yield* sql.withTransaction(
+          const results = yield* sql.withTransaction(
             Effect.forEach(prepared, insertPrepared, { concurrency: 1 })
           )
+          return results.map((result) => result.value)
         }).pipe(
           Effect.withSpan("collection.createMany", {
             kind: "internal",
@@ -780,7 +792,49 @@ function makeCollectionServiceLayerWith(
           }, { captureStackTrace: false })
         )
 
-      const updateOne = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
+      interface PreparedUpdate {
+        readonly collection: AnyCollectionDef
+        readonly id: string
+        readonly raw: RepoRecord
+        readonly cleaned: RepoRecord
+        readonly hashed: RepoRecord
+        readonly passwordChanging: boolean
+        readonly passwordKeyPresent: boolean
+        readonly ctx: RequestCtx
+        readonly admin: boolean
+      }
+
+      interface PreparedDelete {
+        readonly collection: AnyCollectionDef
+        readonly id: string
+        readonly ctx: RequestCtx
+        readonly admin: boolean
+      }
+
+      const deleteFiles = (keys: ReadonlyArray<string>) =>
+        Effect.forEach(
+          keys,
+          (key) =>
+            Effect.gen(function* () {
+              yield* fileStorage.delete(key).pipe(Effect.catch(() => Effect.void))
+              const thumbKeys = yield* fileStorage
+                .list(`_thumbs/${key}/`)
+                .pipe(Effect.orElseSucceed(() => []))
+              yield* Effect.forEach(
+                thumbKeys,
+                (tk) => fileStorage.delete(tk).pipe(Effect.catch(() => Effect.void)),
+                { concurrency: "unbounded" }
+              )
+            }),
+          { concurrency: "unbounded" }
+        )
+
+      const prepareUpdate = (
+        collection: AnyCollectionDef,
+        id: string,
+        data: RepoRecord,
+        ctx: RequestCtx
+      ): Effect.Effect<PreparedUpdate, CollectionError> =>
         Effect.gen(function* () {
           if (collection.schema["x-collection-kind"] === "view") {
             return yield* new ReadOnlyError({ collection: collection.name })
@@ -789,10 +843,10 @@ function makeCollectionServiceLayerWith(
           yield* rejectSystemFields(data, collection.schema, collection.name)
           const schemas = getInputSchemas(collection)
           const cleaned = yield* Schema.decodeUnknownEffect(schemas.update)(data).pipe(
-            Effect.mapError(parseErrToValidationError(collection.name)),
+            Effect.mapError(parseErrToValidationError(collection.name))
           )
 
-          // If the collection has no rules at all, deny immediately (don't leak existence)
+          // If the collection has no rules at all, deny immediately (don't leak existence).
           if (!ctx.admin && ctx.internal === undefined) {
             const enforcerResult = enforcerForAction(collection.schema, "update")
             if (enforcerResult === null) {
@@ -800,70 +854,143 @@ function makeCollectionServiceLayerWith(
             }
           }
 
-          const existing = yield* repo.view(collection.name, id)
+          const newPassword = asString(cleaned["password"])
+          const passwordChanging =
+            isAuthCollection(collection) && newPassword !== undefined && newPassword.length > 0
+
+          if (passwordChanging && ctx.admin !== true && ctx.internal === undefined) {
+            const confirm = asString(data["passwordConfirm"])
+            if (confirm === undefined || confirm !== newPassword) {
+              return yield* new ValidationError({
+                collection: collection.name,
+                issues: ["passwordConfirm must match password"]
+              })
+            }
+          }
+
+          if (ctx.internal === "auth-flow" || ctx.internal === "email-change") {
+            const allowed =
+              ctx.internal === "email-change"
+                ? new Set(["email", "emailVerified"])
+                : new Set(["password", "emailVerified"])
+            const disallowed = Object.keys(cleaned).filter((key) => !allowed.has(key))
+            if (disallowed.length > 0) {
+              return yield* new ValidationError({
+                collection: collection.name,
+                issues: [`${ctx.internal} cannot update: ${disallowed.join(", ")}`]
+              })
+            }
+          }
+
+          return {
+            collection,
+            id,
+            raw: data,
+            cleaned,
+            hashed: yield* hashAuthPassword(collection, cleaned, true),
+            passwordChanging,
+            passwordKeyPresent: "password" in cleaned,
+            ctx,
+            admin: ctx.admin === true
+          }
+        })
+
+      const executeUpdate = (
+        prepared: PreparedUpdate,
+        deferCleanup: boolean
+      ): Effect.Effect<MutationBatchResult, CollectionError> =>
+        Effect.gen(function* () {
+          const existing = yield* repo.view(prepared.collection.name, prepared.id)
           if (Option.isNone(existing)) {
-            return yield* new NotFoundError({ collection: collection.name, id })
+            return yield* new NotFoundError({ collection: prepared.collection.name, id: prepared.id })
           }
 
           // The rule sees the effective post-write value: a body key present in
           // the patch resolves to the patch value, otherwise to the stored
           // record's value, otherwise to null.
-          const ctxWithBody: RequestCtx = { ...ctx, body: { ...existing.value, ...cleaned } }
+          const ctxWithBody: RequestCtx = {
+            ...prepared.ctx,
+            body: { ...existing.value, ...prepared.cleaned }
+          }
 
-          if (!ctx.admin && ctx.internal === undefined) {
-            const ruleWhere = yield* compileRule(collection, "update", ctxWithBody, resolveOptions)
-
-            // Rule check against this specific row
-            const combined = andWhere(ruleWhere, idClause(id))
-            const allowed = yield* repo.viewFilter(collection.name, { where: combined })
+          if (!prepared.admin && prepared.ctx.internal === undefined) {
+            const ruleWhere = yield* compileRule(
+              prepared.collection,
+              "update",
+              ctxWithBody,
+              resolveOptions
+            )
+            const allowed = yield* repo.viewFilter(prepared.collection.name, {
+              where: andWhere(ruleWhere, idClause(prepared.id))
+            })
             if (allowed.length === 0) {
-              return yield* new ForbiddenError({ collection: collection.name, action: "update" })
+              return yield* new ForbiddenError({
+                collection: prepared.collection.name,
+                action: "update"
+              })
             }
           }
 
-          const canManage = yield* canManageRecord(collection, id, ctxWithBody)
-          yield* enforceUpdateCredentials(collection, data, cleaned, existing.value, canManage, ctx)
+          const canManage = yield* canManageRecord(
+            prepared.collection,
+            prepared.id,
+            ctxWithBody
+          )
+          yield* enforceUpdateCredentials(
+            prepared.collection,
+            prepared.raw,
+            prepared.cleaned,
+            existing.value,
+            canManage,
+            prepared.ctx
+          )
 
           const updated = yield* repo.update(
-            collection.name,
-            id,
-            getEncoder(collection)(yield* hashAuthPassword(collection, cleaned, true))
+            prepared.collection.name,
+            prepared.id,
+            getEncoder(prepared.collection)(prepared.hashed)
           )
 
-          if (isAuthCollection(collection) && asString(cleaned["password"]) !== undefined) {
-            yield* challengeStore
-              .consumeAllForUser(collection.name, id, Date.now())
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("auth.password_change.challenge_cleanup_failed", {
-                    cause: String(cause)
-                  })
+          const challengeCleanup = prepared.passwordKeyPresent
+            ? challengeStore
+                .consumeAllForUser(prepared.collection.name, prepared.id, Date.now())
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("auth.password_change.challenge_cleanup_failed", {
+                      cause: String(cause)
+                    })
+                  )
                 )
-              )
+            : Effect.void
+
+          const oldKeys = extractReplacedFileKeys(
+            existing.value,
+            prepared.cleaned,
+            prepared.collection.schema
+          )
+          const cleanup = challengeCleanup.pipe(Effect.andThen(deleteFiles(oldKeys)))
+
+          const value = stripHidden(
+            prepared.collection,
+            yield* decodeRow(
+              prepared.collection,
+              Option.getOrElse(updated, () => existing.value)
+            ),
+            prepared.admin
+          )
+
+          if (!deferCleanup) {
+            yield* cleanup
+            return { value, afterCommit: Effect.void }
           }
+          return { value, afterCommit: cleanup }
+        })
 
-          // Best-effort: delete old files and their thumbnails for any replaced file fields.
-          const oldKeys = extractReplacedFileKeys(existing.value, cleaned, collection.schema)
-          yield* Effect.forEach(
-            oldKeys,
-            (key) =>
-              Effect.gen(function* () {
-                yield* fileStorage.delete(key).pipe(Effect.catch(() => Effect.void))
-                const thumbKeys = yield* fileStorage.list(`_thumbs/${key}/`).pipe(Effect.orElseSucceed(() => []))
-                yield* Effect.forEach(
-                  thumbKeys,
-                  (tk) => fileStorage.delete(tk).pipe(Effect.catch(() => Effect.void)),
-                  { concurrency: "unbounded" }
-                )
-              }),
-            { concurrency: "unbounded" }
-          )
-
-          return stripHidden(
-            collection,
-            yield* decodeRow(collection, Option.getOrElse(updated, () => existing.value)),
-            ctx.admin === true
-          )
+      const updateOne = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepareUpdate(collection, id, data, ctx)
+          const result = yield* executeUpdate(prepared, false)
+          return result.value
         }).pipe(
           Effect.withSpan("collection.update", {
             kind: "internal",
@@ -872,7 +999,29 @@ function makeCollectionServiceLayerWith(
         )
 
       const update = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
-        updateOne(collection, id, data, ctx)
+        Effect.gen(function* () {
+          const prepared = yield* prepareUpdate(collection, id, data, ctx)
+          const startedAt = yield* Clock.currentTimeMillis
+          const entry = {
+            operation: "update" as const,
+            collection,
+            execute: executeUpdate(prepared, true),
+            estimatedBytes: estimateRowBytes(prepared.cleaned) + id.length * 2
+          }
+          const row =
+            ctx.internal !== undefined
+              ? yield* batcher.submitInline(entry)
+              : yield* batcher.submit(entry)
+          yield* Effect.annotateCurrentSpan({
+            "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
+          })
+          return row
+        }).pipe(
+          Effect.withSpan("collection.update", {
+            kind: "internal",
+            attributes: { collection: collection.name }
+          }, { captureStackTrace: false })
+        )
 
       // Same transaction contract as createMany: one BEGIN, every per-record
       // update (validation, rule check against the merged row, credentials,
@@ -899,13 +1048,17 @@ function makeCollectionServiceLayerWith(
           }, { captureStackTrace: false })
         )
 
-      const deleteOne = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
+      const prepareDelete = (
+        collection: AnyCollectionDef,
+        id: string,
+        ctx: RequestCtx
+      ): Effect.Effect<PreparedDelete, CollectionError> =>
         Effect.gen(function* () {
           if (collection.schema["x-collection-kind"] === "view") {
             return yield* new ReadOnlyError({ collection: collection.name })
           }
 
-          // If the collection has no rules at all, deny immediately (don't leak existence)
+          // If the collection has no rules at all, deny immediately (don't leak existence).
           if (!ctx.admin) {
             const enforcerResult = enforcerForAction(collection.schema, "delete")
             if (enforcerResult === null) {
@@ -913,38 +1066,83 @@ function makeCollectionServiceLayerWith(
             }
           }
 
-          const existing = yield* repo.view(collection.name, id)
+          return { collection, id, ctx, admin: ctx.admin === true }
+        })
+
+      const executeDelete = (
+        prepared: PreparedDelete,
+        deferCleanup: boolean
+      ): Effect.Effect<MutationBatchResult, CollectionError> =>
+        Effect.gen(function* () {
+          const existing = yield* repo.view(prepared.collection.name, prepared.id)
           if (Option.isNone(existing)) {
-            return yield* new NotFoundError({ collection: collection.name, id })
+            return yield* new NotFoundError({ collection: prepared.collection.name, id: prepared.id })
           }
 
-          if (!ctx.admin) {
-            const ruleWhere = yield* compileRule(collection, "delete", ctx, resolveOptions)
-            const combined = andWhere(ruleWhere, idClause(id))
-            const allowed = yield* repo.viewFilter(collection.name, { where: combined })
+          if (!prepared.admin) {
+            const ruleWhere = yield* compileRule(
+              prepared.collection,
+              "delete",
+              prepared.ctx,
+              resolveOptions
+            )
+            const allowed = yield* repo.viewFilter(prepared.collection.name, {
+              where: andWhere(ruleWhere, idClause(prepared.id))
+            })
             if (allowed.length === 0) {
-              return yield* new ForbiddenError({ collection: collection.name, action: "delete" })
+              return yield* new ForbiddenError({
+                collection: prepared.collection.name,
+                action: "delete"
+              })
             }
           }
 
-          yield* repo.delete(collection.name, id)
+          const deleted = yield* repo.delete(prepared.collection.name, prepared.id)
+          if (Option.isNone(deleted)) {
+            return yield* new NotFoundError({ collection: prepared.collection.name, id: prepared.id })
+          }
 
-          // Best-effort: delete files and their thumbnails after the record is gone.
-          const keys = extractFileKeys(existing.value, collection.schema)
-          yield* Effect.forEach(
-            keys,
-            (key) =>
-              Effect.gen(function* () {
-                yield* fileStorage.delete(key).pipe(Effect.catch(() => Effect.void))
-                const thumbKeys = yield* fileStorage.list(`_thumbs/${key}/`).pipe(Effect.orElseSucceed(() => []))
-                yield* Effect.forEach(
-                  thumbKeys,
-                  (tk) => fileStorage.delete(tk).pipe(Effect.catch(() => Effect.void)),
-                  { concurrency: "unbounded" }
-                )
-              }),
-            { concurrency: "unbounded" }
+          const cleanup = deleteFiles(
+            extractFileKeys(existing.value, prepared.collection.schema)
           )
+
+          if (!deferCleanup) {
+            yield* cleanup
+            return { value: existing.value, afterCommit: Effect.void }
+          }
+          return { value: existing.value, afterCommit: cleanup }
+        })
+
+      const deleteOne = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepareDelete(collection, id, ctx)
+          const result = yield* executeDelete(prepared, false)
+          void result
+        }).pipe(
+          Effect.withSpan("collection.delete", {
+            kind: "internal",
+            attributes: { collection: collection.name }
+          }, { captureStackTrace: false })
+        )
+
+      const deleteBatched = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepareDelete(collection, id, ctx)
+          const startedAt = yield* Clock.currentTimeMillis
+          const entry = {
+            operation: "delete" as const,
+            collection,
+            execute: executeDelete(prepared, true),
+            estimatedBytes: id.length * 2 + 64
+          }
+          if (ctx.internal !== undefined) {
+            yield* batcher.submitInline(entry)
+          } else {
+            yield* batcher.submit(entry)
+          }
+          yield* Effect.annotateCurrentSpan({
+            "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
+          })
         }).pipe(
           Effect.withSpan("collection.delete", {
             kind: "internal",
@@ -970,7 +1168,7 @@ function makeCollectionServiceLayerWith(
           }, { captureStackTrace: false })
         )
 
-      return { list, view, create, createMany, update, updateMany, delete: deleteOne, deleteMany }
+      return { list, view, create, createMany, update, updateMany, delete: deleteBatched, deleteMany }
     })
   ).pipe(Layer.provide(batcherLayer))
 }

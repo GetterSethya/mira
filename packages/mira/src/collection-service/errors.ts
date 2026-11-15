@@ -74,12 +74,15 @@ export class PayloadTooLargeError extends Data.TaggedError("PayloadTooLargeError
  * idempotent, so an automatic retry can duplicate a row.
  *
  * @example
- * new CreateBatchClosedError({ pending: 3 })
+ * new BatchMutationClosedError({ pending: 3 })
  *
- * @see CreateBatcher — the queue that raises this on shutdown
+ * @see MutationBatcher — the queue that raises this on shutdown
  */
-export class CreateBatchClosedError extends Data.TaggedError("CreateBatchClosedError")<{
+export type BatchOperation = "create" | "update" | "delete"
+
+export class BatchMutationClosedError extends Data.TaggedError("BatchMutationClosedError")<{
   readonly pending: number
+  readonly operation: BatchOperation
 }> {}
 
 /**
@@ -89,10 +92,11 @@ export class CreateBatchClosedError extends Data.TaggedError("CreateBatchClosedE
  * The server returns HTTP 503 `{ error: "batch_unavailable", retryable: false }`.
  *
  * @example
- * new CreateBatchQueueFullError({ limit: 1_000 })
+ * new BatchMutationQueueFullError({ limit: 1_000 })
  */
-export class CreateBatchQueueFullError extends Data.TaggedError("CreateBatchQueueFullError")<{
+export class BatchMutationQueueFullError extends Data.TaggedError("BatchMutationQueueFullError")<{
   readonly limit: number
+  readonly operation: BatchOperation
 }> {}
 
 /**
@@ -105,10 +109,11 @@ export class CreateBatchQueueFullError extends Data.TaggedError("CreateBatchQueu
  * response — do not blindly retry creates.
  *
  * @example
- * new CreateBatchTimeoutError({ timeoutMs: 10_000 })
+ * new BatchMutationTimeoutError({ timeoutMs: 10_000 })
  */
-export class CreateBatchTimeoutError extends Data.TaggedError("CreateBatchTimeoutError")<{
+export class BatchMutationTimeoutError extends Data.TaggedError("BatchMutationTimeoutError")<{
   readonly timeoutMs: number
+  readonly operation: BatchOperation
 }> {}
 
 /**
@@ -124,7 +129,13 @@ export class CreateBatchTimeoutError extends Data.TaggedError("CreateBatchTimeou
  *   yield* sql.withTransaction(svc.create(Posts, data, ctx))
  * })
  */
-export class CreateBatchNestedTransactionError extends Data.TaggedError("CreateBatchNestedTransactionError")<{}> {}
+export class BatchMutationConflictError extends Data.TaggedError("BatchMutationConflictError")<{
+  readonly operation: BatchOperation
+}> {}
+
+export class BatchMutationNestedTransactionError extends Data.TaggedError("BatchMutationNestedTransactionError")<{
+  readonly operation: BatchOperation
+}> {}
 
 /**
  * Union of all errors that can be raised by CollectionService operations.
@@ -142,8 +153,9 @@ export type CollectionError =
   | ValidationError
   | ReadOnlyError
   | PayloadTooLargeError
-  | CreateBatchClosedError
-  | CreateBatchQueueFullError
-  | CreateBatchTimeoutError
-  | CreateBatchNestedTransactionError
+  | BatchMutationClosedError
+  | BatchMutationQueueFullError
+  | BatchMutationTimeoutError
+  | BatchMutationConflictError
+  | BatchMutationNestedTransactionError
   | SqlError.SqlError

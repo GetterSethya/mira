@@ -8,7 +8,7 @@ import { makeCachedCollectionServiceLayer } from "@/cache/index.js"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import {
   makeBatchedCollectionServiceLayer,
-  makeCreateBatchStatsLayer,
+  makeBatchMutationStatsLayer,
   resolveBatchMutationConfig
 } from "@/collection-service/index.js"
 import { AppConfig, AppConfigLive } from "@/config/index.js"
@@ -301,31 +301,31 @@ export class MiraApp<R = never, Telemetry = never> {
       }).pipe(Effect.orDie)
     ).pipe(Layer.provide(fullMid))
 
-    // Create batching. One stats value per app build: it is merged below (so
+    // Mutation batching. One stats value per app build: it is merged below (so
     // plugin routes can read it) and passed to the batched base service.
-    // `null` from the resolver means the feature is off — the disabled batcher
-    // runs inserts inline and no queue/fiber is created.
+    // `queue === null` means the feature is off — the disabled batcher runs
+    // mutations inline and no queue/fiber is created.
     const batchMutation = resolveBatchMutationConfig(this.#config.batchMutation)
-    const createBatchConfig = batchMutation.create
-    const createBatchStatsLayer = makeCreateBatchStatsLayer()
+    const batchingEnabled = batchMutation.queue !== null
+    const batchMutationStatsLayer = makeBatchMutationStatsLayer()
 
     // Core collection service: cached by default, or uncached when the app
     // explicitly disables the cache. The hook decorator wraps either one.
     const cacheConfig = this.#config.cache ?? {}
     const collectionServiceLayer =
       cacheConfig.enabled === false
-        ? createBatchConfig === null
-          ? makeCollectionServiceLayer(allCollections)
-          : makeBatchedCollectionServiceLayer(allCollections, createBatchConfig, createBatchStatsLayer)
+        ? batchingEnabled
+          ? makeBatchedCollectionServiceLayer(allCollections, batchMutation, batchMutationStatsLayer)
+          : makeCollectionServiceLayer(allCollections)
         : makeCachedCollectionServiceLayer(
             allCollections,
             cacheConfig,
-            createBatchConfig === null
-              ? {}
-              : {
-                  batchMutation: { ...batchMutation, create: createBatchConfig },
-                  statsLayer: createBatchStatsLayer
+            batchingEnabled
+              ? {
+                  batchMutation,
+                  statsLayer: batchMutationStatsLayer
                 }
+              : {}
           )
 
     // Hook collection service decorator: wraps the selected collection service with hooks
@@ -335,9 +335,9 @@ export class MiraApp<R = never, Telemetry = never> {
 
     // Full top layer: hook-wrapped collection service + all mid services +
     // auto-migration side effect + the app-wide create-batch stats value (so
-    // plugin routes can resolve `CreateBatchStats`).
+    // plugin routes can resolve `BatchMutationStats`).
     const topLayer = hookCollectionLayer.pipe(
-      Layer.provideMerge(Layer.mergeAll(fullMid, autoMigrateLayer, createBatchStatsLayer))
+      Layer.provideMerge(Layer.mergeAll(fullMid, autoMigrateLayer, batchMutationStatsLayer))
     )
 
     // Cron service: scoped fibers die when server stops; provided with full service stack + hook service

@@ -8,30 +8,35 @@ export {
 } from "./collection-service.js"
 export type { CursorPage, RequestCtx } from "./context.js"
 export type {
-  CreateBatchEntry,
-  CreateBatchStatsSnapshot,
+  BatchMutationFlush,
+  BatchMutationStatsSnapshot,
+  BatchOperationStatsSnapshot,
   MiraBatchMutationConfig,
   MiraBatchOperationConfig,
+  MutationBatchEntry,
+  MutationBatchResult,
   PreparedCreate,
   ResolvedBatchMutationConfig,
-  ResolvedBatchOperationConfig
-} from "./create-batcher.js"
+  ResolvedBatchOperationConfig,
+  ResolvedBatchQueueConfig
+} from "./mutation-batcher.js"
 export {
-  CreateBatcher,
-  CreateBatcherDisabledLive,
-  CreateBatchStats,
+  MutationBatcher,
+  MutationBatcherDisabledLive,
+  BatchMutationStats,
   estimateRowBytes,
-  makeCreateBatcherLayer,
-  makeCreateBatchStatsLayer,
+  makeMutationBatcherLayer,
+  makeBatchMutationStatsLayer,
   resolveBatchMutationConfig,
   resolveBatchOperationConfig
-} from "./create-batcher.js"
-export type { CollectionError } from "./errors.js"
+} from "./mutation-batcher.js"
+export type { BatchOperation, CollectionError } from "./errors.js"
 export {
-  CreateBatchClosedError,
-  CreateBatchNestedTransactionError,
-  CreateBatchQueueFullError,
-  CreateBatchTimeoutError,
+  BatchMutationClosedError,
+  BatchMutationConflictError,
+  BatchMutationNestedTransactionError,
+  BatchMutationQueueFullError,
+  BatchMutationTimeoutError,
   ForbiddenError,
   NotFoundError,
   ReadOnlyError,

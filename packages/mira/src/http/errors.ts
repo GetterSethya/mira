@@ -20,16 +20,19 @@ import type { FileStorageError } from "@/storage/storage.js"
  * | `ValidationError` | 422 |
  * | `ReadOnlyError` | 405 |
  * | `PayloadTooLargeError` | 413 |
- * | `CreateBatchClosedError` | 503 |
- * | `CreateBatchQueueFullError` | 503 |
- * | `CreateBatchTimeoutError` | 503 |
- * | `CreateBatchNestedTransactionError` | 500 |
+ * | `BatchMutationClosedError` | 503 |
+ * | `BatchMutationQueueFullError` | 503 |
+ * | `BatchMutationTimeoutError` | 503 |
+ * | `BatchMutationConflictError` | 409 |
+ * | `BatchMutationNestedTransactionError` | 500 |
  * | `FileStorageError` | 502 |
  * | `SqlError` | 500 |
  *
- * The create-batch 503s share `{ error: "batch_unavailable", retryable: false }`
- * and deliberately carry no `Retry-After`: a create is not idempotent, so an
- * automatic retry can duplicate a row.
+ * The 503 family carries `{ error: "batch_unavailable", operation, retryable }`.
+ * Create is never retryable (a retry can duplicate a row); update/delete are
+ * retryable for queue-full/timeout, and a retried delete may return 404 for a
+ * row this client already deleted. A closed batcher is never retryable until
+ * restart.
  *
  * Use this as a final `.pipe()` call in route handlers to convert domain errors
  * to HTTP responses.
@@ -76,34 +79,55 @@ export const catchCollectionErrors = <A, R>(
           { status: 413 as const }
         )
       ),
-    // Batch-unavailable family: 503 without `Retry-After`. A timed-out or
-    // rejected create may still have committed; automatic retries duplicate.
-    CreateBatchClosedError: () =>
+    // Batch-unavailable family. Create is never retryable; update/delete are
+    // retryable for queue-full/timeout. A closed batcher is never retryable
+    // until restart.
+    BatchMutationClosedError: (e) =>
       Effect.fail(
         HttpServerResponse.jsonUnsafe(
-          { error: "batch_unavailable", retryable: false },
+          {
+            error: "batch_unavailable",
+            operation: e.operation,
+            retryable: false,
+            retryAfterRestart: true
+          },
           { status: 503 as const }
         )
       ),
-    CreateBatchQueueFullError: () =>
+    BatchMutationQueueFullError: (e) =>
       Effect.fail(
         HttpServerResponse.jsonUnsafe(
-          { error: "batch_unavailable", retryable: false },
+          {
+            error: "batch_unavailable",
+            operation: e.operation,
+            retryable: e.operation !== "create"
+          },
           { status: 503 as const }
         )
       ),
-    CreateBatchTimeoutError: () =>
+    BatchMutationTimeoutError: (e) =>
       Effect.fail(
         HttpServerResponse.jsonUnsafe(
-          { error: "batch_unavailable", retryable: false },
+          {
+            error: "batch_unavailable",
+            operation: e.operation,
+            retryable: e.operation !== "create"
+          },
           { status: 503 as const }
         )
       ),
-    // Programmer error: `create` ran inside an open SQL transaction.
-    CreateBatchNestedTransactionError: () =>
+    BatchMutationConflictError: (e) =>
       Effect.fail(
         HttpServerResponse.jsonUnsafe(
-          { error: "create_inside_transaction" },
+          { error: "batch_conflict", operation: e.operation, retryable: false },
+          { status: 409 as const }
+        )
+      ),
+    // Programmer error: an enabled mutation ran inside an open SQL transaction.
+    BatchMutationNestedTransactionError: (e) =>
+      Effect.fail(
+        HttpServerResponse.jsonUnsafe(
+          { error: "mutation_inside_transaction", operation: e.operation },
           { status: 500 as const }
         )
       ),

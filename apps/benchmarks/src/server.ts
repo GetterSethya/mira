@@ -2,7 +2,7 @@ import {
   BaseCollection,
   Field,
   Repository,
-  CreateBatchStats,
+  BatchMutationStats,
   defineRule,
   LocalFileStorage,
   Mira,
@@ -88,7 +88,7 @@ const batchStatsRoute = HttpRouter.route(
   "GET",
   "/__bench/batch-stats",
   Effect.gen(function* () {
-    const stats = yield* CreateBatchStats
+    const stats = yield* BatchMutationStats
     return HttpServerResponse.jsonUnsafe(yield* stats.snapshot)
   }).pipe(
     Effect.catchCause(() =>
@@ -108,7 +108,7 @@ const resetBatchStatsRoute = HttpRouter.route(
   "POST",
   "/__bench/batch-stats/reset",
   Effect.gen(function* () {
-    const stats = yield* CreateBatchStats
+    const stats = yield* BatchMutationStats
     yield* stats.reset
     return HttpServerResponse.jsonUnsafe({ ok: true })
   }).pipe(
@@ -148,7 +148,7 @@ const exitRoute = HttpRouter.route(
   })
 )
 
-const benchPlugin = MiraPlugin.define<Repository | CreateBatchStats | SqlClient.SqlClient>({
+const benchPlugin = MiraPlugin.define<Repository | BatchMutationStats | SqlClient.SqlClient>({
   routes: [
     pingRoute,
     repoListRoute,
@@ -168,6 +168,8 @@ const cacheEnabled = process.env.BENCH_CACHE !== "off"
 const createBatchEnabled = process.env.BENCH_CREATE_BATCH !== "off"
 const createBatchWindowMs = Number(process.env.BENCH_CREATE_BATCH_WINDOW_MS ?? "0")
 const createBatchMax = Number(process.env.BENCH_CREATE_BATCH_MAX ?? "100")
+const updateBatchEnabled = process.env.BENCH_UPDATE_BATCH === "on"
+const deleteBatchEnabled = process.env.BENCH_DELETE_BATCH === "on"
 
 Mira.builder()
   .platform(platform.preset)
@@ -181,7 +183,9 @@ Mira.builder()
       enabled: createBatchEnabled,
       windowMs: createBatchWindowMs,
       maxBatchSize: createBatchMax
-    }
+    },
+    ...(updateBatchEnabled ? { update: { enabled: true } } : {}),
+    ...(deleteBatchEnabled ? { delete: { enabled: true } } : {})
   })
   .telemetry(Layer.empty)
   .build()

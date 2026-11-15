@@ -2,7 +2,7 @@ import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { Layer } from "effect"
 
 import type { MiraCacheConfig } from "@/cache/types.js"
-import type { MiraBatchMutationConfig } from "@/collection-service/create-batcher.js"
+import type { MiraBatchMutationConfig } from "@/collection-service/mutation-batcher.js"
 import type { CronDef } from "@/cron/types.js"
 import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
@@ -198,25 +198,20 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
   /**
    * Configure transparent mutation batching (optional, **off by default**).
    *
-   * The shape is operation-keyed so update/delete can be added later without
-   * another builder method:
+   * The shape is operation-keyed. All three operations are implemented:
    *
    * ```ts
-   * .batchMutation({ create: {} })                 // create batching on
+   * .batchMutation({ create: {}, update: {}, delete: {} })
    * .batchMutation({ create: { enabled: false } }) // explicitly off
-   * .batchMutation({ windowMs: 2, create: {} })    // shared defaults
+   * .batchMutation({ windowMs: 2, create: {}, update: {} })
    * ```
    *
-   * Only `create` is implemented today. `update`/`delete` are accepted by the
-   * type but throw at startup if enabled, rather than silently doing nothing.
-   *
-   * Concurrent single creates are merged into one SQLite transaction: each
-   * request still validates, checks rules and hashes passwords in its own
-   * fiber, but only the insert is queued and committed together. This reduces
-   * commit/fsync count under load at the cost of a small fixed latency
-   * (`windowMs`) at low concurrency, and it widens the window in which a
-   * committed row can exist without the client receiving the response — do
-   * not blindly retry a timed-out create.
+   * Concurrent single mutations are merged into one SQLite transaction: create
+   * prepares validation/rules/hashing in the request fiber; update/delete read
+   * the stored row, check rules and credentials inside the batch transaction.
+   * This reduces commit/fsync count under `synchronous=FULL`, with no reliable
+   * win under `NORMAL` and a low-concurrency regression. Enable it for FULL
+   * write bursts, not for NORMAL or latency-sensitive single-request traffic.
    *
    * @param c - A `MiraBatchMutationConfig`
    * @returns A new builder (same phantom type — batching is optional)
@@ -224,7 +219,7 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    * @example
    * Mira.builder()
    *   // ... required steps
-   *   .batchMutation({ create: { windowMs: 2, maxBatchSize: 100 } })
+   *   .batchMutation({ windowMs: 2, maxBatchSize: 100, create: {}, update: {}, delete: {} })
    */
   batchMutation(c: MiraBatchMutationConfig): MiraBuilder<Has, R, Telemetry> {
     return new MiraBuilder({ ...this.#config, batchMutation: c })
@@ -350,7 +345,7 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
       migrations: config.migrations ?? {},
       rateLimits: config.rateLimits ?? {},
       cache: config.cache ?? { enabled: true },
-      batchMutation: config.batchMutation ?? { create: { enabled: false } }
+      batchMutation: config.batchMutation ?? {}
     })
   }
 }

@@ -6,9 +6,9 @@ import type { SqlClient } from "effect/sql"
 
 import { CollectionService, makeBatchedCollectionServiceLayer, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import type {
-  CreateBatchStats,
-  ResolvedBatchOperationConfig
-} from "@/collection-service/create-batcher.js"
+  BatchMutationStats,
+  ResolvedBatchMutationConfig
+} from "@/collection-service/mutation-batcher.js"
 import type { Dialect } from "@/dialect/dialect.js"
 import type { AuthService } from "@/http/auth.js"
 import type { Repository } from "@/repository/repository.js"
@@ -73,17 +73,13 @@ function stableListKey(
  * Base-service selection for {@link makeCachedCollectionServiceLayer}.
  *
  * Batched-without-stats is not representable: the batcher needs the app's
- * single `CreateBatchStats` value, so enabling batching requires both fields.
+ * single `BatchMutationStats` value, so enabling batching requires both fields.
  */
 export type CachedCollectionServiceOptions =
   | { readonly batchMutation?: null | undefined; readonly statsLayer?: never }
   | {
-      readonly batchMutation: {
-        readonly create: ResolvedBatchOperationConfig
-        readonly update: null
-        readonly delete: null
-      }
-      readonly statsLayer: Layer.Layer<CreateBatchStats>
+      readonly batchMutation: ResolvedBatchMutationConfig
+      readonly statsLayer: Layer.Layer<BatchMutationStats>
     }
 
 /**
@@ -127,7 +123,7 @@ export function makeCachedCollectionServiceLayer(
     serviceOptions.batchMutation != null && "statsLayer" in serviceOptions
       ? makeBatchedCollectionServiceLayer(
           allCollections,
-          serviceOptions.batchMutation.create,
+          serviceOptions.batchMutation,
           serviceOptions.statsLayer
         )
       : makeCollectionServiceLayer(allCollections)

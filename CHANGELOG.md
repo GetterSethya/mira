@@ -17,35 +17,34 @@ published by CI.
 
 ### Added
 
-- **Opt-in transparent mutation batching (create first).** `Mira.builder().batchMutation({ create: {
-  enabled, windowMs, maxBatchSize, maxQueueSize, maxQueueBytes, submitTimeoutMs } })` merges concurrent single
-  `POST /api/collections/:name` creates into one SQLite transaction: each request still validates,
-  checks its create rule, enforces credentials and hashes passwords in its own fiber, while only
-  the insert is queued. A background flusher runs every insert inside a nested savepoint, isolates
-  statement-level failures, probes for transaction-fatal rollbacks, and completes each request's
-  `Deferred` only after the outer `COMMIT` returns (post-commit completion is uninterruptible).
-  Admission is fail-fast on an explicit count/byte budget (`CreateBatchQueueFullError`), request
-  waits are bounded (`CreateBatchTimeoutError`), flusher defects are counted and close the batcher
-  after three consecutive failures, and layer shutdown fails every uncommitted entry with
-  `CreateBatchClosedError` before the SQL client is released. All three map to `503
-  { error: "batch_unavailable", retryable: false }` without `Retry-After` (a create is not
-  idempotent); calling `create` inside an open transaction fails fast with a 500
-  `{ error: "create_inside_transaction" }` instead of deadlocking. Off by default — the disabled
-  batcher runs inserts inline, so the default path is unchanged. The window defaults to `0`, which
-  drains whatever is already queued after one scheduler yield and never sleeps; a positive
-  `windowMs` opts into a real timer (Windows rounds a 2 ms sleep up to ~15 ms), and the window
-  sweep in the audit measures that trade-off. `createMany` now prepares every
-  record *before* opening its transaction and never touches the queue; as a result a create rule
-  that uses `Rule.subquery()` over the same collection no longer sees rows inserted earlier in the
-  same bulk call. The operation-keyed `batchMutation` shape reserves `update` and `delete`; enabling
-  either today throws at startup instead of silently doing nothing, so adding them later will not
-  change the builder surface. `CreateBatchStats`
-  (`batches`, `commits`, `records`, `maxBatchSize`, `lastBatchSizes`, `rejected`,
-  `consecutiveDefects`, `timedOut`, `admitted`) is available to plugins; `records` counts rows
-  actually written, `timedOut` counts requests that gave up, and stats are best-effort — a counter
-  failure never changes a request's outcome. `pnpm --filter mira-benchmarks
-  create-batch:audit` measures `on` vs `off` across `synchronous=FULL|NORMAL`, c1/c10/c50/c100,
-  with a read arm and an open-loop arm. See `.plans/create-batch-spike-plan.md`.
+- **Opt-in transparent mutation batching (create, update, delete).**
+  `.batchMutation({ create: {}, update: {}, delete: {} })` merges concurrent
+  single-record mutations into one SQLite transaction. Create prepares
+  validation, rules and hashing in the request fiber and queues only the insert.
+  Update/delete read the stored row, check the update/delete rule, `manage` rule
+  and credentials inside the batch transaction, so a later entry in the same
+  flush sees an earlier entry's write. One FIFO flusher runs entries in queue
+  order, uses a savepoint per entry (single-entry fast path preserved), isolates
+  statement-level failures, and settles deferreds only after `COMMIT`. A
+  constraint failure at commit (for example a deferred foreign key) maps to
+  `409 { error: "batch_conflict", operation }` / `BatchMutationConflictError`
+  and does not count as a batcher defect; driver defects close the batcher after
+  three consecutive failures. Queue-full, timeout and closed map to `503
+  { error: "batch_unavailable", operation, retryable }`; create is never
+  retryable, update/delete are retryable for queue-full/timeout (a retried
+  delete may return 404). Admin is captured per entry and hidden fields are
+  stripped per entry. File and auth-challenge cleanup runs after commit through
+  a bounded worker; abandoned jobs are counted and logged. Off by default: the
+  disabled path runs inline and the default behaviour is unchanged.
+  `BatchMutationStats` exposes overall and per-operation `batches`, `applied`,
+  `maxBatchSize`, `lastBatchSizes`, `rejected`, `timedOut`, `admitted` and
+  `cleanupAbandoned`, plus `commits`/`inlineCommits` and
+  `lastFlushDurationsMs`. `updateMany`/`deleteMany` keep their all-or-nothing
+  contract and bypass the queue. Measured on Windows/Node 24, cache off:
+  `synchronous=FULL` c50/c100 update **2.23x/2.48x**, delete **2.60x/2.60x**;
+  `NORMAL` is flat; c1 regresses (update 0.89x, delete 0.74x), so the feature
+  remains opt-in and is not recommended for `NORMAL` or low-concurrency traffic.
+  See `.egm/create-batch-polish-2026-11-15/`.
 - **Transactional bulk update and delete.** `PATCH /api/collections/:name/bulk` accepts
   `{ "records": [{ "id": string, "data": { ... } }, ...] }` and returns `200 { "records": [...] }`;
   `DELETE /api/collections/:name/bulk` accepts a JSON `{ "ids": string[] }` body (intentional —

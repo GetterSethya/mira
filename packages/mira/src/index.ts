@@ -19,24 +19,28 @@ export * from "./hooks/index.js"
 // Server services (for plugins and advanced usage)
 export type { CursorPage,RequestCtx } from "./collection-service/index.js"
 export type {
-  CreateBatchEntry,
-  CreateBatchStatsSnapshot,
+  BatchMutationFlush,
+  BatchMutationStatsSnapshot,
+  BatchOperationStatsSnapshot,
   MiraBatchMutationConfig,
   MiraBatchOperationConfig,
+  MutationBatchEntry,
+  MutationBatchResult,
   PreparedCreate,
   ResolvedBatchMutationConfig,
-  ResolvedBatchOperationConfig
+  ResolvedBatchOperationConfig,
+  ResolvedBatchQueueConfig
 } from "./collection-service/index.js"
 export {
   CollectionService,
-  CreateBatcher,
-  CreateBatcherDisabledLive,
-  CreateBatchStats,
+  MutationBatcher,
+  MutationBatcherDisabledLive,
+  BatchMutationStats,
   estimateRowBytes,
   makeBatchedCollectionServiceLayer,
   makeCollectionServiceLayer,
-  makeCreateBatcherLayer,
-  makeCreateBatchStatsLayer,
+  makeMutationBatcherLayer,
+  makeBatchMutationStatsLayer,
   MAX_BULK_CREATE_RECORDS,
   MAX_BULK_RECORDS,
   resolveBatchMutationConfig,

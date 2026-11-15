@@ -69,9 +69,9 @@ describe("MiraBuilder", () => {
     expect(b0).not.toBe(b1)
   })
 
-  it("defaults batchMutation to create disabled when .batchMutation() is not called", () => {
+  it("defaults batchMutation to an empty config when .batchMutation() is not called", () => {
     const app = fullBuilder().build()
-    expect(app._getConfig().batchMutation).toEqual({ create: { enabled: false } })
+    expect(app._getConfig().batchMutation).toEqual({})
   })
 
   it("threads .batchMutation() through build()'s config literal", () => {

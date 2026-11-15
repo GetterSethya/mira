@@ -17,17 +17,20 @@ import {
   makeCollectionServiceLayer
 } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
-import type { CreateBatchStatsSnapshot, ResolvedBatchOperationConfig } from "@/collection-service/create-batcher.js"
+import type {
+  BatchMutationStatsSnapshot,
+  ResolvedBatchMutationConfig
+} from "@/collection-service/mutation-batcher.js"
 import {
-  CreateBatcher,
-  CreateBatchStats,
+  MutationBatcher,
+  BatchMutationStats,
   estimateRowBytes,
-  makeCreateBatcherLayer,
-  makeCreateBatchStatsLayer,
+  makeMutationBatcherLayer,
+  makeBatchMutationStatsLayer,
   probeTransactionAlive,
   resolveBatchMutationConfig,
   resolveBatchOperationConfig
-} from "@/collection-service/create-batcher.js"
+} from "@/collection-service/mutation-batcher.js"
 import type { CollectionError } from "@/collection-service/errors.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { SqliteDatabase } from "@/databases/sqlite.js"
@@ -95,12 +98,31 @@ const usersRules = defineRule(usersDef, (R) => ({
 const Users = applyRulesToCollections([usersDef], [usersRules])[0]
 
 /** Long windows so only an explicit `flushNow` releases a batch under TestClock. */
-const batchedConfig: ResolvedBatchOperationConfig = {
-  windowMs: 60_000,
-  maxBatchSize: 100,
-  maxQueueSize: 1_000,
-  maxQueueBytes: 32 * 1024 * 1024,
-  submitTimeoutMs: 60_000
+const batchedConfig: ResolvedBatchMutationConfig = {
+  queue: {
+    windowMs: 60_000,
+    maxBatchSize: 100,
+    maxQueueSize: 1_000,
+    maxQueueBytes: 32 * 1024 * 1024,
+    submitTimeoutMs: 60_000
+  },
+  create: { submitTimeoutMs: 60_000 },
+  update: null,
+  delete: null
+}
+
+const withQueue = (
+  config: ResolvedBatchMutationConfig,
+  overrides: Partial<NonNullable<ResolvedBatchMutationConfig["queue"]>>
+): ResolvedBatchMutationConfig => ({
+  ...config,
+  queue: config.queue === null ? null : { ...config.queue, ...overrides }
+})
+
+const mutationConfig: ResolvedBatchMutationConfig = {
+  ...batchedConfig,
+  update: { submitTimeoutMs: 60_000 },
+  delete: { submitTimeoutMs: 60_000 }
 }
 
 type ServiceRequirements = Repository | SqlClient.SqlClient | FileStorageService | DialectService | AuthService
@@ -120,8 +142,8 @@ function serviceDeps<A, E>(
 
 function batchedLayer(
   collections: ReadonlyArray<AnyCollectionDef> = [Posts],
-  config: ResolvedBatchOperationConfig = batchedConfig,
-  statsLayer: Layer.Layer<CreateBatchStats> = makeCreateBatchStatsLayer()
+  config: ResolvedBatchMutationConfig = batchedConfig,
+  statsLayer: Layer.Layer<BatchMutationStats> = makeBatchMutationStatsLayer()
 ) {
   const service = serviceDeps(makeBatchedCollectionServiceLayer(collections, config, statsLayer))
   return Layer.mergeAll(service, statsLayer, sqliteLayer, FileStorageTest, NodeCryptoLayer)
@@ -194,13 +216,13 @@ const waitFor = (what: string, count: number, read: Effect.Effect<number>) =>
 
 const waitForAdmitted = (count: number) =>
   Effect.gen(function* () {
-    const stats = yield* CreateBatchStats
+    const stats = yield* BatchMutationStats
     yield* waitFor("admitted", count, stats.snapshot.pipe(Effect.map((snapshot) => snapshot.admitted)))
   })
 
 const waitForDefects = (count: number) =>
   Effect.gen(function* () {
-    const stats = yield* CreateBatchStats
+    const stats = yield* BatchMutationStats
     yield* waitFor("defects", count, stats.snapshot.pipe(Effect.map((snapshot) => snapshot.consecutiveDefects)))
   })
 
@@ -211,14 +233,24 @@ const waitForDefects = (count: number) =>
  */
 const waitForBatches = (count: number) =>
   Effect.gen(function* () {
-    const stats = yield* CreateBatchStats
+    const stats = yield* BatchMutationStats
     yield* waitFor("batches", count, stats.snapshot.pipe(Effect.map((snapshot) => snapshot.batches)))
   })
 
 const waitForCommits = (count: number) =>
   Effect.gen(function* () {
-    const stats = yield* CreateBatchStats
+    const stats = yield* BatchMutationStats
     yield* waitFor("commits", count, stats.snapshot.pipe(Effect.map((snapshot) => snapshot.commits)))
+  })
+
+const waitForOperationApplied = (operation: "create" | "update" | "delete", count: number) =>
+  Effect.gen(function* () {
+    const stats = yield* BatchMutationStats
+    yield* waitFor(
+      `${operation}.applied`,
+      count,
+      stats.snapshot.pipe(Effect.map((snapshot) => snapshot.operations[operation].applied))
+    )
   })
 
 /**
@@ -231,7 +263,7 @@ const collectBatched = <A>(
   admittedCount: number = creates.length
 ) =>
   Effect.gen(function* () {
-    const stats = yield* CreateBatchStats
+    const stats = yield* BatchMutationStats
     const fiber = yield* Effect.forkChild(
       Effect.forEach(creates, (create) => Effect.exit(create), { concurrency: "unbounded" })
     )
@@ -253,30 +285,49 @@ function failureTag(exit: Exit.Exit<unknown, CollectionError>): string | undefin
 // Deterministic stats layer for tests that need a seam (defects, commit signal)
 // ---------------------------------------------------------------------------
 
-const emptySnapshot: CreateBatchStatsSnapshot = {
+const emptyOperationStats = {
   batches: 0,
-  commits: 0,
-  records: 0,
+  applied: 0,
   maxBatchSize: 0,
   lastBatchSizes: [],
   rejected: 0,
+  timedOut: 0,
+  admitted: 0,
+  cleanupAbandoned: 0
+} as const
+
+const emptySnapshot: BatchMutationStatsSnapshot = {
+  commits: 0,
+  inlineCommits: 0,
+  batches: 0,
+  applied: 0,
+  maxBatchSize: 0,
+  lastBatchSizes: [],
+  lastFlushDurationsMs: [],
+  rejected: 0,
   consecutiveDefects: 0,
   timedOut: 0,
-  admitted: 0
+  admitted: 0,
+  cleanupAbandoned: 0,
+  operations: {
+    create: emptyOperationStats,
+    update: emptyOperationStats,
+    delete: emptyOperationStats
+  }
 }
 
 function makeInstrumentedStatsLayer(options: {
   readonly failFlushTimes?: number
   readonly commitSignal?: Deferred.Deferred<void>
-} = {}): Layer.Layer<CreateBatchStats> {
+} = {}): Layer.Layer<BatchMutationStats> {
   return Layer.effect(
-    CreateBatchStats,
+    BatchMutationStats,
     Effect.gen(function* () {
-      const state = yield* Ref.make<CreateBatchStatsSnapshot>(emptySnapshot)
+      const state = yield* Ref.make<BatchMutationStatsSnapshot>(emptySnapshot)
       const failuresLeft = yield* Ref.make(options.failFlushTimes ?? 0)
       const flushSignal = yield* Queue.sliding<void>(1)
 
-      return CreateBatchStats.of({
+      return BatchMutationStats.of({
         flushSignal,
         snapshot: Ref.get(state),
         reset: Ref.set(state, emptySnapshot),
@@ -286,7 +337,12 @@ function makeInstrumentedStatsLayer(options: {
             yield* Deferred.succeed(options.commitSignal, undefined)
           }
         }),
-        recordFlush: (size, written, _collections) =>
+        recordInlineCommit: () =>
+          Ref.update(state, (current) => ({
+            ...current,
+            inlineCommits: current.inlineCommits + 1
+          })),
+        recordFlush: (flush) =>
           Effect.gen(function* () {
             const remaining = yield* Ref.get(failuresLeft)
             if (remaining > 0) {
@@ -296,19 +352,27 @@ function makeInstrumentedStatsLayer(options: {
             yield* Ref.update(state, (current) => ({
               ...current,
               batches: current.batches + 1,
-              records: current.records + written,
-              maxBatchSize: Math.max(current.maxBatchSize, size),
-              lastBatchSizes: [...current.lastBatchSizes, size],
+              applied: current.applied + flush.applied,
+              maxBatchSize: Math.max(current.maxBatchSize, flush.size),
+              lastBatchSizes: [...current.lastBatchSizes, flush.size],
               consecutiveDefects: 0
             }))
           }),
-        recordRejected: Ref.update(state, (current) => ({ ...current, rejected: current.rejected + 1 })),
+        recordRejected: () =>
+          Ref.update(state, (current) => ({ ...current, rejected: current.rejected + 1 })),
         recordDefect: Ref.update(state, (current) => ({
           ...current,
           consecutiveDefects: current.consecutiveDefects + 1
         })),
-        recordTimeout: Ref.update(state, (current) => ({ ...current, timedOut: current.timedOut + 1 })),
-        recordAdmitted: Ref.update(state, (current) => ({ ...current, admitted: current.admitted + 1 })),
+        recordTimeout: () =>
+          Ref.update(state, (current) => ({ ...current, timedOut: current.timedOut + 1 })),
+        recordAdmitted: () =>
+          Ref.update(state, (current) => ({ ...current, admitted: current.admitted + 1 })),
+        recordCleanupAbandoned: () =>
+          Ref.update(state, (current) => ({
+            ...current,
+            cleanupAbandoned: current.cleanupAbandoned + 1
+          })),
         flushNow: Queue.offer(flushSignal, undefined).pipe(Effect.asVoid)
       })
     })
@@ -331,10 +395,6 @@ describe("resolveBatchOperationConfig", () => {
   it.effect("applies the documented defaults when enabled", () =>
     Effect.sync(() => {
       expect(resolveBatchOperationConfig({ enabled: true })).toEqual({
-        windowMs: 0,
-        maxBatchSize: 100,
-        maxQueueSize: 1_000,
-        maxQueueBytes: 32 * 1024 * 1024,
         submitTimeoutMs: 10_000
       })
     })
@@ -342,8 +402,8 @@ describe("resolveBatchOperationConfig", () => {
 
   it.effect("accepts a fractional window (0.5 ms) and keeps integer counts", () =>
     Effect.sync(() => {
-      const resolved = resolveBatchOperationConfig({ enabled: true, windowMs: 0.5 })
-      expect(resolved?.windowMs).toBe(0.5)
+      const resolved = resolveBatchMutationConfig({ windowMs: 0.5, create: {} })
+      expect(resolved.queue?.windowMs).toBe(0.5)
       expect(() => resolveBatchOperationConfig({ enabled: true, maxBatchSize: 1.5 })).toThrowError(
         /maxBatchSize/
       )
@@ -352,16 +412,21 @@ describe("resolveBatchOperationConfig", () => {
 
   it.effect("keeps explicit overrides", () =>
     Effect.sync(() => {
-      expect(
-        resolveBatchOperationConfig({
-          enabled: true,
-          windowMs: 0,
-          maxBatchSize: 5,
-          maxQueueSize: 7,
-          maxQueueBytes: 1_024,
-          submitTimeoutMs: 25
-        })
-      ).toEqual({ windowMs: 0, maxBatchSize: 5, maxQueueSize: 7, maxQueueBytes: 1_024, submitTimeoutMs: 25 })
+      const resolved = resolveBatchMutationConfig({
+        windowMs: 0,
+        maxBatchSize: 5,
+        maxQueueSize: 7,
+        maxQueueBytes: 1_024,
+        submitTimeoutMs: 25,
+        create: {}
+      })
+      expect(resolved.queue).toEqual({
+        windowMs: 0,
+        maxBatchSize: 5,
+        maxQueueSize: 7,
+        maxQueueBytes: 1_024,
+        submitTimeoutMs: 25
+      })
     })
   )
 
@@ -391,32 +456,38 @@ describe("resolveBatchOperationConfig", () => {
 describe("resolveBatchMutationConfig", () => {
   it.effect("is fully disabled when no mutation operation is configured", () =>
     Effect.sync(() => {
-      expect(resolveBatchMutationConfig()).toEqual({ create: null, update: null, delete: null })
-      expect(resolveBatchMutationConfig({})).toEqual({ create: null, update: null, delete: null })
+      expect(resolveBatchMutationConfig()).toEqual({
+        queue: null,
+        create: null,
+        update: null,
+        delete: null
+      })
+      expect(resolveBatchMutationConfig({})).toEqual({
+        queue: null,
+        create: null,
+        update: null,
+        delete: null
+      })
     })
   )
 
   it.effect("enables create for an empty create object", () =>
     Effect.sync(() => {
       expect(resolveBatchMutationConfig({ create: {} }).create).toEqual({
-        windowMs: 0,
-        maxBatchSize: 100,
-        maxQueueSize: 1_000,
-        maxQueueBytes: 32 * 1024 * 1024,
         submitTimeoutMs: 10_000
       })
     })
   )
 
-  it.effect("lets per-operation values override shared defaults", () =>
+  it.effect("lets per-operation values tighten shared defaults", () =>
     Effect.sync(() => {
       const resolved = resolveBatchMutationConfig({
         windowMs: 5,
         maxBatchSize: 20,
         create: { windowMs: 1, maxBatchSize: 10 }
       })
-      expect(resolved.create?.windowMs).toBe(1)
-      expect(resolved.create?.maxBatchSize).toBe(10)
+      expect(resolved.queue?.windowMs).toBe(1)
+      expect(resolved.queue?.maxBatchSize).toBe(10)
     })
   )
 
@@ -426,11 +497,11 @@ describe("resolveBatchMutationConfig", () => {
     })
   )
 
-  it.effect("rejects update/delete until their batching is implemented", () =>
+  it.effect("resolves update and delete batching", () =>
     Effect.sync(() => {
-      expect(() => resolveBatchMutationConfig({ update: {} })).toThrowError(/update.*not implemented/)
-      expect(() => resolveBatchMutationConfig({ delete: {} })).toThrowError(/delete.*not implemented/)
-      expect(() => resolveBatchMutationConfig({ update: { enabled: false } })).not.toThrow()
+      expect(resolveBatchMutationConfig({ update: {} }).update).not.toBeNull()
+      expect(resolveBatchMutationConfig({ delete: {} }).delete).not.toBeNull()
+      expect(resolveBatchMutationConfig({ update: { enabled: false } }).update).toBeNull()
     })
   )
 })
@@ -444,7 +515,7 @@ describe("create batching", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       const payloads = Array.from({ length: 20 }, (_, index) => ({ title: `title-${index}` }))
       const exits = yield* collectBatched(payloads.map((payload) => svc.create(Posts, payload, noCtx)))
@@ -457,10 +528,10 @@ describe("create batching", () => {
       yield* waitForBatches(1)
       const snapshot = yield* stats.snapshot
       expect(snapshot.batches).toBe(1)
-      expect(snapshot.records).toBe(20)
+      expect(snapshot.applied).toBe(20)
       expect(snapshot.commits).toBe(1)
       expect(snapshot.maxBatchSize).toBe(20)
-      expect(snapshot.commits).toBeLessThan(snapshot.records)
+      expect(snapshot.commits).toBeLessThan(snapshot.applied)
 
       const page = yield* svc.list(Posts, null, 100, noCtx)
       expect(page.items.length).toBe(20)
@@ -471,7 +542,7 @@ describe("create batching", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       const creates = [
         svc.create(Posts, { title: "valid-0" }, noCtx),
@@ -487,7 +558,7 @@ describe("create batching", () => {
       yield* waitForBatches(1)
       const snapshot = yield* stats.snapshot
       expect(snapshot.admitted).toBe(5)
-      expect(snapshot.records).toBe(5)
+      expect(snapshot.applied).toBe(5)
       expect(yield* countPosts).toBe(5)
     }).pipe(Effect.provide(batchedLayer()))
   )
@@ -498,7 +569,7 @@ describe("create batching", () => {
       const sql = yield* SqlClient.SqlClient
       yield* sql.unsafe(`CREATE UNIQUE INDEX "posts_title_unique" ON "posts" ("title")`)
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       const exits = yield* collectBatched([
         svc.create(Posts, { title: "same" }, noCtx),
@@ -530,7 +601,7 @@ describe("create batching", () => {
         END
       `)
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       const exits = yield* collectBatched([
         svc.create(Posts, { title: "ok-1" }, noCtx),
@@ -540,7 +611,7 @@ describe("create batching", () => {
 
       // The entry's own cause is captured before the driver's savepoint
       // finalizer dies, so the batch normalizes to the real SQL error (a 500),
-      // not a `CreateBatchClosedError` 503.
+      // not a `BatchMutationClosedError` 503.
       const tags = exits.map(failureTag)
       expect(tags).toEqual(["SqlError", "SqlError", "SqlError"])
       expect(yield* countPosts).toBe(0)
@@ -597,7 +668,7 @@ describe("create batching", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       // Under `it.effect` time only moves when the TestClock is advanced. A
       // positive window here would hang, so this asserts the zero-window path
@@ -609,7 +680,7 @@ describe("create batching", () => {
       const snapshot = yield* stats.snapshot
       expect(snapshot.batches).toBe(1)
       expect(snapshot.commits).toBe(1)
-    }).pipe(Effect.provide(batchedLayer([Posts], { ...batchedConfig, windowMs: 0 })))
+    }).pipe(Effect.provide(batchedLayer([Posts], withQueue(batchedConfig, { windowMs: 0 }))))
   )
 
   it.live("windowMs 0 keeps a sequential create closer to the inline path than a positive window", () =>
@@ -630,7 +701,7 @@ describe("create batching", () => {
             samples.push((yield* Clock.currentTimeMillis) - startedAt)
           }
           return medianMs(samples)
-        }).pipe(Effect.provide(batchedLayer([Posts], { ...batchedConfig, windowMs })))
+        }).pipe(Effect.provide(batchedLayer([Posts], withQueue(batchedConfig, { windowMs }))))
 
       const zeroWindow = yield* measure(0)
       const positiveWindow = yield* measure(5)
@@ -686,7 +757,7 @@ describe("create batching", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       const rows = yield* svc.createMany(Posts, [{ title: "a" }, { title: "b" }, { title: "c" }], noCtx)
       expect(rows.map((row) => row["title"])).toEqual(["a", "b", "c"])
@@ -709,7 +780,7 @@ describe("create batching", () => {
       const result = yield* sql
         .withTransaction(svc.create(Posts, { title: "nested" }, noCtx))
         .pipe(Effect.exit)
-      expect(failureTag(result)).toBe("CreateBatchNestedTransactionError")
+      expect(failureTag(result)).toBe("BatchMutationNestedTransactionError")
     }).pipe(Effect.provide(batchedLayer()))
   )
 })
@@ -721,17 +792,18 @@ describe("create batching", () => {
 describe("create batching queue bounds", () => {
   it.effect("rejects when the entry-count budget is full and releases it afterwards", () =>
     Effect.gen(function* () {
-      const stats = yield* CreateBatchStats
-      const batcher = yield* CreateBatcher
+      const stats = yield* BatchMutationStats
+      const batcher = yield* MutationBatcher
       const started = yield* Deferred.make<void>()
       const gate = yield* Deferred.make<void>()
 
       const held = yield* Effect.forkChild(
         batcher.submit({
+          operation: "create",
           collection: Posts,
-          insert: Deferred.succeed(started, undefined).pipe(
+          execute: Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Deferred.await(gate)),
-            Effect.as({ id: "held" })
+            Effect.as({ value: { id: "held" }, afterCommit: Effect.void })
           ),
           estimatedBytes: 10
         })
@@ -744,17 +816,23 @@ describe("create batching queue bounds", () => {
 
       const queued = yield* Effect.forkChild(
         batcher.submit({
+          operation: "create",
           collection: Posts,
-          insert: Effect.succeed({ id: "queued" }),
+          execute: Effect.succeed({ value: { id: "queued" }, afterCommit: Effect.void }),
           estimatedBytes: 10
         })
       )
       yield* waitForAdmitted(2)
 
       const rejected = yield* batcher
-        .submit({ collection: Posts, insert: Effect.succeed({ id: "rejected" }), estimatedBytes: 10 })
+        .submit({
+          operation: "create",
+          collection: Posts,
+          execute: Effect.succeed({ value: { id: "rejected" }, afterCommit: Effect.void }),
+          estimatedBytes: 10
+        })
         .pipe(Effect.exit)
-      expect(failureTag(rejected)).toBe("CreateBatchQueueFullError")
+      expect(failureTag(rejected)).toBe("BatchMutationQueueFullError")
 
       yield* Deferred.succeed(gate, undefined)
       yield* stats.flushNow
@@ -766,22 +844,23 @@ describe("create batching queue bounds", () => {
 
       const snapshot = yield* stats.snapshot
       expect(snapshot.rejected).toBe(1)
-    }).pipe(Effect.provide(batcherOnlyLayer({ ...batchedConfig, maxQueueSize: 1 })))
+    }).pipe(Effect.provide(batcherOnlyLayer(withQueue(batchedConfig, { maxQueueSize: 1 }))))
   )
 
   it.effect("rejects when the byte budget is full", () =>
     Effect.gen(function* () {
-      const stats = yield* CreateBatchStats
-      const batcher = yield* CreateBatcher
+      const stats = yield* BatchMutationStats
+      const batcher = yield* MutationBatcher
       const started = yield* Deferred.make<void>()
       const gate = yield* Deferred.make<void>()
 
       const held = yield* Effect.forkChild(
         batcher.submit({
+          operation: "create",
           collection: Posts,
-          insert: Deferred.succeed(started, undefined).pipe(
+          execute: Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Deferred.await(gate)),
-            Effect.as({ id: "held" })
+            Effect.as({ value: { id: "held" }, afterCommit: Effect.void })
           ),
           estimatedBytes: 1_000
         })
@@ -791,14 +870,24 @@ describe("create batching queue bounds", () => {
       yield* Deferred.await(started)
 
       const queued = yield* Effect.forkChild(
-        batcher.submit({ collection: Posts, insert: Effect.succeed({ id: "queued" }), estimatedBytes: 600 })
+        batcher.submit({
+          operation: "create",
+          collection: Posts,
+          execute: Effect.succeed({ value: { id: "queued" }, afterCommit: Effect.void }),
+          estimatedBytes: 600
+        })
       )
       yield* waitForAdmitted(2)
 
       const rejected = yield* batcher
-        .submit({ collection: Posts, insert: Effect.succeed({ id: "rejected" }), estimatedBytes: 600 })
+        .submit({
+          operation: "create",
+          collection: Posts,
+          execute: Effect.succeed({ value: { id: "rejected" }, afterCommit: Effect.void }),
+          estimatedBytes: 600
+        })
         .pipe(Effect.exit)
-      expect(failureTag(rejected)).toBe("CreateBatchQueueFullError")
+      expect(failureTag(rejected)).toBe("BatchMutationQueueFullError")
 
       yield* Deferred.succeed(gate, undefined)
       yield* stats.flushNow
@@ -808,24 +897,24 @@ describe("create batching queue bounds", () => {
       const snapshot = yield* stats.snapshot
       expect(snapshot.rejected).toBe(1)
     }).pipe(
-      Effect.provide(batcherOnlyLayer({ ...batchedConfig, maxQueueBytes: 1_000 }))
+      Effect.provide(batcherOnlyLayer(withQueue(batchedConfig, { maxQueueBytes: 1_000 })))
     )
   )
 
   it.live("times out a create whose batch never flushes and frees its budget", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
       const svc = yield* CollectionService
 
       const timedOut = yield* svc.create(Posts, { title: "timeout" }, noCtx).pipe(Effect.exit)
-      expect(failureTag(timedOut)).toBe("CreateBatchTimeoutError")
+      expect(failureTag(timedOut)).toBe("BatchMutationTimeoutError")
 
       // Drain the cancelled entry: the flusher skips it, so no row is written
       // and the queue budget is released. `records` counts written rows only.
       yield* stats.flushNow
       yield* waitFor("batches", 1, stats.snapshot.pipe(Effect.map((snapshot) => snapshot.batches)))
-      expect((yield* stats.snapshot).records).toBe(0)
+      expect((yield* stats.snapshot).applied).toBe(0)
       expect((yield* stats.snapshot).timedOut).toBe(1)
       expect((yield* stats.snapshot).rejected).toBe(0)
       expect(yield* countPosts).toBe(0)
@@ -839,7 +928,7 @@ describe("create batching queue bounds", () => {
       expect(row["title"]).toBe("after")
     }).pipe(
       Effect.provide(
-        batchedLayer([Posts], { ...batchedConfig, windowMs: 60_000, submitTimeoutMs: 20, maxQueueSize: 1 })
+        batchedLayer([Posts], withQueue(batchedConfig, { windowMs: 60_000, submitTimeoutMs: 20, maxQueueSize: 1 }))
       )
     )
   )
@@ -848,7 +937,7 @@ describe("create batching queue bounds", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       // `recordFlush` dies after the commit and after the deferreds are
       // completed. The row exists, so the request must succeed.
@@ -873,7 +962,7 @@ describe("create batching queue bounds", () => {
     )
   )
 
-  it.effect("fails the batch and recovers when a deferred foreign key aborts the COMMIT", () =>
+  it.effect("maps a deferred foreign key COMMIT abort to a conflict and recovers", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
       const sql = yield* SqlClient.SqlClient
@@ -881,17 +970,18 @@ describe("create batching queue bounds", () => {
       yield* sql.unsafe(`DELETE FROM "parents"`)
       yield* sql.unsafe(`PRAGMA foreign_keys = ON`)
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       // The insert succeeds; the deferred FK violation only fires at COMMIT,
-      // which the driver raises with `Effect.orDie` — a real flusher defect.
+      // which the driver raises with `Effect.orDie`. A constraint defect is a
+      // client-data conflict, not a batcher defect.
       const first = yield* collectBatched([
         svc.create(Posts, { title: "fk-1", parentId: "missing" }, noCtx),
         svc.create(Posts, { title: "fk-2", parentId: "missing" }, noCtx)
       ])
-      expect(first.every((exit) => failureTag(exit) === "CreateBatchClosedError")).toBe(true)
+      expect(first.every((exit) => failureTag(exit) === "BatchMutationConflictError")).toBe(true)
       expect(yield* countPosts).toBe(0)
-      yield* waitForDefects(1)
+      expect((yield* stats.snapshot).consecutiveDefects).toBe(0)
 
       const recovered = yield* collectBatched([svc.create(Posts, { title: "after" }, noCtx)])
       expect(failureTag(recovered[0])).toBeUndefined()
@@ -900,7 +990,7 @@ describe("create batching queue bounds", () => {
     }).pipe(Effect.provide(batchedLayer()))
   )
 
-  it.effect("closes the batcher after three consecutive COMMIT failures", () =>
+  it.effect("does not close the batcher after three consecutive deferred-FK conflicts", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
       const sql = yield* SqlClient.SqlClient
@@ -908,20 +998,19 @@ describe("create batching queue bounds", () => {
       yield* sql.unsafe(`DELETE FROM "parents"`)
       yield* sql.unsafe(`PRAGMA foreign_keys = ON`)
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       const failBatch = (title: string) => svc.create(Posts, { title, parentId: "missing" }, noCtx)
 
-      yield* collectBatched([failBatch("one")])
-      yield* waitForDefects(1)
-      yield* collectBatched([failBatch("two")])
-      yield* waitForDefects(2)
-      yield* collectBatched([failBatch("three")])
-      yield* waitForDefects(3)
+      for (const title of ["one", "two", "three"]) {
+        const exits = yield* collectBatched([failBatch(title)])
+        expect(failureTag(exits[0])).toBe("BatchMutationConflictError")
+      }
 
-      const closed = yield* svc.create(Posts, { title: "four" }, noCtx).pipe(Effect.exit)
-      expect(failureTag(closed)).toBe("CreateBatchClosedError")
-      expect((yield* stats.snapshot).records).toBe(0)
+      const recovered = yield* collectBatched([svc.create(Posts, { title: "four" }, noCtx)])
+      expect(failureTag(recovered[0])).toBeUndefined()
+      expect((yield* stats.snapshot).consecutiveDefects).toBe(0)
+      expect((yield* countPosts)).toBe(1)
     }).pipe(Effect.provide(batchedLayer()))
   )
 
@@ -929,21 +1018,22 @@ describe("create batching queue bounds", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       yield* svc.create(Posts, { title: "a" }, noCtx)
       yield* svc.create(Posts, { title: "b" }, noCtx)
       yield* svc.create(Posts, { title: "c" }, noCtx)
 
       const snapshot = yield* stats.snapshot
-      expect(snapshot.commits).toBe(3)
+      expect(snapshot.inlineCommits).toBe(3)
+      expect(snapshot.commits).toBe(0)
       expect(snapshot.batches).toBe(0)
-      expect(snapshot.records).toBe(0)
+      expect(snapshot.applied).toBe(0)
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
           serviceDeps(makeCollectionServiceLayer([Posts])),
-          makeCreateBatchStatsLayer(),
+          makeBatchMutationStatsLayer(),
           sqliteLayer,
           FileStorageTest,
           NodeCryptoLayer
@@ -958,25 +1048,30 @@ describe("create batching queue bounds", () => {
 // ---------------------------------------------------------------------------
 
 describe("create batcher shutdown", () => {
-  it.effect("fails queued and in-flight uncommitted creates with CreateBatchClosedError", () =>
+  it.effect("fails queued and in-flight uncommitted creates with BatchMutationClosedError", () =>
     Effect.gen(function* () {
-      const statsLayer = makeCreateBatchStatsLayer()
+      const statsLayer = makeBatchMutationStatsLayer()
       const scope = yield* Scope.make()
       const context = yield* Layer.buildWithScope(batcherOnlyLayer(batchedConfig, statsLayer), scope)
 
       yield* Effect.gen(function* () {
-        const stats = yield* CreateBatchStats
-        const batcher = yield* CreateBatcher
+        const stats = yield* BatchMutationStats
+        const batcher = yield* MutationBatcher
 
         const queued = yield* Effect.forkChild(
-          batcher.submit({ collection: Posts, insert: Effect.never, estimatedBytes: 10 })
+          batcher.submit({
+            operation: "create",
+            collection: Posts,
+            execute: Effect.never,
+            estimatedBytes: 10
+          })
         )
         yield* waitForAdmitted(1)
         // Shut down while the entry is still queued (no flush was signalled).
         yield* Scope.close(scope, Exit.void)
         const exit = yield* Fiber.await(queued)
-        expect(failureTag(exit)).toBe("CreateBatchClosedError")
-        expect((yield* stats.snapshot).records).toBe(0)
+        expect(failureTag(exit)).toBe("BatchMutationClosedError")
+        expect((yield* stats.snapshot).applied).toBe(0)
       }).pipe(Effect.provide(context))
 
       // A consumer layer that depends on the batcher is released before it, so
@@ -985,46 +1080,47 @@ describe("create batcher shutdown", () => {
       const releases: Array<string> = []
       const consumer = Layer.effectDiscard(
         Effect.gen(function* () {
-          yield* CreateBatcher
+          yield* MutationBatcher
           yield* Effect.addFinalizer(() => Effect.sync(() => releases.push("consumer")))
         })
       )
       yield* Layer.buildWithScope(
-        consumer.pipe(Layer.provide(batcherOnlyLayer(batchedConfig, makeCreateBatchStatsLayer()))),
+        consumer.pipe(Layer.provide(batcherOnlyLayer(batchedConfig, makeBatchMutationStatsLayer()))),
         consumerScope
       )
       yield* Scope.close(consumerScope, Exit.void)
       expect(releases).toEqual(["consumer"])
     }))
 
-  it.effect("rolls back an in-flight uncommitted create and reports CreateBatchClosedError", () =>
+  it.effect("rolls back an in-flight uncommitted create and reports BatchMutationClosedError", () =>
     Effect.gen(function* () {
-      const statsLayer = makeCreateBatchStatsLayer()
+      const statsLayer = makeBatchMutationStatsLayer()
       const scope = yield* Scope.make()
       // The SQL client is provided *outside* the batcher scope so the row can
       // be counted after shutdown.
       const context = yield* Layer.buildWithScope(
-        Layer.merge(makeCreateBatcherLayer(batchedConfig, statsLayer), statsLayer),
+        Layer.merge(makeMutationBatcherLayer(batchedConfig, statsLayer), statsLayer),
         scope
       )
 
       yield* Effect.gen(function* () {
         yield* setupPostsTable
-        const stats = yield* CreateBatchStats
-        const batcher = yield* CreateBatcher
+        const stats = yield* BatchMutationStats
+        const batcher = yield* MutationBatcher
         const sql = yield* SqlClient.SqlClient
         const started = yield* Deferred.make<void>()
         const gate = yield* Deferred.make<void>()
 
         const inflight = yield* Effect.forkChild(
           batcher.submit({
+            operation: "create",
             collection: Posts,
-            insert: sql`INSERT INTO "posts" ("id", "title", "published", "created", "updated") VALUES ('inflight', 'inflight', 0, 'x', 'x')`.pipe(
+            execute: sql`INSERT INTO "posts" ("id", "title", "published", "created", "updated") VALUES ('inflight', 'inflight', 0, 'x', 'x')`.pipe(
               // A real write inside the open batch transaction, then block so
               // shutdown interrupts the transaction with the row uncommitted.
               Effect.andThen(Deferred.succeed(started, undefined)),
               Effect.andThen(Deferred.await(gate)),
-              Effect.as({ id: "inflight" })
+              Effect.as({ value: { id: "inflight" }, afterCommit: Effect.void })
             ),
             estimatedBytes: 10
           })
@@ -1035,7 +1131,7 @@ describe("create batcher shutdown", () => {
 
         yield* Scope.close(scope, Exit.void)
         const exit = yield* Fiber.await(inflight)
-        expect(failureTag(exit)).toBe("CreateBatchClosedError")
+        expect(failureTag(exit)).toBe("BatchMutationClosedError")
         expect((yield* stats.snapshot).commits).toBe(0)
         expect(yield* countPosts).toBe(0)
       }).pipe(Effect.provide(context))
@@ -1045,11 +1141,11 @@ describe("create batcher shutdown", () => {
 
 /** Real batcher exposed as an output, for tests that submit entries directly. */
 function batcherOnlyLayer(
-  config: ResolvedBatchOperationConfig = batchedConfig,
-  statsLayer: Layer.Layer<CreateBatchStats> = makeCreateBatchStatsLayer()
+  config: ResolvedBatchMutationConfig = batchedConfig,
+  statsLayer: Layer.Layer<BatchMutationStats> = makeBatchMutationStatsLayer()
 ) {
   return Layer.merge(
-    makeCreateBatcherLayer(config, statsLayer).pipe(Layer.provideMerge(sqliteLayer)),
+    makeMutationBatcherLayer(config, statsLayer).pipe(Layer.provideMerge(sqliteLayer)),
     statsLayer
   )
 }
@@ -1069,7 +1165,7 @@ describe("create batcher commit boundary", () => {
 
       yield* Effect.gen(function* () {
         yield* setupPostsTable
-        const stats = yield* CreateBatchStats
+        const stats = yield* BatchMutationStats
         const svc = yield* CollectionService
 
         const create = yield* Effect.forkChild(svc.create(Posts, { title: "committed" }, noCtx))
@@ -1148,7 +1244,7 @@ describe("create batching with decorators", () => {
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const stats = yield* CreateBatchStats
+      const stats = yield* BatchMutationStats
 
       const before = yield* svc.list(Posts, null, 10, noCtx)
       expect(before.items.length).toBe(0)
@@ -1162,9 +1258,9 @@ describe("create batching with decorators", () => {
     }).pipe(
       Effect.provide(
         (() => {
-          const statsLayer = makeCreateBatchStatsLayer()
+          const statsLayer = makeBatchMutationStatsLayer()
           const service = serviceDeps(
-            makeCachedCollectionServiceLayer([Posts], {}, { batchMutation: { create: batchedConfig, update: null, delete: null }, statsLayer })
+            makeCachedCollectionServiceLayer([Posts], {}, { batchMutation: batchedConfig, statsLayer })
           )
           return Layer.mergeAll(service, statsLayer, sqliteLayer, FileStorageTest, NodeCryptoLayer)
         })()
@@ -1208,7 +1304,7 @@ describe("create batching with decorators", () => {
       }).pipe(
         Effect.provide(
           (() => {
-            const statsLayer = makeCreateBatchStatsLayer()
+            const statsLayer = makeBatchMutationStatsLayer()
             const inner = serviceDeps(makeBatchedCollectionServiceLayer([Posts], batchedConfig, statsLayer))
             return Layer.mergeAll(
               makeHookCollectionServiceLayer().pipe(
@@ -1235,7 +1331,7 @@ describe("create batching instrumentation", () => {
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
       const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
-      const statsLayer = makeCreateBatchStatsLayer()
+      const statsLayer = makeBatchMutationStatsLayer()
       const service = serviceDeps(makeBatchedCollectionServiceLayer([Posts], batchedConfig, statsLayer))
 
       yield* Effect.gen(function* () {
@@ -1247,12 +1343,12 @@ describe("create batching instrumentation", () => {
         ])
         const spans = yield* Queue.clear(queue)
 
-        const batch = spans.find((span) => span.name === "collection.createBatch")
+        const batch = spans.find((span) => span.name === "collection.mutationBatch")
         expect(batch).toBeDefined()
         expect(batch?.attributes["batch.size"]).toBe(2)
         expect(batch?.attributes["batch.collectionCount"]).toBe(1)
         expect(batch?.attributes["batch.collections"]).toBe("posts")
-        expect(spans.filter((span) => span.name === "collection.insertInBatch").length).toBe(2)
+        expect(spans.filter((span) => span.name === "collection.mutateInBatch").length).toBe(2)
       }).pipe(
         // The flusher is forked during layer construction, so the custom tracer
         // must be in context *before* the layer is built.
@@ -1283,7 +1379,7 @@ describe("MiraApp create batching wiring", () => {
 
       yield* Effect.gen(function* () {
         const svc = yield* CollectionService
-        const stats = yield* CreateBatchStats
+        const stats = yield* BatchMutationStats
         const row = yield* svc.create(Posts, { title: "wired" }, noCtx)
         expect(row["title"]).toBe("wired")
 
@@ -1296,7 +1392,7 @@ describe("MiraApp create batching wiring", () => {
     })
   )
 
-  it.live("exposes CreateBatchStats even when batching is disabled", () =>
+  it.live("exposes BatchMutationStats even when batching is disabled", () =>
     Effect.gen(function* () {
       const app = Mira.builder()
         .platform(NodePlatform)
@@ -1310,11 +1406,12 @@ describe("MiraApp create batching wiring", () => {
 
       yield* Effect.gen(function* () {
         const svc = yield* CollectionService
-        const stats = yield* CreateBatchStats
+        const stats = yield* BatchMutationStats
         yield* svc.create(Posts, { title: "inline" }, noCtx)
 
         const snapshot = yield* stats.snapshot
-        expect(snapshot.commits).toBe(1)
+        expect(snapshot.inlineCommits).toBe(1)
+        expect(snapshot.commits).toBe(0)
         expect(snapshot.batches).toBe(0)
         expect(snapshot.admitted).toBe(0)
       }).pipe(Effect.provide(app.buildServiceLayer()))
@@ -1336,7 +1433,7 @@ describe("MiraApp create batching wiring", () => {
 
       yield* Effect.gen(function* () {
         const svc = yield* CollectionService
-        const stats = yield* CreateBatchStats
+        const stats = yield* BatchMutationStats
         const row = yield* svc.create(Posts, { title: "cached-wired" }, noCtx)
         expect(row["title"]).toBe("cached-wired")
 
@@ -1347,5 +1444,130 @@ describe("MiraApp create batching wiring", () => {
         expect(snapshot.batches).toBe(1)
       }).pipe(Effect.provide(app.buildServiceLayer()))
     })
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Update/delete batching
+// ---------------------------------------------------------------------------
+
+describe("update/delete batching", () => {
+  it.effect("batches 20 concurrent updates and reports per-operation stats", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const stats = yield* BatchMutationStats
+
+      const seeded = yield* svc.createMany(
+        Posts,
+        Array.from({ length: 20 }, (_, index) => ({ title: `seed-${index}` })),
+        noCtx
+      )
+      const ids = seeded.map((row) => String(row["id"]))
+
+      const exits = yield* collectBatched(
+        ids.map((id, index) => svc.update(Posts, id, { title: `updated-${index}` }, noCtx))
+      )
+      expect(exits.every((exit) => Exit.isSuccess(exit))).toBe(true)
+      yield* waitForOperationApplied("update", 20)
+
+      const snapshot = yield* stats.snapshot
+      expect(snapshot.operations.update.applied).toBe(20)
+      expect(snapshot.operations.update.batches).toBeGreaterThanOrEqual(1)
+      expect(snapshot.commits).toBeGreaterThanOrEqual(1)
+    }).pipe(Effect.provide(batchedLayer([Posts], mutationConfig)))
+  )
+
+  it.effect("fails only the missing update id", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const stats = yield* BatchMutationStats
+
+      const seeded = yield* svc.createMany(
+        Posts,
+        Array.from({ length: 19 }, (_, index) => ({ title: `seed-${index}` })),
+        noCtx
+      )
+      const ids = seeded.map((row) => String(row["id"]))
+
+      const exits = yield* collectBatched([
+        ...ids.map((id, index) => svc.update(Posts, id, { title: `updated-${index}` }, noCtx)),
+        svc.update(Posts, "missing-id", { title: "missing" }, noCtx)
+      ])
+
+      expect(exits.filter((exit) => Exit.isSuccess(exit)).length).toBe(19)
+      expect(failureTag(exits[19])).toBe("NotFoundError")
+      yield* waitForOperationApplied("update", 19)
+      const snapshot = yield* stats.snapshot
+      expect(snapshot.operations.update.applied).toBe(19)
+    }).pipe(Effect.provide(batchedLayer([Posts], mutationConfig)))
+  )
+
+  it.effect("batches 20 concurrent deletes and removes every row", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const stats = yield* BatchMutationStats
+
+      const seeded = yield* svc.createMany(
+        Posts,
+        Array.from({ length: 20 }, (_, index) => ({ title: `seed-${index}` })),
+        noCtx
+      )
+      const ids = seeded.map((row) => String(row["id"]))
+
+      const exits = yield* collectBatched(ids.map((id) => svc.delete(Posts, id, noCtx)))
+      expect(exits.every((exit) => Exit.isSuccess(exit))).toBe(true)
+      expect(yield* countPosts).toBe(0)
+      yield* waitForOperationApplied("delete", 20)
+
+      const snapshot = yield* stats.snapshot
+      expect(snapshot.operations.delete.applied).toBe(20)
+      expect(snapshot.operations.delete.batches).toBeGreaterThanOrEqual(1)
+    }).pipe(Effect.provide(batchedLayer([Posts], mutationConfig)))
+  )
+
+  it.effect("fails only the missing delete id", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const stats = yield* BatchMutationStats
+
+      const seeded = yield* svc.createMany(
+        Posts,
+        Array.from({ length: 19 }, (_, index) => ({ title: `seed-${index}` })),
+        noCtx
+      )
+      const ids = seeded.map((row) => String(row["id"]))
+
+      const exits = yield* collectBatched([
+        ...ids.map((id) => svc.delete(Posts, id, noCtx)),
+        svc.delete(Posts, "missing-id", noCtx)
+      ])
+
+      expect(exits.filter((exit) => Exit.isSuccess(exit)).length).toBe(19)
+      expect(failureTag(exits[19])).toBe("NotFoundError")
+      yield* waitForOperationApplied("delete", 19)
+      const snapshot = yield* stats.snapshot
+      expect(snapshot.operations.delete.applied).toBe(19)
+    }).pipe(Effect.provide(batchedLayer([Posts], mutationConfig)))
+  )
+
+  it.effect("orders update then delete of the same row in one flush", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+
+      const [row] = yield* svc.createMany(Posts, [{ title: "ordered" }], noCtx)
+      const id = String(row?.["id"])
+      const exits = yield* collectBatched([
+        svc.update(Posts, id, { title: "updated" }, noCtx),
+        svc.delete(Posts, id, noCtx)
+      ])
+
+      expect(exits.every((exit) => Exit.isSuccess(exit))).toBe(true)
+      expect(yield* countPosts).toBe(0)
+    }).pipe(Effect.provide(batchedLayer([Posts], mutationConfig)))
   )
 })

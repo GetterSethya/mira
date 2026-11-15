@@ -70,6 +70,12 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - Lifecycle callbacks: plugin `onBootstrap`/`onServe` effects execute on start: `[app.ts:MiraApp.serve]`
 - Plugin side effects: plugin `layer` and `routes` are merged into the app graph/router: `[plugin.ts:MiraPlugin]`
 
+## Mutation batching
+
+- `.batchMutation({ create, update, delete })` is optional and off by default; `buildServiceLayer()` builds the batched base only when `resolveBatchMutationConfig` returns a non-null `queue`: `[app.ts:MiraApp.buildServiceLayer]`
+- The stats layer is created once per app build and merged into the service graph, so plugin routes can read `BatchMutationStats`: `[app.ts:MiraApp.buildServiceLayer]`
+- A partially enabled configuration routes non-enabled operations through `submitInline`; the explicit bulk endpoints keep their all-or-nothing contract and bypass the queue: `[mutation-batcher.ts:MutationBatcher]`
+
 ## Verification
 
 - Run: `pnpm --filter @gettersethya/mira test`

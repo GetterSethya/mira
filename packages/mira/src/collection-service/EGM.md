@@ -67,6 +67,15 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - On `update`/`delete`, replaced or removed file keys and their `_thumbs/<key>/` children are deleted best-effort; failures are swallowed: `[collection-service.ts:CollectionService]`
 - `@request_body_*` in a `list`/`view`/`delete` rule can never match (bodiless actions); a one-time warning is logged per collection/action at layer build: `[collection-service.ts:makeCollectionServiceLayer]`
 
+## Mutation batching
+
+- Opt-in via `.batchMutation({ create, update, delete })`; each operation is present/enabled independently and the shared FIFO queue is created when at least one is enabled: `[mutation-batcher.ts:resolveBatchMutationConfig]`
+- Create prepares validation/rules/hashing in the request fiber and queues only the insert. Update/delete prepare schema validation, then read the stored row, check the update/delete rule, `manage` rule and credentials inside the batch transaction: `[collection-service.ts:prepareUpdate]` `[collection-service.ts:executeUpdate]` `[collection-service.ts:executeDelete]`
+- One flusher runs entries in FIFO order, uses a savepoint per entry (single-entry fast path preserved), commits once, resolves deferreds after `COMMIT`, and hands post-commit file/challenge cleanup to a bounded worker: `[mutation-batcher.ts:makeMutationBatcherLayer]`
+- Per-entry 404/403/422 failures isolate; a transaction-fatal failure fails the batch; a constraint failure at `COMMIT` maps to `BatchMutationConflictError` (409 `batch_conflict`) and is not a batcher defect: `[mutation-batcher.ts:collectionErrorOf]`
+- `submitInline` bypasses every queue guard for a non-enabled operation and for `ctx.internal` auth flows: `[mutation-batcher.ts:MutationBatcher]`
+- `updateMany`/`deleteMany` keep their all-or-nothing contract and bypass the queue; they call the same `updateOne`/`deleteOne` helpers with `deferCleanup: false`: `[collection-service.ts:updateMany]`
+
 ## Side Effects
 
 - SQL reads/writes through `Repository` (`list`, `view`, `viewFilter`, `create`, `update`, `delete`): `[collection-service.ts:CollectionService]`

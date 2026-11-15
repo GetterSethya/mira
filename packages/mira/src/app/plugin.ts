@@ -4,7 +4,7 @@ import type { HttpRouter } from "effect/http"
 import type { SqlClient } from "effect/sql"
 
 import type { CollectionService } from "@/collection-service/collection-service.js"
-import type { CreateBatchStats } from "@/collection-service/create-batcher.js"
+import type { BatchMutationStats } from "@/collection-service/mutation-batcher.js"
 import type { AppConfig } from "@/config/index.js"
 import type { CronDef } from "@/cron/types.js"
 import type {
@@ -83,7 +83,7 @@ export const onCollectionSuccess = <T>(
  * that needs something outside it (its own layer, for example) must supply it
  * through the plugin's `layer`.
  *
- * `CreateBatchStats` and `SqlClient` are included for benchmark and
+ * `BatchMutationStats` and `SqlClient` are included for benchmark and
  * introspection routes; they are available because the service layer is
  * merged into the router's context, not because a plugin should write to the
  * database directly.
@@ -93,7 +93,7 @@ export type PluginRouteServices =
   | AppConfig
   | Repository
   | CollectionService
-  | CreateBatchStats
+  | BatchMutationStats
   | SqlClient.SqlClient
 
 export interface MiraPlugin<R = never> {

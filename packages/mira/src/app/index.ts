@@ -32,7 +32,7 @@ export type { MiraCacheConfig } from "../cache/types.js"
 export type {
   MiraBatchMutationConfig,
   MiraBatchOperationConfig
-} from "@/collection-service/create-batcher.js"
+} from "@/collection-service/mutation-batcher.js"
 export type { MiraApp, ServeOptions } from "./app.js"
 export { applyRulesToCollections } from "./app.js"
 export type { MiraAppConfig } from "./builder.js"

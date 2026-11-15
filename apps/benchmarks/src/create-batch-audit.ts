@@ -64,7 +64,7 @@ interface ReadArmResult {
 interface BatchStats {
   readonly batches: number
   readonly commits: number
-  readonly records: number
+  readonly applied: number
   readonly maxBatchSize: number
   readonly lastBatchSizes: ReadonlyArray<number>
   readonly rejected: number
@@ -287,7 +287,7 @@ const readBatchStats = async (server: RunningServer): Promise<BatchStats | null>
   return {
     batches,
     commits: Number(payload["commits"] ?? 0),
-    records: Number(payload["records"] ?? 0),
+    applied: Number(payload["applied"] ?? 0),
     maxBatchSize: Number(payload["maxBatchSize"] ?? 0),
     lastBatchSizes: Array.isArray(payload["lastBatchSizes"])
       ? payload["lastBatchSizes"].filter((value): value is number => typeof value === "number")
@@ -822,7 +822,7 @@ const evaluate = (
   const flushOk = fullOnC50.every((cell) => cell.medianFlushSizeLast50 >= 4)
   const commitRatio = fullOnC50.map((cell) => (cell.stats?.commits ?? 0) / cell.requests)
   const commitOk = commitRatio.length > 0 && commitRatio.every((ratio) => ratio <= 0.25)
-  const recordsOk = fullOnC50.every((cell) => cell.stats?.records === cell.requests)
+  const recordsOk = fullOnC50.every((cell) => cell.stats?.applied === cell.requests)
   checks.push({
     name: "2. batching evidence at FULL c50",
     status: !statsOk ? "fail" : batchesOk && flushOk && commitOk && recordsOk ? "pass" : "fail",
@@ -992,8 +992,8 @@ const evaluate = (
     }
     if (cell.batch === "on" && cell.concurrency > 1) {
       if (cell.stats.maxBatchSize <= 1) selfCheckFailures.push(`${cell.label}: maxBatchSize <= 1`)
-      if (cell.stats.records !== cell.requests) {
-        selfCheckFailures.push(`${cell.label}: records ${cell.stats.records} != requests ${cell.requests}`)
+      if (cell.stats.applied !== cell.requests) {
+        selfCheckFailures.push(`${cell.label}: records ${cell.stats.applied} != requests ${cell.requests}`)
       }
     }
     if (cell.rows !== cell.expectedRows) {
@@ -1163,7 +1163,7 @@ const renderSummary = (
   lines.push("## Notes")
   lines.push("")
   lines.push("- `rps` is successful throughput (2xx only); failed attempts are excluded. Each cell reports its success rate next to it.")
-  lines.push("- `commits` comes from `CreateBatchStats`, recorded after `COMMIT` returns; `batches` is the flush count; `median flush` is over the last 50 flushes, not the whole run.")
+  lines.push("- `commits` comes from `BatchMutationStats`, recorded after `COMMIT` returns; `batches` is the flush count; `median flush` is over the last 50 flushes, not the whole run.")
   lines.push("- A create that times out may still have committed. There is no idempotency key: do not blindly retry creates.")
   lines.push("- The batch holds the single SQLite connection for its duration, so reads in other fibers wait for the commit.")
   lines.push(`- The read arm targets ${READ_TARGET} completed reads per cell; check 8 is \`insufficient-data\` when a cell misses that target or has no read-at-rest sample.`)
@@ -1202,11 +1202,11 @@ const main = async () => {
 
       // Hard self-checks: abort rather than report a meaningless comparison.
       if (result.stats === null) {
-        throw new Error(`${spec.label}: CreateBatchStats is missing or unreadable — aborting`)
+        throw new Error(`${spec.label}: BatchMutationStats is missing or unreadable — aborting`)
       }
-      if (result.batch === "on" && result.concurrency > 1 && result.stats.records !== result.requests) {
+      if (result.batch === "on" && result.concurrency > 1 && result.stats.applied !== result.requests) {
         throw new Error(
-          `${spec.label}: stats.records (${result.stats.records}) !== requests (${result.requests}) — aborting`
+          `${spec.label}: stats.applied (${result.stats.applied}) !== requests (${result.requests}) — aborting`
         )
       }
       if (result.batch === "off" && result.stats.batches !== 0) {
