@@ -313,7 +313,7 @@ const data = {
     memoryGb: Math.round(totalmem() / 1024 ** 3),
     node: process.version,
     bun: bunVersion,
-    gitCommit
+    harnessCommit: gitCommit
   },
   method: {
     runs: RUNS,

@@ -330,6 +330,7 @@
         </p>
       </div>
 
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex — scrollable region; keyboard focus is intentional -->
       <div class="table-wrap" tabindex="0" role="region" aria-label="Latency medians">
         <table>
           <caption class="sr-only">Median latency per metric for Node and Bun</caption>
@@ -360,6 +361,7 @@
           index. A clean separation means the ranges do not touch. Consistent direction with
           overlapping ranges means every pair favoured Bun but one outlier widened the range.
         </p>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex — scrollable region; keyboard focus is intentional -->
         <div class="table-wrap" tabindex="0" role="region" aria-label="Run-to-run spread">
           <table>
             <caption class="sr-only">Minimum and maximum values, Bun wins and verdict per metric</caption>
