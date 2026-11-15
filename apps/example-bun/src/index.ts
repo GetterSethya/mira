@@ -5,7 +5,7 @@ import {
   defineRule,
   Field,
   LocalFileStorage,
-  Mira
+  Mira,
 } from "@gettersethya/mira"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
 
