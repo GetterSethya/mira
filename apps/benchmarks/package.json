@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "bench": "tsx src/runner.ts",
-    "server:node": "tsx src/server.ts",
+    "server:node": "node src/server.ts",
     "server:bun": "bun run src/server.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -37,10 +37,16 @@ including the per-run spread.
 - Console telemetry is disabled with `Layer.empty` on both servers so span export does not
   compete with the request path.
 - Node runs `node:http` + `node:sqlite`; Bun runs Bun's native HTTP server + `bun:sqlite`.
-- Both servers execute TypeScript. Node uses `tsx`; Bun runs TypeScript natively. This is
-  intentional because it matches each runtime's normal development path, but it makes the
-  startup number a tooling comparison as well as a runtime comparison. A compiled Node bundle
-  would be a different experiment.
+- Both servers execute TypeScript directly. Node 24 has type stripping enabled by default, so
+  the runner starts it as `node src/server.ts`; Bun uses its native loader. Node's stripping is
+  erasable-syntax only: no enums, namespaces, parameter properties or path-alias resolution
+  unless you add `--experimental-transform-types` or a loader. This server uses erasable syntax
+  and package imports, so it runs unchanged. A compiled Node bundle would be a different
+  experiment.
+- `BENCH_NODE_LOADER=tsx pnpm benchmark:platforms` restores the old `tsx` loader for a
+  tooling comparison. Node 24 has no `--strip-types` flag; the older opt-in flag is
+  `--experimental-strip-types`, and the default can be disabled with
+  `--no-experimental-strip-types`.
 - The load generator is the same Node `fetch` process for both servers. It does not use an
   external benchmark binary, so client-side variance is shared. The child process pipes are
   drained by the runner; no server output is left to block on.
@@ -48,7 +54,7 @@ including the per-run spread.
   one machine; the JSON keeps every run so the page can show overlap. They are directional,
   not a universal guarantee.
 - The create metric includes a durable SQLite write and is expected to be fsync-bound. It is
-  less separable than the list metric at this sample size; the page says so when the ranges
+  the noisiest metric; the page shows ranges and only calls a separation when the ranges do not
   overlap.
 
 ## Output

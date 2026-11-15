@@ -36,6 +36,7 @@ type PlatformSummary = {
 const packageRoot = process.cwd()
 const repoRoot = join(packageRoot, "../..")
 const RUNS = Number(process.env.BENCH_RUNS ?? "5")
+const NODE_LOADER = process.env.BENCH_NODE_LOADER === "tsx" ? "tsx" : "native"
 const RECORDS = Number(process.env.BENCH_RECORDS ?? "500")
 const SEED_RECORDS = Number(process.env.BENCH_SEED_RECORDS ?? "50")
 const LIST_REQUESTS = Number(process.env.BENCH_LIST_REQUESTS ?? "2000")
@@ -153,7 +154,13 @@ const stopServer = async (child: ChildProcess) => {
 const startServer = (platform: PlatformName, port: number, dbPath: string, uploads: string) => {
   const command =
     platform === "node"
-      ? { executable: process.execPath, args: ["--import", "tsx", "src/server.ts"] }
+      ? {
+          executable: process.execPath,
+          args:
+            NODE_LOADER === "native"
+              ? ["src/server.ts"]
+              : ["--import", "tsx", "src/server.ts"]
+        }
       : { executable: "bun", args: ["run", "src/server.ts"] }
 
   const child = spawn(command.executable, command.args, {
@@ -310,6 +317,7 @@ const data = {
   },
   method: {
     runs: RUNS,
+    nodeLoader: NODE_LOADER,
     runOrder: "alternating node-first / bun-first",
     seedRecords: SEED_RECORDS,
     seedConcurrency: 10,
@@ -336,9 +344,10 @@ const data = {
   }
 }
 
-const outputPath = join(repoRoot, "apps/landing/src/lib/benchmarks.json")
+const outputPath =
+  process.env.BENCH_OUTPUT ?? join(repoRoot, "apps/landing/src/lib/benchmarks.json")
 const tempPath = `${outputPath}.tmp`
 writeFileSync(tempPath, `${JSON.stringify(data, null, 2)}\n`)
 renameSync(tempPath, outputPath)
 
-console.log("Wrote apps/landing/src/lib/benchmarks.json")
+console.log(`Wrote ${outputPath}`)

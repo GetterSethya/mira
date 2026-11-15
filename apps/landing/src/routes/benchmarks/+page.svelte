@@ -100,13 +100,13 @@
 
   const summary = [
     {
-      label: 'Cold start · Node via tsx',
+      label: 'Cold start · native TypeScript',
       node: `${formatMs(node.startupMs)} (${formatRange(nodeStartup, (v) => decimal.format(v))} ms)`,
       bun: `${formatMs(bun.startupMs)} (${formatRange(bunStartup, (v) => decimal.format(v))} ms)`,
       delta: startupFaster > 0
         ? `Bun ${decimal.format(startupFaster)}× faster`
         : `Node ${decimal.format(-startupFaster)}× faster`,
-      note: 'Node runs through tsx; Bun runs TypeScript natively. The bracket is spawn to first 200.'
+      note: 'Node 24 strips types at startup; Bun runs TypeScript natively. The bracket is spawn to first 200.'
     },
     {
       label: 'Create throughput',
@@ -405,6 +405,8 @@
           <div><dt>Request body</dt><dd>{method.payloadBytes}-byte <code>body</code> field on create</dd></div>
           <div><dt>List response</dt><dd>limit {method.responseLimit} rows</dd></div>
           <div><dt>Host</dt><dd>{environment.cores} threads · ~{environment.memoryGb} GB RAM</dd></div>
+          <div><dt>Node TS</dt><dd>{method.nodeLoader === 'native' ? 'native type stripping' : 'tsx loader'}</dd></div>
+          <div><dt>Bun TS</dt><dd>native loader</dd></div>
           <div><dt>Client</dt><dd>Same Node fetch process for both servers</dd></div>
         </dl>
 
@@ -413,10 +415,10 @@
             This is a directional, single-machine comparison, not a universal claim. Both
             servers run the same Mira code, collections, rules, migrations and HTTP router.
             Console telemetry is disabled on both so span export does not compete with the
-            request. Bun uses Bun's native HTTP server, SQLite driver and runtime and runs the
-            TypeScript server directly. Node uses <code>node:http</code>,
-            <code>node:sqlite</code> and the Node platform preset, with the server started
-            through <code>tsx</code>; a compiled Node bundle would change the startup number.
+            request. Both run the TypeScript server directly: Node 24 strips types at startup,
+            Bun uses its native loader. Bun uses Bun's native HTTP server, SQLite driver and
+            runtime. Node uses <code>node:http</code>, <code>node:sqlite</code> and the Node
+            platform preset. A compiled Node bundle would be a different experiment.
           </p>
           <p>
             Database files are fresh for every run, so startup includes migration. Each Node
@@ -434,7 +436,7 @@
             relations and <code>expand</code>, pagination past the first page, memory,
             multi-core scaling, any concurrency other than {method.concurrency}, any other
             machine, and a compiled Node bundle. Create writes are durable and I/O-bound, which
-            is why their ranges overlap.
+            makes create the noisiest metric.
           </p>
           <p class="source">
             <a
