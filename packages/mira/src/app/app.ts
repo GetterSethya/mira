@@ -85,6 +85,23 @@ export interface ServeOptions {
    * Defaults to 10. Pass `1` to disable retrying.
    */
   maxPortAttempts?: number
+  /**
+   * Disable the HTTP router's per-request access log. Defaults to `false`.
+   *
+   * The access log is useful in development but costs a log record, formatting
+   * and a write to the configured logger on every request. Disable it for
+   * throughput-sensitive deployments and benchmarks.
+   */
+  disableLogger?: boolean
+  /**
+   * Disable span registration globally. Defaults to `false`.
+   *
+   * When telemetry is not exported, the Effect runtime still creates native
+   * spans and captures a short stack trace for each `withSpan`. Disabling
+   * tracing removes that overhead, at the cost of losing all spans and
+   * trace propagation for the process.
+   */
+  disableTracing?: boolean
 }
 
 /**
@@ -292,7 +309,7 @@ export class MiraApp<R = never, Telemetry = never> {
    * Build the complete server layer including the HTTP router and server.
    * Accepts an optional port override (otherwise uses the port from AppConfig).
    *
-   * @param options - Optional serve options (`port`, `maxPortAttempts`)
+   * @param options - Optional serve options (`port`, `maxPortAttempts`, `disableLogger`, `disableTracing`)
    * @returns A Layer ready to be launched
    *
    * @internal Called by serve() — most users should use serve() directly.
@@ -318,7 +335,8 @@ export class MiraApp<R = never, Telemetry = never> {
     ).pipe(Layer.provide(serviceLayer))
 
     return HttpRouter.serve(HttpRouter.addAll(routes), {
-      middleware: (effect) => ipAnnotationMiddleware(makeCorsMiddleware(this.#config.cors)(effect))
+      middleware: (effect) => ipAnnotationMiddleware(makeCorsMiddleware(this.#config.cors)(effect)),
+      disableLogger: options?.disableLogger === true
     }).pipe(Layer.provide(serverLayer), Layer.provideMerge(serviceLayer))
   }
 
@@ -331,7 +349,7 @@ export class MiraApp<R = never, Telemetry = never> {
    * If the requested port is already in use, the server automatically retries
    * on the next available port (up to `maxPortAttempts`, default 10).
    *
-   * @param options - Optional serve options (`port`, `maxPortAttempts`)
+   * @param options - Optional serve options (`port`, `maxPortAttempts`, `disableLogger`, `disableTracing`)
    *
    * @example
    * app.serve()                       // default port, auto-increment if busy
@@ -344,8 +362,7 @@ export class MiraApp<R = never, Telemetry = never> {
     const fullLayer = this.buildLayer(options)
     const usingDefaultCors = this.#config.cors === defaultCorsConfig
 
-    this.#config.platform.runMain(
-      Effect.gen(function* () {
+    const appEffect = Effect.gen(function* () {
         if (usingDefaultCors) {
           yield* Effect.logWarning(
             "CORS: using the permissive default — every Origin is reflected and credentials are allowed. " +
@@ -356,7 +373,10 @@ export class MiraApp<R = never, Telemetry = never> {
         const bootstrapLayer = Layer.effectDiscard(hookService.runBootstrap())
         yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))
         yield* hookService.runServe()
-      }) as Effect.Effect<never, never, never>
+    }) as Effect.Effect<never, never, never>
+
+    this.#config.platform.runMain(
+      options?.disableTracing === true ? Effect.withTracerEnabled(false)(appEffect) : appEffect
     )
   }
 }
