@@ -48,8 +48,9 @@ the platform implementations aggregated by `platforms/node.ts`.
 ## Global Side Effects
 
 - SQL DDL/DML: migrations, `_collections`, `_migrations`, `_config`, token tables, and
-  telemetry tables — `[src/migrator/migrator.ts:MigratorLive]`,
-  `[src/http/token-store.ts:TokenStoreLive]`, `[src/telemetry/sqlite-logger.ts:makeSqliteTelemetryLayer]`.
+  telemetry tables in the caller-supplied telemetry database —
+  `[src/migrator/migrator.ts:MigratorLive]`, `[src/http/token-store.ts:TokenStoreLive]`,
+  `[src/telemetry/sqlite-logger.ts:makeSqliteTelemetryLayer]`.
 - HTTP server binding with port retry and request handling — `[src/app/app.ts:MiraApp.buildLayer]`.
 - File storage reads/writes/deletes and thumbnail cache writes — `[src/storage/storage.ts:FileStorage]`,
   `[src/thumbnail/photon.ts:ThumbnailServicePhotonLive]`.

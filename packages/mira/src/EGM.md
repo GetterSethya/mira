@@ -39,8 +39,10 @@ to `crypto/node.ts`, `http/auth-node.ts`, and `http/server-factory-node.ts`, agg
 - Hooks: `HookService`, `makeHookServiceLayer`, `makeHookCollectionServiceLayer`
   (`HookCollectionService` itself is internal) — `[hooks/hook-service.ts:HookService]`.
 - Cron and telemetry: `CronService`, `makeCronServiceLayer`, `CronNotFoundError`, cron
-  context types; `makeSqliteTelemetryLayer`, `logCleanupCronDef`, `TelemetrySqlClient`,
-  `ConsoleTelemetryLayer`, `makeConsoleTelemetryLayer` —
+  context types; `makeSqliteTelemetryLayer` (driver-neutral: the caller supplies a
+  `SqlClient` layer for a dedicated telemetry database), `SqliteLoggerConfig`,
+  `logCleanupCronDef`, `TelemetrySqlClient`, `ConsoleTelemetryLayer`,
+  `makeConsoleTelemetryLayer` —
   `[cron/index.ts:CronService]`, `[telemetry/sqlite-logger.ts:makeSqliteTelemetryLayer]`,
   `[telemetry/index.ts:ConsoleTelemetryLayer]`.
 - Plugin API (via `app/index.ts`): `MiraPlugin`, `onCollection`, `onCollectionSuccess`,

@@ -77,12 +77,11 @@ export type { PhotonThumbnailOptions, ThumbSpec } from "./thumbnail/index.js"
 
 // Telemetry (sqlite logger)
 export type { SqliteLoggerConfig } from "./telemetry/sqlite-logger.js"
-export { logCleanupCronDef,makeSqliteTelemetryLayer } from "./telemetry/sqlite-logger.js"
-export { TelemetrySqlClient } from "./telemetry/telemetry-sql-client.js"
+export { logCleanupCronDef, makeSqliteTelemetryLayer } from "./telemetry/sqlite-logger.js"
 
 // Telemetry (console tracer/logger)
 export type { ConsolePrintOptions } from "./telemetry/index-core.js"
-export { ConsoleTelemetryLayer, makeConsoleTelemetryLayer } from "./telemetry/index-core.js"
+export { ConsoleTelemetryLayer, makeConsoleTelemetryLayer, TelemetrySqlClient } from "./telemetry/index-core.js"
 
 // Cron system
 export type {

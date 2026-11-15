@@ -114,16 +114,16 @@ export interface ServeOptions {
  * @see MiraBuilder — builds MiraApp
  * @see Mira — entry point: Mira.builder()
  */
-export class MiraApp<R = never> {
-  readonly #config: MiraAppConfig
+export class MiraApp<R = never, Telemetry = never> {
+  readonly #config: MiraAppConfig<Telemetry>
   readonly #extras: Array<MiraPlugin<any>>
-  constructor(config: MiraAppConfig) {
+  constructor(config: MiraAppConfig<Telemetry>) {
     this.#config = config
     this.#extras = []
   }
 
   /** @internal for tests only */
-  _getConfig(): MiraAppConfig {
+  _getConfig(): MiraAppConfig<Telemetry> {
     return this.#config
   }
 
@@ -148,7 +148,7 @@ export class MiraApp<R = never> {
    * @example
    * app.extend(MiraDashboard).serve()
    */
-  extend(plugin: MiraPlugin<any>): MiraApp<R> {
+  extend(plugin: MiraPlugin<any>): MiraApp<R, Telemetry> {
     this.#extras.push(plugin)
     return this
   }

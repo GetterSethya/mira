@@ -17,6 +17,9 @@ importers:
 
   apps/example:
     dependencies:
+      '@effect/sql-sqlite-node':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@gettersethya/mira':
         specifier: workspace:*
         version: link:../../packages/mira
@@ -39,6 +42,9 @@ importers:
 
   apps/example-bun:
     dependencies:
+      '@effect/sql-sqlite-bun':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@gettersethya/mira':
         specifier: workspace:*
         version: link:../../packages/mira

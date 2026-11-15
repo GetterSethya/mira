@@ -6,7 +6,7 @@ export const LogsCollection: AnyCollectionDef = BaseCollection.define("logs", {
   message: Field.text(),
   traceId: Field.text({ required: false }),
   spanId:  Field.text({ required: false }),
-})
+}).indexes((I) => [I.on("created")])
 
 export const SpansCollection: AnyCollectionDef = BaseCollection.define("spans", {
   name:         Field.text(),
@@ -18,4 +18,4 @@ export const SpansCollection: AnyCollectionDef = BaseCollection.define("spans", 
   status:       Field.text(),
   error:        Field.text({ required: false }),
   attributes:   Field.text(),
-})
+}).indexes((I) => [I.on("created")])

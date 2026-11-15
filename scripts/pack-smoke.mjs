@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -103,9 +103,9 @@ try {
       2
     )
   )
-  run("bun", ["add", ...tarballs, "effect@4.0.0"], bunTemp, false)
+  run("bun", ["add", ...tarballs, "effect@4.0.0", "@effect/sql-sqlite-bun@4.0.0"], bunTemp, false)
   const bunExportCheck =
-    "if (!m.BunPlatform) throw new Error('Bun entry missing BunPlatform'); if (!m.BunPortablePlatform) throw new Error('Bun entry missing BunPortablePlatform'); if (!m.BunCryptoLayer) throw new Error('Bun entry missing BunCryptoLayer'); if (!m.BunAuthServiceLayer) throw new Error('Bun entry missing BunAuthServiceLayer'); if (!m.ThumbnailServiceBunLive) throw new Error('Bun entry missing ThumbnailServiceBunLive'); if ('makeSqliteTelemetryLayer' in m) throw new Error('Bun entry leaked Node SQLite telemetry')"
+    "if (!m.BunPlatform) throw new Error('Bun entry missing BunPlatform'); if (!m.BunPortablePlatform) throw new Error('Bun entry missing BunPortablePlatform'); if (!m.BunCryptoLayer) throw new Error('Bun entry missing BunCryptoLayer'); if (!m.BunAuthServiceLayer) throw new Error('Bun entry missing BunAuthServiceLayer'); if (!m.ThumbnailServiceBunLive) throw new Error('Bun entry missing ThumbnailServiceBunLive'); if (typeof m.makeSqliteTelemetryLayer !== 'function') throw new Error('Bun entry missing makeSqliteTelemetryLayer'); if (!m.TelemetrySqlClient) throw new Error('Bun entry missing TelemetrySqlClient'); if (!m.logCleanupCronDef) throw new Error('Bun entry missing logCleanupCronDef')"
   run(
     bunExecutable(),
     ["-e", `import('@gettersethya/mira').then((m) => { ${bunExportCheck} })`],
@@ -121,6 +121,36 @@ try {
     bunTemp,
     false
   )
+
+  // Run the packed Bun telemetry write/read script from inside the temp install.
+  copyFileSync(
+    join(repo, "scripts", "pack-smoke-bun-telemetry.ts"),
+    join(bunTemp, "pack-smoke-bun-telemetry.ts")
+  )
+  run(bunExecutable(), ["run", "pack-smoke-bun-telemetry.ts"], bunTemp, false)
+
+  // Bundle only the telemetry surface and assert the Node SQLite driver stays out.
+  writeFileSync(
+    join(bunTemp, "telemetry-chunk-entry.ts"),
+    [
+      'import { makeSqliteTelemetryLayer, TelemetrySqlClient } from "@gettersethya/mira/bun"',
+      'import { SqliteClient } from "@effect/sql-sqlite-bun"',
+      "console.log(makeSqliteTelemetryLayer, TelemetrySqlClient, SqliteClient)",
+      ""
+    ].join("\n")
+  )
+  run(
+    bunExecutable(),
+    ["build", "telemetry-chunk-entry.ts", "--target=bun", "--outfile=telemetry-chunk.js"],
+    bunTemp,
+    false
+  )
+  const telemetryChunk = readFileSync(join(bunTemp, "telemetry-chunk.js"), "utf8")
+  for (const forbidden of ["@effect/sql-sqlite-node", "node:sqlite"]) {
+    if (telemetryChunk.includes(forbidden)) {
+      throw new Error(`Bun telemetry chunk references ${forbidden}`)
+    }
+  }
 
   console.log("pack smoke ok - Node and Bun entries resolve from packed tarballs")
 } finally {

@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
@@ -6,7 +10,7 @@ import { expect, vi } from "vitest"
 
 import { AppConfig } from "@/config/index.js"
 import { NodeCryptoLayer } from "@/crypto/index.js"
-import { logCleanupCronDef,makeSqliteTelemetryLayerForClient } from "@/telemetry/sqlite-logger.js"
+import { logCleanupCronDef, makeSqliteTelemetryLayer, makeSqliteTelemetryLayerForClient } from "@/telemetry/sqlite-logger.js"
 import { TelemetrySqlClient } from "@/telemetry/telemetry-sql-client.js"
 
 function makeLayer(logConsole = false) {
@@ -281,6 +285,91 @@ describe("makeSqliteTelemetryLayerForClient", () => {
   )
 })
 
+describe("makeSqliteTelemetryLayer", () => {
+  const makePublicLayer = (filename = ":memory:") =>
+    makeSqliteTelemetryLayer({
+      sqlLayer: SqliteClient.layer({ filename })
+    }).pipe(Layer.provide(NodeCryptoLayer))
+
+  it.effect("exposes TelemetrySqlClient and applies SQLite PRAGMAs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mira-telemetry-pragma-"))
+    const filename = join(dir, "telemetry.db")
+
+    return Effect.gen(function* () {
+      const sql = yield* TelemetrySqlClient
+
+      const journal = yield* sql<{ journal_mode: string }>`PRAGMA journal_mode`
+      const synchronous = yield* sql<{ synchronous: number }>`PRAGMA synchronous`
+      const busyTimeout = yield* sql<{ timeout: number }>`PRAGMA busy_timeout`
+
+      expect(journal[0]?.journal_mode).toBe("wal")
+      expect(synchronous[0]?.synchronous).toBe(1)
+      expect(busyTimeout[0]?.timeout).toBe(5000)
+
+      yield* Effect.logInfo("public-layer-log")
+      yield* Effect.void.pipe(Effect.withSpan("public-layer-span"))
+      yield* Effect.promise(drainMicrotasks)
+
+      const logs = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM logs WHERE message = 'public-layer-log'`
+      const spans = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM spans WHERE name = 'public-layer-span'`
+
+      expect(Number(logs[0]?.count ?? 0)).toBeGreaterThan(0)
+      expect(Number(spans[0]?.count ?? 0)).toBeGreaterThan(0)
+    }).pipe(
+      Effect.provide(makePublicLayer(filename)),
+      Effect.ensuring(Effect.sync(() => rmSync(dir, { recursive: true, force: true })))
+    )
+  })
+
+  it.effect("creates created indexes on logs and spans", () =>
+    Effect.gen(function* () {
+      const sql = yield* TelemetrySqlClient
+
+      const logs = yield* sql<{ name: string }>`PRAGMA index_list(logs)`
+      const spans = yield* sql<{ name: string }>`PRAGMA index_list(spans)`
+
+      expect(logs.some((row) => row.name.includes("created"))).toBe(true)
+      expect(spans.some((row) => row.name.includes("created"))).toBe(true)
+    }).pipe(Effect.provide(makePublicLayer()))
+  )
+
+  it("drains queued logs when the scope closes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mira-telemetry-drain-"))
+    const filename = join(dir, "telemetry.db")
+
+    try {
+      const layer = makeSqliteTelemetryLayer({
+        sqlLayer: SqliteClient.layer({ filename })
+      }).pipe(Layer.provide(NodeCryptoLayer))
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Effect.forEach(
+            Array.from({ length: 500 }),
+            (_, i) => Effect.logInfo(`drain-${i}`),
+            { discard: true }
+          )
+        }).pipe(Effect.provide(layer), Effect.scoped)
+      )
+
+      const count = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM logs`
+          return Number(rows[0]?.count ?? 0)
+        }).pipe(
+          Effect.provide(SqliteClient.layer({ filename })),
+          Effect.scoped
+        )
+      )
+
+      expect(count).toBe(500)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("logCleanupCronDef", () => {
   function makeCleanupLayer(logRetentionDays: number) {
     const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
@@ -318,8 +407,8 @@ describe("logCleanupCronDef", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
 
-      yield* sql.unsafe(`CREATE TABLE logs  (id TEXT PRIMARY KEY, created TEXT NOT NULL)`)
-      yield* sql.unsafe(`CREATE TABLE spans (id TEXT PRIMARY KEY, created TEXT NOT NULL)`)
+      yield* sql.unsafe(`CREATE TABLE logs  (seqId INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT, created TEXT NOT NULL)`)
+      yield* sql.unsafe(`CREATE TABLE spans (seqId INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT, created TEXT NOT NULL)`)
 
       const old    = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
       const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
@@ -343,8 +432,8 @@ describe("logCleanupCronDef", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
 
-      yield* sql.unsafe(`CREATE TABLE logs  (id TEXT PRIMARY KEY, created TEXT NOT NULL)`)
-      yield* sql.unsafe(`CREATE TABLE spans (id TEXT PRIMARY KEY, created TEXT NOT NULL)`)
+      yield* sql.unsafe(`CREATE TABLE logs  (seqId INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT, created TEXT NOT NULL)`)
+      yield* sql.unsafe(`CREATE TABLE spans (seqId INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT, created TEXT NOT NULL)`)
 
       const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
 

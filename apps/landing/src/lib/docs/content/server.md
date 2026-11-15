@@ -118,22 +118,27 @@ SQLite cannot `ALTER COLUMN`, so the dialect rebuilds any table targeted by a co
 
 `ConsoleTelemetryLayer` prints one JSON line per completed span prefixed `[trace]`, plus structured logs carrying `traceId`/`spanId` when a span is active. `makeConsoleTelemetryLayer({ pretty: true })` switches to Chalk output.
 
-To keep logs and spans in SQLite:
+To keep logs and spans in SQLite, pass the SQL driver layer yourself. The layer is driver-neutral and requires a **dedicated telemetry database**, separate from the application database:
 
 ```ts
 import { makeSqliteTelemetryLayer } from "@gettersethya/mira"
+import { SqliteClient } from "@effect/sql-sqlite-node"
 
-.telemetry(makeSqliteTelemetryLayer({ dbPath: "mira-logs.db", logConsole: true }))
+.telemetry(makeSqliteTelemetryLayer({
+  sqlLayer: SqliteClient.layer({ filename: "mira-logs.db" }),
+  logConsole: true,
+  pretty: false,
+}))
 ```
 
-This layer is Node-only in the Bun cut because it imports the Node SQLite driver. On Bun, use the default console telemetry or a custom layer; the SQLite telemetry and `logCleanupCronDef` are not available.
+On Bun, import `SqliteClient` from `@effect/sql-sqlite-bun` and keep the same shape. Both the Node entry and `@gettersethya/mira/bun` export `makeSqliteTelemetryLayer`, `SqliteLoggerConfig`, `TelemetrySqlClient`, and `logCleanupCronDef`. There is no `dbPath` option: the caller owns the driver and supplies the layer, so neither entry carries a runtime-specific SQLite dependency for telemetry.
 
-It opens a separate SQLite database, migrates `logs` and `spans` at layer construction, and re-provides the connection as `TelemetrySqlClient` for the admin telemetry routes. Spans go onto an unbounded queue drained by a scoped fiber, so completion never blocks on I/O. Log writes are fire-and-forget. `dbPath` defaults to `"mira-logs.db"`; `logConsole` echoes to stdout and `pretty` affects only that echo.
+The layer applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` at construction, then migrates `logs` and `spans`. Both tables index `created`, so retention scans do not read the whole table. The connection is re-provided as `TelemetrySqlClient` for the admin telemetry routes. Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-entry queue, each drained by a scoped fiber, so span and record completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports log rows dropped because the bounded queue was full. `logConsole` echoes to stdout; `pretty` affects only that echo, never the stored rows.
 
-`logCleanupCronDef` is a daily `0 0 * * *` job deleting `logs` and `spans` older than `AppConfig.logRetentionDays`; add it to `.crons([...])`. It requires `TelemetrySqlClient`, so use it only with `makeSqliteTelemetryLayer`; the default console telemetry does not provide the table client. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
+`logCleanupCronDef` is a daily `0 0 * * *` job deleting `logs` and `spans` older than `AppConfig.logRetentionDays`; add it to `.crons([...])`. Deletes run in batches of 1,000 using the `created` index, then the job runs `PRAGMA wal_checkpoint(TRUNCATE)` and logs a warning when the checkpoint is busy. It requires `TelemetrySqlClient`, so use it only with `makeSqliteTelemetryLayer`; the default console telemetry does not provide the table client. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
 
 ## Thumbnails and the platform boundary
 
 `ThumbnailServicePhotonLive` is wired into the foundation layer and supports JPEG, PNG, and WebP through `@cf-wasm/photon`. The file-serving route accepts a `thumb` spec in `WxH[tbf]` form: `t` is cover, `b` is contain, `f` is fill, and no suffix defaults to cover. A `0` axis scales proportionally; `0x0` returns the source size. Results are cached best-effort at `_thumbs/<filename>/<spec>`, and a resize failure falls back to the original. The app hardcodes the Photon layer; `ThumbnailServiceNoopLive` exists internally for tests and is not a public builder option.
 
-`NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. `BunPlatform` does the same with native Bun filesystem, path, HTTP server, and runtime; it reuses the Node-compatible crypto, password, and SMTP layers. `BunSqliteDatabase` pairs Bun SQLite with the same dialect. Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic; Photon works under both runtimes, while SQLite telemetry remains Node-only in this cut. For hook ordering and cron state see [plugins](../plugins/); for routes and status codes see the [HTTP API](../http-api/); for the admin UI see the [dashboard](../dashboard/).
+`NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. `BunPlatform` does the same with native Bun filesystem, path, HTTP server, and runtime; it reuses the Node-compatible crypto, password, and SMTP layers. `BunSqliteDatabase` pairs Bun SQLite with the same dialect. Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic; Photon works under both runtimes, and SQLite telemetry works on both when you pass the matching `SqlClient` layer. For hook ordering and cron state see [plugins](../plugins/); for routes and status codes see the [HTTP API](../http-api/); for the admin UI see the [dashboard](../dashboard/).

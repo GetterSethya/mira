@@ -110,13 +110,25 @@ Use `makeThumbnailServiceBunLive({ maxPixels, allowPhotonFallback })` for a diff
 
 ## SQLite
 
-`BunSqliteDatabase` pairs the Bun SQLite client with the existing SQLite dialect. Migrations, `_config`, `_auth_challenges`, `_revoked_tokens`, and `_rate_limits` use the same SQL as the Node preset. The Bun driver enables WAL and a busy timeout by default. The Node SQLite telemetry layer is separate and is not part of the Bun entry.
+`BunSqliteDatabase` pairs the Bun SQLite client with the existing SQLite dialect. Migrations, `_config`, `_auth_challenges`, `_revoked_tokens`, and `_rate_limits` use the same SQL as the Node preset. The Bun driver enables WAL and a busy timeout by default. Telemetry is driver-neutral: keep the telemetry DB separate and pass a Bun `SqliteClient` layer.
 
 `SqliteDatabase` is also exported from the Bun entry as an alias for `BunSqliteDatabase`, so code that follows the Node docs keeps working after switching imports.
 
 ## Telemetry
 
-Console telemetry is the default and has no Node SQLite dependency. The SQLite telemetry layer (`makeSqliteTelemetryLayer`) is Node-only in this cut because it imports `@effect/sql-sqlite-node`; the Bun entry does not export it. Use the default console layer; a driver-neutral SQLite telemetry layer is a follow-up.
+Console telemetry is the default and has no SQLite dependency. To persist logs and spans under Bun, pass a Bun `SqlClient` layer for a dedicated telemetry database:
+
+```ts
+import { makeSqliteTelemetryLayer } from "@gettersethya/mira/bun"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
+
+.telemetry(makeSqliteTelemetryLayer({
+  sqlLayer: SqliteClient.layer({ filename: "mira-logs.db" }),
+  logConsole: true,
+}))
+```
+
+The layer applies WAL, `synchronous=NORMAL`, and `busy_timeout=5000`, migrates `logs` and `spans` with a `created` index, and exposes the connection as `TelemetrySqlClient`. `logCleanupCronDef` uses the same client, so add it to `.crons([...])` alongside the layer. Both the Node entry and `@gettersethya/mira/bun` export `makeSqliteTelemetryLayer`, `SqliteLoggerConfig`, `TelemetrySqlClient`, and `logCleanupCronDef`; only the imported driver differs. Do not reuse the application database — telemetry writes must go to a separate file to avoid contention.
 
 ## Version pin
 
@@ -140,9 +152,8 @@ The smoke is the runtime proof. It does not replace the Node test suite; run `pn
 
 - Deno, Postgres, and MySQL.
 - Bun versions older than `1.3.14`; `BunPlatform` fails fast on them.
-- Bun-native SQLite telemetry.
 - A Bun-native SMTP client. `nodemailer` uses Bun's native `node:net` and TLS implementation.
 - Native `cover` thumbnails. `Bun.Image` has no centre-crop operation yet, so `cover` uses Photon.
 - Automatic Bun → Node password portability. Use `BunPortablePlatform` if you need it.
 - A full Node/Bun CI matrix. CI runs typecheck, the Node test suite, the package build, a packed-tarball install smoke, the Bun smoke, and an example boot on one runner.
-- Dashboard telemetry pages that depend on the SQLite log store. The dashboard core and its public bootstrap route work on Bun; the SQLite telemetry backend is Node-only in this cut.
+- Dashboard telemetry pages that depend on the SQLite log store. The dashboard core and its public bootstrap route work on Bun; the SQLite telemetry backend also works there once you pass a Bun `SqliteClient` layer, but it still needs a dedicated telemetry database.

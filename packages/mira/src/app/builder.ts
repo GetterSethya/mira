@@ -27,7 +27,7 @@ import type {
  *
  * @see MiraBuilder — builds this config
  */
-export interface MiraAppConfig {
+export interface MiraAppConfig<Telemetry = never> {
   platform: MiraPlatform
   database: MiraDatabase
   storage: MiraStorage
@@ -35,13 +35,13 @@ export interface MiraAppConfig {
   collections: ReadonlyArray<AnyCollectionDef>
   rules?: ReadonlyArray<RuleBinding>
   crons: ReadonlyArray<CronDef<any>>
-  telemetry: Layer.Layer<never, never, PlatformServices>
+  telemetry: Layer.Layer<Telemetry, never, PlatformServices>
   cors: CorsConfig
   migrations?: MigrateOptions
   rateLimits?: MiraRateLimits
 }
 
-function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfig {
+function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraAppConfig<any> {
   return (
     config.platform !== undefined &&
     config.database !== undefined &&
@@ -83,15 +83,15 @@ function isMiraAppConfig(config: Partial<MiraAppConfig>): config is MiraAppConfi
  * @see MiraApp — the assembled application
  * @see Mira.builder — entry point
  */
-export class MiraBuilder<Has extends string = never, R = never> {
-  readonly #config: Partial<MiraAppConfig>
+export class MiraBuilder<Has extends string = never, R = never, Telemetry = never> {
+  readonly #config: Partial<MiraAppConfig<any>>
 
-  constructor(config: Partial<MiraAppConfig> = {}) {
+  constructor(config: Partial<MiraAppConfig<any>> = {}) {
     this.#config = config
   }
 
   /** @internal for tests only */
-  _getPartialConfig(): Partial<MiraAppConfig> {
+  _getPartialConfig(): Partial<MiraAppConfig<any>> {
     return this.#config
   }
 
@@ -104,7 +104,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @param p - A MiraPlatform preset (e.g., NodePlatform)
    * @returns A new builder with "platform" added to the phantom type
    */
-  platform(p: MiraPlatform): MiraBuilder<Has | "platform", R> {
+  platform(p: MiraPlatform): MiraBuilder<Has | "platform", R, Telemetry> {
     return new MiraBuilder({ ...this.#config, platform: p })
   }
 
@@ -115,7 +115,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @param d - A MiraDatabase preset (e.g., SqliteDatabase({ filename: "data.db" }))
    * @returns A new builder with "database" added to the phantom type
    */
-  database(d: MiraDatabase): MiraBuilder<Has | "database", R> {
+  database(d: MiraDatabase): MiraBuilder<Has | "database", R, Telemetry> {
     return new MiraBuilder({ ...this.#config, database: d })
   }
 
@@ -126,7 +126,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @param s - A MiraStorage preset (e.g., LocalFileStorage({ directory: "./uploads" }))
    * @returns A new builder with "storage" added to the phantom type
    */
-  storage(s: MiraStorage): MiraBuilder<Has | "storage", R> {
+  storage(s: MiraStorage): MiraBuilder<Has | "storage", R, Telemetry> {
     return new MiraBuilder({ ...this.#config, storage: s })
   }
 
@@ -136,7 +136,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @param e - A MiraEmail preset (e.g., SmtpEmail({ ... }))
    * @returns A new builder with "email" added to the phantom type
    */
-  email(e: MiraEmail): MiraBuilder<Has | "email", R> {
+  email(e: MiraEmail): MiraBuilder<Has | "email", R, Telemetry> {
     return new MiraBuilder({ ...this.#config, email: e })
   }
 
@@ -152,7 +152,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @param r - A `MiraRateLimits` object
    * @returns A new builder (same phantom type — rate limits are optional)
    */
-  rateLimits(r: MiraRateLimits): MiraBuilder<Has, R> {
+  rateLimits(r: MiraRateLimits): MiraBuilder<Has, R, Telemetry> {
     return new MiraBuilder({ ...this.#config, rateLimits: r })
   }
 
@@ -164,7 +164,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    *            or ViewCollection.define()
    * @returns A new builder with "collections" added to the phantom type
    */
-  collections(c: ReadonlyArray<AnyCollectionDef>): MiraBuilder<Has | "collections", R> {
+  collections(c: ReadonlyArray<AnyCollectionDef>): MiraBuilder<Has | "collections", R, Telemetry> {
     return new MiraBuilder({ ...this.#config, collections: c })
   }
 
@@ -176,7 +176,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @param r - Array of RuleBinding from Mira.defineRule(collection, cb)
    * @returns A new builder (same phantom type — rules is optional)
    */
-  rules(r: ReadonlyArray<RuleBinding>): MiraBuilder<Has, R> {
+  rules(r: ReadonlyArray<RuleBinding>): MiraBuilder<Has, R, Telemetry> {
     const seen = new Set<string>()
     for (const rb of r) {
       if (seen.has(rb.collectionName)) {
@@ -194,7 +194,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @param c - Array of CronDef objects with name, schedule, and handler
    * @returns A new builder (same phantom type — crons is optional)
    */
-  crons<R2>(c: ReadonlyArray<CronDef<R2>>): MiraBuilder<Has, R | R2> {
+  crons<R2>(c: ReadonlyArray<CronDef<R2>>): MiraBuilder<Has, R | R2, Telemetry> {
     return new MiraBuilder({ ...this.#config, crons: c })
   }
 
@@ -206,7 +206,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @param l - A Layer providing telemetry services (may require platform services)
    * @returns A new builder with "telemetry" added to the phantom type
    */
-  telemetry(l: Layer.Layer<never, never, PlatformServices>): MiraBuilder<Has | "telemetry", R> {
+  telemetry<T2>(l: Layer.Layer<T2, never, PlatformServices>): MiraBuilder<Has | "telemetry", R, T2> {
     return new MiraBuilder({ ...this.#config, telemetry: l })
   }
 
@@ -222,7 +222,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    *
    * @throws If `credentials: true` is combined with a wildcard origin
    */
-  cors(c: CorsConfig): MiraBuilder<Has, R> {
+  cors(c: CorsConfig): MiraBuilder<Has, R, Telemetry> {
     assertValidCorsConfig(c)
     return new MiraBuilder({ ...this.#config, cors: c })
   }
@@ -243,7 +243,7 @@ export class MiraBuilder<Has extends string = never, R = never> {
    *   .migrations({ allowDestructive: true, logLevel: 3 })
    *   .build()
    */
-  migrations(m: MigrateOptions): MiraBuilder<Has, R> {
+  migrations(m: MigrateOptions): MiraBuilder<Has, R, Telemetry> {
     return new MiraBuilder({ ...this.#config, migrations: m })
   }
 
@@ -258,12 +258,12 @@ export class MiraBuilder<Has extends string = never, R = never> {
    * @throws If build() is called before all required steps are completed
    *         (caught at compile time by the phantom type)
    */
-  build(this: MiraBuilder<"platform" | "database" | "storage" | "collections", R>): MiraApp<R> {
+  build(this: MiraBuilder<"platform" | "database" | "storage" | "collections", R, Telemetry>): MiraApp<R, Telemetry> {
     const config = this._getPartialConfig()
     if (!isMiraAppConfig(config)) {
       throw new Error("build() called on incomplete builder")
     }
-    return new MiraApp<R>({
+    return new MiraApp<R, Telemetry>({
       platform: config.platform,
       database: config.database,
       storage: config.storage,

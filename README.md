@@ -135,7 +135,9 @@ Mira.builder()
   .collections([Users, Posts])                                      // required — your collections
   .rules([userRules, postRules])                                    // optional — server-side access rules
   .crons([/* CronDef definitions */])                               // optional — cron jobs
-  .telemetry(makeSqliteTelemetryLayer({ dbPath: "logs.db" }))       // optional — SQLite telemetry
+  .telemetry(makeSqliteTelemetryLayer({                             // optional — SQLite telemetry
+    sqlLayer: SqliteClient.layer({ filename: "mira-logs.db" }),     //   caller-supplied driver, dedicated DB
+  }))
   .cors({ allowedOrigins: ["https://app.example.com"] })            // optional — CORS (defaults to permissive *)
   .build()                                                          // produces MiraApp
   .extend(MiraDashboard)                                            // optional — register plugins
@@ -151,7 +153,7 @@ Mira.builder()
 | `.collections(c)` | yes | Array of collection definitions. |
 | `.rules(r)` | no | Array of `RuleBinding` from `defineRule(collection, cb)`. Collections without rules deny all actions. |
 | `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
-| `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). |
+| `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). `makeSqliteTelemetryLayer({ sqlLayer })` persists logs and spans to a dedicated SQLite database; supply the driver layer, e.g. `SqliteClient.layer({ filename: "mira-logs.db" })` from `@effect/sql-sqlite-node` or `@effect/sql-sqlite-bun`. |
 | `.cors(c)` | no | CORS config. Defaults to permissive (`*`), so a separately-hosted frontend works with zero config. |
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
 | `.extend(plugin)` | — | Called on `MiraApp` after `.build()`. Registers a `MiraPlugin`. |
@@ -1250,10 +1252,17 @@ import { makeConsoleTelemetryLayer } from "@gettersethya/mira"
 [trace] collection.list client 3.20ms ok posts cache.hit=true
 ```
 
-To persist logs and spans to a SQLite database instead, use `makeSqliteTelemetryLayer`:
+To persist logs and spans to a SQLite database instead, use `makeSqliteTelemetryLayer`. Mira does not open the database for you: pass a `SqlClient` layer for a **dedicated telemetry database**. The caller owns the driver, so the same API works on Node and Bun.
 
 ```typescript
-import { Mira, NodePlatform, SqliteDatabase, LocalFileStorage, makeSqliteTelemetryLayer } from "@gettersethya/mira"
+import {
+  LocalFileStorage,
+  makeSqliteTelemetryLayer,
+  Mira,
+  NodePlatform,
+  SqliteDatabase,
+} from "@gettersethya/mira"
+import { SqliteClient } from "@effect/sql-sqlite-node"
 
 const app = Mira.builder()
   .platform(NodePlatform)
@@ -1261,17 +1270,23 @@ const app = Mira.builder()
   .storage(LocalFileStorage({ directory: "./uploads" }))
   .collections([Users, Posts])
   .telemetry(makeSqliteTelemetryLayer({
-    dbPath:     "mira-logs.db",   // defaults to "mira-logs.db"
-    logConsole: true,             // also print to stdout (default: false)
-    pretty:     true,             // colorize the console output (default: false)
+    sqlLayer:   SqliteClient.layer({ filename: "mira-logs.db" }), // dedicated telemetry DB
+    logConsole: true,                                             // also print to stdout (default: false)
+    pretty:     true,                                             // colorize the console output (default: false)
   }))
   .build()
 ```
 
-The telemetry layer writes to two collections in a dedicated SQLite database (separate from your main database to avoid write contention):
+On Bun, import `SqliteClient` from `@effect/sql-sqlite-bun` instead and keep the rest identical. Both the Node entry and `@gettersethya/mira/bun` export `makeSqliteTelemetryLayer`, `SqliteLoggerConfig`, `TelemetrySqlClient`, and `logCleanupCronDef`.
+
+The layer applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` during construction, then migrates two collections into that database:
 
 - **`logs`** — structured log entries from `Effect.log()`. Fields: `seqId`, `level`, `message`, `traceId?`, `spanId?`, `created`, `updated`.
 - **`spans`** — completed Effect spans. Fields: `seqId`, `name`, `traceId`, `spanId`, `parentSpanId?`, `kind`, `durationMs`, `status`, `error?`, `attributes`, `created`, `updated`.
+
+Both tables index `created` for retention scans. Completed spans are offered to an unbounded queue and log rows to a bounded queue (10,000 entries) drained by scoped fibers, so record and span completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports any log rows dropped because the bounded queue was full. The database connection is also provided as `TelemetrySqlClient` for the admin telemetry routes. `logConsole` echoes to stdout and `pretty` affects only that echo.
+
+`logCleanupCronDef` is a daily `0 0 * * *` job. It deletes rows older than `AppConfig.logRetentionDays` in batches of 1,000 using the `created` index, then runs `PRAGMA wal_checkpoint(TRUNCATE)` and logs a warning when the checkpoint is busy. Add it to `.crons([...])`. The handler requires `TelemetrySqlClient`, so it only works with `makeSqliteTelemetryLayer`; the default console telemetry does not provide that client. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
 
 The telemetry endpoints (`GET /api/_telemetry/logs` and `GET /api/_telemetry/spans`) require a session from a plugin-declared admin collection and support cursor-based pagination via `?after=<seqId>&limit=<n>`. Logs return `{ logs, total, limit, nextCursor }`; spans return `{ spans, total, limit, nextCursor }`. Spans also accept `traceId`, and a bad telemetry filter is a `400`, not a `422`. The dashboard's log/span viewer uses these routes for continuous pagination.
 

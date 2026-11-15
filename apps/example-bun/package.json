@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@effect/sql-sqlite-bun": "4.0.0",
     "@gettersethya/mira": "workspace:*",
     "@gettersethya/mira-dashboard": "workspace:*",
     "effect": "4.0.0"

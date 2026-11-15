@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { SqlClient, SqlSchema } from "effect/sql"
 
-import { CryptoService } from "@/crypto/index.js"
+import { CryptoService } from "@/crypto/crypto.js"
 
 import type { AppConfigShape, S3Config } from "./types.js"
 

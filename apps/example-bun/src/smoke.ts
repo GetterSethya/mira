@@ -18,15 +18,18 @@ import {
   FileStorage,
   hmacSha256Base64Url,
   LocalFileStorage,
+  makeSqliteTelemetryLayer,
   makeThumbnailServiceBunLive,
   Mira,
   parseThumbSpec,
   RateLimiter,
   sha256Base64Url,
   SmtpEmail,
+  TelemetrySqlClient,
   ThumbnailService
 } from "@gettersethya/mira/bun"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
 
 type BunImagePipeline = {
   metadata(): Promise<{ readonly width: number; readonly height: number }>
@@ -104,6 +107,11 @@ const app = Mira.builder()
   )
   .collections([Posts])
   .rules([rules])
+  .telemetry(
+    makeSqliteTelemetryLayer({
+      sqlLayer: SqliteClient.layer({ filename: join(dir, "telemetry.db") })
+    })
+  )
   .build()
   .extend(MiraDashboard)
 
@@ -116,6 +124,19 @@ const request = (path: string, init?: RequestInit) =>
 const program = Effect.gen(function* () {
   const context = yield* Layer.build(app.buildLayer({ port, maxPortAttempts: 5 }))
   requestPort = Context.get(context, AppConfig).port
+
+  // SQLite telemetry: one log and one span must reach the dedicated database.
+  yield* Effect.logInfo("bun-smoke-log")
+  yield* Effect.void.pipe(Effect.withSpan("bun-smoke-span"))
+  yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 250)))
+  const telemetrySql = Context.get(context, TelemetrySqlClient)
+  const logRows = yield* telemetrySql<{ count: number }>`SELECT COUNT(*) AS count FROM logs`
+  const spanRows = yield* telemetrySql<{ count: number }>`SELECT COUNT(*) AS count FROM spans`
+  const logCount = Number(logRows[0]?.count ?? 0)
+  const spanCount = Number(spanRows[0]?.count ?? 0)
+  if (logCount === 0 || spanCount === 0) {
+    throw new Error(`telemetry rows missing: logs=${logCount} spans=${spanCount}`)
+  }
 
   // Native Bun crypto: hashing and UUIDv7.
   const sha = yield* sha256Base64Url("hello")
@@ -302,6 +323,7 @@ const program = Effect.gen(function* () {
     },
     emailReceived: startedSmtp.received.length,
     storage: { key, listed: listedKeys.length },
+    telemetry: { logs: logCount, spans: spanCount },
     port: requestPort,
     rateLimit: { first: first.blocked === null, second: second.blocked?.policy }
   }
@@ -333,6 +355,7 @@ type SmokeResult = {
   }
   readonly emailReceived: number
   readonly storage: { readonly key: string; readonly listed: number }
+  readonly telemetry: { readonly logs: number; readonly spans: number }
   readonly port: number
   readonly rateLimit: { readonly first: boolean; readonly second: string | undefined }
 }

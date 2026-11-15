@@ -19,6 +19,26 @@ published by CI.
 
 ### Changed
 
+- **Breaking: driver-neutral SQLite telemetry.** `makeSqliteTelemetryLayer` no longer
+  accepts `dbPath` and no longer opens the database itself. Pass a `SqlClient` layer for a
+  dedicated telemetry database:
+  `makeSqliteTelemetryLayer({ sqlLayer: SqliteClient.layer({ filename: "mira-logs.db" }) })`,
+  importing `SqliteClient` from `@effect/sql-sqlite-node` on Node or
+  `@effect/sql-sqlite-bun` on Bun. Both the Node entry and `@gettersethya/mira/bun` export
+  `makeSqliteTelemetryLayer`, `SqliteLoggerConfig`, `TelemetrySqlClient`, and
+  `logCleanupCronDef`; the telemetry layer no longer pulls a SQLite driver into either
+  entry. At construction the layer applies WAL, `synchronous=NORMAL`, and
+  `busy_timeout=5000`, then adds a `created` index to `logs` and `spans`. Log rows now go
+  through a bounded 10,000-entry queue drained by a scoped writer, spans keep their
+  unbounded queue, and both queues are flushed on shutdown with dropped log rows reported.
+  `MiraBuilder`/`MiraApp` now carry the telemetry output type, so
+  `buildLayer()`/`buildServiceLayer()` expose `TelemetrySqlClient` to `Context.get` without
+  `getUnsafe`. The retention cron deletes in batches of 1,000 using the new index,
+  checkpoints the WAL with `PRAGMA wal_checkpoint(TRUNCATE)`, and warns instead of failing
+  when the checkpoint is busy. Upgrading an existing telemetry database builds the `created`
+  indexes once on the first boot after upgrade, which can pause startup on a large `logs` or
+  `spans` table.
+
 ### Fixed
 
 ## [0.1.0-alpha.37] - 2026-11-14

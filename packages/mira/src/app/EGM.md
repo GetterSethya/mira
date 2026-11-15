@@ -7,7 +7,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 ## Interface
 
 - `Mira` — entry object exposing `builder()`: `[index.ts:Mira]`
-- `MiraBuilder<Has, R>` — fluent, immutable builder. Required steps: `platform`, `database`, `storage`, `collections`; optional: `rules`, `crons`, `telemetry`, `cors`, `migrations`; terminal: `build`: `[builder.ts:MiraBuilder]`
+- `MiraBuilder<Has, R, Telemetry>` — fluent, immutable builder. Required steps: `platform`, `database`, `storage`, `collections`; optional: `rules`, `crons`, `telemetry`, `cors`, `migrations`; terminal: `build`: `[builder.ts:MiraBuilder]`
 - `MiraBuilder.platform(p)` — records a `MiraPlatform` and adds `"platform"` to the phantom type: `[builder.ts:MiraBuilder.platform]`
 - `MiraBuilder.database(d)` — records a `MiraDatabase` and adds `"database"`: `[builder.ts:MiraBuilder.database]`
 - `MiraBuilder.storage(s)` — records a `MiraStorage` and adds `"storage"`: `[builder.ts:MiraBuilder.storage]`
@@ -18,8 +18,8 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - `MiraBuilder.cors(c)` — validates and stores a `CorsConfig`: `[builder.ts:MiraBuilder.cors]`
 - `MiraBuilder.migrations(m)` — stores `MigrateOptions` for auto-migration: `[builder.ts:MiraBuilder.migrations]`
 - `MiraBuilder.build()` — requires all four required phantom tags; defaults telemetry, CORS, and migrations: `[builder.ts:MiraBuilder.build]`
-- `MiraAppConfig` (type) — the fully-defaulted configuration consumed by `MiraApp`: `[builder.ts:MiraAppConfig]`
-- `MiraApp<R>` — assembled application with `extend`, `buildServiceLayer`, `buildLayer`, `serve`, plus `_getConfig`/`_getExtras`/`_resolveAdminCollections` test accessors: `[app.ts:MiraApp]`
+- `MiraAppConfig<Telemetry>` (type) — the fully-defaulted configuration consumed by `MiraApp`; `telemetry` is `Layer<Telemetry, never, PlatformServices>`: `[builder.ts:MiraAppConfig]`
+- `MiraApp<R, Telemetry>` — assembled application with `extend`, `buildServiceLayer`, `buildLayer`, `serve`, plus `_getConfig`/`_getExtras`/`_resolveAdminCollections` test accessors. `Telemetry` is the output of the `.telemetry(...)` layer, so `TelemetrySqlClient` is visible to `Context.get` from the built app layer: `[app.ts:MiraApp]`
 - `MiraApp.extend(plugin)` — appends a `MiraPlugin` and returns `this` for chaining: `[app.ts:MiraApp.extend]`
 - `MiraApp.buildServiceLayer()` — full service graph (no HTTP bind), including auto-migration and cron fibers: `[app.ts:MiraApp.buildServiceLayer]`
 - `MiraApp.buildLayer(options?)` — service graph plus router and server layer; called internally by `serve`: `[app.ts:MiraApp.buildLayer]`

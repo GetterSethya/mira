@@ -10,8 +10,10 @@ offers them synchronously to an unbounded queue, and a scoped consumer fiber
 drains it. The SQLite path (`sqlite-logger.ts`, `telemetry-sql-client.ts`,
 `collections.ts`) writes the same data into a dedicated log database (`logs` and
 `spans` tables) and additionally exposes that database through
-`TelemetrySqlClient` so the HTTP telemetry routes can read it. `index.ts`
-merges the console tracer and logger into `makeConsoleTelemetryLayer`.
+`TelemetrySqlClient` so the HTTP telemetry routes can read it. The SQLite path is
+driver-neutral: the caller supplies a `SqlClient` layer for a dedicated telemetry
+database. `index.ts` merges the console tracer and logger into
+`makeConsoleTelemetryLayer`.
 
 ## Interface
 
@@ -43,10 +45,10 @@ merges the console tracer and logger into `makeConsoleTelemetryLayer`.
 
 ### `sqlite-logger.ts`
 
-- `SqliteLoggerConfig` (type) — `{ dbPath?, logConsole?, pretty? }`. [sqlite-logger.ts:SqliteLoggerConfig]
-- `logCleanupCronDef` — `CronDef` named `"mira:log-cleanup"`, `Schedule.cron("0 0 * * *")`, deleting `logs` and `spans` older than `logRetentionDays`. [sqlite-logger.ts:logCleanupCronDef]
-- `makeSqliteTelemetryLayerForClient(config)` — layer over an ambient `SqlClient` + `CryptoService` that migrates the two telemetry collections, builds the SQLite logger, drains spans into `spans`, and returns the merged Logger/Tracer layer. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
-- `makeSqliteTelemetryLayer(config)` — self-contained layer: opens its own SQLite client at `config.dbPath ?? "mira-logs.db"`, wires `NodeCryptoLayer`, and merges the logger with `TelemetrySqlClient`. [sqlite-logger.ts:makeSqliteTelemetryLayer]
+- `SqliteLoggerConfig` (type) — `{ sqlLayer, logConsole?, pretty? }`; `sqlLayer` is a `Layer<SqlClient.SqlClient, never, never>` for a dedicated telemetry database. [sqlite-logger.ts:SqliteLoggerConfig]
+- `logCleanupCronDef` — `CronDef<TelemetrySqlClient | AppConfig>` named `"mira:log-cleanup"`, `Schedule.cron("0 0 * * *")`, deleting `logs` and `spans` older than `logRetentionDays` in batches. [sqlite-logger.ts:logCleanupCronDef]
+- `makeSqliteTelemetryLayerForClient(config)` — layer over an ambient `SqlClient` + `CryptoService` that applies the telemetry PRAGMAs, migrates the two telemetry collections, builds the queued SQLite logger/tracer, and returns the merged Logger/Tracer layer. Exported for tests. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
+- `makeSqliteTelemetryLayer(config)` — driver-neutral layer: provides `config.sqlLayer` to the logger and re-exposes it as `TelemetrySqlClient`; requires `CryptoService` and dies on layer failure. [sqlite-logger.ts:makeSqliteTelemetryLayer]
 
 ### `telemetry-sql-client.ts`
 
@@ -54,8 +56,8 @@ merges the console tracer and logger into `makeConsoleTelemetryLayer`.
 
 ### `collections.ts`
 
-- `LogsCollection` — base collection `"logs"` with `level`, `message`, optional `traceId`/`spanId`. [collections.ts:LogsCollection]
-- `SpansCollection` — base collection `"spans"` with `name`, `traceId`, `spanId`, optional `parentSpanId`, `kind`, `durationMs`, `status`, optional `error`, `attributes`. [collections.ts:SpansCollection]
+- `LogsCollection` — base collection `"logs"` with `level`, `message`, optional `traceId`/`spanId`, indexed on `created`. [collections.ts:LogsCollection]
+- `SpansCollection` — base collection `"spans"` with `name`, `traceId`, `spanId`, optional `parentSpanId`, `kind`, `durationMs`, `status`, optional `error`, `attributes`, indexed on `created`. [collections.ts:SpansCollection]
 
 No subdirectories.
 
@@ -71,25 +73,28 @@ No subdirectories.
 - Log level is uppercased and array messages are joined with spaces. [logger.ts:makeStructuredLogger]
 - Log lines carry `traceId`/`spanId` only when the emitting fiber has a current span. [logger.ts:makeStructuredLogger]
 - SQLite log rows always include generated `id`, uppercase `level`, joined `message`, and identical `created`/`updated` ISO timestamps, plus `traceId`/`spanId` when a span is active. [sqlite-logger.ts:makeSqliteLogger]
-- Log insertion is fire-and-forget: `Effect.runPromise(...).catch(() => {})`, so a failing log write never fails the caller and is silent. [sqlite-logger.ts:makeSqliteLogger]
+- Log rows are offered with `Queue.offerUnsafe` to a bounded queue (capacity 10,000); a full queue drops the row, increments a counter, and never fails the caller. [sqlite-logger.ts:makeSqliteLogger]
 - Span rows JSON-encode `attributes` and store `parentSpanId`/`error` as `null` when absent. [sqlite-logger.ts:writeSpanToDb]
-- The SQLite telemetry layer migrates `LogsCollection` and `SpansCollection` during layer construction and dies on failure. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
-- `makeSqliteTelemetryLayer` resolves its own `SqlClient` from the configured `dbPath` (default `"mira-logs.db"`) and also re-provides it as `TelemetrySqlClient`. [sqlite-logger.ts:makeSqliteTelemetryLayer]
+- Layer construction applies `PRAGMA journal_mode = WAL`, `PRAGMA synchronous = NORMAL`, and `PRAGMA busy_timeout = 5000`, then migrates `LogsCollection` and `SpansCollection`. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
+- The setup effect retries only SQLite `SQLITE_BUSY`/`SQLITE_LOCKED` lock timeouts, with exponential backoff (`100 millis`, up to 4 retries); other failures die. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
+- `makeSqliteTelemetryLayer` provides the caller-supplied `sqlLayer` to both the logger and the `TelemetrySqlClient` tag; it does not open a database itself. [sqlite-logger.ts:makeSqliteTelemetryLayer]
+- `sqlLayer` must point at a dedicated telemetry database, not the application database; the config doc says so, and `TelemetrySqlClient` exists to keep the two clients apart. [sqlite-logger.ts:SqliteLoggerConfig] [telemetry-sql-client.ts:TelemetrySqlClient]
 - `SqliteLoggerConfig.logConsole` gates console echo; `pretty` only affects the echo, not database contents. [sqlite-logger.ts:SqliteLoggerConfig]
-- `logCleanupCronDef` computes the cutoff from `AppConfig.logRetentionDays` in days and deletes from both `logs` and `spans`. [sqlite-logger.ts:logCleanupCronDef]
-- Only `TelemetrySqlClient` and `AppConfig` are required by the cleanup cron handler. [sqlite-logger.ts:logCleanupCronDef]
+- `logCleanupCronDef` computes the cutoff from `AppConfig.logRetentionDays` in days and deletes from both `logs` and `spans` in batches of 1,000 rows. [sqlite-logger.ts:logCleanupCronDef]
+- The cleanup job finishes with `PRAGMA wal_checkpoint(TRUNCATE)`; a failed checkpoint is logged as a warning, and a busy checkpoint logs a second warning instead of failing the job. [sqlite-logger.ts:logCleanupCronDef]
+- Only `TelemetrySqlClient` and `AppConfig` are required by the cleanup cron handler, so it has no effect without the SQLite telemetry layer. [sqlite-logger.ts:logCleanupCronDef]
 - The logger/tracer hold a reference to the same ambient `SqlClient` they were built with; the layer expects `SqlClient.SqlClient | CryptoService`. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
 - `makeSqliteTelemetryLayerForClient` is exported for testing and is not part of the `index.ts` barrel. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
-- `TelemetrySqlClient` must stay separate from the app's primary `SqlClient` to avoid contention (documented on the tag). [telemetry-sql-client.ts:TelemetrySqlClient]
 
 ## Side Effects
 
 - Writes to stdout via `console.log` for every span (`[trace] {json}` or pretty form) and, when `logConsole` is set, for every log line. [tracer.ts:printSpanJson] [sqlite-logger.ts:makeSqliteLogger]
-- Opens and writes a dedicated SQLite database file (`mira-logs.db` by default) with `logs` and `spans` tables. [sqlite-logger.ts:makeSqliteTelemetryLayer]
-- Runs schema migrations for the telemetry collections at layer construction. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
-- Uses an unbounded in-memory `Queue<CompletedSpan>` plus a scoped consumer fiber and a shutdown finalizer in both console and SQLite paths. [tracer.ts:makeConsoleTracerLayer] [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
+- Opens and writes a dedicated SQLite database supplied through `SqliteLoggerConfig.sqlLayer`, with `logs` and `spans` tables. [sqlite-logger.ts:makeSqliteTelemetryLayer]
+- Applies WAL, `synchronous=NORMAL`, and `busy_timeout=5000`, then runs schema migrations for the telemetry collections at layer construction. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
+- Uses a bounded `Queue<LogRow>` (10,000) and an unbounded `Queue<CompletedSpan>`, each with a scoped consumer fiber and a shutdown finalizer that drains remaining rows with a 2-second timeout. [sqlite-logger.ts:makeSqliteTelemetryLayerForClient]
+- Reports dropped log rows and failed drains to stderr; individual write failures are caught and logged rather than failing the layer. [sqlite-logger.ts:safeWriteLogRow] [sqlite-logger.ts:drainRows]
 - Generates row ids with Node `Buffer` over `CryptoService.randomBytesSync`. [sqlite-logger.ts:makeSqliteLogger]
-- `logCleanupCronDef` performs scheduled `DELETE` statements against the telemetry database and logs the cutoff via `Effect.logInfo`. [sqlite-logger.ts:logCleanupCronDef]
+- `logCleanupCronDef` performs scheduled batched `DELETE` statements against the telemetry database, checkpoints the WAL, and logs the cutoff via `Effect.logInfo`. [sqlite-logger.ts:logCleanupCronDef]
 - Span attribute encoding failures terminate the write with `Effect.orDie` rather than surfacing in the effect's error channel. [sqlite-logger.ts:writeSpanToDb]
 
 ## Verification

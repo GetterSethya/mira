@@ -82,9 +82,10 @@ export {
 } from "./thumbnail/index.js"
 export type { BunThumbnailOptions, PhotonThumbnailOptions, ThumbSpec } from "./thumbnail/index.js"
 
-// Console telemetry. The SQLite logger is Node-only in this cut because it
-// imports the Node SQLite driver; the Bun smoke uses console telemetry.
+// Telemetry. The SQLite logger is driver-neutral: pass a Bun SQLite layer.
 export * from "./telemetry/index-core.js"
+export type { SqliteLoggerConfig } from "./telemetry/sqlite-logger.js"
+export { logCleanupCronDef, makeSqliteTelemetryLayer } from "./telemetry/sqlite-logger.js"
 
 // Cron system.
 export type {

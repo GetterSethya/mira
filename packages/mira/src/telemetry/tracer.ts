@@ -1,7 +1,7 @@
 import chalk from "chalk"
 import { Cause, Effect, Exit, Layer, Option, Queue, Schema, Tracer } from "effect"
 
-import { CryptoService } from "@/crypto/index.js"
+import { CryptoService } from "@/crypto/crypto.js"
 
 import type { ConsolePrintOptions } from "./types.js"
 
