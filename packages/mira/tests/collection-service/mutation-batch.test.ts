@@ -1504,6 +1504,29 @@ describe("update/delete batching", () => {
     }).pipe(Effect.provide(batchedLayer([Posts], mutationConfig)))
   )
 
+  it.effect("reads the stored row inside the batch and returns 404 when it vanished", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const stats = yield* BatchMutationStats
+      const sql = yield* SqlClient.SqlClient
+
+      const [row] = yield* svc.createMany(Posts, [{ title: "vanishing" }], noCtx)
+      const id = String(row?.["id"])
+      const fiber = yield* Effect.forkChild(
+        svc.update(Posts, id, { title: "updated" }, noCtx).pipe(Effect.exit)
+      )
+      yield* waitForAdmitted(1)
+      // The row disappears after admission but before the flush executes.
+      yield* sql`DELETE FROM ${sql("posts")} WHERE "id" = ${id}`
+      yield* stats.flushNow
+
+      const exit = yield* Fiber.join(fiber)
+      expect(failureTag(exit)).toBe("NotFoundError")
+      expect((yield* stats.snapshot).admitted).toBe(1)
+    }).pipe(Effect.provide(batchedLayer([Posts], mutationConfig)))
+  )
+
   it.effect("batches 20 concurrent deletes and removes every row", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
