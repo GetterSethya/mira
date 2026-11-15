@@ -24,6 +24,7 @@ type Scenario =
   | "list-nocache"
   | "list-nofilter-nocache"
   | "list-scan"
+  | "list-selective-fullscan"
   | "repo-list"
   | "repo-list-scan"
   | "create"
@@ -62,6 +63,7 @@ type CaseResult = AuditCase & {
   readonly memory: Memory | null
   readonly profilePath: string | null
   readonly profileBytes: number | null
+  readonly titleIndex: boolean
 }
 
 const packageRoot = process.cwd()
@@ -77,6 +79,12 @@ const platforms = (process.env.AUDIT_PLATFORMS ?? "node,bun")
   .map((value) => value.trim())
   .filter((value): value is PlatformName => value === "node" || value === "bun")
 const BODY = "x".repeat(180)
+
+// Benchmark-only control: adds `posts_title_idx` after seeding so the selective
+// `title = <missing>` filter can be measured once as a full scan (index absent)
+// and once as an index seek. It is never part of the production collection
+// definition; leave it unset for the platform comparison runs.
+const titleIndexEnabled = process.env.AUDIT_INDEX_TITLE === "1"
 
 const MemorySchema = Schema.Struct({
   rss: Schema.Number,
@@ -250,6 +258,18 @@ const seedRows = (dbPath: string, rows: number) => {
   db.close()
 }
 
+/**
+ * Adds a title index out-of-band, after seeding, so the selective filter can be
+ * measured with and without one. The migrator diffs schemas (not the physical
+ * `sqlite_master`), so this index survives the measured server's boot migration.
+ */
+const createTitleIndex = (dbPath: string) => {
+  const db = new DatabaseSync(dbPath)
+  db.exec("CREATE INDEX IF NOT EXISTS posts_title_idx ON posts(title)")
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)")
+  db.close()
+}
+
 const prepareDatabase = async (platform: PlatformName, rows: number, dir: string) => {
   const dbPath = join(dir, "bench.sqlite")
   const uploads = join(dir, "uploads")
@@ -268,6 +288,7 @@ const prepareDatabase = async (platform: PlatformName, rows: number, dir: string
     await stopServer(baseUrl, server.child)
   }
   seedRows(dbPath, rows)
+  if (titleIndexEnabled) createTitleIndex(dbPath)
   return { dbPath, uploads }
 }
 
@@ -278,6 +299,9 @@ const listUrl = (baseUrl: string, prefix: string, index: number) => {
   return `${baseUrl}/api/collections/posts?limit=30&filter=${filter}`
 }
 
+// `title = <missing>` matches no row, so without an index on `title` SQLite must
+// read the whole table for every request. `list-selective-fullscan` is the case
+// name that says so; `list-scan` is the older name for the same probe.
 const scanUrl = (baseUrl: string, prefix: string, index: number) => {
   const filter = encodeURIComponent(
     JSON.stringify({ op: "eq", field: "title", value: `${prefix}-${index}` })
@@ -317,6 +341,8 @@ const requestFor = (
     case "list-nofilter-nocache":
       return fetch(listNoFilterNoCacheUrl(baseUrl))
     case "list-scan":
+      return fetch(scanUrl(baseUrl, prefix, index))
+    case "list-selective-fullscan":
       return fetch(scanUrl(baseUrl, prefix, index))
     case "repo-list":
       return fetch(repoListUrl(baseUrl, prefix, index))
@@ -383,7 +409,8 @@ const runCase = async (testCase: AuditCase): Promise<CaseResult> => {
       load,
       memory,
       profilePath: profileBytes === null ? null : profilePath,
-      profileBytes
+      profileBytes,
+      titleIndex: titleIndexEnabled
     }
   } finally {
     await stopServer(baseUrl, server.child)
@@ -403,6 +430,7 @@ const profileCases = (platform: PlatformName): ReadonlyArray<AuditCase> => [
   { name: "list-nofilter-nocache-small", platform, scenario: "list-nofilter-nocache", rows: 550, concurrency: 50, requests: 4_000, profile: true },
   { name: "list-large", platform, scenario: "list", rows: 50_000, concurrency: 50, requests: 4_000, profile: true },
   { name: "list-scan-large", platform, scenario: "list-scan", rows: 50_000, concurrency: 50, requests: 2_000, profile: true },
+  { name: "list-selective-fullscan-large", platform, scenario: "list-selective-fullscan", rows: 50_000, concurrency: 50, requests: 2_000, profile: true },
   { name: "repo-list-small", platform, scenario: "repo-list", rows: 550, concurrency: 50, requests: 4_000, profile: true },
   { name: "repo-list-large", platform, scenario: "repo-list", rows: 50_000, concurrency: 50, requests: 4_000, profile: true },
   { name: "create", platform, scenario: "create", rows: 0, concurrency: 50, requests: 4_000, profile: true }
@@ -474,6 +502,17 @@ const loadCases = (platform: PlatformName): ReadonlyArray<AuditCase> => {
       profile: false
     })
   }
+  for (const rows of [550, 50_000]) {
+    cases.push({
+      name: `list-selective-fullscan-${rows}-c50`,
+      platform,
+      scenario: "list-selective-fullscan",
+      rows,
+      concurrency: 50,
+      requests: rows === 50_000 ? 500 : 2_000,
+      profile: false
+    })
+  }
   return cases
 }
 
@@ -497,6 +536,7 @@ for (const testCase of cases) {
       `p50=${load === null ? "-" : load.p50.toFixed(1)} ` +
       `p95=${load === null ? "-" : load.p95.toFixed(1)} ` +
       `rss=${((result.memory?.rss ?? 0) / 1024 / 1024).toFixed(0)}MB ` +
+      `titleIndex=${result.titleIndex ? "on" : "off"} ` +
       `profile=${result.profileBytes ?? "-"}`
   )
 }
@@ -504,6 +544,9 @@ for (const testCase of cases) {
 const outputPath = join(outDir, `audit-${mode}.json`)
 mkdirSync(outDir, { recursive: true })
 const tempPath = `${outputPath}.tmp`
-writeFileSync(tempPath, `${JSON.stringify({ mode, results }, null, 2)}\n`)
+writeFileSync(
+  tempPath,
+  `${JSON.stringify({ mode, method: { titleIndex: titleIndexEnabled }, results }, null, 2)}\n`
+)
 renameSync(tempPath, outputPath)
 console.log(`Wrote ${outputPath}`)

@@ -74,6 +74,35 @@ Useful controls:
 - `AUDIT_OUT=<dir>` writes results elsewhere.
 - `BENCH_SYNCHRONOUS=NORMAL` tests the SQLite durability trade-off.
 - `BENCH_TRACING=on` re-enables tracing; `BENCH_STACK_TRACES=off` disables span stack capture.
+- `AUDIT_INDEX_TITLE=1` adds a benchmark-only `posts_title_idx` index (see below).
+
+## Selective filter: full scan vs title index
+
+The list benchmark's filter is `title neq <value>`, which matches every seeded row, so
+`LIMIT 30` stops the scan after the first 30 rows. That is the right shape for a cache/SQL
+comparison, but it cannot show the cost of a scan that has to touch the whole table.
+
+`list-scan` (`list-scan-large` in `profiles`, plus the `repo-list-scan` cases) uses
+`title = <missing>` instead: the filter selects nothing, so `LIMIT 30` cannot stop early and
+SQLite must read every row. That is a full table scan. `list-selective-fullscan`
+(`list-selective-fullscan-large`, `list-selective-fullscan-50000-c50`) is the same probe under a
+name that states the cost when no index exists. Every case result records `titleIndex: false`
+unless `AUDIT_INDEX_TITLE=1` is set.
+
+`AUDIT_INDEX_TITLE=1` creates `CREATE INDEX IF NOT EXISTS posts_title_idx ON posts(title)` in
+the seeded database before the measured server starts, turning the same selective filter into
+an index seek. The flag is written into the audit JSON as `method.titleIndex` and repeated per
+case result, so an indexed run is never mistaken for an unindexed one:
+
+```bash
+AUDIT_MODE=load AUDIT_PLATFORMS=node AUDIT_ONLY=list-selective-fullscan-50000-c50 pnpm --filter mira-benchmarks perf:audit
+AUDIT_MODE=load AUDIT_PLATFORMS=node AUDIT_ONLY=list-selective-fullscan-50000-c50 AUDIT_INDEX_TITLE=1 pnpm --filter mira-benchmarks perf:audit
+```
+
+The index is a benchmark-only control. It is created out-of-band on the seeded database and is
+**not** part of the `posts` collection definition, so it is not a recommendation to index every
+filterable column in a real app. Use the two runs together: unindexed tells you what a full scan
+costs at this row count, indexed tells you the ceiling an index can buy back.
 
 ## Output
 
