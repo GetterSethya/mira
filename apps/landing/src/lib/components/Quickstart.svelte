@@ -782,17 +782,6 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  .editor-scroll::after {
-    content: '';
-    position: sticky;
-    bottom: 0;
-    display: block;
-    height: 28px;
-    margin-top: -28px;
-    background: linear-gradient(to bottom, transparent, var(--code-bg));
-    pointer-events: none;
-  }
-
   .editor-scroll:focus-visible {
     outline: 2px solid var(--ink);
     outline-offset: -2px;
