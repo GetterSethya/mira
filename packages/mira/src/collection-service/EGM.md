@@ -25,6 +25,7 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - `CollectionError` (type) — union of the above plus `ValidationError` and `SqlError`: `[errors.ts:CollectionError]`
 - `ValidationError` — re-exported from the client package: `[errors.ts:ValidationError]`
 - `makeRowDecoder` / `makeRowEncoder` — dialect-gated `0`/`1` ⇄ boolean conversion: `[decode.ts:makeRowDecoder]`
+- `makeProjectedListRowMapper(schema, storesBooleanAsInteger, projection)` — maps a list row in SELECT order, skips `seqId`, and preserves only projected keys plus `expand`: `[decode.ts:makeProjectedListRowMapper]`
 - `RowDecoder`, `RowEncoder` (types) — decoder returns an `Effect`, encoder is pure: `[decode.ts:RowDecoder]`
 - `stripHiddenFields(schema, record)` — allowlist filter dropping `x-hidden` and unknown keys: `[decode.ts:stripHiddenFields]`
 - `toPublicRecord(schema, storesBooleanAsInteger, record)` — decode + strip for direct-read responses: `[decode.ts:toPublicRecord]`
@@ -55,6 +56,8 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - `select` is an allowlist checked with `Object.hasOwn` against the collection's properties; `id`, `created`, `updated` are always included; hidden fields are excluded unless admin: `[collection-service.ts:resolveFields]`
 - A non-admin sort on an `x-hidden` field fails with `ValidationError`; unknown sort fields fall back to default ordering: `[collection-service.ts:validateSort]`
 - `list` always fetches `seqId`, derives `nextCursor` only when the page is full, and removes `seqId` from returned items: `[collection-service.ts:CollectionService]`
+- Default visible fields are cached per schema identity and frozen; `seqId` is appended once through a second array cache. The no-select/no-expand list path reuses both arrays: `[collection-service.ts:resolveFields]`
+- The default list uses `makeProjectedListRowMapper`, iterating the exact `fieldsForQuery` projection so response key set/order match the SELECT and non-projected keys are omitted; `select`/`expand` keep `makeListRowMapper`. A custom `Repository` that returns extra columns has them dropped on the default path: `[collection-service.ts:list]`
 - `expand` only joins fields whose `x-kind` is `relation`; duplicates collapse; the target collection's `view` rule is applied unless admin; a target with no view rule or an auth-needing rule under an anonymous caller is silently not expanded: `[collection-service.ts:resolveExpand]`
 - Hidden fields are stripped from `create`/`update` responses for non-admin callers (same contract as list/view): `[collection-service.ts:stripHidden]`
 - Auth passwords are hashed at this single write chokepoint; on update an empty password is dropped so a blank edit form preserves the stored hash: `[collection-service.ts:hashAuthPassword]`

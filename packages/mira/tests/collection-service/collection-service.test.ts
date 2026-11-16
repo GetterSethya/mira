@@ -264,6 +264,40 @@ describe("list", () => {
       expect("seqId" in result.items[0]).toBe(false)
     }).pipe(Effect.provide(testLayer)))
 
+  it.effect("list item key set and order follow the SELECT projection", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      yield* svc.create(Posts, { title: "Ordered", published: true }, noCtx)
+      const result = yield* svc.list(Posts, null, 10, noCtx)
+      if (!isCursorPage(result)) throw new Error("expected CursorPage")
+      expect(Object.keys(result.items[0] ?? {})).toEqual([
+        "id",
+        "title",
+        "published",
+        "authorId",
+        "created",
+        "updated"
+      ])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("admin default list omits seqId and keeps the same schema order", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      yield* svc.create(Posts, { title: "Admin", published: false }, noCtx)
+      const result = yield* svc.list(Posts, null, 10, { headers: {}, query: {}, admin: true })
+      if (!isCursorPage(result)) throw new Error("expected CursorPage")
+      expect(Object.keys(result.items[0] ?? {})).toEqual([
+        "id",
+        "title",
+        "published",
+        "authorId",
+        "created",
+        "updated"
+      ])
+    }).pipe(Effect.provide(testLayer)))
+
   it.effect("list items decode booleans and omit seqId in the same pass", () =>
     Effect.gen(function* () {
       yield* setupPostsTable

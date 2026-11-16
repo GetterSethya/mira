@@ -22,7 +22,7 @@ import type {
   ResolvedBatchMutationConfig
 } from "./mutation-batcher.js"
 import type { RowDecoder, RowDecoderSync, RowEncoder } from "./decode.js"
-import { makeListRowMapper, makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
+import { makeListRowMapper, makeProjectedListRowMapper, makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
 import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
@@ -143,12 +143,44 @@ export const MAX_BULK_RECORDS = 1_000
 /** @deprecated Use {@link MAX_BULK_RECORDS}. Kept as a compatibility alias. */
 export const MAX_BULK_CREATE_RECORDS = MAX_BULK_RECORDS
 
+const defaultFieldsCache = new WeakMap<
+  CollectionSchema,
+  { readonly user: ReadonlyArray<string>; readonly admin: ReadonlyArray<string> }
+>()
+
+const listFieldsCache = new WeakMap<
+  ReadonlyArray<string>,
+  ReadonlyArray<string>
+>()
+
+function defaultFields(schema: CollectionSchema) {
+  const cached = defaultFieldsCache.get(schema)
+  if (cached !== undefined) return cached
+  const all = Object.keys(schema.properties)
+  const value = {
+    user: Object.freeze(all.filter((field) => schema.properties[field]["x-hidden"] !== true)),
+    admin: Object.freeze(all)
+  }
+  defaultFieldsCache.set(schema, value)
+  return value
+}
+
+function listQueryFields(fields: ReadonlyArray<string>) {
+  if (fields.includes("seqId")) return fields
+  const cached = listFieldsCache.get(fields)
+  if (cached !== undefined) return cached
+  const value = Object.freeze([...fields, "seqId"])
+  listFieldsCache.set(fields, value)
+  return value
+}
+
 function resolveFields(schema: CollectionSchema, userSelect: ReadonlyArray<string> | null, admin = false): ReadonlyArray<string> {
   const properties = schema.properties
   const isVisible = (field: string) => admin || properties[field]["x-hidden"] !== true
-  const nonHidden = Object.keys(properties).filter(isVisible)
 
-  if (userSelect === null) return nonHidden
+  if (userSelect === null) {
+    return admin ? defaultFields(schema).admin : defaultFields(schema).user
+  }
 
   // Allowlist every requested name against the collection's own property keys
   // (`Object.hasOwn`) — for admin too. Only real fields are selected.
@@ -433,6 +465,21 @@ function makeCollectionServiceLayerWith(
       const getListRowMapper = (collection: AnyCollectionDef): RowDecoderSync =>
         listRowMapperMap.get(collection.name) ??
         makeListRowMapper(collection.schema, dialect.storesBooleanAsInteger)
+      const projectedListMapperCache = new WeakMap<ReadonlyArray<string>, RowDecoderSync>()
+      const getProjectedListMapper = (
+        collection: AnyCollectionDef,
+        projection: ReadonlyArray<string>
+      ): RowDecoderSync => {
+        const cached = projectedListMapperCache.get(projection)
+        if (cached !== undefined) return cached
+        const mapper = makeProjectedListRowMapper(
+          collection.schema,
+          dialect.storesBooleanAsInteger,
+          projection
+        )
+        projectedListMapperCache.set(projection, mapper)
+        return mapper
+      }
       const getEncoder = (collection: AnyCollectionDef): RowEncoder => encoderMap.get(collection.name) ?? ((r) => r)
 
       // create/update return the stored row directly (no `resolveFields` pass), so
@@ -637,11 +684,19 @@ function makeCollectionServiceLayerWith(
 
           const sortOrder = sort !== undefined ? yield* validateSort(collection.schema, collection.name, sort, ctx.admin === true) : undefined
           const fields = resolveFields(collection.schema, select ?? null, ctx.admin === true)
-          const expandDefs = yield* resolveExpand(collection.schema, expand ?? null, allCollections, ctx)
-          const fieldsWithExpand = [...new Set([...fields, ...expandDefs.map((e) => e.localField)])]
+          const expandDefs =
+            expand === null || expand === undefined || expand.length === 0
+              ? []
+              : yield* resolveExpand(collection.schema, expand, allCollections, ctx)
+          const defaultProjection = select === null && expandDefs.length === 0
+          const fieldsWithExpand = defaultProjection
+            ? fields
+            : [...new Set([...fields, ...expandDefs.map((e) => e.localField)])]
 
           // seqId is x-hidden but must be fetched for cursor-based pagination
-          const fieldsForQuery = fieldsWithExpand.includes("seqId") ? fieldsWithExpand : [...fieldsWithExpand, "seqId"]
+          const fieldsForQuery = defaultProjection
+            ? listQueryFields(fieldsWithExpand)
+            : [...new Set([...fieldsWithExpand, "seqId"])]
 
           const listOpts = {
             sort: sortOrder ?? { field: "seqId", direction: "asc" as const },
@@ -663,7 +718,9 @@ function makeCollectionServiceLayerWith(
           // One synchronous pass per row: strip seqId (internal pagination column,
           // must not appear in API responses) and decode booleans together. Each
           // item is a fresh object, so the repository result is never mutated.
-          const mapRow = getListRowMapper(collection)
+          const mapRow = defaultProjection
+            ? getProjectedListMapper(collection, fieldsForQuery)
+            : getListRowMapper(collection)
           const items = rows.items.map(mapRow)
           return { items, nextCursor }
         }).pipe(

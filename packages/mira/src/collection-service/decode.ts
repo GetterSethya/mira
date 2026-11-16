@@ -70,6 +70,43 @@ export function makeListRowMapper(colSchema: CollectionSchema, storesBooleanAsIn
   }
 }
 
+/**
+ * Projection-based counterpart to {@link makeListRowMapper}. The projection is
+ * the exact `fieldsForQuery` array sent to `Repository.list`, so iteration order
+ * matches the row's SELECT order and keys outside the projection are never
+ * emitted as `undefined`.
+ *
+ * `expand` is the only non-projection key `Repository.reshapeExpand` adds; it is
+ * copied explicitly when present. The caller uses this mapper only for a
+ * non-empty projection; the empty-projection `SELECT *` fallback keeps
+ * {@link makeListRowMapper}.
+ */
+export function makeProjectedListRowMapper(
+  colSchema: CollectionSchema,
+  storesBooleanAsInteger: boolean,
+  projection: ReadonlyArray<string>
+) {
+  const keys = projection
+    .filter((key) => key !== "seqId")
+    .map((key) => ({
+      key,
+      boolean:
+        storesBooleanAsInteger && colSchema.properties[key]?.type === "boolean"
+    }))
+
+  return (record: RepoRecord): RepoRecord => {
+    const out: RepoRecord = {}
+    for (const entry of keys) {
+      if (!Object.hasOwn(record, entry.key)) continue
+      const value = record[entry.key]
+      out[entry.key] =
+        entry.boolean && (value === 0 || value === 1) ? value === 1 : value
+    }
+    if (Object.hasOwn(record, "expand")) out["expand"] = record["expand"]
+    return out
+  }
+}
+
 export function makeRowEncoder(colSchema: CollectionSchema, storesBooleanAsInteger: boolean): RowEncoder {
   if (!storesBooleanAsInteger) return (record) => record
 

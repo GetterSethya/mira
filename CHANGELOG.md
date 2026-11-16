@@ -86,6 +86,15 @@ published by CI.
 
 ### Changed
 
+- **Read-path fast path for default list responses.** Default visible fields
+  are cached per schema, `fields + seqId` is cached for the default projection,
+  and the no-select/no-expand list path uses a projection-based row mapper that
+  preserves SELECT key order and skips `seqId` without a per-row `Object.keys`.
+  `select`/`expand` keep the existing mapper. Measured list medians: **2569 →
+  2673 rps**, p99 **33.5 → 30.3 ms**, profile CPU **2084 → 2024 ms**; the mapper
+  microbenchmark is **3.81M → 4.20M ops/s** on the full projection (narrow
+  `select` still uses the old mapper). Internal performance only; no API shape
+  change.
 - **Effect-runtime fast paths for the mutation request path.** Placeholder-free
   rules (`1 = 1`) return their compiled clause without a regex scan; batched
   entries use a plain one-way cancellation flag and a mutable observed-cause

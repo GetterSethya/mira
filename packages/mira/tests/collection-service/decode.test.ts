@@ -5,6 +5,7 @@ import { expect } from "vitest"
 
 import {
   makeListRowMapper,
+  makeProjectedListRowMapper,
   makeRowDecoder,
   makeRowDecoderSync,
   makeRowEncoder,
@@ -81,6 +82,49 @@ describe("makeListRowMapper", () => {
   it("still strips seqId when booleans need no conversion", () => {
     const mapRow = makeListRowMapper(Posts.schema, false)
     expect(mapRow({ id: "1", seqId: 3, published: false })).toEqual({ id: "1", published: false })
+  })
+})
+
+describe("makeProjectedListRowMapper", () => {
+  it("preserves SELECT order, drops seqId, and never emits non-projected keys", () => {
+    const mapRow = makeProjectedListRowMapper(Posts.schema, true, [
+      "title",
+      "id",
+      "published",
+      "seqId"
+    ])
+    const item = mapRow({
+      title: "X",
+      id: "1",
+      published: 1,
+      seqId: 9,
+      secret: "must-not-leak"
+    })
+
+    expect(Object.keys(item)).toEqual(["title", "id", "published"])
+    expect(item).toStrictEqual({ title: "X", id: "1", published: true })
+  })
+
+  it("keeps a null value and only decodes boolean-valued 0/1", () => {
+    const mapRow = makeProjectedListRowMapper(Posts.schema, true, [
+      "title",
+      "published",
+      "views"
+    ])
+    const item = mapRow({ title: null, published: 0, views: 1 })
+    expect(item).toStrictEqual({ title: null, published: false, views: 1 })
+  })
+
+  it("copies expand when the repository added it", () => {
+    const mapRow = makeProjectedListRowMapper(Posts.schema, true, ["id", "title", "seqId"])
+    const item = mapRow({
+      id: "1",
+      title: "X",
+      seqId: 2,
+      expand: { author: { id: "u1", name: "A" } }
+    })
+    expect(Object.keys(item)).toEqual(["id", "title", "expand"])
+    expect(item["expand"]).toEqual({ author: { id: "u1", name: "A" } })
   })
 })
 
