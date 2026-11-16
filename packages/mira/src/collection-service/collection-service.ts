@@ -1,7 +1,7 @@
 import type { AnyCollectionDef, CollectionSchema } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
 import { filterNodeToWhereClause } from "@gettersethya/mira-client"
-import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, References, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { literal } from "effect/sql/Statement"
 
@@ -775,7 +775,8 @@ function makeCollectionServiceLayerWith(
       const create = (collection: AnyCollectionDef, data: RepoRecord, ctx: RequestCtx) =>
         Effect.gen(function* () {
           const prepared = yield* prepareCreate(collection, data, ctx)
-          const startedAt = yield* Clock.currentTimeMillis
+          const tracingEnabled = yield* References.TracerEnabled
+          const startedAt = tracingEnabled ? yield* Clock.currentTimeMillis : 0
           const row = yield* batcher.submit({
             operation: "create",
             collection,
@@ -785,9 +786,11 @@ function makeCollectionServiceLayerWith(
           // `batch.size` is deliberately absent: the request fiber does not
           // know its batch until the deferred resolves. The flusher's
           // `collection.mutationBatch` span carries the size.
-          yield* Effect.annotateCurrentSpan({
-            "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
-          })
+          if (tracingEnabled) {
+            yield* Effect.annotateCurrentSpan({
+              "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
+            })
+          }
           return row
         }).pipe(
           Effect.withSpan("collection.create", {
@@ -1103,7 +1106,8 @@ function makeCollectionServiceLayerWith(
       const update = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
         Effect.gen(function* () {
           const prepared = yield* prepareUpdate(collection, id, data, ctx)
-          const startedAt = yield* Clock.currentTimeMillis
+          const tracingEnabled = yield* References.TracerEnabled
+          const startedAt = tracingEnabled ? yield* Clock.currentTimeMillis : 0
           const entry = {
             operation: "update" as const,
             collection,
@@ -1114,9 +1118,11 @@ function makeCollectionServiceLayerWith(
             ctx.internal !== undefined
               ? yield* batcher.submitInline(entry)
               : yield* batcher.submit(entry)
-          yield* Effect.annotateCurrentSpan({
-            "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
-          })
+          if (tracingEnabled) {
+            yield* Effect.annotateCurrentSpan({
+              "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
+            })
+          }
           return row
         }).pipe(
           Effect.withSpan("collection.update", {
@@ -1288,7 +1294,8 @@ function makeCollectionServiceLayerWith(
       const deleteBatched = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
         Effect.gen(function* () {
           const prepared = yield* prepareDelete(collection, id, ctx)
-          const startedAt = yield* Clock.currentTimeMillis
+          const tracingEnabled = yield* References.TracerEnabled
+          const startedAt = tracingEnabled ? yield* Clock.currentTimeMillis : 0
           const entry = {
             operation: "delete" as const,
             collection,
@@ -1300,9 +1307,11 @@ function makeCollectionServiceLayerWith(
           } else {
             yield* batcher.submit(entry)
           }
-          yield* Effect.annotateCurrentSpan({
-            "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
-          })
+          if (tracingEnabled) {
+            yield* Effect.annotateCurrentSpan({
+              "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
+            })
+          }
         }).pipe(
           Effect.withSpan("collection.delete", {
             kind: "internal",

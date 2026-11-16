@@ -119,6 +119,63 @@ describe("resolveCtxPlaceholders body resolution", () => {
       expect(out.params).toEqual(["u1", "u1"])
     }))
 
+  it.effect("returns a fresh clause for a placeholder-free public rule", () =>
+    Effect.gen(function* () {
+      const input = { sql: "1 = 1", params: [] }
+      const out = yield* resolveCtxPlaceholders(input, noCtx, "posts", "update")
+      expect(out).not.toBe(input)
+      expect(out.sql).toBe("1 = 1")
+      expect(out.params).toEqual([])
+    }))
+
+  it.effect("does not fast-return a positional placeholder with no bound params", () =>
+    Effect.gen(function* () {
+      const out = yield* resolveCtxPlaceholders(
+        { sql: "t.title = ?", params: [] },
+        noCtx,
+        "posts",
+        "update"
+      )
+      expect(out.sql).toBe("t.title = ?")
+      expect(out.params).toEqual([undefined])
+    }))
+
+  it.effect("still encodes raw params when the clause is not placeholder-free", () =>
+    Effect.gen(function* () {
+      const out = yield* resolveCtxPlaceholders(
+        { sql: "t.published = ?", params: [true] },
+        noCtx,
+        "posts",
+        "update",
+        { encodeParam: (value) => (value === true ? 1 : value) }
+      )
+      expect(out.params).toEqual([1])
+    }))
+
+  it.effect("zero-param auth placeholder still fails closed without auth", () =>
+    Effect.gen(function* () {
+      const result = yield* resolveCtxPlaceholders(
+        { sql: "t.ownerId = @auth_id", params: [] },
+        noCtx,
+        "posts",
+        "update"
+      ).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) expect(result.failure._tag).toBe("ForbiddenError")
+    }))
+
+  it.effect("zero-param unknown source still fails closed", () =>
+    Effect.gen(function* () {
+      const result = yield* resolveCtxPlaceholders(
+        { sql: "t.key = @request_cookie_session", params: [] },
+        noCtx,
+        "posts",
+        "update"
+      ).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) expect(result.failure._tag).toBe("ForbiddenError")
+    }))
+
   it.effect("unknown request source fails closed with ForbiddenError", () =>
     Effect.gen(function* () {
       const result = yield* resolveCtxPlaceholders(

@@ -86,6 +86,17 @@ published by CI.
 
 ### Changed
 
+- **Effect-runtime fast paths for the mutation request path.** Placeholder-free
+  rules (`1 = 1`) return their compiled clause without a regex scan; batched
+  entries use a plain one-way cancellation flag and a mutable observed-cause
+  slot instead of per-entry `Ref` allocations; repository CRUD spans are skipped
+  when tracing is disabled, while `CurrentStackFrame` is preserved so failure
+  causes still name `repository.*`; and `batch.wait_ms` clock reads/annotations
+  are skipped when tracing is off. Measured at `synchronous=FULL` c50 with
+  batching on: update **1847 → 2003 rps** (median, +8.4%), p99 **50.9 → 44.9 ms**,
+  profile CPU **2805 → 2606 ms**; create is non-inferior (2299 vs 2269 rps);
+  tracing-on is neutral. The benchmark profiler now prints p50/p99 and accepts
+  `PROFILE_TRACING=on`.
 - **Delete fast path with dialect-aware affected-row reporting.** Delete now reads
   the stored row and the delete-rule result in one `SELECT` via
   `Repository.viewWithAccess`, then removes the row with

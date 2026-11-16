@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Data, Effect, Layer, Option, Result } from "effect"
+import { Cause, Data, Effect, Exit, Layer, Option, Result } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -414,6 +414,21 @@ describe("repository", () => {
         expect(Option.isSome(result)).toBe(true)
         expect(Option.isNone(yield* deleteExisting("posts", created.id as string))).toBe(true)
       }).pipe(Effect.provide(precheckLayer)))
+  })
+
+  describe("tracing", () => {
+    it.effect("keeps the repository stack frame when tracing is disabled", () =>
+      Effect.gen(function* () {
+        const repo = yield* Repository
+        const exit = yield* repo.view("no_such_table", "abc").pipe(
+          Effect.exit,
+          Effect.withTracerEnabled(false)
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(Cause.pretty(exit.cause)).toContain("repository.view")
+        }
+      }).pipe(Effect.provide(testLayer)))
   })
 
   describe("Option contract (negative paths)", () => {

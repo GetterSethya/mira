@@ -985,6 +985,65 @@ describe("create batching queue bounds", () => {
     )
   )
 
+  it.live("interrupting a queued create cancels it before the flush", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const stats = yield* BatchMutationStats
+      const svc = yield* CollectionService
+
+      const fiber = yield* Effect.forkChild(svc.create(Posts, { title: "interrupted" }, noCtx))
+      yield* waitForAdmitted(1)
+      yield* Fiber.interrupt(fiber)
+      yield* stats.flushNow
+      yield* waitForBatches(1)
+
+      expect((yield* stats.snapshot).applied).toBe(0)
+      expect(yield* countPosts).toBe(0)
+    }).pipe(
+      Effect.provide(
+        batchedLayer(
+          [Posts],
+          withQueue(batchedConfig, {
+            windowMs: 60_000,
+            submitTimeoutMs: 60_000,
+            maxBatchSize: 10
+          })
+        )
+      )
+    )
+  )
+
+  it.live("skips a cancelled entry and still commits the later entry in the same batch", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const stats = yield* BatchMutationStats
+      const svc = yield* CollectionService
+
+      const cancelled = yield* Effect.forkChild(svc.create(Posts, { title: "cancelled" }, noCtx))
+      const kept = yield* Effect.forkChild(svc.create(Posts, { title: "kept" }, noCtx))
+      yield* waitForAdmitted(2)
+      yield* Fiber.interrupt(cancelled)
+      yield* stats.flushNow
+      yield* waitForBatches(1)
+
+      const row = yield* Fiber.join(kept)
+      expect(row["title"]).toBe("kept")
+      expect(yield* countPosts).toBe(1)
+      expect((yield* stats.snapshot).applied).toBe(1)
+    }).pipe(
+      Effect.provide(
+        batchedLayer(
+          [Posts],
+          withQueue(batchedConfig, {
+            windowMs: 60_000,
+            submitTimeoutMs: 60_000,
+            maxBatchSize: 10
+          })
+        )
+      )
+    )
+  )
+
   it.effect("a stats failure after COMMIT does not change the request outcome", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
@@ -1403,6 +1462,30 @@ describe("create batching instrumentation", () => {
     })
   )
 
+  it.effect("omits repository spans when tracing is disabled", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      const service = serviceDeps(makeCollectionServiceLayer([Posts]))
+
+      yield* Effect.gen(function* () {
+        yield* setupPostsTable
+        const svc = yield* CollectionService
+        const row = yield* svc.create(Posts, { title: "before-no-tracing" }, noCtx)
+        yield* Queue.clear(queue)
+
+        yield* svc.update(Posts, String(row["id"]), { title: "after-no-tracing" }, noCtx).pipe(
+          Effect.withTracerEnabled(false)
+        )
+        const spans = yield* Queue.clear(queue)
+        expect(spans.some((span) => span.name.startsWith("repository."))).toBe(false)
+      }).pipe(
+        Effect.provide(Layer.mergeAll(service, sqliteLayer, FileStorageTest, NodeCryptoLayer)),
+        Effect.provideService(Tracer.Tracer, tracer)
+      )
+    })
+  )
+
   it.effect("uses the delete access fast path and skips viewFilter/delete", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
@@ -1423,6 +1506,50 @@ describe("create batching instrumentation", () => {
         expect(spans.some((span) => span.name === "repository.delete")).toBe(false)
       }).pipe(
         Effect.provide(Layer.mergeAll(service, sqliteLayer, FileStorageTest, NodeCryptoLayer)),
+        Effect.provideService(Tracer.Tracer, tracer)
+      )
+    })
+  )
+
+  it.effect("annotates collection.create with batch.wait_ms when tracing is on", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      const statsLayer = makeBatchMutationStatsLayer()
+      const service = serviceDeps(makeBatchedCollectionServiceLayer([Posts], batchedConfig, statsLayer))
+
+      yield* Effect.gen(function* () {
+        yield* setupPostsTable
+        const svc = yield* CollectionService
+        yield* collectBatched([svc.create(Posts, { title: "wait-span" }, noCtx)])
+        const spans = yield* Queue.clear(queue)
+        const createSpan = spans.find((span) => span.name === "collection.create")
+        expect(createSpan).toBeDefined()
+        expect(typeof createSpan?.attributes["batch.wait_ms"]).toBe("number")
+      }).pipe(
+        Effect.provide(Layer.mergeAll(service, statsLayer, sqliteLayer, FileStorageTest, NodeCryptoLayer)),
+        Effect.provideService(Tracer.Tracer, tracer)
+      )
+    })
+  )
+
+  it.effect("does not emit collection.create when tracing is disabled", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      const statsLayer = makeBatchMutationStatsLayer()
+      const service = serviceDeps(makeBatchedCollectionServiceLayer([Posts], batchedConfig, statsLayer))
+
+      yield* Effect.gen(function* () {
+        yield* setupPostsTable
+        const svc = yield* CollectionService
+        yield* collectBatched([
+          svc.create(Posts, { title: "no-span" }, noCtx).pipe(Effect.withTracerEnabled(false))
+        ])
+        const spans = yield* Queue.clear(queue)
+        expect(spans.some((span) => span.name === "collection.create")).toBe(false)
+      }).pipe(
+        Effect.provide(Layer.mergeAll(service, statsLayer, sqliteLayer, FileStorageTest, NodeCryptoLayer)),
         Effect.provideService(Tracer.Tracer, tracer)
       )
     })

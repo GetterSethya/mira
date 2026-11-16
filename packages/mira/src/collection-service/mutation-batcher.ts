@@ -291,7 +291,8 @@ interface QueuedEntry {
   readonly collection: AnyCollectionDef
   readonly execute: Effect.Effect<MutationBatchResult, CollectionError>
   readonly deferred: Deferred.Deferred<RepoRecord, CollectionError>
-  readonly cancelled: Ref.Ref<boolean>
+  /** One-way flag: only the owning request fiber writes; the flusher reads once. */
+  readonly cancelled: { cancelled: boolean }
   readonly bytes: number
 }
 
@@ -871,7 +872,7 @@ export function makeMutationBatcherLayer(
         Effect.gen(function* () {
           const settled: Array<EntryOutcome> = []
           for (const [index, entry] of taken.entries()) {
-            if (yield* Ref.get(entry.cancelled)) {
+            if (entry.cancelled.cancelled) {
               settled.push({ _tag: "skipped", entry })
               continue
             }
@@ -880,10 +881,16 @@ export function makeMutationBatcherLayer(
             // savepoint finalizer runs: when a transaction-fatal error has
             // already rolled the savepoint back, `ROLLBACK TO SAVEPOINT` dies
             // and would otherwise replace the real error with a defect.
-            const observed = yield* Ref.make<Option.Option<Cause.Cause<CollectionError>>>(Option.none())
+            const observed: { cause: Option.Option<Cause.Cause<CollectionError>> } = {
+              cause: Option.none()
+            }
             const execute = entry.execute.pipe(
               Effect.onExit((exit) =>
-                Exit.isFailure(exit) ? Ref.set(observed, Option.some(exit.cause)) : Effect.void
+                Exit.isFailure(exit)
+                  ? Effect.sync(() => {
+                      observed.cause = Option.some(exit.cause)
+                    })
+                  : Effect.void
               ),
               Effect.withSpan(
                 "collection.mutateInBatch",
@@ -914,7 +921,7 @@ export function makeMutationBatcherLayer(
               return yield* Effect.failCause(result.cause)
             }
 
-            const originalCause = Option.getOrElse(yield* Ref.get(observed), () => result.cause)
+            const originalCause = Option.getOrElse(observed.cause, () => result.cause)
 
             const alive = yield* probeTransactionAlive(sql)
             if (!alive) {
@@ -1142,7 +1149,7 @@ export function makeMutationBatcherLayer(
 
           const bytes = Math.max(0, entry.estimatedBytes)
           const deferred = yield* Deferred.make<RepoRecord, CollectionError>()
-          const cancelled = yield* Ref.make(false)
+          const cancelled = { cancelled: false }
           const queued: QueuedEntry = {
             operation: entry.operation,
             collection: entry.collection,
@@ -1208,7 +1215,9 @@ export function makeMutationBatcherLayer(
             Effect.flatMap(
               Option.match({
                 onNone: () =>
-                  Ref.set(queued.cancelled, true).pipe(
+                  Effect.sync(() => {
+                    queued.cancelled.cancelled = true
+                  }).pipe(
                     Effect.andThen(
                       stats
                         .recordTimeout(entry.operation)
@@ -1226,7 +1235,11 @@ export function makeMutationBatcherLayer(
                 onSome: (row) => Effect.succeed(row)
               })
             ),
-            Effect.onInterrupt(() => Ref.set(queued.cancelled, true))
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                queued.cancelled.cancelled = true
+              })
+            )
           )
         })
 

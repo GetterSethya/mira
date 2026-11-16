@@ -69,6 +69,12 @@ export function resolveCtxPlaceholders(
   bodyPlan?: BodyBindingPlan
 ) {
   const encode = options?.encodeParam ?? ((value: unknown) => value)
+  // A clause with no request placeholders and no positional params is already
+  // resolved. Return a fresh object so a future caller cannot mutate the
+  // enforcer's cached EnforceResult.
+  if (result.params.length === 0 && !/[@?]/.test(result.sql)) {
+    return Effect.succeed({ sql: result.sql, params: [] })
+  }
   return Effect.gen(function* () {
     const needsAuth = /@auth_\w+/.test(result.sql)
     if (needsAuth && ctx.auth === undefined) {

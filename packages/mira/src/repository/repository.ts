@@ -6,6 +6,7 @@ import { literal } from "effect/sql/Statement"
 import { CryptoService } from "@/crypto/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import type { DeleteResultStrategy } from "@/dialect/dialect.js"
+import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord, SortOrder } from "./types.js"
 import type { AccessPredicate, AccessRow } from "./types.js"
@@ -169,7 +170,7 @@ export const RepositoryLive = Layer.effect(
           yield* sql`INSERT INTO ${sql(table)} ${sql.insert(record)}`
           return record
         }).pipe(
-          Effect.withSpan("repository.create", { kind: "client", attributes: { table } }, { captureStackTrace: false })
+          withSpanWhenEnabled("repository.create", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         ),
 
       view: (table, id) =>
@@ -177,7 +178,7 @@ export const RepositoryLive = Layer.effect(
           const rows = yield* sql<RepoRecord>`SELECT * FROM ${sql(table)} t WHERE t.id = ${id} LIMIT 1`
           return rows.length > 0 ? Option.some(rows[0]) : Option.none()
         }).pipe(
-          Effect.withSpan("repository.view", { kind: "client", attributes: { table } }, { captureStackTrace: false })
+          withSpanWhenEnabled("repository.view", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         ),
 
       update: (table, id, data) =>
@@ -190,7 +191,7 @@ export const RepositoryLive = Layer.effect(
           const rows = yield* sql<RepoRecord>`SELECT * FROM ${sql(table)} t WHERE t.id = ${id} LIMIT 1`
           return rows.length > 0 ? Option.some(rows[0]) : Option.none()
         }).pipe(
-          Effect.withSpan("repository.update", { kind: "client", attributes: { table } }, { captureStackTrace: false })
+          withSpanWhenEnabled("repository.update", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         ),
 
       viewFilter: (table, filter) =>
@@ -203,7 +204,7 @@ export const RepositoryLive = Layer.effect(
           const rows = yield* sql<RepoRecord>`${select} FROM ${sql(table)} t${joins} WHERE ${where}${order}`
           return rows.map((r) => reshapeExpand(r, filter.expand))
         }).pipe(
-          Effect.withSpan(
+          withSpanWhenEnabled(
             "repository.viewFilter",
             { kind: "client", attributes: { table } },
             { captureStackTrace: false }
@@ -235,7 +236,7 @@ export const RepositoryLive = Layer.effect(
           }
           return Option.some({ record, access })
         }).pipe(
-          Effect.withSpan(
+          withSpanWhenEnabled(
             "repository.viewWithAccess",
             { kind: "client", attributes: { table } },
             { captureStackTrace: false }
@@ -265,7 +266,7 @@ export const RepositoryLive = Layer.effect(
             }
           }
         }).pipe(
-          Effect.withSpan(
+          withSpanWhenEnabled(
             "repository.deleteExisting",
             { kind: "client", attributes: { table } },
             { captureStackTrace: false }
@@ -284,7 +285,7 @@ export const RepositoryLive = Layer.effect(
 
           return { items: items.map((r) => reshapeExpand(r, options?.expand)) }
         }).pipe(
-          Effect.withSpan("repository.list", { kind: "client", attributes: { table } }, { captureStackTrace: false })
+          withSpanWhenEnabled("repository.list", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         ),
 
       delete: (table: string, id: string): Effect.Effect<Option.Option<void>, SqlError.SqlError> =>
@@ -294,7 +295,7 @@ export const RepositoryLive = Layer.effect(
           yield* sql`DELETE FROM ${sql(table)} WHERE id = ${id}`
           return Option.some<void>(undefined)
         }).pipe(
-          Effect.withSpan("repository.delete", { kind: "client", attributes: { table } }, { captureStackTrace: false })
+          withSpanWhenEnabled("repository.delete", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         )
     })
   })

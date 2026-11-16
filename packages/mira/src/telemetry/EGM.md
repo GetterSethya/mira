@@ -29,6 +29,10 @@ database. `index.ts` merges the console tracer and logger into
 - `makeConsoleTracerLayer(options)` — layer owning the unbounded span queue, a scoped drain fiber, a shutdown finalizer, and the tracer. [tracer.ts:makeConsoleTracerLayer]
 - `ConsoleTracerLayer` — `makeConsoleTracerLayer()` default (JSON output). [tracer.ts:ConsoleTracerLayer]
 
+### `span.ts`
+
+- `withSpanWhenEnabled(name, options?, traceOptions?)` — applies `Effect.withSpan` when the fiber has tracing enabled; otherwise skips the no-op span and preserves `References.CurrentStackFrame` so failure causes still name the operation. [span.ts:withSpanWhenEnabled]
+
 ### `logger.ts`
 
 - `LogLine` (type) — `{ level, message, timestamp, traceId?, spanId? }`. [logger.ts:LogLine]
@@ -64,6 +68,7 @@ No subdirectories.
 ## Invariants
 
 - `QueueSpan.end` calls `super.end` first, then offers the span with `Queue.offerUnsafe` — span completion never blocks on I/O. [tracer.ts:QueueSpan]
+- `withSpanWhenEnabled` is identity-safe for tracing-on span names/attributes; when tracing is off it skips the no-op span but preserves the `CurrentStackFrame` chain, so `Cause.pretty` still names the operation. It is used for repository CRUD spans only. [span.ts:withSpanWhenEnabled]
 - Only attributes whose value is `string | number | boolean` are copied into `CompletedSpan.attributes`; other attribute types are dropped. [tracer.ts:QueueSpan]
 - Span status is `"ok"` for `Exit.isSuccess` and `"error"` (with `Cause.pretty`) otherwise. [tracer.ts:QueueSpan]
 - Shutdown finalizers are registered so the drain fiber stops first and the remaining queue items are flushed last (LIFO ordering, documented inline). [tracer.ts:makeConsoleTracerLayer]

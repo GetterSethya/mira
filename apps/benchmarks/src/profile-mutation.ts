@@ -26,6 +26,7 @@ const requests = Number(process.env.PROFILE_REQUESTS ?? "5000")
 const concurrency = Number(process.env.PROFILE_CONCURRENCY ?? "50")
 const seedRows = Number(process.env.PROFILE_SEED ?? "3000")
 const synchronous = process.env.PROFILE_SYNC === "NORMAL" ? "NORMAL" : "FULL"
+const tracing = process.env.PROFILE_TRACING === "on"
 const profileDir =
   process.env.PROFILE_DIR ?? join(repoRoot, ".egm", "create-batch-polish-2026-11-15", "profile", operation)
 mkdirSync(profileDir, { recursive: true })
@@ -61,7 +62,7 @@ const child: ChildProcess = spawn(
       BENCH_UPLOADS: join(directory, "uploads"),
       BENCH_SYNCHRONOUS: synchronous,
       BENCH_CACHE: "off",
-      BENCH_TRACING: "off",
+      BENCH_TRACING: tracing ? "on" : "off",
       BENCH_STACK_TRACES: "off",
       BENCH_CREATE_BATCH: "on",
       BENCH_UPDATE_BATCH: "on",
@@ -171,16 +172,24 @@ const list = async (index: number) => {
   return response.ok
 }
 
+const percentile = (sorted: ReadonlyArray<number>, fraction: number) => {
+  if (sorted.length === 0) return 0
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * fraction)))
+  return sorted[index] ?? 0
+}
+
 const run = async (ids: ReadonlyArray<string>) => {
   let next = 0
   let successes = 0
   let failures = 0
+  const latencies: Array<number> = []
   const started = performance.now()
   const worker = async () => {
     while (true) {
       const index = next
       next += 1
       if (index >= requests) return
+      const requestStarted = performance.now()
       let ok = false
       if (operation === "list") {
         ok = await list(index)
@@ -203,13 +212,22 @@ const run = async (ids: ReadonlyArray<string>) => {
           if (id !== undefined) ok = await remove(id)
         }
       }
+      latencies.push(performance.now() - requestStarted)
       if (ok) successes += 1
       else failures += 1
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker))
   const durationMs = performance.now() - started
-  return { successes, failures, durationMs, rps: successes / (durationMs / 1000) }
+  const sorted = [...latencies].sort((left, right) => left - right)
+  return {
+    successes,
+    failures,
+    durationMs,
+    rps: successes / (durationMs / 1000),
+    p50: percentile(sorted, 0.5),
+    p99: percentile(sorted, 0.99)
+  }
 }
 
 try {
@@ -234,7 +252,7 @@ try {
     throw new Error(`Profile stop failed: ${stopResponse.status} ${await stopResponse.text()}`)
   }
   process.stdout.write(
-    `${operation} ${synchronous}: ${result.successes}/${requests} ok, ${result.failures} failed, ${result.rps.toFixed(0)} rps\n`
+    `${operation} ${synchronous} tracing=${tracing ? "on" : "off"}: ${result.successes}/${requests} ok, ${result.failures} failed, ${result.rps.toFixed(0)} rps, p50 ${result.p50.toFixed(1)}ms, p99 ${result.p99.toFixed(1)}ms\n`
   )
   process.stdout.write(`profile=${profileFile}\n`)
 } finally {
