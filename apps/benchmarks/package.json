@@ -10,6 +10,7 @@
     "profile:mutation": "tsx src/profile-mutation.ts",
     "analyze:cpu": "tsx src/analyze-cpuprofile.ts",
     "perf:analyze": "node src/analyze-profiles.ts",
+    "test": "node --import tsx --test tests/analyze-heapprofile.test.ts",
     "server:node": "node src/server.ts",
     "server:bun": "bun run src/server.ts",
     "typecheck": "tsc --noEmit"

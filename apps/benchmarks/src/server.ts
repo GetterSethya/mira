@@ -145,22 +145,51 @@ const countRoute = HttpRouter.route(
 )
 
 let profileSession: Session | null = null
+let heapProfiling = false
+
+function sessionPost(session: Session, method: string, params?: object): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const callback = (error: Error | null, result: unknown) => {
+      if (error !== null) reject(error)
+      else resolve(result)
+    }
+    if (params === undefined) session.post(method, callback)
+    else session.post(method, params, callback)
+  })
+}
 
 const profileStartRoute = HttpRouter.route(
   "GET",
   "/__bench/profile/start",
-  Effect.sync(() => {
+  Effect.gen(function* () {
+    const req = yield* HttpServerRequest.HttpServerRequest
+    const params = new URLSearchParams(req.url.includes("?") ? req.url.split("?")[1] : "")
+    const heap = params.get("heap") === "1"
     if (profileSession !== null) {
       return HttpServerResponse.jsonUnsafe({ error: "already profiling" }, { status: 409 })
     }
     const session = new Session()
     session.connect()
-    session.post("Profiler.enable", () => {
-      session.post("Profiler.start", () => {})
+    yield* Effect.promise(async () => {
+      await sessionPost(session, "Profiler.enable")
+      await sessionPost(session, "Profiler.start")
+      if (heap) {
+        await sessionPost(session, "HeapProfiler.enable")
+        await sessionPost(session, "HeapProfiler.startSampling", {
+          samplingInterval: 16_384,
+          includeObjectsCollectedByMajorGC: true,
+          includeObjectsCollectedByMinorGC: true
+        })
+      }
     })
     profileSession = session
-    return HttpServerResponse.jsonUnsafe({ ok: true })
-  })
+    heapProfiling = heap
+    return HttpServerResponse.jsonUnsafe({ ok: true, heap })
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "profile_start_failed" }, { status: 500 }))
+    )
+  )
 )
 
 const profileStopRoute = HttpRouter.route(
@@ -173,23 +202,29 @@ const profileStopRoute = HttpRouter.route(
     if (file === null) {
       return HttpServerResponse.jsonUnsafe({ error: "file required" }, { status: 400 })
     }
+    const heapFile = params.get("heapFile")
     const session = profileSession
     if (session === null) {
       return HttpServerResponse.jsonUnsafe({ error: "not profiling" }, { status: 409 })
     }
+    const wasHeapProfiling = heapProfiling
     profileSession = null
-    const profile = yield* Effect.promise(
-      () =>
-        new Promise<unknown>((resolve, reject) => {
-          session.post("Profiler.stop", (error, result) => {
-            session.disconnect()
-            if (error) reject(error)
-            else resolve(result.profile)
-          })
-        })
-    )
-    yield* Effect.sync(() => writeFileSync(file, JSON.stringify(profile)))
-    return HttpServerResponse.jsonUnsafe({ ok: true, file })
+    heapProfiling = false
+    const profiles = yield* Effect.promise(async () => {
+      const cpu = await sessionPost(session, "Profiler.stop")
+      const heap = wasHeapProfiling ? await sessionPost(session, "HeapProfiler.stopSampling") : null
+      session.disconnect()
+      return { cpu, heap }
+    })
+    const cpuProfile = profiles.cpu as { profile?: unknown } | undefined
+    yield* Effect.sync(() => writeFileSync(file, JSON.stringify(cpuProfile?.profile ?? profiles.cpu)))
+    if (profiles.heap !== null && heapFile !== null) {
+      const heapProfile = profiles.heap as { profile?: unknown } | undefined
+      yield* Effect.sync(() =>
+        writeFileSync(heapFile, JSON.stringify(heapProfile?.profile ?? profiles.heap))
+      )
+    }
+    return HttpServerResponse.jsonUnsafe({ ok: true, file, heapFile })
   }).pipe(
     Effect.catchCause(() =>
       Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "profile_stop_failed" }, { status: 500 }))

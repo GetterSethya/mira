@@ -8,6 +8,7 @@
  *   PROFILE_OP=update PROFILE_REQUESTS=5000 pnpm --filter mira-benchmarks profile:mutation
  *   PROFILE_OP=create PROFILE_REQUESTS=5000 pnpm --filter mira-benchmarks profile:mutation
  *   PROFILE_OP=mixed  PROFILE_REQUESTS=3000 pnpm --filter mira-benchmarks profile:mutation
+ *   PROFILE_HEAP=1 PROFILE_OP=list pnpm --filter mira-benchmarks profile:mutation
  */
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
@@ -27,6 +28,7 @@ const concurrency = Number(process.env.PROFILE_CONCURRENCY ?? "50")
 const seedRows = Number(process.env.PROFILE_SEED ?? "3000")
 const synchronous = process.env.PROFILE_SYNC === "NORMAL" ? "NORMAL" : "FULL"
 const tracing = process.env.PROFILE_TRACING === "on"
+const heap = process.env.PROFILE_HEAP === "1"
 const profileDir =
   process.env.PROFILE_DIR ?? join(repoRoot, ".egm", "create-batch-polish-2026-11-15", "profile", operation)
 mkdirSync(profileDir, { recursive: true })
@@ -236,17 +238,17 @@ try {
   const warmupIds = operation === "delete" ? ids.slice(-200) : ids.slice(0, Math.min(200, ids.length))
   await run(warmupIds)
   const measuredIds = operation === "delete" ? ids.slice(0, requests) : ids
-  const profileFile = join(
-    profileDir,
-    `${operation}-${synchronous}-${Date.now()}.cpuprofile`
-  )
-  const startResponse = await fetch(`${baseUrl}/__bench/profile/start`)
+  const stamp = Date.now()
+  const profileFile = join(profileDir, `${operation}-${synchronous}-${stamp}.cpuprofile`)
+  const heapFile = heap ? join(profileDir, `${operation}-${synchronous}-${stamp}.heapprofile`) : null
+  const startResponse = await fetch(`${baseUrl}/__bench/profile/start${heap ? "?heap=1" : ""}`)
   if (!startResponse.ok) {
     throw new Error(`Profile start failed: ${startResponse.status} ${await startResponse.text()}`)
   }
   const result = await run(measuredIds)
+  const heapParam = heapFile === null ? "" : `&heapFile=${encodeURIComponent(heapFile)}`
   const stopResponse = await fetch(
-    `${baseUrl}/__bench/profile/stop?file=${encodeURIComponent(profileFile)}`
+    `${baseUrl}/__bench/profile/stop?file=${encodeURIComponent(profileFile)}${heapParam}`
   )
   if (!stopResponse.ok) {
     throw new Error(`Profile stop failed: ${stopResponse.status} ${await stopResponse.text()}`)
@@ -255,6 +257,7 @@ try {
     `${operation} ${synchronous} tracing=${tracing ? "on" : "off"}: ${result.successes}/${requests} ok, ${result.failures} failed, ${result.rps.toFixed(0)} rps, p50 ${result.p50.toFixed(1)}ms, p99 ${result.p99.toFixed(1)}ms\n`
   )
   process.stdout.write(`profile=${profileFile}\n`)
+  if (heapFile !== null) process.stdout.write(`heapProfile=${heapFile}\n`)
 } finally {
   await stopServer()
   rmSync(directory, { recursive: true, force: true })
