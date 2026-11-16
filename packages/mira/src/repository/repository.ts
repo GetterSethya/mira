@@ -6,6 +6,7 @@ import { literal } from "effect/sql/Statement"
 import { CryptoService } from "@/crypto/index.js"
 
 import type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord, SortOrder } from "./types.js"
+import type { AccessPredicate, AccessRow } from "./types.js"
 
 /**
  * Repository tag — schema-agnostic CRUD abstraction above SqlClient.
@@ -40,6 +41,14 @@ export class Repository extends Context.Service<
     update(table: string, id: string, data: RepoRecord): Effect.Effect<Option.Option<RepoRecord>, SqlError.SqlError>
     view(table: string, id: string): Effect.Effect<Option.Option<RepoRecord>, SqlError.SqlError>
     viewFilter(table: string, filter: FilterOptions): Effect.Effect<ReadonlyArray<RepoRecord>, SqlError.SqlError>
+    /** Optional fast path: one SELECT returns the row plus access booleans. */
+    viewWithAccess?: (
+      table: string,
+      id: string,
+      predicates: readonly [AccessPredicate, ...AccessPredicate[]]
+    ) => Effect.Effect<Option.Option<AccessRow>, SqlError.SqlError>
+    /** Optional fast path: DELETE without the preceding existence SELECT. */
+    deleteExisting?: (table: string, id: string) => Effect.Effect<Option.Option<void>, SqlError.SqlError>
     list(
       table: string,
       limit: number,
@@ -184,6 +193,50 @@ export const RepositoryLive = Layer.effect(
         }).pipe(
           Effect.withSpan(
             "repository.viewFilter",
+            { kind: "client", attributes: { table } },
+            { captureStackTrace: false }
+          )
+        ),
+
+      viewWithAccess: (table, id, predicates) =>
+        Effect.gen(function* () {
+          const select = buildSelect(sql)
+          const accessColumns = predicates.map(
+            (predicate) =>
+              sql`CASE WHEN (${literal(predicate.where.sql, predicate.where.params)}) THEN 1 ELSE 0 END AS ${sql(`__mira_access_${predicate.name}`)}`
+          )
+          const accessSql = sql.join(", ", false)(accessColumns)
+          const rows = yield* sql<RepoRecord>`${select}, ${accessSql} FROM ${sql(table)} t WHERE t.id = ${id} LIMIT 1`
+          if (rows.length === 0) return Option.none()
+          const row = rows[0]
+          if (row === undefined) return Option.none()
+          const access: Partial<Record<"rule" | "manage", boolean>> = {}
+          const record: RepoRecord = {}
+          for (const [key, value] of Object.entries(row)) {
+            if (key === "__mira_access_rule") {
+              access.rule = Number(value) === 1
+            } else if (key === "__mira_access_manage") {
+              access.manage = Number(value) === 1
+            } else {
+              record[key] = value
+            }
+          }
+          return Option.some({ record, access })
+        }).pipe(
+          Effect.withSpan(
+            "repository.viewWithAccess",
+            { kind: "client", attributes: { table } },
+            { captureStackTrace: false }
+          )
+        ),
+
+      deleteExisting: (table, id) =>
+        Effect.gen(function* () {
+          const rows = yield* sql<{ id: string }>`DELETE FROM ${sql(table)} WHERE id = ${id} RETURNING id`
+          return rows.length > 0 ? Option.some<void>(undefined) : Option.none()
+        }).pipe(
+          Effect.withSpan(
+            "repository.deleteExisting",
             { kind: "client", attributes: { table } },
             { captureStackTrace: false }
           )

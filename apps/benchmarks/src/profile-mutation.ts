@@ -215,7 +215,9 @@ const run = async (ids: ReadonlyArray<string>) => {
 try {
   await waitForReady()
   const ids = await seed()
-  await run(ids.slice(0, Math.min(200, ids.length))) // warm-up
+  const warmupIds = operation === "delete" ? ids.slice(-200) : ids.slice(0, Math.min(200, ids.length))
+  await run(warmupIds)
+  const measuredIds = operation === "delete" ? ids.slice(0, requests) : ids
   const profileFile = join(
     profileDir,
     `${operation}-${synchronous}-${Date.now()}.cpuprofile`
@@ -224,7 +226,7 @@ try {
   if (!startResponse.ok) {
     throw new Error(`Profile start failed: ${startResponse.status} ${await startResponse.text()}`)
   }
-  const result = await run(ids)
+  const result = await run(measuredIds)
   const stopResponse = await fetch(
     `${baseUrl}/__bench/profile/stop?file=${encodeURIComponent(profileFile)}`
   )

@@ -27,7 +27,7 @@ import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
 import type { ResolveOptions } from "./where.js"
-import { andWhere, cursorClause, idClause, resolveCtxPlaceholders, resolveFieldRefs } from "./where.js"
+import { andWhere, cursorClause, extractCtxRefs, idClause, resolveCtxPlaceholders, resolveFieldRefs } from "./where.js"
 
 /**
  * Collection Service tag — the core business-logic layer sitting between
@@ -1074,43 +1074,101 @@ function makeCollectionServiceLayerWith(
         deferCleanup: boolean
       ): Effect.Effect<MutationBatchResult, CollectionError> =>
         Effect.gen(function* () {
-          const existing = yield* repo.view(prepared.collection.name, prepared.id)
-          if (Option.isNone(existing)) {
-            return yield* new NotFoundError({ collection: prepared.collection.name, id: prepared.id })
-          }
+          const viewWithAccess = repo.viewWithAccess
+          const deleteExisting = repo.deleteExisting
+          const enforcer = prepared.admin
+            ? null
+            : enforcerForAction(prepared.collection.schema, "delete")
+          const refs = enforcer === null ? null : extractCtxRefs(enforcer.sql)
+          const fastPath =
+            process.env["MIRA_DELETE_FAST_PATH"] !== "off" &&
+            viewWithAccess !== undefined &&
+            deleteExisting !== undefined &&
+            (prepared.admin ||
+              (refs !== null &&
+                refs.bodyKeys.length === 0 &&
+                !(prepared.ctx.auth === undefined && refs.authFields.length > 0)))
 
-          if (!prepared.admin) {
+          let existingRecord: RepoRecord | null = null
+          if (fastPath && !prepared.admin && refs !== null) {
             const ruleWhere = yield* compileRule(
               prepared.collection,
               "delete",
               prepared.ctx,
               resolveOptions
             )
-            const allowed = yield* repo.viewFilter(prepared.collection.name, {
-              where: andWhere(ruleWhere, idClause(prepared.id))
-            })
-            if (allowed.length === 0) {
+            const accesses = yield* viewWithAccess(
+              prepared.collection.name,
+              prepared.id,
+              [{ name: "rule", where: ruleWhere }]
+            )
+            if (Option.isNone(accesses)) {
+              return yield* new NotFoundError({
+                collection: prepared.collection.name,
+                id: prepared.id
+              })
+            }
+            if (accesses.value.access.rule !== true) {
               return yield* new ForbiddenError({
                 collection: prepared.collection.name,
                 action: "delete"
               })
             }
+            existingRecord = accesses.value.record
+          } else {
+            const existing = yield* repo.view(prepared.collection.name, prepared.id)
+            if (Option.isNone(existing)) {
+              return yield* new NotFoundError({
+                collection: prepared.collection.name,
+                id: prepared.id
+              })
+            }
+            existingRecord = existing.value
+
+            if (!prepared.admin) {
+              const ruleWhere = yield* compileRule(
+                prepared.collection,
+                "delete",
+                prepared.ctx,
+                resolveOptions
+              )
+              const allowed = yield* repo.viewFilter(prepared.collection.name, {
+                where: andWhere(ruleWhere, idClause(prepared.id))
+              })
+              if (allowed.length === 0) {
+                return yield* new ForbiddenError({
+                  collection: prepared.collection.name,
+                  action: "delete"
+                })
+              }
+            }
           }
 
-          const deleted = yield* repo.delete(prepared.collection.name, prepared.id)
+          const existingValue = existingRecord
+          if (existingValue === null) {
+            return yield* new NotFoundError({
+              collection: prepared.collection.name,
+              id: prepared.id
+            })
+          }
+
+          const deleted =
+            fastPath && deleteExisting !== undefined
+              ? yield* deleteExisting(prepared.collection.name, prepared.id)
+              : yield* repo.delete(prepared.collection.name, prepared.id)
           if (Option.isNone(deleted)) {
             return yield* new NotFoundError({ collection: prepared.collection.name, id: prepared.id })
           }
 
           const cleanup = deleteFiles(
-            extractFileKeys(existing.value, prepared.collection.schema)
+            extractFileKeys(existingValue, prepared.collection.schema)
           )
 
           if (!deferCleanup) {
             yield* cleanup
-            return { value: existing.value, afterCommit: Effect.void }
+            return { value: existingValue, afterCommit: Effect.void }
           }
-          return { value: existing.value, afterCommit: cleanup }
+          return { value: existingValue, afterCommit: cleanup }
         })
 
       const deleteOne = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>

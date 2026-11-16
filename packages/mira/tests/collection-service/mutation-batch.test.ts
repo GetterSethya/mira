@@ -97,6 +97,18 @@ const usersRules = defineRule(usersDef, (R) => ({
 }))
 const Users = applyRulesToCollections([usersDef], [usersRules])[0]
 
+const guardedDef = BaseCollection.define("guarded", {
+  title: Field.text({ required: true })
+})
+const guardedRules = defineRule(guardedDef, (R) => ({
+  list: R.public(),
+  view: R.public(),
+  create: R.public(),
+  update: R.public(),
+  delete: R.authId(Users).eq(R.literal("allowed"))
+}))
+const Guarded = applyRulesToCollections([guardedDef], [guardedRules])[0]
+
 /** Long windows so only an explicit `flushNow` releases a batch under TestClock. */
 const batchedConfig: ResolvedBatchMutationConfig = {
   queue: {
@@ -166,6 +178,20 @@ const setupPostsTable = Effect.gen(function* () {
   yield* sql.unsafe(`DROP TRIGGER IF EXISTS "posts_poison"`)
   yield* sql.unsafe(`DROP INDEX IF EXISTS "posts_title_unique"`)
   yield* sql.unsafe(`DELETE FROM "posts"`)
+})
+
+const setupGuardedTable = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "guarded" (
+      "seqId"   INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"      TEXT NOT NULL UNIQUE,
+      "title"   TEXT NOT NULL,
+      "created" TEXT NOT NULL,
+      "updated" TEXT NOT NULL
+    )
+  `)
+  yield* sql.unsafe(`DELETE FROM "guarded"`)
 })
 
 const setupUsersTable = Effect.gen(function* () {
@@ -1327,6 +1353,31 @@ describe("create batching with decorators", () => {
 // ---------------------------------------------------------------------------
 
 describe("create batching instrumentation", () => {
+  it.effect("uses the delete access fast path and skips viewFilter/delete", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      const service = serviceDeps(makeCollectionServiceLayer([Posts]))
+
+      yield* Effect.gen(function* () {
+        yield* setupPostsTable
+        const svc = yield* CollectionService
+        const [row] = yield* svc.createMany(Posts, [{ title: "fast-delete" }], noCtx)
+        yield* Queue.clear(queue)
+        yield* svc.delete(Posts, String(row?.["id"]), noCtx)
+        const spans = yield* Queue.clear(queue)
+
+        expect(spans.some((span) => span.name === "repository.viewWithAccess")).toBe(true)
+        expect(spans.some((span) => span.name === "repository.deleteExisting")).toBe(true)
+        expect(spans.some((span) => span.name === "repository.viewFilter")).toBe(false)
+        expect(spans.some((span) => span.name === "repository.delete")).toBe(false)
+      }).pipe(
+        Effect.provide(Layer.mergeAll(service, sqliteLayer, FileStorageTest, NodeCryptoLayer)),
+        Effect.provideService(Tracer.Tracer, tracer)
+      )
+    })
+  )
+
   it.effect("emits a batch span with size and per-entry insert spans", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
@@ -1502,6 +1553,23 @@ describe("update/delete batching", () => {
       const snapshot = yield* stats.snapshot
       expect(snapshot.operations.update.applied).toBe(19)
     }).pipe(Effect.provide(batchedLayer([Posts], mutationConfig)))
+  )
+
+  it.effect("returns 404 for anonymous auth-requiring delete of a missing row and 403 for an existing row", () =>
+    Effect.gen(function* () {
+      yield* setupGuardedTable
+      const sql = yield* SqlClient.SqlClient
+      const svc = yield* CollectionService
+      yield* sql`INSERT INTO ${sql("guarded")} ("id", "title", "created", "updated") VALUES ('existing', 'x', 'now', 'now')`
+
+      const missing = yield* svc.delete(Guarded, "missing", noCtx).pipe(Effect.exit)
+      expect(failureTag(missing)).toBe("NotFoundError")
+
+      const denied = yield* svc.delete(Guarded, "existing", noCtx).pipe(Effect.exit)
+      expect(failureTag(denied)).toBe("ForbiddenError")
+
+      yield* svc.delete(Guarded, "existing", adminCtx)
+    }).pipe(Effect.provide(batchedLayer([Guarded])))
   )
 
   it.effect("reads the stored row inside the batch and returns 404 when it vanished", () =>

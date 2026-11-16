@@ -51,3 +51,19 @@ export type FilterOptions = {
   fields?: ReadonlyArray<string>
   expand?: ReadonlyArray<ExpandDef>
 }
+
+/**
+ * A computed access predicate returned alongside a row. `name` is a closed,
+ * internal alias; it is never request-derived.
+ */
+export type AccessPredicateName = "rule" | "manage"
+
+export type AccessPredicate = {
+  readonly name: AccessPredicateName
+  readonly where: WhereClause
+}
+
+export type AccessRow = {
+  readonly record: RepoRecord
+  readonly access: Readonly<Partial<Record<AccessPredicateName, boolean>>>
+}
