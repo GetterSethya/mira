@@ -95,7 +95,9 @@ published by CI.
   when its driver exposes an affected count, and `precheck` as the portable
   fallback. SQLite `DELETE ... RETURNING` is verified on Node 24 and Bun 1.4.
   Body-placeholder and anonymous `@auth_*` delete rules keep the existing
-  fallback, preserving 404-before-403 and body semantics.
+  fallback, preserving 404-before-403 and body semantics. **Breaking for custom
+  dialects:** `DialectType` now requires `deleteResult`; use
+  `{ _tag: "precheck" }` when the driver has no affected-row signal.
 - **SQLite WAL is explicit for Node and Bun.** `SqliteDatabase` and `BunSqliteDatabase`
   now issue `PRAGMA journal_mode = WAL` themselves when the connection opens, immediately
   before the optional `PRAGMA synchronous` mode. The Effect SQLite drivers already default
