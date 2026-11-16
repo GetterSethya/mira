@@ -309,7 +309,7 @@
 
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div
-        class="editor-scroll"
+        class="editor-scroll scroll-fade"
         id="explorer-code"
         bind:this={editorScroll}
         tabindex="0"
