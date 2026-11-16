@@ -2,7 +2,7 @@
 
 ## Overview
 
-The business-logic layer between the HTTP router and schema-agnostic `Repository`. Every operation validates input against Effect Schema codecs generated from the collection's JSON Schema, compiles and binds `x-rules`, manages system fields (`seqId`, `created`, `updated`), encodes/decodes dialect-specific storage representations (SQLite booleans), strips `x-hidden` fields for non-admin callers, paginates by `seqId` cursor, enforces auth-collection credential rules (hashing, `passwordConfirm`, `oldPassword`, `emailVerified`, additive `manage` rule), resolves relation `expand`s with the target's `view` rule, and best-effort deletes replaced/removed files and their thumbnails. It is parameterised per collection set by `makeCollectionServiceLayer(allCollections)`.
+The business-logic layer between the HTTP router and schema-agnostic `Repository`. Every operation validates input against Effect Schema codecs generated from the collection's JSON Schema, compiles and binds `x-rules`, manages system fields (`seqId`, `created`, `updated`), encodes/decodes dialect-specific storage representations (SQLite booleans), strips `x-hidden` fields for non-admin callers, paginates by `seqId` cursor (with a sort-value keyset for non-`seqId` sorts), enforces auth-collection credential rules (hashing, `passwordConfirm`, `oldPassword`, `emailVerified`, additive `manage` rule), resolves relation `expand`s with the target's `view` rule, and best-effort deletes replaced/removed files and their thumbnails. It is parameterised per collection set by `makeCollectionServiceLayer(allCollections)`.
 
 ## Interface
 
@@ -34,7 +34,8 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - `parseErrToValidationError(collection)` — formats `Schema.SchemaError` into issue strings: `[input-schema.ts:parseErrToValidationError]`
 - `andWhere(a, b)` — AND-combines two `WhereClause`s and concatenates params: `[where.ts:andWhere]`
 - `idClause(id)` — `t.id = ?`: `[where.ts:idClause]`
-- `cursorClause(after)` — `t.seqId > ?`: `[where.ts:cursorClause]`
+- `cursorClause(after)` - `t.seqId > ?`: `[where.ts:cursorClause]`
+- `keysetClause(sort, value, after)` - `(t."<field>", t.seqId) > (?, ?)` for ASC / `<` for DESC: `[where.ts:keysetClause]`
 - `resolveCtxPlaceholders(result, ctx, collection, action)` — binds `@auth_*` / `@request_*` placeholders: `[where.ts:resolveCtxPlaceholders]`
 - `extractCtxRefs(sql)` — reports exactly which ctx fields a rule references: `[where.ts:extractCtxRefs]`
 - `CtxRefs` (type) — `authFields`, `queryKeys`, `headerKeys`, `bodyKeys`: `[where.ts:CtxRefs]`
@@ -56,6 +57,7 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - `select` is an allowlist checked with `Object.hasOwn` against the collection's properties; `id`, `created`, `updated` are always included; hidden fields are excluded unless admin: `[collection-service.ts:resolveFields]`
 - A non-admin sort on an `x-hidden` field fails with `ValidationError`; unknown sort fields fall back to default ordering: `[collection-service.ts:validateSort]`
 - `list` always fetches `seqId`, derives `nextCursor` only when the page is full, and removes `seqId` from returned items: `[collection-service.ts:CollectionService]`
+- For a non-`seqId` sort with `after`, `list` resolves the cursor row's sort value with a raw `seqId` lookup and uses the row-value `keysetClause`; `seqId` is the tie-breaker in both `ORDER BY` and the predicate. Nullable sort fields and missing cursor rows fail with `ValidationError` (422) instead of silently skipping rows: `[collection-service.ts:CollectionService]`, `[repository.ts:orderFrag]`
 - Default visible fields are cached per schema identity and frozen; `seqId` is appended once through a second array cache. The no-select/no-expand list path reuses both arrays: `[collection-service.ts:resolveFields]`
 - The default list uses `makeProjectedListRowMapper`, iterating the exact `fieldsForQuery` projection so response key set/order match the SELECT and non-projected keys are omitted; `select`/`expand` keep `makeListRowMapper`. A custom `Repository` that returns extra columns has them dropped on the default path: `[collection-service.ts:list]`
 - `expand` only joins fields whose `x-kind` is `relation`; duplicates collapse; the target collection's `view` rule is applied unless admin; a target with no view rule or an auth-needing rule under an anonymous caller is silently not expanded: `[collection-service.ts:resolveExpand]`

@@ -71,7 +71,7 @@ Use `isRateLimited(error)` or `error.status === 429` to detect a backoff respons
 
 ## Query options
 
-`getList` accepts `filter`, `sort`, `order`, `cursor`, `limit`, `select`, `expand`, and `retryOptions`. The filter is a **callback** that receives the typed builder, not a prebuilt node. The `cursor` value is whatever the previous page returned as `nextCursor`, and the client sends it as the `after` parameter.
+`getList` accepts `filter`, `sort`, `order`, `cursor`, `limit`, `select`, `expand`, and `retryOptions`. The filter is a **callback** that receives the typed builder, not a prebuilt node. The `cursor` value is whatever the previous page returned as `nextCursor`, and the client sends it as the `after` parameter. Sorted pagination is supported for non-nullable sort fields; nullable sorted cursors and cursors whose row was deleted return a `422` validation error.
 
 ```ts
 let cursor: number | null = null

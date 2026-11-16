@@ -67,10 +67,12 @@ export class Repository extends Context.Service<
   }
 >()("Repository") {}
 
-function orderFrag(sql: SqlClient.SqlClient, sort?: SortOrder) {
+function orderFrag(sql: SqlClient.SqlClient, sort?: SortOrder, tieBreaker?: string) {
   if (!sort) return sql.literal("")
   const dir = sort.direction === "desc" ? "DESC" : "ASC"
-  return sql.literal(` ORDER BY t."${sort.field}" ${dir}`)
+  const secondary =
+    tieBreaker !== undefined && tieBreaker !== sort.field ? `, t."${tieBreaker}" ${dir}` : ""
+  return sql.literal(` ORDER BY t."${sort.field}" ${dir}${secondary}`)
 }
 
 function buildSelect(sql: SqlClient.SqlClient, fields?: ReadonlyArray<string>, expand?: ReadonlyArray<ExpandDef>) {
@@ -197,7 +199,7 @@ export const RepositoryLive = Layer.effect(
       viewFilter: (table, filter) =>
         Effect.gen(function* () {
           const where = literal(filter.where.sql, filter.where.params)
-          const order = orderFrag(sql, filter.sort)
+          const order = orderFrag(sql, filter.sort, filter.tieBreaker)
           const select = buildSelect(sql, filter.fields, filter.expand)
           const joins = buildJoins(sql, filter.expand)
 
@@ -275,7 +277,7 @@ export const RepositoryLive = Layer.effect(
 
       list: (table, limit, options) =>
         Effect.gen(function* () {
-          const order = orderFrag(sql, options?.sort)
+          const order = orderFrag(sql, options?.sort, options?.tieBreaker)
           const select = buildSelect(sql, options?.fields, options?.expand)
           const joins = buildJoins(sql, options?.expand)
 

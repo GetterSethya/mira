@@ -37,6 +37,8 @@ export type ExpandDef = {
 export type ListOptions = {
   where?: WhereClause
   sort?: SortOrder
+  /** Optional second sort key, used by the collection service for a stable keyset. */
+  tieBreaker?: string
   fields?: ReadonlyArray<string>
   expand?: ReadonlyArray<ExpandDef>
 }
@@ -48,6 +50,8 @@ export type ListOptions = {
 export type FilterOptions = {
   where: WhereClause
   sort?: SortOrder
+  /** Optional second sort key, used by the collection service for a stable keyset. */
+  tieBreaker?: string
   fields?: ReadonlyArray<string>
   expand?: ReadonlyArray<ExpandDef>
 }

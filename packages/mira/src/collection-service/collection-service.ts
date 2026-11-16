@@ -28,7 +28,7 @@ import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
 import type { BodyBinding, BodyBindingPlan, ResolveOptions } from "./where.js"
-import { andWhere, cursorClause, extractCtxRefs, idClause, resolveCtxPlaceholders, resolveFieldRefs } from "./where.js"
+import { andWhere, cursorClause, extractCtxRefs, idClause, keysetClause, resolveCtxPlaceholders, resolveFieldRefs } from "./where.js"
 
 /**
  * Collection Service tag — the core business-logic layer sitting between
@@ -265,6 +265,12 @@ function resolveExpand(
  * Unknown fields are ignored (falls back to the default `seqId` order),
  * matching prior behaviour.
  */
+function isNullableSortField(schema: CollectionSchema, field: string): boolean {
+  const prop = schema.properties[field]
+  if (prop?.["x-system"] === true) return false
+  return !(schema.required?.includes(field) ?? false)
+}
+
 function validateSort(
   schema: CollectionSchema,
   collectionName: string,
@@ -681,9 +687,44 @@ function makeCollectionServiceLayerWith(
               : null
           const where: WhereClause | null =
             ruleWhere !== null && userFilter !== null ? andWhere(ruleWhere, userFilter) : (userFilter ?? ruleWhere)
-          const combined = cursor !== null && where !== null ? andWhere(where, cursorClause(cursor)) : where
-
           const sortOrder = sort !== undefined ? yield* validateSort(collection.schema, collection.name, sort, ctx.admin === true) : undefined
+          const effectiveSort: SortOrder = sortOrder ?? { field: "seqId", direction: "asc" }
+
+          let cursorWhere: WhereClause | null = null
+          if (cursor !== null) {
+            if (effectiveSort.field === "seqId") {
+              cursorWhere = cursorClause(cursor)
+            } else {
+              if (isNullableSortField(collection.schema, effectiveSort.field)) {
+                return yield* Effect.fail(
+                  new ValidationError({
+                    collection: collection.name,
+                    issues: [
+                      `Cannot paginate a sorted list on nullable field "${effectiveSort.field}"; sort by seqId or a non-null field`
+                    ]
+                  })
+                )
+              }
+              const cursorRows = yield* repo.viewFilter(collection.name, {
+                where: { sql: "t.seqId = ?", params: [cursor] },
+                fields: [effectiveSort.field]
+              })
+              const cursorRow = cursorRows[0]
+              const value = cursorRow?.[effectiveSort.field]
+              if (cursorRow === undefined || value === null || value === undefined) {
+                return yield* Effect.fail(
+                  new ValidationError({
+                    collection: collection.name,
+                    issues: [`Invalid cursor: row ${cursor} no longer exists`]
+                  })
+                )
+              }
+              cursorWhere = keysetClause(effectiveSort, value, cursor)
+            }
+          }
+          const combined =
+            cursorWhere !== null ? (where !== null ? andWhere(where, cursorWhere) : cursorWhere) : where
+
           const fields = resolveFields(collection.schema, select ?? null, ctx.admin === true)
           const expandDefs =
             expand === null || expand === undefined || expand.length === 0
@@ -700,10 +741,11 @@ function makeCollectionServiceLayerWith(
             : [...new Set([...fieldsWithExpand, "seqId"])]
 
           const listOpts = {
-            sort: sortOrder ?? { field: "seqId", direction: "asc" as const },
+            sort: effectiveSort,
+            tieBreaker: "seqId",
             fields: fieldsForQuery,
             expand: expandDefs
-          } as const
+          }
 
           const rows = yield* repo.list(
             collection.name,

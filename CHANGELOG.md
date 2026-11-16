@@ -181,6 +181,15 @@ published by CI.
 
 ### Fixed
 
+- **Sorted list cursor pagination.** `?sort=<field>&after=<seqId>` now resolves
+  the cursor row's sort value and continues with a `(sortField, seqId)` keyset,
+  with `seqId` as the tie-breaker. Previously the server filtered on `seqId`
+  and then sorted by the requested field, so later pages could skip or repeat
+  rows. Nullable sort fields and deleted cursor rows now fail closed with `422`
+  instead of returning a silently incomplete page. The numeric `nextCursor` /
+  `after` contract is unchanged; only non-`seqId` cursor pages pay one
+  primary-key lookup.
+
 ## [0.1.0-alpha.37] - 2026-11-14
 
 ### Added

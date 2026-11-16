@@ -112,6 +112,21 @@ const shapes: ReadonlyArray<{ name: string; sql: string; params: ReadonlyArray<s
     name: "cursor + indexed category",
     sql: `SELECT t."id", t."title", t."category", t."views", t."seqId" FROM "posts" t WHERE t."category" = ? AND t."seqId" > ? ORDER BY t."seqId" ASC LIMIT 30`,
     params: ["alpha", 1000]
+  },
+  {
+    name: "keyset title asc",
+    sql: `SELECT t."id", t."title", t."category", t."views", t."seqId" FROM "posts" t WHERE (t."title", t."seqId") > (?, ?) ORDER BY t."title" ASC, t."seqId" ASC LIMIT 30`,
+    params: ["title-50000", 50001]
+  },
+  {
+    name: "keyset title desc",
+    sql: `SELECT t."id", t."title", t."category", t."views", t."seqId" FROM "posts" t WHERE (t."title", t."seqId") < (?, ?) ORDER BY t."title" DESC, t."seqId" DESC LIMIT 30`,
+    params: ["title-50000", 50001]
+  },
+  {
+    name: "filter indexed + keyset title",
+    sql: `SELECT t."id", t."title", t."category", t."views", t."seqId" FROM "posts" t WHERE t."category" = ? AND (t."title", t."seqId") > (?, ?) ORDER BY t."title" ASC, t."seqId" ASC LIMIT 30`,
+    params: ["alpha", "title-50000", 50001]
   }
 ]
 

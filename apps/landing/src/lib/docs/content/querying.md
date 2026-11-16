@@ -71,7 +71,7 @@ Expansion joins the target's `id` column. A relation declared with a different t
 
 ## Cursor pagination
 
-`after` is a cursor, not an offset: pass the `seqId` of the last row you received, and the next query returns rows with a greater `seqId`. The default order is `seqId` ascending, which is exactly what makes the window monotonic; sorting by another field while paginating can skip or repeat rows, so walk in `seqId` order when you need a complete pass. `nextCursor` is the last row's `seqId` when the page is full, and `null` when it is not. A full page can still be the end of the data, so keep requesting until `nextCursor` is `null` and treat a final empty page as normal.
+`after` is a cursor, not an offset: pass the `seqId` of the last row you received. The default order is `seqId` ascending. Sorted pagination is also supported: the server resolves the cursor row's sort value and continues with a `(sortField, seqId)` keyset, using `seqId` as a stable tie-breaker. The sort field must be non-nullable; a sorted request that uses `after` on a nullable field returns `422 validation_failed` rather than silently skipping rows. If the cursor row has been deleted, the server also returns `422` so you can restart from the first page. `nextCursor` is the last row's `seqId` when the page is full, and `null` when it is not. A full page can still be the end of the data, so keep requesting until `nextCursor` is `null` and treat a final empty page as normal.
 
 ```json
 {

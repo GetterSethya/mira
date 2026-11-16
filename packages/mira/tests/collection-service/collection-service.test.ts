@@ -422,6 +422,174 @@ describe("list", () => {
 // list with filter
 // ---------------------------------------------------------------------------
 
+describe("list sorted cursor pagination", () => {
+  const pageTitles = (page: CursorPage) => page.items.map((item) => item["title"])
+
+  it.effect("walks a title-ascending list across pages without gaps or duplicates", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      for (const title of ["E", "D", "C", "B", "A"]) {
+        yield* svc.create(Posts, { title }, noCtx)
+      }
+
+      const page1 = yield* svc.list(Posts, null, 2, noCtx, undefined, { field: "title", direction: "asc" })
+      if (!isCursorPage(page1) || page1.nextCursor === null) throw new Error("expected page 1 cursor")
+      expect(pageTitles(page1)).toEqual(["A", "B"])
+
+      const page2 = yield* svc.list(Posts, page1.nextCursor, 2, noCtx, undefined, {
+        field: "title",
+        direction: "asc"
+      })
+      if (!isCursorPage(page2) || page2.nextCursor === null) throw new Error("expected page 2 cursor")
+      expect(pageTitles(page2)).toEqual(["C", "D"])
+
+      const page3 = yield* svc.list(Posts, page2.nextCursor, 2, noCtx, undefined, {
+        field: "title",
+        direction: "asc"
+      })
+      if (!isCursorPage(page3)) throw new Error("expected page 3")
+      expect(pageTitles(page3)).toEqual(["E"])
+      expect(page3.nextCursor).toBeNull()
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("walks a title-descending list across pages", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      for (const title of ["A", "B", "C", "D", "E"]) {
+        yield* svc.create(Posts, { title }, noCtx)
+      }
+
+      const page1 = yield* svc.list(Posts, null, 2, noCtx, undefined, { field: "title", direction: "desc" })
+      if (!isCursorPage(page1) || page1.nextCursor === null) throw new Error("expected page 1 cursor")
+      expect(pageTitles(page1)).toEqual(["E", "D"])
+
+      const page2 = yield* svc.list(Posts, page1.nextCursor, 2, noCtx, undefined, {
+        field: "title",
+        direction: "desc"
+      })
+      if (!isCursorPage(page2) || page2.nextCursor === null) throw new Error("expected page 2 cursor")
+      expect(pageTitles(page2)).toEqual(["C", "B"])
+
+      const page3 = yield* svc.list(Posts, page2.nextCursor, 2, noCtx, undefined, {
+        field: "title",
+        direction: "desc"
+      })
+      if (!isCursorPage(page3)) throw new Error("expected page 3")
+      expect(pageTitles(page3)).toEqual(["A"])
+      expect(page3.nextCursor).toBeNull()
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("uses seqId as a tie-breaker for equal sort values", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      for (let index = 0; index < 3; index += 1) {
+        yield* svc.create(Posts, { title: "same" }, noCtx)
+      }
+
+      const seen: Array<unknown> = []
+      const page1 = yield* svc.list(Posts, null, 2, noCtx, undefined, {
+        field: "title",
+        direction: "asc"
+      })
+      if (!isCursorPage(page1) || page1.nextCursor === null) throw new Error("expected page 1 cursor")
+      seen.push(...page1.items.map((item) => item["id"]))
+
+      const page2 = yield* svc.list(Posts, page1.nextCursor, 2, noCtx, undefined, {
+        field: "title",
+        direction: "asc"
+      })
+      if (!isCursorPage(page2)) throw new Error("expected page 2")
+      seen.push(...page2.items.map((item) => item["id"]))
+
+      expect(new Set(seen).size).toBe(3)
+      expect(page2.nextCursor).toBeNull()
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("supports filter + sort + cursor together", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      for (const title of ["A", "B", "C", "D"]) {
+        yield* svc.create(Posts, { title }, noCtx)
+      }
+
+      const page1 = yield* svc.list(
+        Posts,
+        null,
+        2,
+        noCtx,
+        { op: "in", field: "title", values: ["A", "C", "D"] },
+        { field: "title", direction: "asc" }
+      )
+      if (!isCursorPage(page1) || page1.nextCursor === null) throw new Error("expected page 1 cursor")
+      expect(pageTitles(page1)).toEqual(["A", "C"])
+
+      const page2 = yield* svc.list(
+        Posts,
+        page1.nextCursor,
+        2,
+        noCtx,
+        { op: "in", field: "title", values: ["A", "C", "D"] },
+        { field: "title", direction: "asc" }
+      )
+      if (!isCursorPage(page2)) throw new Error("expected page 2")
+      expect(pageTitles(page2)).toEqual(["D"])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rejects a sorted cursor on a nullable field", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      yield* svc.create(Posts, { title: "nullable-sort" }, noCtx)
+
+      const page1 = yield* svc.list(Posts, null, 1, noCtx, undefined, {
+        field: "authorId",
+        direction: "asc"
+      })
+      if (!isCursorPage(page1) || page1.nextCursor === null) throw new Error("expected cursor")
+      const result = yield* svc
+        .list(Posts, page1.nextCursor, 1, noCtx, undefined, {
+          field: "authorId",
+          direction: "asc"
+        })
+        .pipe(Effect.result)
+
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
+        if (result.failure._tag === "ValidationError") {
+          expect(result.failure.issues.some((issue) => issue.includes("nullable"))).toBe(true)
+        }
+      }
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rejects a cursor whose row no longer exists", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      const first = yield* svc.create(Posts, { title: "A" }, noCtx)
+      yield* svc.create(Posts, { title: "B" }, noCtx)
+
+      const page1 = yield* svc.list(Posts, null, 1, noCtx, undefined, { field: "title", direction: "asc" })
+      if (!isCursorPage(page1) || page1.nextCursor === null) throw new Error("expected cursor")
+      yield* svc.delete(Posts, String(first["id"]), noCtx)
+      const result = yield* svc
+        .list(Posts, page1.nextCursor, 1, noCtx, undefined, { field: "title", direction: "asc" })
+        .pipe(Effect.result)
+
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ValidationError")
+        if (result.failure._tag === "ValidationError") {
+          expect(result.failure.issues.some((issue) => issue.includes("Invalid cursor"))).toBe(true)
+        }
+      }
+    }).pipe(Effect.provide(testLayer)))
+})
+
 describe("list with filter", () => {
   it.effect("filters by eq on string field", () =>
     Effect.gen(function* () {

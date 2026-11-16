@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 
-import type { RepoRecord, WhereClause } from "@/repository/types.js"
+import type { RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
 import type { EnforceResult } from "@/rule/enforcer.js"
 
 import type { RequestCtx } from "./context.js"
@@ -22,6 +22,19 @@ export function idClause(id: string): WhereClause {
 /** Produces a WHERE clause for cursor pagination: seqId strictly after the given cursor. */
 export function cursorClause(after: number): WhereClause {
   return { sql: "t.seqId > ?", params: [after] }
+}
+
+/**
+ * Produces a row-value keyset predicate for a sorted cursor:
+ * `(field, seqId) > (value, after)` for ASC, `<` for DESC.
+ *
+ * The caller must resolve `value` from the cursor row and reject nullable sort
+ * fields; SQL row comparison with NULL is unknown, and null ordering differs by
+ * dialect. The field name is validated against the schema before this point.
+ */
+export function keysetClause(sort: SortOrder, value: unknown, after: number): WhereClause {
+  const op = sort.direction === "asc" ? ">" : "<"
+  return { sql: `(t."${sort.field}", t.seqId) ${op} (?, ?)`, params: [value, after] }
 }
 
 /** Shared pattern for the `@auth_<field>` / `@request_<source>_<key>` placeholders emitted by the rule compiler. */
