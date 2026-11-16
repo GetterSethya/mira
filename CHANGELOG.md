@@ -86,6 +86,20 @@ published by CI.
 
 ### Changed
 
+- **Tracing-off request-path fast paths.** HTTP, collection-service, cache, hook
+  and mutation-batch spans now use `withSpanWhenEnabled`, and `auth.*` /
+  `cache.hit` / `http.forwarded_for` annotations use
+  `annotateCurrentSpanWhenEnabled` (`fiber.cache.tracerEnabled` + native span).
+  Tracing-off requests no longer build no-op spans or perform
+  `Effect.currentSpan` lookups; tracing-on names, kinds, attributes and
+  parent/child topology are unchanged. The benchmark harness now writes a
+  windowed inspector heap profile (`PROFILE_HEAP=1`). Fedora 44, 5,000 list
+  requests: **960 -> 1048 rps** (+9.2%), p50 **47.4 -> 42.8 ms**, p99
+  **103.0 -> 94.2 ms**, profile CPU **5449 -> 4954 ms**; update **801 -> 847
+  rps** (+5.7%); sampled heap **593.7 -> 471.4 MiB** (-20.6%, **121.6 -> 96.5
+  KiB/request**). Helper isolation: `Effect.withSpan` 1295 ns/op / 276.63 MiB
+  sampled -> `withSpanWhenEnabled` 499 ns/op / 111.16 MiB. Internal performance
+  only; no API shape change.
 - **Read-path fast path for default list responses.** Default visible fields
   are cached per schema, `fields + seqId` is cached for the default projection,
   and the no-select/no-expand list path uses a projection-based row mapper that
