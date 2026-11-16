@@ -134,6 +134,8 @@ function rebuildStatements(table: string, desired: TableShape, stored: TableShap
 
 export const sqliteDialect: DialectType = {
   storesBooleanAsInteger: true,
+  // SQLite 3.35+ supports DELETE ... RETURNING on both the Node and Bun drivers.
+  deleteResult: { _tag: "returning" },
 
   quoteIdentifier: quote,
   quoteLiteral,

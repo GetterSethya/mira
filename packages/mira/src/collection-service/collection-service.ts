@@ -1081,7 +1081,6 @@ function makeCollectionServiceLayerWith(
             : enforcerForAction(prepared.collection.schema, "delete")
           const refs = enforcer === null ? null : extractCtxRefs(enforcer.sql)
           const fastPath =
-            process.env["MIRA_DELETE_FAST_PATH"] !== "off" &&
             viewWithAccess !== undefined &&
             deleteExisting !== undefined &&
             (prepared.admin ||

@@ -1,14 +1,24 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Effect, Layer, Option, Result } from "effect"
+import { Data, Effect, Layer, Option, Result } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 
+class RepositoryMethodMissing extends Data.TaggedError("RepositoryMethodMissing")<{
+  readonly method: string
+}> {}
+
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const testLayer = Layer.mergeAll(RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer)), sqliteLayer, NodeCryptoLayer)
+const DialectTest = Layer.succeed(Dialect, sqliteDialect)
+const returningInfra = Layer.mergeAll(sqliteLayer, NodeCryptoLayer, DialectTest)
+const testLayer = Layer.mergeAll(RepositoryLive.pipe(Layer.provide(returningInfra)), returningInfra)
+const precheckInfra = Layer.mergeAll(sqliteLayer, NodeCryptoLayer)
+const precheckLayer = Layer.mergeAll(RepositoryLive.pipe(Layer.provide(precheckInfra)), precheckInfra)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -362,6 +372,48 @@ describe("repository", () => {
         const result = yield* repo.delete("posts", "nosuchid123456")
         expect(Option.isNone(result)).toBe(true)
       }).pipe(Effect.provide(testLayer)))
+  })
+
+  describe("deleteExisting", () => {
+    it.effect("removes an existing row with DELETE ... RETURNING", () =>
+      Effect.gen(function* () {
+        yield* setupTable
+        const repo = yield* Repository
+        const deleteExisting = repo.deleteExisting
+        if (deleteExisting === undefined) {
+          return yield* Effect.die(new RepositoryMethodMissing({ method: "deleteExisting" }))
+        }
+        const created = yield* repo.create("posts", { title: "Fast gone" })
+        const result = yield* deleteExisting("posts", created.id as string)
+        expect(Option.isSome(result)).toBe(true)
+        expect(Option.isNone(yield* repo.view("posts", created.id as string))).toBe(true)
+      }).pipe(Effect.provide(testLayer)))
+
+    it.effect("returns Option.none for an unknown id", () =>
+      Effect.gen(function* () {
+        yield* setupTable
+        const repo = yield* Repository
+        const deleteExisting = repo.deleteExisting
+        if (deleteExisting === undefined) {
+          return yield* Effect.die(new RepositoryMethodMissing({ method: "deleteExisting" }))
+        }
+        const result = yield* deleteExisting("posts", "nosuchid123456")
+        expect(Option.isNone(result)).toBe(true)
+      }).pipe(Effect.provide(testLayer)))
+
+    it.effect("uses the precheck fallback when no Dialect is provided", () =>
+      Effect.gen(function* () {
+        yield* setupTable
+        const repo = yield* Repository
+        const deleteExisting = repo.deleteExisting
+        if (deleteExisting === undefined) {
+          return yield* Effect.die(new RepositoryMethodMissing({ method: "deleteExisting" }))
+        }
+        const created = yield* repo.create("posts", { title: "Precheck gone" })
+        const result = yield* deleteExisting("posts", created.id as string)
+        expect(Option.isSome(result)).toBe(true)
+        expect(Option.isNone(yield* deleteExisting("posts", created.id as string))).toBe(true)
+      }).pipe(Effect.provide(precheckLayer)))
   })
 
   describe("Option contract (negative paths)", () => {

@@ -10,16 +10,18 @@ beyond `.sql`-quoted identifiers.
 
 `Repository` is a `Context.Service` tag whose operations all return `Effect`s with
 `SqlError.SqlError` in the error channel. `RepositoryLive` supplies the
-implementation from `SqlClient` + `CryptoService`. `types.ts` holds the shapes:
-`RepoRecord` (raw row), `CursorResult` (items-only page), `WhereClause`
-(enforcer output), `SortOrder`, `ExpandDef` and the list/filter option bags.
+implementation from `SqlClient` + `CryptoService`, and reads the optional
+`Dialect` service to choose its `DELETE` affected-row strategy. `types.ts` holds
+the shapes: `RepoRecord` (raw row), `CursorResult` (items-only page),
+`WhereClause` (enforcer output), `SortOrder`, `ExpandDef`, the list/filter option
+bags, and `AccessPredicate`/`AccessRow`.
 
 Relation expansion is implemented as a `LEFT JOIN` per `ExpandDef`, emitting
 prefixed columns that are reshaped back into a nested `row.expand` object.
 
 ## Interface
 
-- `Repository` — `Context.Service` tag with `create`, `update`, `view`, `viewFilter`, `list`, `delete` [repository.ts:Repository]
+- `Repository` — `Context.Service` tag with `create`, `update`, `view`, `viewFilter`, `list`, `delete`, optional `viewWithAccess` and optional `deleteExisting` [repository.ts:Repository]
 - `RepositoryLive` — `Layer.effect` implementation; requires `SqlClient` and `CryptoService` [repository.ts:RepositoryLive]
 - `generateId` — 15-character unbiased alphanumeric id (`a-z A-Z 0-9`) built from `CryptoService.randomBytes` (exported from the file, **not** re-exported by `index.ts`, and currently unused by `RepositoryLive`) [id.ts:generateId]
 - (type) `RepoRecord` — `Record<string, unknown>`, the only row shape this layer sees [types.ts:RepoRecord]
@@ -35,6 +37,8 @@ prefixed columns that are reshaped back into a nested `row.expand` object.
 - `create` injects `id`, `created`, `updated` into the caller's record before inserting and returns the merged record [repository.ts:RepositoryLive]
 - `update` always overwrites `updated` and excludes `id` and `created` from the `SET` clause via `sql.update(patch, ["id", "created"])`, then re-reads the row [repository.ts:RepositoryLive]
 - `update`, `view` and `delete` return `Option.none()` when no row matches; `delete` performs an existence `SELECT 1` before issuing `DELETE` and returns `Option.some(undefined)` only when it actually deleted [repository.ts:RepositoryLive]
+- `viewWithAccess` returns the row plus `__mira_access_<name>` booleans from `CASE WHEN (<predicate>) THEN 1 ELSE 0 END`; the aliases are stripped before returning, and a missing key is `false` at the call site [repository.ts:RepositoryLive]
+- `deleteExisting` is the fast path: it uses `Dialect.deleteResult` (`returning`, `affectedRows`, or `precheck`) to report whether the `DELETE` removed a row, so callers that already confirmed existence do not pay a second `SELECT` [repository.ts:RepositoryLive]
 - `list` never issues `COUNT(*)`; pagination is carried entirely by `LIMIT` plus a caller-supplied cursor predicate inside `where` [types.ts:CursorResult], [repository.ts:RepositoryLive]
 - `where` is optional for `list` (public collections) but required for `viewFilter`; the repository splices it through `Statement.literal`, never `sql.unsafe` [types.ts:ListOptions], [types.ts:FilterOptions], [repository.ts:RepositoryLive]
 - Table names, join aliases and join columns are emitted through `sql(...)`; the SELECT column list and `ORDER BY` are composed as quoted fragments inside `sql.literal(...)`, with field names taken from the collection schema rather than raw request input [repository.ts:buildSelect], [repository.ts:buildJoins], [repository.ts:orderFrag]
@@ -51,7 +55,7 @@ prefixed columns that are reshaped back into a nested `row.expand` object.
 - Issues `INSERT`, `SELECT`, `UPDATE` and `DELETE` statements through `SqlClient` [repository.ts:RepositoryLive]
 - Reads randomness from `CryptoService.randomBytes` to build ids [repository.ts:RepositoryLive]
 - Reads the wall clock (`new Date().toISOString()`) to stamp `created`/`updated` [repository.ts:RepositoryLive]
-- Emits `repository.*` trace spans (create, view, update, viewFilter, list, delete) [repository.ts:RepositoryLive]
+- Emits `repository.*` trace spans (create, view, update, viewFilter, list, delete, viewWithAccess, deleteExisting) [repository.ts:RepositoryLive]
 
 ## Verification
 

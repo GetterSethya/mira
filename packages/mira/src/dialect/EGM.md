@@ -15,7 +15,8 @@ migrator and database preset.
 ## Interface
 
 - `Dialect` — `Context.Service` tag over a `DialectType`; inject with `Layer.succeed(Dialect, sqliteDialect)` [dialect.ts:Dialect]
-- `DialectType` (type) — the contract: `translatePlan`, `translate`, `nativeType`, `quoteIdentifier`, `quoteLiteral`, `indexName`, `storesBooleanAsInteger` [dialect.ts:DialectType]
+- `DialectType` (type) — the contract: `translatePlan`, `translate`, `nativeType`, `quoteIdentifier`, `quoteLiteral`, `indexName`, `storesBooleanAsInteger`, `deleteResult` [dialect.ts:DialectType]
+- `DeleteResultStrategy` (type) �?" how a `DELETE` reports an affected row: `returning`, `affectedRows`, or `precheck` [dialect.ts:DeleteResultStrategy]
 - `TranslatePlanContext` (type) — `{ tables: ReadonlyMap<string, TableShapes> }` passed to `translatePlan` [dialect.ts:TranslatePlanContext]
 - `TranslatedPlan` (type) — `{ statements, cleanup }` returned by `translatePlan` [dialect.ts:TranslatedPlan]
 - `translateStep(translate, step)` — renders one step, failing when it yields no SQL [dialect.ts:translateStep]
@@ -34,6 +35,8 @@ migrator and database preset.
 - `PRAGMA legacy_alter_table = ON` is emitted before any rebuild and `… = OFF` in `cleanup` [dialect-sqlite.ts:translatePlan]
 - `sqliteDialect.translate("alterColumn")` returns `[]`; that arm is unreachable through `translatePlan`, which rebuilds instead [dialect-sqlite.ts:sqliteDialect]
 - SQLite stores booleans as integers (`storesBooleanAsInteger: true`) [dialect-sqlite.ts:sqliteDialect]
+- SQLite reports `DELETE` results with `returning`; Node 24 and Bun 1.4 both return the deleted id from `DELETE ... RETURNING id` [dialect-sqlite.ts:sqliteDialect]
+- A dialect without `RETURNING` chooses `affectedRows` when its driver exposes an affected count, or `precheck` for the portable `SELECT 1` + `DELETE` fallback [dialect.ts:DeleteResultStrategy]
 - Identifiers are double-quoted and index names are `idx_<table>_<fields joined by _>` [dialect-sqlite.ts:quote] [dialect-sqlite.ts:indexNameOf]
 - `quoteLiteral` renders `NULL`, `1`/`0` for booleans, bare numbers, and single-quoted strings with embedded quotes doubled [dialect-sqlite.ts:quoteLiteral]
 - `ADD COLUMN NOT NULL` without a default gets a fallback default (`""` for text, `0` otherwise) because SQLite rejects it on non-empty tables [dialect-sqlite.ts:sqliteDialect]

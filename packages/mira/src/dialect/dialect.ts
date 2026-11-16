@@ -1,7 +1,23 @@
-import { Context, Effect } from "effect"
+import { Context, Effect, Option } from "effect"
 
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
 import type { ColumnDef, IndexShape, MigrationStep, TableShapes } from "@/migrator/types.js"
+
+/**
+ * How a dialect reports whether a `DELETE` removed a row.
+ *
+ * `returning` is the preferred shape: `DELETE ... RETURNING id` returns the
+ * removed id, so the repository gets an affected-row signal from the same
+ * statement. `affectedRows` is for drivers that expose a row count on the raw
+ * result. `precheck` is the portable fallback: `SELECT 1` before the delete.
+ */
+export type DeleteResultStrategy =
+  | { readonly _tag: "returning" }
+  | {
+      readonly _tag: "affectedRows"
+      readonly read: (raw: unknown) => Option.Option<number>
+    }
+  | { readonly _tag: "precheck" }
 
 /** What a dialect needs to render a plan, beyond the step list itself. */
 export type TranslatePlanContext = {
@@ -51,6 +67,8 @@ export type DialectType = {
   indexName: (table: string, fields: Array<string>) => string
   /** Whether this dialect stores boolean columns as 0/1 integers (true for SQLite; false for dialects with a native boolean type, e.g. Postgres). */
   storesBooleanAsInteger: boolean
+  /** How `DELETE` reports whether it removed a row. */
+  deleteResult: DeleteResultStrategy
 }
 
 /**

@@ -1,12 +1,20 @@
-import { Context, Effect, Layer, Option } from "effect"
+import { Context, Data, Effect, Layer, Option } from "effect"
 import type { SqlError } from "effect/sql";
 import { SqlClient } from "effect/sql"
 import { literal } from "effect/sql/Statement"
 
 import { CryptoService } from "@/crypto/index.js"
+import { Dialect } from "@/dialect/dialect.js"
+import type { DeleteResultStrategy } from "@/dialect/dialect.js"
 
 import type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord, SortOrder } from "./types.js"
 import type { AccessPredicate, AccessRow } from "./types.js"
+
+/** The dialect could not decode its own DELETE result shape. */
+class DeleteResultUnknownError extends Data.TaggedError("DeleteResultUnknownError")<{
+  readonly table: string
+  readonly raw: unknown
+}> {}
 
 /**
  * Repository tag — schema-agnostic CRUD abstraction above SqlClient.
@@ -145,6 +153,10 @@ export const RepositoryLive = Layer.effect(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const crypto = yield* CryptoService
+    const dialect = yield* Effect.serviceOption(Dialect)
+    const deleteResultStrategy: DeleteResultStrategy = Option.isSome(dialect)
+      ? dialect.value.deleteResult
+      : { _tag: "precheck" }
 
     return Repository.of({
       create: (table, data) =>
@@ -232,8 +244,26 @@ export const RepositoryLive = Layer.effect(
 
       deleteExisting: (table, id) =>
         Effect.gen(function* () {
-          const rows = yield* sql<{ id: string }>`DELETE FROM ${sql(table)} WHERE id = ${id} RETURNING id`
-          return rows.length > 0 ? Option.some<void>(undefined) : Option.none()
+          switch (deleteResultStrategy._tag) {
+            case "returning": {
+              const rows = yield* sql<{ id: string }>`DELETE FROM ${sql(table)} WHERE ${sql("id")} = ${id} RETURNING ${sql("id")}`
+              return rows.length > 0 ? Option.some<void>(undefined) : Option.none()
+            }
+            case "affectedRows": {
+              const raw = yield* (sql`DELETE FROM ${sql(table)} WHERE ${sql("id")} = ${id}`).raw
+              const affected = deleteResultStrategy.read(raw)
+              if (Option.isNone(affected)) {
+                return yield* Effect.die(new DeleteResultUnknownError({ table, raw }))
+              }
+              return affected.value > 0 ? Option.some<void>(undefined) : Option.none()
+            }
+            case "precheck": {
+              const check = yield* sql`SELECT 1 FROM ${sql(table)} WHERE ${sql("id")} = ${id} LIMIT 1`
+              if (check.length === 0) return Option.none()
+              yield* sql`DELETE FROM ${sql(table)} WHERE ${sql("id")} = ${id}`
+              return Option.some<void>(undefined)
+            }
+          }
         }).pipe(
           Effect.withSpan(
             "repository.deleteExisting",

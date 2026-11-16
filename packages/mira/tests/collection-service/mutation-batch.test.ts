@@ -109,6 +109,18 @@ const guardedRules = defineRule(guardedDef, (R) => ({
 }))
 const Guarded = applyRulesToCollections([guardedDef], [guardedRules])[0]
 
+const bodyGuardedDef = BaseCollection.define("body_guarded", {
+  title: Field.text({ required: true })
+})
+const bodyGuardedRules = defineRule(bodyGuardedDef, (R) => ({
+  list: R.public(),
+  view: R.public(),
+  create: R.public(),
+  update: R.public(),
+  delete: R.request("body", "token").eq(R.literal("allow"))
+}))
+const BodyGuarded = applyRulesToCollections([bodyGuardedDef], [bodyGuardedRules])[0]
+
 /** Long windows so only an explicit `flushNow` releases a batch under TestClock. */
 const batchedConfig: ResolvedBatchMutationConfig = {
   queue: {
@@ -192,6 +204,20 @@ const setupGuardedTable = Effect.gen(function* () {
     )
   `)
   yield* sql.unsafe(`DELETE FROM "guarded"`)
+})
+
+const setupBodyGuardedTable = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "body_guarded" (
+      "seqId"   INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"      TEXT NOT NULL UNIQUE,
+      "title"   TEXT NOT NULL,
+      "created" TEXT NOT NULL,
+      "updated" TEXT NOT NULL
+    )
+  `)
+  yield* sql.unsafe(`DELETE FROM "body_guarded"`)
 })
 
 const setupUsersTable = Effect.gen(function* () {
@@ -954,7 +980,7 @@ describe("create batching queue bounds", () => {
       expect(row["title"]).toBe("after")
     }).pipe(
       Effect.provide(
-        batchedLayer([Posts], withQueue(batchedConfig, { windowMs: 60_000, submitTimeoutMs: 20, maxQueueSize: 1 }))
+        batchedLayer([Posts], withQueue(batchedConfig, { windowMs: 60_000, submitTimeoutMs: 100, maxQueueSize: 1 }))
       )
     )
   )
@@ -1570,6 +1596,23 @@ describe("update/delete batching", () => {
 
       yield* svc.delete(Guarded, "existing", adminCtx)
     }).pipe(Effect.provide(batchedLayer([Guarded])))
+  )
+
+  it.effect("falls back for a delete rule with a body placeholder and does not substitute a column", () =>
+    Effect.gen(function* () {
+      yield* setupBodyGuardedTable
+      const sql = yield* SqlClient.SqlClient
+      const svc = yield* CollectionService
+      yield* sql`INSERT INTO ${sql("body_guarded")} ("id", "title", "created", "updated") VALUES ('existing', 'x', 'now', 'now')`
+
+      const denied = yield* svc.delete(BodyGuarded, "existing", noCtx).pipe(Effect.exit)
+      expect(failureTag(denied)).toBe("ForbiddenError")
+
+      const stillThere = yield* sql<{ id: string }>`SELECT "id" FROM ${sql("body_guarded")} WHERE "id" = 'existing'`
+      expect(stillThere.length).toBe(1)
+
+      yield* svc.delete(BodyGuarded, "existing", adminCtx)
+    }).pipe(Effect.provide(batchedLayer([BodyGuarded])))
   )
 
   it.effect("reads the stored row inside the batch and returns 404 when it vanished", () =>
