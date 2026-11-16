@@ -1,3 +1,6 @@
+import { writeFileSync } from "node:fs"
+import { Session } from "node:inspector"
+
 import {
   BaseCollection,
   Field,
@@ -34,7 +37,9 @@ const Posts = BaseCollection.define("posts", {
 const postsRules = defineRule(Posts, (R) => ({
   list: R.public(),
   view: R.public(),
-  create: R.public()
+  create: R.public(),
+  update: R.public(),
+  delete: R.public()
 }))
 
 const platform =
@@ -139,6 +144,59 @@ const countRoute = HttpRouter.route(
   )
 )
 
+let profileSession: Session | null = null
+
+const profileStartRoute = HttpRouter.route(
+  "GET",
+  "/__bench/profile/start",
+  Effect.sync(() => {
+    if (profileSession !== null) {
+      return HttpServerResponse.jsonUnsafe({ error: "already profiling" }, { status: 409 })
+    }
+    const session = new Session()
+    session.connect()
+    session.post("Profiler.enable", () => {
+      session.post("Profiler.start", () => {})
+    })
+    profileSession = session
+    return HttpServerResponse.jsonUnsafe({ ok: true })
+  })
+)
+
+const profileStopRoute = HttpRouter.route(
+  "GET",
+  "/__bench/profile/stop",
+  Effect.gen(function* () {
+    const req = yield* HttpServerRequest.HttpServerRequest
+    const params = new URLSearchParams(req.url.includes("?") ? req.url.split("?")[1] : "")
+    const file = params.get("file")
+    if (file === null) {
+      return HttpServerResponse.jsonUnsafe({ error: "file required" }, { status: 400 })
+    }
+    const session = profileSession
+    if (session === null) {
+      return HttpServerResponse.jsonUnsafe({ error: "not profiling" }, { status: 409 })
+    }
+    profileSession = null
+    const profile = yield* Effect.promise(
+      () =>
+        new Promise<unknown>((resolve, reject) => {
+          session.post("Profiler.stop", (error, result) => {
+            session.disconnect()
+            if (error) reject(error)
+            else resolve(result.profile)
+          })
+        })
+    )
+    yield* Effect.sync(() => writeFileSync(file, JSON.stringify(profile)))
+    return HttpServerResponse.jsonUnsafe({ ok: true, file })
+  }).pipe(
+    Effect.catchCause(() =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "profile_stop_failed" }, { status: 500 }))
+    )
+  )
+)
+
 const exitRoute = HttpRouter.route(
   "GET",
   "/__bench/exit",
@@ -156,6 +214,8 @@ const benchPlugin = MiraPlugin.define<Repository | BatchMutationStats | SqlClien
     batchStatsRoute,
     resetBatchStatsRoute,
     countRoute,
+    profileStartRoute,
+    profileStopRoute,
     exitRoute
   ]
 })

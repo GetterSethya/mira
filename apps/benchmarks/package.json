@@ -7,6 +7,8 @@
     "bulk-create:audit": "node src/bulk-create-audit.ts",
     "perf:audit": "node src/audit.ts",
     "create-batch:audit": "node src/create-batch-audit.ts",
+    "profile:mutation": "tsx src/profile-mutation.ts",
+    "analyze:cpu": "tsx src/analyze-cpuprofile.ts",
     "perf:analyze": "node src/analyze-profiles.ts",
     "server:node": "node src/server.ts",
     "server:bun": "bun run src/server.ts",
