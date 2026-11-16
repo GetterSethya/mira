@@ -1,7 +1,9 @@
+import { randomBytes } from "node:crypto"
+
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
 import { AuthCollection, BaseCollection, Field } from "@gettersethya/mira-client"
-import { Effect, Layer, Result } from "effect"
+import { Effect, Layer, Queue, Result, Tracer } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -15,6 +17,8 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
+import type { CompletedSpan } from "@/telemetry/tracer.js"
+import { makeConsoleTracer } from "@/telemetry/tracer.js"
 
 const FileStorageTest = Layer.succeed(FileStorage, FileStorage.of({
   upload: (key) => Effect.succeed(key),
@@ -158,18 +162,29 @@ describe("body rules on create", () => {
 })
 
 describe("body rules on update", () => {
-  it.effect("allows a patch that omits the body key when the stored value matches (fallback)", () =>
+  it.effect("uses the access fast path when the body key is absent and the stored value matches", () =>
     Effect.gen(function* () {
-      yield* setupTables
-      const svc = yield* CollectionService
-      const created = yield* svc.create(Notes, { title: "Original", ownerId: "u1" }, anonCtx)
-      const id = created["id"]
-      if (typeof id !== "string") {
-        expect.unreachable("expected string id")
-      }
-      const updated = yield* svc.update(Notes, id, { title: "Renamed" }, anonCtx)
-      expect(updated["title"]).toBe("Renamed")
-      expect(updated["ownerId"]).toBe("u1")
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+
+      yield* Effect.gen(function* () {
+        yield* setupTables
+        const svc = yield* CollectionService
+        const created = yield* svc.create(Notes, { title: "Original", ownerId: "u1" }, anonCtx)
+        const id = created["id"]
+        if (typeof id !== "string") {
+          expect.unreachable("expected string id")
+        }
+
+        yield* Queue.clear(queue)
+        const updated = yield* svc.update(Notes, id, { title: "Renamed" }, anonCtx)
+        expect(updated["title"]).toBe("Renamed")
+        expect(updated["ownerId"]).toBe("u1")
+
+        const spans = yield* Queue.clear(queue)
+        expect(spans.map((span) => span.name)).toContain("repository.viewWithAccess")
+        expect(spans.some((span) => span.name === "repository.viewFilter")).toBe(false)
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("403s a patch that changes the body key away from the stored value", () =>

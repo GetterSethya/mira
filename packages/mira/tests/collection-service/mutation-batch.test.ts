@@ -1379,6 +1379,30 @@ describe("create batching with decorators", () => {
 // ---------------------------------------------------------------------------
 
 describe("create batching instrumentation", () => {
+  it.effect("uses the update access fast path and skips viewFilter", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      const service = serviceDeps(makeCollectionServiceLayer([Posts]))
+
+      yield* Effect.gen(function* () {
+        yield* setupPostsTable
+        const svc = yield* CollectionService
+        const row = yield* svc.create(Posts, { title: "before-update" }, noCtx)
+        yield* Queue.clear(queue)
+        yield* svc.update(Posts, String(row["id"]), { title: "after-update" }, noCtx)
+        const spans = yield* Queue.clear(queue)
+
+        expect(spans.map((span) => span.name)).toContain("repository.viewWithAccess")
+        expect(spans.some((span) => span.name === "repository.viewFilter")).toBe(false)
+        expect(spans.some((span) => span.name === "repository.update")).toBe(true)
+      }).pipe(
+        Effect.provide(Layer.mergeAll(service, sqliteLayer, FileStorageTest, NodeCryptoLayer)),
+        Effect.provideService(Tracer.Tracer, tracer)
+      )
+    })
+  )
+
   it.effect("uses the delete access fast path and skips viewFilter/delete", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()

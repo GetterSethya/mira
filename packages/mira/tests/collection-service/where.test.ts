@@ -88,6 +88,37 @@ describe("resolveCtxPlaceholders body resolution", () => {
       expect(out.params).toEqual(["active", "t1", "u1"])
     }))
 
+  it.effect("body plan binds patch keys as params and absent keys as quoted columns", () =>
+    Effect.gen(function* () {
+      const out = yield* resolveCtxPlaceholders(
+        { sql: "@request_body_title = t.title AND t.ownerId = @request_body_ownerId", params: [] },
+        noCtx,
+        "posts",
+        "update",
+        undefined,
+        new Map([
+          ["title", { _tag: "param" as const, value: "New title" }],
+          ["ownerId", { _tag: "column" as const, column: "ownerId" }]
+        ])
+      )
+      expect(out.sql).toBe('? = t.title AND t.ownerId = t."ownerId"')
+      expect(out.params).toEqual(["New title"])
+    }))
+
+  it.effect("a repeated body key binds one param per occurrence", () =>
+    Effect.gen(function* () {
+      const out = yield* resolveCtxPlaceholders(
+        { sql: "@request_body_ownerId = @request_body_ownerId", params: [] },
+        noCtx,
+        "posts",
+        "update",
+        undefined,
+        new Map([["ownerId", { _tag: "param" as const, value: "u1" }]])
+      )
+      expect(out.sql).toBe("? = ?")
+      expect(out.params).toEqual(["u1", "u1"])
+    }))
+
   it.effect("unknown request source fails closed with ForbiddenError", () =>
     Effect.gen(function* () {
       const result = yield* resolveCtxPlaceholders(
@@ -121,5 +152,16 @@ describe("extractCtxRefs", () => {
     const refs = extractCtxRefs("t.ownerId = @auth_id AND t.key = @request_header_xkey")
     expect(refs.bodyKeys).toEqual([])
     expect(refs.authFields).toEqual(["id"])
+  })
+
+  it("marks subquery rules and unknown request sources", () => {
+    const subquery = extractCtxRefs(
+      "EXISTS (SELECT 1 FROM t2 WHERE t2.id = @request_body_ownerId)"
+    )
+    expect(subquery.hasSubquery).toBe(true)
+    expect(subquery.hasUnknownSource).toBe(false)
+
+    const unknown = extractCtxRefs("t.key = @request_cookie_session")
+    expect(unknown.hasUnknownSource).toBe(true)
   })
 })

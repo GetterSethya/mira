@@ -1,7 +1,9 @@
+import { randomBytes } from "node:crypto"
+
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
 import { AuthCollection, Field } from "@gettersethya/mira-client"
-import { Effect, Layer, Result } from "effect"
+import { Effect, Layer, Queue, Result, Tracer } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -14,6 +16,8 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
+import type { CompletedSpan } from "@/telemetry/tracer.js"
+import { makeConsoleTracer } from "@/telemetry/tracer.js"
 
 const FileStorageTest = Layer.succeed(FileStorage, FileStorage.of({
   upload: (key) => Effect.succeed(key),
@@ -152,6 +156,48 @@ describe("auth create credentials", () => {
 })
 
 describe("auth update credentials", () => {
+  it.effect("returns 404 for an anonymous update of a missing row before 403", () =>
+    Effect.gen(function* () {
+      yield* setupUsersTable
+      const existing = yield* seedUser("anon@x.com", "old-pw")
+      const svc = yield* CollectionService
+
+      const missing = yield* svc
+        .update(Users, "nosuchid123456", { role: "admin" }, anonCtx)
+        .pipe(Effect.result)
+      expectFailure(missing, "NotFoundError")
+
+      const denied = yield* svc
+        .update(Users, String(existing["id"]), { role: "admin" }, anonCtx)
+        .pipe(Effect.result)
+      expectFailure(denied, "ForbiddenError")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("uses the access fast path for a manager update", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+
+      yield* Effect.gen(function* () {
+        yield* setupUsersTable
+        const target = yield* seedUser("managed@x.com", "old-pw", "user")
+        const svc = yield* CollectionService
+
+        yield* Queue.clear(queue)
+        const updated = yield* svc.update(
+          Users,
+          String(target["id"]),
+          { email: "managed-new@x.com" },
+          asUser("manager-1", "admin")
+        )
+        expect(updated["email"]).toBe("managed-new@x.com")
+
+        const spans = yield* Queue.clear(queue)
+        expect(spans.map((span) => span.name)).toContain("repository.viewWithAccess")
+        expect(spans.some((span) => span.name === "repository.viewFilter")).toBe(false)
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+    }).pipe(Effect.provide(testLayer)))
+
   it.effect("changing password without oldPassword is rejected", () =>
     Effect.gen(function* () {
       yield* setupUsersTable

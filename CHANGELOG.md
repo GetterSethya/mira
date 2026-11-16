@@ -98,6 +98,17 @@ published by CI.
   fallback, preserving 404-before-403 and body semantics. **Breaking for custom
   dialects:** `DialectType` now requires `deleteResult`; use
   `{ _tag: "precheck" }` when the driver has no affected-row signal.
+- **Update fast path with body-aware rule predicates.** Update now reads the
+  stored row, the update rule, and the `manage` rule result in one `SELECT` via
+  `Repository.viewWithAccess`, then writes with `Repository.update` (service-layer
+  statements 4 → 3; auth + `manage` 5 → 3). A `@request_body_*` key present in
+  the patch binds the patch value; an absent key that is a real non-generated
+  field binds `t."<key>"` so the rule still evaluates against the stored row.
+  Body-only keys, generated/system fields, subquery body rules, unknown request
+  sources, and anonymous auth-requiring rules keep the row-first fallback, so
+  404-before-403 and merged-body semantics are unchanged. Measured at
+  `synchronous=FULL` c50 with batching on: 1.08×–1.21× in two off/on runs;
+  statement count is the deterministic evidence.
 - **SQLite WAL is explicit for Node and Bun.** `SqliteDatabase` and `BunSqliteDatabase`
   now issue `PRAGMA journal_mode = WAL` themselves when the connection opens, immediately
   before the optional `PRAGMA synchronous` mode. The Effect SQLite drivers already default

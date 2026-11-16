@@ -46,12 +46,27 @@ export interface ResolveOptions {
   readonly encodeParam?: (value: unknown) => unknown
 }
 
+/**
+ * How an update rule's `@request_body_<key>` placeholder should bind when the
+ * rule is evaluated as part of the stored-row query.
+ *
+ * `param` is used when the patch supplies the key. `column` is used when the key
+ * is absent from the patch: the rule reads the stored row through `t."<key>"`
+ * instead of a parameter, so the existence + rule check stays one SELECT.
+ */
+export type BodyBinding =
+  | { readonly _tag: "param"; readonly value: unknown }
+  | { readonly _tag: "column"; readonly column: string }
+
+export type BodyBindingPlan = ReadonlyMap<string, BodyBinding>
+
 export function resolveCtxPlaceholders(
   result: EnforceResult,
   ctx: RequestCtx,
   collection: string,
   action: string,
-  options?: ResolveOptions
+  options?: ResolveOptions,
+  bodyPlan?: BodyBindingPlan
 ) {
   const encode = options?.encodeParam ?? ((value: unknown) => value)
   return Effect.gen(function* () {
@@ -90,7 +105,11 @@ export function resolveCtxPlaceholders(
       } else if (reqSource === "header" && reqKey !== undefined) {
         resolved.push(encode(ctx.headers[reqKey] ?? null))
       } else if (reqSource === "body" && reqKey !== undefined) {
-        const val = ctx.body?.[reqKey]
+        const binding = bodyPlan?.get(reqKey)
+        if (binding?._tag === "column") {
+          return `t."${binding.column.replace(/"/g, '""')}"`
+        }
+        const val = binding?._tag === "param" ? binding.value : ctx.body?.[reqKey]
         resolved.push(encode(Array.isArray(val) ? val[0] : (val ?? null)))
       }
       return "?"
@@ -106,6 +125,10 @@ export type CtxRefs = {
   queryKeys: ReadonlyArray<string>
   headerKeys: ReadonlyArray<string>
   bodyKeys: ReadonlyArray<string>
+  /** A rule contains a SELECT/EXISTS subquery; absent body keys must fall back. */
+  hasSubquery: boolean
+  /** A rule references a request source other than query/header/body (fail closed). */
+  hasUnknownSource: boolean
 }
 
 /**
@@ -133,6 +156,7 @@ export function extractCtxRefs(sql: string): CtxRefs {
   const queryKeys = new Set<string>()
   const headerKeys = new Set<string>()
   const bodyKeys = new Set<string>()
+  let hasUnknownSource = false
 
   for (const match of sql.matchAll(new RegExp(CTX_PLACEHOLDER_PATTERN, "g"))) {
     const [, authField, reqSource, reqKey] = match
@@ -143,7 +167,10 @@ export function extractCtxRefs(sql: string): CtxRefs {
         queryKeys.add(reqKey)
       } else if (reqSource === "body") {
         bodyKeys.add(reqKey)
+      } else if (reqSource === "header") {
+        headerKeys.add(reqKey)
       } else {
+        hasUnknownSource = true
         headerKeys.add(reqKey)
       }
     }
@@ -153,7 +180,9 @@ export function extractCtxRefs(sql: string): CtxRefs {
     authFields: Object.freeze([...authFields].sort()),
     queryKeys: Object.freeze([...queryKeys].sort()),
     headerKeys: Object.freeze([...headerKeys].sort()),
-    bodyKeys: Object.freeze([...bodyKeys].sort())
+    bodyKeys: Object.freeze([...bodyKeys].sort()),
+    hasSubquery: /\b(?:SELECT|EXISTS)\b/i.test(sql),
+    hasUnknownSource
   })
   ctxRefsCache.set(sql, refs)
   return refs

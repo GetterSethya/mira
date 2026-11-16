@@ -9,7 +9,7 @@ import { AuthChallengeStore } from "@/auth/challenge-store.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { AuthService } from "@/http/auth.js"
 import { Repository } from "@/repository/repository.js"
-import type { ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
+import type { AccessPredicate, ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
 import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage } from "@/storage/storage.js"
 
@@ -26,7 +26,7 @@ import { makeListRowMapper, makeRowDecoder, makeRowEncoder, stripHiddenFields } 
 import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
-import type { ResolveOptions } from "./where.js"
+import type { BodyBinding, BodyBindingPlan, ResolveOptions } from "./where.js"
 import { andWhere, cursorClause, extractCtxRefs, idClause, resolveCtxPlaceholders, resolveFieldRefs } from "./where.js"
 
 /**
@@ -447,6 +447,40 @@ function makeCollectionServiceLayerWith(
         collection.schema["x-collection-kind"] === "auth"
 
       const asString = (value: unknown) => (typeof value === "string" ? value : undefined)
+
+      /**
+       * Builds the binding plan for an update rule's `@request_body_*` keys.
+       *
+       * A key in the patch binds the patch value as a param. A key absent from
+       * the patch binds `t."<key>"`, so the rule reads the stored row in the same
+       * SELECT. A body-only key (passwordConfirm, oldPassword, unknown) or a
+       * generated/system field cannot be resolved before the read, so the caller
+       * must use the row-first fallback. Subquery rules are also excluded:
+       * substituting `t."<key>"` inside a subquery is not alias-safe.
+       */
+      const buildBodyPlan = (
+        collection: AnyCollectionDef,
+        ruleSql: string,
+        cleaned: RepoRecord
+      ): BodyBindingPlan | null => {
+        const refs = extractCtxRefs(ruleSql)
+        if (refs.bodyKeys.length === 0) return new Map()
+        if (refs.hasSubquery) return null
+
+        const plan = new Map<string, BodyBinding>()
+        for (const key of refs.bodyKeys) {
+          if (Object.hasOwn(cleaned, key)) {
+            plan.set(key, { _tag: "param", value: cleaned[key] })
+            continue
+          }
+          const property = collection.schema.properties[key]
+          if (property === undefined || property["x-generated"] === true || property["x-system"] === true) {
+            return null
+          }
+          plan.set(key, { _tag: "column", column: key })
+        }
+        return plan
+      }
 
       // canManage = admin OR (auth + authenticated + manage rule matches). Evaluated
       // against the incoming payload for create (emailVerified forced false so the
@@ -900,60 +934,127 @@ function makeCollectionServiceLayerWith(
         deferCleanup: boolean
       ): Effect.Effect<MutationBatchResult, CollectionError> =>
         Effect.gen(function* () {
-          const existing = yield* repo.view(prepared.collection.name, prepared.id)
-          if (Option.isNone(existing)) {
-            return yield* new NotFoundError({ collection: prepared.collection.name, id: prepared.id })
-          }
+          const collection = prepared.collection
+          const viewWithAccess = repo.viewWithAccess
+          const updateEnforcer =
+            prepared.admin || prepared.ctx.internal !== undefined
+              ? null
+              : enforcerForAction(collection.schema, "update")
+          const updateRefs = updateEnforcer === null ? null : extractCtxRefs(updateEnforcer.sql)
+          const updateBodyPlan =
+            updateEnforcer === null ? null : buildBodyPlan(collection, updateEnforcer.sql, prepared.cleaned)
+          const manageEnforcer =
+            isAuthCollection(collection) &&
+            prepared.ctx.auth !== undefined &&
+            !prepared.admin &&
+            prepared.ctx.internal === undefined
+              ? enforcerForAction(collection.schema, "manage")
+              : null
+          const manageRefs = manageEnforcer === null ? null : extractCtxRefs(manageEnforcer.sql)
+          const manageBodyPlan =
+            manageEnforcer === null ? null : buildBodyPlan(collection, manageEnforcer.sql, prepared.cleaned)
 
-          // The rule sees the effective post-write value: a body key present in
-          // the patch resolves to the patch value, otherwise to the stored
-          // record's value, otherwise to null.
-          const ctxWithBody: RequestCtx = {
-            ...prepared.ctx,
-            body: { ...existing.value, ...prepared.cleaned }
-          }
+          const fastPath =
+            viewWithAccess !== undefined &&
+            updateEnforcer !== null &&
+            updateRefs !== null &&
+            updateBodyPlan !== null &&
+            !updateRefs.hasUnknownSource &&
+            !(prepared.ctx.auth === undefined && updateRefs.authFields.length > 0) &&
+            (manageEnforcer === null ||
+              (manageRefs !== null && manageBodyPlan !== null && !manageRefs.hasUnknownSource))
+          let existingRecord: RepoRecord | null = null
+          let canManage = false
 
-          if (!prepared.admin && prepared.ctx.internal === undefined) {
-            const ruleWhere = yield* compileRule(
-              prepared.collection,
+          if (fastPath && updateEnforcer !== null && updateBodyPlan !== null) {
+            const ruleWhere = yield* resolveCtxPlaceholders(
+              updateEnforcer,
+              prepared.ctx,
+              collection.name,
               "update",
-              ctxWithBody,
-              resolveOptions
+              resolveOptions,
+              updateBodyPlan
             )
-            const allowed = yield* repo.viewFilter(prepared.collection.name, {
-              where: andWhere(ruleWhere, idClause(prepared.id))
-            })
-            if (allowed.length === 0) {
-              return yield* new ForbiddenError({
-                collection: prepared.collection.name,
-                action: "update"
-              })
+            const predicates: [AccessPredicate, ...Array<AccessPredicate>] = [
+              { name: "rule", where: ruleWhere }
+            ]
+            if (manageEnforcer !== null && manageBodyPlan !== null) {
+              const manageWhere = yield* resolveCtxPlaceholders(
+                manageEnforcer,
+                prepared.ctx,
+                collection.name,
+                "manage",
+                resolveOptions,
+                manageBodyPlan
+              )
+              predicates.push({ name: "manage", where: manageWhere })
             }
+
+            const accesses = yield* viewWithAccess(collection.name, prepared.id, predicates)
+            if (Option.isNone(accesses)) {
+              return yield* new NotFoundError({ collection: collection.name, id: prepared.id })
+            }
+            if (accesses.value.access.rule !== true) {
+              return yield* new ForbiddenError({ collection: collection.name, action: "update" })
+            }
+            existingRecord = accesses.value.record
+            canManage = accesses.value.access.manage === true
+          } else {
+            const existing = yield* repo.view(collection.name, prepared.id)
+            if (Option.isNone(existing)) {
+              return yield* new NotFoundError({ collection: collection.name, id: prepared.id })
+            }
+            existingRecord = existing.value
+
+            // The rule sees the effective post-write value: a body key present in
+            // the patch resolves to the patch value, otherwise to the stored
+            // record's value, otherwise to null.
+            const ctxWithBody: RequestCtx = {
+              ...prepared.ctx,
+              body: { ...existing.value, ...prepared.cleaned }
+            }
+
+            if (!prepared.admin && prepared.ctx.internal === undefined) {
+              const ruleWhere = yield* compileRule(
+                collection,
+                "update",
+                ctxWithBody,
+                resolveOptions
+              )
+              const allowed = yield* repo.viewFilter(collection.name, {
+                where: andWhere(ruleWhere, idClause(prepared.id))
+              })
+              if (allowed.length === 0) {
+                return yield* new ForbiddenError({ collection: collection.name, action: "update" })
+              }
+            }
+
+            canManage = yield* canManageRecord(collection, prepared.id, ctxWithBody)
           }
 
-          const canManage = yield* canManageRecord(
-            prepared.collection,
-            prepared.id,
-            ctxWithBody
-          )
+          const existingValue = existingRecord
+          if (existingValue === null) {
+            return yield* new NotFoundError({ collection: collection.name, id: prepared.id })
+          }
+
           yield* enforceUpdateCredentials(
-            prepared.collection,
+            collection,
             prepared.raw,
             prepared.cleaned,
-            existing.value,
+            existingValue,
             canManage,
             prepared.ctx
           )
 
           const updated = yield* repo.update(
-            prepared.collection.name,
+            collection.name,
             prepared.id,
-            getEncoder(prepared.collection)(prepared.hashed)
+            getEncoder(collection)(prepared.hashed)
           )
 
           const challengeCleanup = prepared.passwordKeyPresent
             ? challengeStore
-                .consumeAllForUser(prepared.collection.name, prepared.id, Date.now())
+                .consumeAllForUser(collection.name, prepared.id, Date.now())
                 .pipe(
                   Effect.catchCause((cause) =>
                     Effect.logWarning("auth.password_change.challenge_cleanup_failed", {
@@ -964,18 +1065,15 @@ function makeCollectionServiceLayerWith(
             : Effect.void
 
           const oldKeys = extractReplacedFileKeys(
-            existing.value,
+            existingValue,
             prepared.cleaned,
-            prepared.collection.schema
+            collection.schema
           )
           const cleanup = challengeCleanup.pipe(Effect.andThen(deleteFiles(oldKeys)))
 
           const value = stripHidden(
-            prepared.collection,
-            yield* decodeRow(
-              prepared.collection,
-              Option.getOrElse(updated, () => existing.value)
-            ),
+            collection,
+            yield* decodeRow(collection, Option.getOrElse(updated, () => existingValue)),
             prepared.admin
           )
 
