@@ -5,7 +5,7 @@
   import BenchmarkMetricRow from '$lib/components/BenchmarkMetricRow.svelte';
   import benchmarks from '$lib/benchmarks.json';
 
-  const { results, environment, method, generatedAt } = benchmarks;
+  const { results, environment, method } = benchmarks;
 
   const node = results.node;
   const bun = results.bun;
@@ -44,6 +44,12 @@
     min: Math.min(...values),
     max: Math.max(...values)
   });
+
+  const overlaps = (a: ReadonlyArray<number>, b: ReadonlyArray<number>) => {
+    const left = range(a);
+    const right = range(b);
+    return left.max >= right.min && right.max >= left.min;
+  };
 
   const formatRange = (values: ReadonlyArray<number>, format: (value: number) => string) =>
     `${format(range(values).min)}–${format(range(values).max)}`;
@@ -290,24 +296,18 @@
   }));
 
   const workloadRows = orderedRows.filter((row) => row.group === 'speed');
-  const cardRows = workloadRows;
-  const workloadBunWins = workloadRows.filter((row) => row.winner === 'bun').length;
-  const workloadNodeWins = workloadRows.length - workloadBunWins;
-  const percentileBunWins = latencyRows.filter((row) => row.winner === 'bun').length;
-  const percentileNodeWins = latencyRows.length - percentileBunWins;
-  const leaderName = workloadBunWins >= workloadNodeWins ? 'Bun' : 'Node';
-  const leaderWins = Math.max(workloadBunWins, workloadNodeWins);
-  const percentileLeader = percentileBunWins >= percentileNodeWins ? 'Bun' : 'Node';
-  const percentileLeaderWins = Math.max(percentileBunWins, percentileNodeWins);
-  const workloadPhrase =
-    leaderWins === workloadRows.length ? `all ${workloadRows.length}` : `${leaderWins} of ${workloadRows.length}`;
-  const heroResult = `${leaderName} led ${workloadPhrase} headline metrics and ${percentileLeaderWins} of ${latencyRows.length} percentiles.`;
-  const percentileExceptions = latencyRows.filter((row) => row.winner === 'node');
-  const exceptionNote =
-    percentileExceptions.length > 0
-      ? `; ${percentileExceptions.map((row) => `${row.label}: Node is lower`).join('; ')}`
-      : '';
-  const verdictNote = `${percentileLeaderWins} of ${latencyRows.length} percentiles ${percentileLeader}${exceptionNote}.`;
+  const createP99 = latencyRows.find((row) => row.label === 'Create p99');
+  const createP99Overlap = overlaps(
+    values(node.runs, (run) => run.create.p99),
+    values(bun.runs, (run) => run.create.p99)
+  );
+  const createP99Delta = createP99
+    ? `${createP99.delta}${createP99Overlap ? ' (ranges overlap)' : ''}`
+    : '';
+  const cardRows = [
+    ...workloadRows.map((row) => ({ id: row.id, label: row.id === 'list' ? 'List' : row.id === 'list-cached' ? 'Cached list' : row.label, delta: row.delta })),
+    ...(createP99 ? [{ id: 'create-p99', label: 'Create p99', delta: createP99Delta }] : [])
+  ];
 
   const facts = [
     { label: 'Runs', value: `${method.runs} interleaved pairs` },
@@ -364,11 +364,13 @@
         Node vs Bun, measured.
       </h1>
       <p class="mt-6 max-w-[52ch] text-[18px] leading-[1.6] text-[var(--fg)] max-sm:text-[18px]">
-        One Mira app, one SQLite collection, one load generator. {heroResult}
+        One Mira app, one SQLite collection, one load generator. Five interleaved pairs; measured
+        differences below.
       </p>
-      <p class="mt-5 text-[14px] leading-[1.7] text-[var(--muted)]">
-        <time datetime={generatedAt}>{formatDate(generatedAt)}</time> · {osLabel} · {cpu} · Node
-        {environment.node} · Bun {environment.bun}
+      <p class="mt-5 flex flex-col gap-0.5 text-[14px] leading-[1.7] text-[var(--muted)] sm:flex-row sm:flex-wrap sm:gap-x-3">
+        <span>{cpu}</span>
+        <span>Node {environment.node}</span>
+        <span>Bun {environment.bun}</span>
       </p>
       <div class="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
         <a
@@ -385,19 +387,9 @@
     <aside
       class="w-full rounded-[var(--radius-md)] bg-[var(--surface)] p-6 animate-[rise_560ms_80ms_var(--ease)_both] motion-reduce:animate-none lg:max-w-[560px]"
       data-ui
-      aria-label="Headline result"
+      aria-label="Measured differences"
     >
-      <p class="text-[14px] font-medium text-[var(--muted)]">Headline metrics</p>
-      <div class="mt-3.5 flex items-baseline gap-2">
-        <span
-          class="text-[54px] font-semibold leading-[0.9] tracking-[-0.05em] tabular-nums max-sm:text-[46px] {leaderWins > 0
-            ? 'text-[var(--success)]'
-            : 'text-[var(--muted)]'}">{leaderWins}</span
-        >
-        <span class="text-[24px] text-[var(--muted)]">of {workloadRows.length}</span>
-        <span class="text-[14px] text-[var(--muted)]">{leaderName}</span>
-      </div>
-      <p class="mt-3.5 text-[14px] text-[var(--muted)]">{verdictNote}</p>
+      <p class="text-[14px] font-medium text-[var(--muted)]">Measured differences</p>
       <div
         class="mt-3 flex flex-wrap items-center gap-2"
         role="img"
@@ -420,11 +412,11 @@
         </span>
         <span class="ml-1 text-[14px] text-[var(--muted)]">5 pairs</span>
       </div>
-      <ul class="mt-[18px] flex flex-col gap-1.5 border-t border-[var(--border)] pt-4 text-[14px] sm:grid sm:grid-cols-2 sm:gap-x-8 sm:gap-y-1.5 lg:flex lg:flex-col">
+      <ul class="mt-[18px] flex flex-col gap-1.5 border-t border-[var(--border)] pt-4 text-[14px]">
         {#each cardRows as row (row.id)}
           <li class="flex items-baseline justify-between gap-4">
-            <span class="text-[var(--muted)]">{row.short}</span>
-            <span class="text-right tabular-nums text-[var(--fg)]">{row.delta}</span>
+            <span class="text-[var(--muted)] {row.id === 'create-p99' ? '' : 'whitespace-nowrap'}">{row.label}</span>
+            <span class="text-right tabular-nums text-[var(--fg)] {row.id === 'create-p99' ? '' : 'whitespace-nowrap'}">{row.delta}</span>
           </li>
         {/each}
       </ul>

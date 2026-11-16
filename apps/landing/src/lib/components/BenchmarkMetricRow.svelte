@@ -19,7 +19,7 @@
 </script>
 
 <article
-  class="grid items-center gap-4 border-t border-[var(--border)] py-5 first:border-t-0 lg:grid-cols-[minmax(150px,0.75fr)_minmax(0,1.55fr)_minmax(150px,0.4fr)] lg:gap-7 max-lg:grid-cols-[minmax(0,1fr)_auto]"
+  class="grid items-center gap-4 border-t border-[var(--border)] py-5 first:border-t-0 lg:grid-cols-[minmax(150px,0.75fr)_minmax(0,1.55fr)_minmax(170px,0.4fr)] lg:gap-7 max-lg:grid-cols-[minmax(0,1fr)_auto]"
 >
   <div>
     <h3 class="text-[16px] font-semibold tracking-[-0.015em] text-[var(--ink)]">{row.label}</h3>
