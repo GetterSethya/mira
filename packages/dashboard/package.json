@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "pnpm --dir ui exec svelte-kit sync && vitest run --passWithNoTests",
     "build:ui": "cd ui && pnpm build",
     "dev:ui": "cd ui && pnpm dev"
   },
