@@ -1,4 +1,4 @@
-See how a collection definition becomes a table and a route, and what happens to one request. A Mira app is collection definitions plus rules; the server derives the schema and the HTTP surface from them.
+See how a collection definition becomes a table and a route, and what happens to one request. A Mira app is collection definitions plus rules. The server derives the schema and the HTTP surface from them.
 
 ## The six parts
 
@@ -6,12 +6,12 @@ See how a collection definition becomes a table and a route, and what happens to
 |---|---|---|
 | Collection definition | The `BaseCollection`/`AuthCollection`/`ViewCollection` builder result | `packages/collection/src/collection/` |
 | Serialized schema | JSON Schema with `x-*` annotations, stored per collection | `_collections` table, written through `packages/mira/src/migrator/` |
-| Table and routes | DDL from the schema; REST handlers from the same schema | `packages/mira/src/migrator/`, `packages/mira/src/http/router.ts` |
+| Table and routes | DDL from the schema. REST handlers from the same schema | `packages/mira/src/migrator/`, `packages/mira/src/http/router.ts` |
 | Rule | Per-action expression compiled to a SQL `WHERE` fragment | `packages/mira/src/rule/` |
 | Collection service | Validation, rule enforcement, encoding, hidden-field stripping | `packages/mira/src/collection-service/collection-service.ts` |
 | Repository | Schema-agnostic CRUD over `SqlClient` | `packages/mira/src/repository/repository.ts` |
 
-Source paths are for contributors; app code never imports them. The [API reference](../api/) owns the package map and the contract links.
+Source paths are for contributors. App code never imports them. The [API reference](../api/) owns the package map and the contract links.
 
 ## One request
 
@@ -38,6 +38,6 @@ No controllers: the router is generated from the collection set. No DTOs: the fi
 
 ## Next
 
-- [Collections](../collections/) — the fields, relations, and indexes behind a table.
-- [Rules](../rules/) — which rows each caller may read or write.
-- [HTTP API and files](../http-api/) — the generated routes, status codes, and file rules.
+- [Collections](../collections/): the fields, relations, and indexes behind a table.
+- [Rules](../rules/): which rows each caller may read or write.
+- [HTTP API and files](../http-api/): the generated routes, status codes, and file rules.

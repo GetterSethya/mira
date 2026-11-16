@@ -17,9 +17,9 @@ Mira.builder()
   .serve()
 ```
 
-Attach a plugin with `.extend(plugin)` after `build()`; Mira then runs its hooks around every matching collection operation.
+Attach a plugin with `.extend(plugin)` after `build()`. Mira then runs its hooks around every matching collection operation.
 
-`MiraPlugin.define` tags the object. `MiraPlugin.fromLayer(layer)` wraps a plain requirement-free `Layer<never, never, never>` when you only need a service contribution. `MiraPlugin.isMiraPlugin(value)` checks the internal `_tag`; `extend()` itself does not call the guard, so pass a `MiraPlugin` rather than an arbitrary object.
+`MiraPlugin.define` tags the object. `MiraPlugin.fromLayer(layer)` wraps a plain requirement-free `Layer<never, never, never>` when you only need a service contribution. `MiraPlugin.isMiraPlugin(value)` checks the internal `_tag`. `extend()` itself does not call the guard, so pass a `MiraPlugin` rather than an arbitrary object.
 
 A plugin may also contribute `layer` (merged after the app's mid layer, so it can use `AppConfig`, `Repository`, and platform services), `routes` (merged after the built-in collection routes), `collections`, `adminCollections`, and `crons`.
 
@@ -33,33 +33,33 @@ The interface also declares `onServe` and `onTerminate`, but the current `serve(
 
 ## Record hooks
 
-Each action has four stages. For create they are `onRecordCreate` (pre), `onRecordCreateExecute`, `onRecordCreateSuccess`, and `onRecordCreateError`; update and delete have the same four names.
+Each action has four stages. For create they are `onRecordCreate` (pre), `onRecordCreateExecute`, `onRecordCreateSuccess`, and `onRecordCreateError`. Update and delete have the same four names.
 
-Every record hook accepts an optional `collections` allowlist; cron hooks use a `crons` allowlist. Omit it to run for all collections or crons. The `onCollection(collections, handler)` and `onCollectionSuccess(collections, handler)` helpers build the same record objects. Hooks require Effect in the host app; install `effect@4.0.0` for this alpha.
+Every record hook accepts an optional `collections` allowlist. Cron hooks use a `crons` allowlist. Omit it to run for all collections or crons. The `onCollection(collections, handler)` and `onCollectionSuccess(collections, handler)` helpers build the same record objects. Hooks require Effect in the host app. Install `effect@4.0.0` for this alpha.
 
 The contexts are `RecordHookContext` (`{ collection, data, record, auth }`), `RecordResultContext` (the same plus `result`), and `HookErrorContext` (`{ collection, action, error, auth }`).
 
-For create, `record` is `undefined` and `data` is the payload. For update and delete, the decorator loads the row through the collection's `view` path, so `record` is view-rule-gated and hidden-field-stripped rather than a raw stored row. Update's `data` carries the incoming patch; delete passes that loaded row as both `record` and `data`.
+For create, `record` is `undefined` and `data` is the payload. For update and delete, the decorator loads the row through the collection's `view` path, so `record` is view-rule-gated and hidden-field-stripped rather than a raw stored row. Update's `data` carries the incoming patch. Delete passes that loaded row as both `record` and `data`.
 
-Pre and execute hooks return the next context, so returning `{ ...ctx, data: { ...ctx.data, ... } }` patches the write before the service sees it. Execute hooks run after the pre stage; the inner service call receives the execute stage's rewritten `data`.
+Pre and execute hooks return the next context, so returning `{ ...ctx, data: { ...ctx.data, ... } }` patches the write before the service sees it. Execute hooks run after the pre stage. The inner service call receives the execute stage's rewritten `data`.
 
 ## List and view hooks
 
-`onRecordList` receives `ListHookContext` — `{ collection, filter, sort, select, expand, cursor, limit, auth }`; its success hook adds `items` and `nextCursor`, and its error hook receives `HookErrorContext`. `onRecordView` receives `ViewHookContext` — `{ collection, id, select, expand, auth }`; its success hook adds `result`. Use these to inject tenant filters or force a select list; the success stage is an observer and cannot change a record.
+`onRecordList` receives `ListHookContext`: `{ collection, filter, sort, select, expand, cursor, limit, auth }`. Its success hook adds `items` and `nextCursor`, and its error hook receives `HookErrorContext`. `onRecordView` receives `ViewHookContext`: `{ collection, id, select, expand, auth }`. Its success hook adds `result`. Use these to inject tenant filters or force a select list. The success stage is an observer and cannot change a record.
 
 ## Ordering and forwarding
 
-Blocking stages run serially in plugin declaration order, and each handler returns the context the next plugin receives, so a later plugin sees earlier rewrites. These stages block the request; avoid slow I/O there.
+Blocking stages run serially in plugin declaration order, and each handler returns the context the next plugin receives, so a later plugin sees earlier rewrites. These stages block the request. Avoid slow I/O there.
 
-Success and error stages are observers. They are detached with `Effect.forkDetach`, wrapped so a defect stays in that fiber, and the decorator catches their failures. The request never waits on them, and an observer cannot change the result. On failure the decorator re-raises the original `CollectionError` immediately; the detached error observer runs independently.
+Success and error stages are observers. They are detached with `Effect.forkDetach`, wrapped so a defect stays in that fiber, and the decorator catches their failures. The request never waits on them, and an observer cannot change the result. On failure the decorator re-raises the original `CollectionError` immediately. The detached error observer runs independently.
 
-The decorator forwards rewrites selectively. A list hook may change `limit`, `filter`, `sort`, `select`, and `expand`; the original `cursor` and request context still reach the service. A view hook may change `select` and `expand`; the original `id` and context still reach the service. Create and update forward the execute stage's `data`; delete forwards the original `id` and context.
+The decorator forwards rewrites selectively. A list hook may change `limit`, `filter`, `sort`, `select`, and `expand`. The original `cursor` and request context still reach the service. A view hook may change `select` and `expand`. The original `id` and context still reach the service. Create and update forward the execute stage's `data`. Delete forwards the original `id` and context.
 
 Rewrites to `cursor`, `id`, and `auth` are not forwarded, so a hook cannot repaginate a list, redirect a read, or swap the caller identity.
 
 ## Email hooks
 
-Plugins can use the `EmailService` directly and observe outgoing mail. `onEmailSend` runs serially and may rewrite the message or set `skip: true`; `onEmailSent` and `onEmailError` are detached observers. The serial chain has a 2-second fail-open timeout, and error hooks never fire for a missing transport.
+Plugins can use the `EmailService` directly and observe outgoing mail. `onEmailSend` runs serially and may rewrite the message or set `skip: true`. `onEmailSent` and `onEmailError` are detached observers. The serial chain has a 2-second fail-open timeout, and error hooks never fire for a missing transport.
 
 ```ts
 MiraPlugin.define({
@@ -77,7 +77,7 @@ MiraPlugin.define({
 })
 ```
 
-The contexts carry `message`, `purpose`, `collection`, `userId`, and `originalTo`; `onEmailSend` also has `skip`. The built-in transport is SMTP. When no transport is configured the service still exists with `enabled: false`, so a plugin can check before sending. See the [email page](../email/) for the transport setup and auth flows.
+The contexts carry `message`, `purpose`, `collection`, `userId`, and `originalTo`. `onEmailSend` also has `skip`. The built-in transport is SMTP. When no transport is configured the service still exists with `enabled: false`, so a plugin can check before sending. See the [email page](../email/) for the transport setup and auth flows.
 
 ## Admin collections
 
@@ -113,18 +113,18 @@ export const digestCron: CronDef = {
 }
 ```
 
-Register it with `.crons([digestCron])` on the builder or with `crons` on a plugin. Names must be unique across the builder and every plugin; a duplicate dies at boot. Each definition gets a scoped fiber, and the first tick is skipped. `CronService.getAll()` returns state, and `CronService.runNow(name)` triggers a run.
+Register it with `.crons([digestCron])` on the builder or with `crons` on a plugin. Names must be unique across the builder and every plugin. A duplicate dies at boot. Each definition gets a scoped fiber, and the first tick is skipped. `CronService.getAll()` returns state, and `CronService.runNow(name)` triggers a run.
 
 Cron hooks follow the record stages: `onCronStart` and `onCronExecute` block and may rewrite the context, while `onCronSuccess`, `onCronError`, and `onCronFinished` are detached observers. Per tick: start, execute, the run, then success or error plus finished.
 
 ### Persisted last-run state
 
-After each run, success or error, Mira writes one JSON blob to `_config` under the `cron_state` key, keyed by cron name; [server](../server/) owns that table. It stores `lastRunAt`, `lastStatus`, `lastDurationMs`, and `lastError`, and boot restores those into `CronState`.
+After each run, success or error, Mira writes one JSON blob to `_config` under the `cron_state` key, keyed by cron name. [Server](../server/) owns that table. It stores `lastRunAt`, `lastStatus`, `lastDurationMs`, and `lastError`, and boot restores those into `CronState`.
 
-- `status` (`"standby"` or `"running"`) is never persisted; every boot starts from standby.
-- Persistence write failures and corrupted stored JSON are logged as warnings; a bad blob falls back to empty state at boot.
+- `status` (`"standby"` or `"running"`) is never persisted. Every boot starts from standby.
+- Persistence write failures and corrupted stored JSON are logged as warnings. A bad blob falls back to empty state at boot.
 
-`runNow` forks the run and returns before the handler finishes; it skips the start/execute hooks and still records the outcome. An unknown name fails with `CronNotFoundError`.
+`runNow` forks the run and returns before the handler finishes. It skips the start/execute hooks and still records the outcome. An unknown name fails with `CronNotFoundError`.
 
 ## Worked example
 
@@ -156,7 +156,7 @@ export const SlugPlugin = MiraPlugin.define({
 })
 ```
 
-Attach it to the built app with `.extend(SlugPlugin)`. The pre hook rewrites `data`; the success hook observes the stored record.
+Attach it to the built app with `.extend(SlugPlugin)`. The pre hook rewrites `data`. The success hook observes the stored record.
 
 ## Next
 

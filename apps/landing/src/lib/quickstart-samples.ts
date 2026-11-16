@@ -305,7 +305,7 @@ export const quickstartSamples: ReadonlyArray<QuickstartSample> = [
     label: 'rest.sh',
     lang: 'bash',
     code: [
-      '# Login with an auth collection — returns { token, record }',
+      '# Login with an auth collection: returns { token, record }',
       'curl -s http://localhost:3000/api/collections/users/auth-with-password \\',
       '  -H "Content-Type: application/json" \\',
       `  -d '{"email":"ada@example.com","password":"correct horse battery"}'`,

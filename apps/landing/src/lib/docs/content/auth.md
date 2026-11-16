@@ -13,7 +13,7 @@ export const Users = AuthCollection.define("users", {
 })
 ```
 
-The builder injects `email` (unique index), `password` (hidden, write-only, `x-kind: "password"`), and `emailVerified` (boolean, default `false`), on top of `id`, `seqId`, `created`, and `updated`. `email` and `password` are required on create; `emailVerified` defaults to `false`. Field semantics are on the [collections page](../collections/).
+The builder injects `email` (unique index), `password` (hidden, write-only, `x-kind: "password"`), and `emailVerified` (boolean, default `false`), on top of `id`, `seqId`, `created`, and `updated`. `email` and `password` are required on create. `emailVerified` defaults to `false`. Field semantics are on the [collections page](../collections/).
 
 ## Passwords and credential checks
 
@@ -21,7 +21,7 @@ A non-empty password is hashed server-side on create and update, at the collecti
 
 Create with a non-empty password requires `passwordConfirm`, and it must equal `password`. `emailVerified` is manager-only: a non-manager cannot set it to `true` on create.
 
-Update that changes the password requires `passwordConfirm`. A caller without manager access who changes the password or the email must also supply `oldPassword`. An empty `password` on update is dropped before hashing, so a blank edit form keeps the existing hash; do not create an account with an empty password.
+Update that changes the password requires `passwordConfirm`. A caller without manager access who changes the password or the email must also supply `oldPassword`. An empty `password` on update is dropped before hashing, so a blank edit form keeps the existing hash. Do not create an account with an empty password.
 
 Who counts as a manager is either an admin request context (used by the dashboard plugin) or an authenticated actor matching the collection's `manage` rule. Admins bypass the credential checks entirely.
 
@@ -37,7 +37,7 @@ export const usersRules = defineRule(Users, (R) => ({
 }))
 ```
 
-Attach the binding with `.rules([usersRules])` on `Mira.builder()`; a detached `defineRule` result does nothing by itself. Then register over HTTP or through the client. The client snippets below assume `mira = createMiraClient(url).withCollections({ users: Users })`. `register()` wraps the create endpoint and does not log the user in; call `authWithPassword()` afterwards if you want a session.
+Attach the binding with `.rules([usersRules])` on `Mira.builder()`. A detached `defineRule` result does nothing by itself. Then register over HTTP or through the client. The client snippets below assume `mira = createMiraClient(url).withCollections({ users: Users })`. `register()` wraps the create endpoint and does not log the user in. Call `authWithPassword()` afterwards if you want a session.
 
 ```bash
 curl -X POST http://localhost:8080/api/collections/users \
@@ -58,7 +58,7 @@ The response is the stored record with hidden fields stripped.
 
 ## Log in and read the current user
 
-Login lives at `POST /api/collections/:name/auth-with-password` and expects a JSON body with `email` and `password`. A non-auth collection answers `405`; a malformed body answers `422`; bad credentials answer `403` without saying which part failed. A successful login returns `{ token, record }` and sets the session cookie.
+Login lives at `POST /api/collections/:name/auth-with-password` and expects a JSON body with `email` and `password`. A non-auth collection answers `405`. A malformed body answers `422`. Bad credentials answer `403` without saying which part failed. A successful login returns `{ token, record }` and sets the session cookie.
 
 ```bash
 curl -X POST http://localhost:8080/api/collections/users/auth-with-password \
@@ -91,7 +91,7 @@ Every request resolves the token against the `TokenStore`: the `jti` must not be
 
 The token is read from the `Authorization: Bearer` header first, then from the `mira_token` cookie. Login sets that cookie as `httpOnly`, `sameSite: "strict"`, `path: "/"`, for 72 hours.
 
-That is the browser path: the client never reads the cookie, `createMiraClient(url)` sends `credentials: "include"`, and `auth.ensureSession()` revalidates it against `/api/auth/me` on page load. For server-side rendering use `createMiraClient(url, { type: "server" })`, which authenticates with a bearer token you supply through `auth.setToken(token)`; `auth.isValid()` checks only the JWT expiry, not the signature.
+That is the browser path: the client never reads the cookie, `createMiraClient(url)` sends `credentials: "include"`, and `auth.ensureSession()` revalidates it against `/api/auth/me` on page load. For server-side rendering use `createMiraClient(url, { type: "server" })`, which authenticates with a bearer token you supply through `auth.setToken(token)`. `auth.isValid()` checks only the JWT expiry, not the signature.
 
 Logout revokes the presented token id and clears the cookie:
 
@@ -109,7 +109,7 @@ Both routes answer `204` on success. Tokens minted before a `logout-all` are rej
 
 ## Manager access
 
-`manage` is an additive rule. It never bypasses the base create or update rule; it only escalates what a caller is already allowed to do. It applies to auth collections only, and a `manage` key on a base or view collection is a compile error. Add it to the binding whose other actions are on the [rules page](../rules/):
+`manage` is an additive rule. It never bypasses the base create or update rule. It only escalates what a caller is already allowed to do. It applies to auth collections only, and a `manage` key on a base or view collection is a compile error. Add it to the binding whose other actions are on the [rules page](../rules/):
 
 ```ts
 export const usersRules = defineRule(Users, (R) => ({
@@ -123,13 +123,13 @@ export const usersRules = defineRule(Users, (R) => ({
 
 `manage` is not a substitute for the create rule: open signup still needs `create: R.public()` from the registration section above.
 
-On create, `manage` is evaluated against the incoming payload with `emailVerified` forced to `false`, so the field it guards cannot be used to satisfy the rule. On update, it is evaluated against the stored record by id. A matching manager may set `email` and `emailVerified` and change a password without `oldPassword`; `passwordConfirm` is still required for password changes. `manage` has no effect on `list`, `view`, or `delete`.
+On create, `manage` is evaluated against the incoming payload with `emailVerified` forced to `false`, so the field it guards cannot be used to satisfy the rule. On update, it is evaluated against the stored record by id. A matching manager may set `email` and `emailVerified` and change a password without `oldPassword`. `passwordConfirm` is still required for password changes. `manage` has no effect on `list`, `view`, or `delete`.
 
 The `authCollection` check matters when an app has more than one auth collection: `R.auth(Users, "role")` reads a role field from the authenticated actor, but the rule engine does not use the collection argument to verify which auth collection issued the token. Pairing it with `R.authCollection()` prevents a token from another auth collection with a matching role from satisfying the rule.
 
 ## Email flows
 
-An auth collection opts into verification, login alerts, login OTP, passwordless login, and email changes with the third `AuthCollection.define()` argument, and every option defaults to off. The transport is selected in the builder with `.email(SmtpEmail(...))`; without it the flows are disabled and request endpoints return `503 email_not_configured`.
+An auth collection opts into verification, login alerts, login OTP, passwordless login, and email changes with the third `AuthCollection.define()` argument, and every option defaults to off. The transport is selected in the builder with `.email(SmtpEmail(...))`. Without it the flows are disabled and request endpoints return `503 email_not_configured`.
 
 For a self-service address change, an authenticated user posts `{ newEmail, oldPassword }` to `POST /request-email-change` and confirms the mailed token at `POST /confirm-email-change`.
 

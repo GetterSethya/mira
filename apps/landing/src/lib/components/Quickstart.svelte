@@ -53,8 +53,8 @@
     </div>
 
     <p class="note">
-      Every sample is TypeScript. React uses <code>.tsx</code> for JSX; Svelte and Vue use
-      <code>&lt;script lang="ts"&gt;</code>. Adapted from the README and apps/example; hooks,
+      Every sample is TypeScript. React uses <code>.tsx</code> for JSX. Svelte and Vue use
+      <code>{'<script lang="ts">'}</code>. Adapted from the README and apps/example. Hooks,
       crons, telemetry and dashboard live there.
     </p>
   </div>

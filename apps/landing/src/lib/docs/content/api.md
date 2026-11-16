@@ -6,7 +6,7 @@ The generated API reference lists every public symbol in every Mira package with
 
 | Package | Entry point | What it owns |
 |---|---|---|
-| [`@gettersethya/mira-collection`](../../api/modules/_gettersethya_mira-collection.html) | `packages/collection/src/index.ts` | Collection builders, fields, indexes, filter DSL, rule DSL, and inferred record types. Isomorphic; no server-only dependencies. |
+| [`@gettersethya/mira-collection`](../../api/modules/_gettersethya_mira-collection.html) | `packages/collection/src/index.ts` | Collection builders, fields, indexes, filter DSL, rule DSL, and inferred record types. Isomorphic. No server-only dependencies. |
 | [`@gettersethya/mira-client`](../../api/modules/_gettersethya_mira-client.html) | `packages/client/src/index.ts` | Typed client SDK, browser/server auth helpers, file clients, and schema types. Re-exports the collection package. |
 | [`@gettersethya/mira`](../../api/modules/_gettersethya_mira.html) | `packages/mira/src/index.ts` | Server library: `Mira.builder()`, platform presets, SQLite, storage, HTTP routing, auth, email, rate limits, thumbnails, and plugins. |
 | [`@gettersethya/mira/bun`](../../api/modules/_gettersethya_mira.index.bun.html) | `packages/mira/src/index.bun.ts` | The Bun entry point: `BunPlatform`, `BunSqliteDatabase`, `BunPortablePlatform`, native crypto, Argon2id, and `Bun.Image` thumbnail services. |
@@ -28,7 +28,7 @@ To see how one request travels from a collection definition through rules and th
 
 ## Source and contracts
 
-The reference is generated from `packages/*/src`. TypeDoc follows the source entry points, so a missing export is a missing API, not a documentation gap. The hand-written guides under `/docs` cover the decisions and trade-offs; the generated reference is the exhaustive index of names, signatures, and comments.
+The reference is generated from `packages/*/src`. TypeDoc follows the source entry points, so a missing export is a missing API, not a documentation gap. The hand-written guides under `/docs` cover the decisions and trade-offs. The generated reference is the exhaustive index of names, signatures, and comments.
 
 The generated HTML is published alongside the docs under `/api/`. It is rebuilt with:
 

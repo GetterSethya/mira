@@ -1,4 +1,4 @@
-Ask a list route for exactly the rows you want, and walk a whole collection without skipping one. Every list route shares one query model — a filter expression, one sort field, a field projection, optional relation expansion, and cursor pagination — and always answers with `{ items, nextCursor }`.
+Ask a list route for exactly the rows you want, and walk a whole collection without skipping one. Every list route shares one query model (a filter expression, one sort field, a field projection, optional relation expansion, and cursor pagination) and always answers with `{ items, nextCursor }`.
 
 ## Filters
 
@@ -26,17 +26,17 @@ Filter.and(
 
 The comparison surface is `.eq`, `.neq`, `.gt`, `.gte`, `.lt`, `.lte`, `.in`, `.like`, `.null`, `.notNull`, and `.between`. `.between(lo, hi)` is sugar for `.gte(lo)` and `.lte(hi)`. There is no `contains` or `startsWith` helper here: `.like` passes your pattern through untouched, so add the `%` wildcards yourself.
 
-Comparison values must be a string, a number, or `null`; boolean values are rejected by the filter compiler. An empty `.in([])` list compiles to `1 = 0` and matches nothing. Unknown fields — and fields marked hidden, unless the caller is an admin — fail with 422.
+Comparison values must be a string, a number, or `null`. Boolean values are rejected by the filter compiler. An empty `.in([])` list compiles to `1 = 0` and matches nothing. Unknown fields fail with 422. The same applies to fields marked hidden, unless the caller is an admin.
 
 ## Raw JSON shape
 
 The `filter` query parameter is one JSON-encoded `FilterNode`:
 
-- comparison: `{ "op": "eq", "field": "status", "value": "published" }` — `op` is `eq`, `neq`, `gt`, `gte`, `lt`, or `lte`
+- comparison: `{ "op": "eq", "field": "status", "value": "published" }`: `op` is `eq`, `neq`, `gt`, `gte`, `lt`, or `lte`
 - membership: `{ "op": "in", "field": "status", "values": ["draft", "review"] }`
 - pattern: `{ "op": "like", "field": "title", "value": "%effect%" }`
 - null check: `{ "op": "null", "field": "deletedAt" }` or `{ "op": "not_null", "field": "deletedAt" }`
-- combinator: `{ "op": "and", "left": <node>, "right": <node> }` — same for `or`
+- combinator: `{ "op": "and", "left": <node>, "right": <node> }`: same for `or`
 - negation: `{ "op": "not", "node": <node> }`
 
 A nested example:
@@ -57,21 +57,21 @@ If the JSON does not decode to a valid node the request fails with 422, so build
 | --- | --- | --- |
 | `filter` | JSON `FilterNode` | ANDed with the collection's `list` rule |
 | `sort` | one field name | unknown names are ignored and the default order stays |
-| `order` | `asc` or `desc` | defaults to `asc`; only applies when `sort` is set |
-| `select` | comma-separated field names | allowlist; unknown or hidden names are dropped |
+| `order` | `asc` or `desc` | defaults to `asc`. Only applies when `sort` is set |
+| `select` | comma-separated field names | allowlist. Unknown or hidden names are dropped |
 | `expand` | comma-separated relation names | one `LEFT JOIN` per relation |
 | `after` | non-negative integer | the `seqId` cursor from the previous page |
 | `limit` | integer | defaults to 30, clamped to 100 |
 
-Sorting uses the collection schema as an allowlist. A non-admin caller cannot sort by a hidden field — that request is a 422 — while an unknown field name is silently ignored and the list keeps its default order. `select` is also an allowlist; for base and auth collections, `id`, `created`, and `updated` are returned whether or not you name them. View collections only return the columns their query exposes. Hidden fields are never selected for ordinary callers.
+Sorting uses the collection schema as an allowlist. A non-admin caller cannot sort by a hidden field (that request is a 422), while an unknown field name is silently ignored and the list keeps its default order. `select` is also an allowlist. For base and auth collections, `id`, `created`, and `updated` are returned whether or not you name them. View collections only return the columns their query exposes. Hidden fields are never selected for ordinary callers.
 
-`expand` fills in related records that a plain join would leave as bare ids. The related row arrives under `expand.<field>`, and a relation that does not resolve is absent — a left-join miss and a denied read look the same. For non-admin callers the target collection's `view` rule is applied to the join, so expanding a record you cannot read yields nothing rather than a leak.
+`expand` fills in related records that a plain join would leave as bare ids. The related row arrives under `expand.<field>`, and a relation that does not resolve is absent. A left-join miss and a denied read look the same. For non-admin callers the target collection's `view` rule is applied to the join, so expanding a record you cannot read yields nothing rather than a leak.
 
-Expansion joins the target's `id` column. A relation declared with a different target field, such as `Field.relation(Users, { field: "email" })`, stores and validates that value but is not expanded by the current join; use the related record's `id` when you need `expand`.
+Expansion joins the target's `id` column. A relation declared with a different target field, such as `Field.relation(Users, { field: "email" })`, stores and validates that value but is not expanded by the current join. Use the related record's `id` when you need `expand`.
 
 ## Cursor pagination
 
-`after` is a cursor, not an offset: pass the `seqId` of the last row you received. The default order is `seqId` ascending. Sorted pagination is also supported: the server resolves the cursor row's sort value and continues with a `(sortField, seqId)` keyset, using `seqId` as a stable tie-breaker. The sort field must be non-nullable; a sorted request that uses `after` on a nullable field returns `422 validation_failed` rather than silently skipping rows. If the cursor row has been deleted, the server also returns `422` so you can restart from the first page. `nextCursor` is the last row's `seqId` when the page is full, and `null` when it is not. A full page can still be the end of the data, so keep requesting until `nextCursor` is `null` and treat a final empty page as normal.
+`after` is a cursor, not an offset: pass the `seqId` of the last row you received. The default order is `seqId` ascending. Sorted pagination is also supported: the server resolves the cursor row's sort value and continues with a `(sortField, seqId)` keyset, using `seqId` as a stable tie-breaker. The sort field must be non-nullable. A sorted request that uses `after` on a nullable field returns `422 validation_failed` rather than silently skipping rows. If the cursor row has been deleted, the server also returns `422` so you can restart from the first page. `nextCursor` is the last row's `seqId` when the page is full, and `null` when it is not. A full page can still be the end of the data, so keep requesting until `nextCursor` is `null` and treat a final empty page as normal.
 
 ```json
 {
@@ -82,7 +82,7 @@ Expansion joins the target's `id` column. A relation declared with a different t
 }
 ```
 
-For ordinary list callers, `seqId` is not part of the response payload; admin contexts and some write responses can expose it. The next request is `?after=42&limit=10`.
+For ordinary list callers, `seqId` is not part of the response payload. Admin contexts and some write responses can expose it. The next request is `?after=42&limit=10`.
 
 ## Worked client query
 
@@ -134,9 +134,9 @@ The response is the `{ items, nextCursor }` envelope. `--data-urlencode` matters
 
 ## Authorization and caching
 
-Filters never widen access. A collection's `list` rule is ANDed with your filter, so records you are not allowed to see are omitted from the page; a `view` of such a record is a 404, not a 403 — see [rules](../rules/). Hidden fields are stripped from responses and refused in `filter` and `sort` for non-admin callers.
+Filters never widen access. A collection's `list` rule is ANDed with your filter, so records you are not allowed to see are omitted from the page. A `view` of such a record is a 404, not a 403. See [rules](../rules/). Hidden fields are stripped from responses and refused in `filter` and `sort` for non-admin callers.
 
-List and record reads pass through an in-memory cache: list entries live 10 seconds and record entries 30 seconds by default, and every key is suffixed with exactly the auth, query, header, and body values the compiled rule references. Two callers with different authorization therefore cannot share a cached page. Writes nuke the collection's list entries and invalidate the affected record; reads that request `expand` bypass the cache entirely.
+List and record reads pass through an in-memory cache: list entries live 10 seconds and record entries 30 seconds by default, and every key is suffixed with exactly the auth, query, header, and body values the compiled rule references. Two callers with different authorization therefore cannot share a cached page. Writes nuke the collection's list entries and invalidate the affected record. Reads that request `expand` bypass the cache entirely.
 
 ## Next
 

@@ -27,7 +27,7 @@
 </script>
 
 <svelte:head>
-  <title>{data.page.title} — Mira docs</title>
+  <title>{data.page.title} | Mira docs</title>
   <meta name="description" content={data.page.summary} />
 </svelte:head>
 

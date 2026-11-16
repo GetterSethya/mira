@@ -10,7 +10,7 @@
     {
       question: 'What does it replace?',
       answer:
-        'The router, session handling and upload endpoint you would otherwise wire. Routes, auth and uploads follow from the collections; rules sit beside them.'
+        'The router, session handling and upload endpoint you would otherwise wire. Routes, auth and uploads follow from the collections. Rules sit beside them.'
     },
     {
       question: 'Why Effect?',
@@ -20,7 +20,7 @@
     {
       question: 'Do I need config files?',
       answer:
-        'No files. Collections and architecture are TypeScript; runtime settings live in a _config table, and S3 credentials can come from env.'
+        'No files. Collections and architecture are TypeScript. Runtime settings live in a _config table, and S3 credentials can come from env.'
     },
     {
       question: 'Is it ready for production?',

@@ -1,4 +1,4 @@
-Turn a set of collection definitions into a configured, migrating, observable server process. Four builder steps are required; the optional steps tune storage, email, rate limits, telemetry, and CORS.
+Turn a set of collection definitions into a configured, migrating, observable server process. Four builder steps are required. The optional steps tune storage, email, rate limits, telemetry, and CORS.
 
 Bun has its own [runtime page](../bun/). [Email](../email/), [plugins](../plugins/), the [HTTP API](../http-api/), and the [dashboard](../dashboard/) have their own pages too.
 
@@ -10,17 +10,17 @@ Bun has its own [runtime page](../bun/). [Email](../email/), [plugins](../plugin
 | `database` | yes | `SqlClient` and active `Dialect` |
 | `storage` | yes | `FileStorage` for uploads, downloads, thumbnails |
 | `collections` | yes | Base, auth, and view definitions |
-| `email` | no | SMTP `EmailService`; defaults to a no-op |
+| `email` | no | SMTP `EmailService`. Defaults to a no-op |
 | `rateLimits` | no | Custom `RateLimitStore` and email policy overrides |
 | `rules` | no | Server-only bindings merged onto schemas |
 | `crons` | no | Scoped scheduled jobs |
-| `telemetry` | no | Tracer and logger layer; defaults to console |
+| `telemetry` | no | Tracer and logger layer. Defaults to console |
 | `cors` | no | Origin, method, header, and credential policy |
 | `migrations` | no | `allowDestructive` and boot-time log verbosity |
 
-The builder exposes `build()` only once all four required steps exist and re-checks at runtime. A collection with no rule denies ordinary callers; see [access rules](../rules/).
+The builder exposes `build()` only once all four required steps exist and re-checks at runtime. A collection with no rule denies ordinary callers. See [access rules](../rules/).
 
-The snippet assumes `Posts`, `Users`, `postsRules`, and `nightlyCleanup` are defined in your app; the collection and rule pages show those definitions.
+The snippet assumes `Posts`, `Users`, `postsRules`, and `nightlyCleanup` are defined in your app. The collection and rule pages show those definitions.
 
 ```ts
 import { Config } from "effect"
@@ -52,25 +52,25 @@ For Bun, import `BunPlatform` and `BunSqliteDatabase` from `@gettersethya/mira/b
 
 ## Boot sequence
 
-Building the app assembles the layer graph in a fixed order. The foundation binds the platform, database, storage, thumbnails, and telemetry; the mid layer adds `Repository`, the migrator, `AppConfig`, the token store, and the rate-limit stores. The email transport, plugin layers, the cached collection service, and the hook decorator sit on top.
+Building the app assembles the layer graph in a fixed order. The foundation binds the platform, database, storage, thumbnails, and telemetry. The mid layer adds `Repository`, the migrator, `AppConfig`, the token store, and the rate-limit stores. The email transport, plugin layers, the cached collection service, and the hook decorator sit on top.
 
-Auto-migration is a side effect of that graph, so the plan completes before the server binds. The server layer then adds the router — generated collection routes plus plugin routes — and the port-retry binding.
+Auto-migration is a side effect of that graph, so the plan completes before the server binds. The server layer then adds the router (generated collection routes plus plugin routes) and the port-retry binding.
 
 Plugin `onBootstrap` hooks run during that startup, after the socket binds and before requests are handled. [Plugins](../plugins/) covers the hook order and the stages that never run.
 
 ## Configuration in `_config`
 
-There is no config-file layer. `AppConfig` seeds a `_config` table on first boot and reads it on every start; some values, such as S3 credentials, can also be supplied as Effect `Config` values.
+There is no config-file layer. `AppConfig` seeds a `_config` table on first boot and reads it on every start. Some values, such as S3 credentials, can also be supplied as Effect `Config` values.
 
 ```sql
 SELECT key, value FROM _config;
 ```
 
-The seeded defaults are `app_name = "mira"`, `port = "8080"`, `application_url = "http://localhost:8080"`, `use_s3 = "false"`, and `log_retention_days = "30"`. Existing rows win; seeding only fills missing keys. `jwt_secret` is 48 random bytes as hex, generated on first boot and persisted, so tokens survive restarts; it is a `Redacted<string>`.
+The seeded defaults are `app_name = "mira"`, `port = "8080"`, `application_url = "http://localhost:8080"`, `use_s3 = "false"`, and `log_retention_days = "30"`. Existing rows win. Seeding only fills missing keys. `jwt_secret` is 48 random bytes as hex, generated on first boot and persisted, so tokens survive restarts. It is a `Redacted<string>`.
 
 Port and URL are mutable in-process: after a fallback, `updateBoundPort` rewrites the URL port so plugin logs and links point at the real address.
 
-Email settings are not stored in `_config`; they come from `.email(...)`, and the dashboard shows the live transport read-only.
+Email settings are not stored in `_config`. They come from `.email(...)`, and the dashboard shows the live transport read-only.
 
 ## Storage backends
 
@@ -99,19 +99,19 @@ import { S3CompatibleStorage } from "@gettersethya/mira"
 )
 ```
 
-Every field accepts a plain value or an Effect `Config`, resolved once at build, so a missing variable fails at startup rather than on first upload. Path-style is the default; set `forcePathStyle: false` for virtual-host style and `publicBaseUrl` for a CDN. The bucket must already exist; no `@aws-sdk/*` package is involved.
+Every field accepts a plain value or an Effect `Config`, resolved once at build, so a missing variable fails at startup rather than on first upload. Path-style is the default. Set `forcePathStyle: false` for virtual-host style and `publicBaseUrl` for a CDN. The bucket must already exist. No `@aws-sdk/*` package is involved.
 
-The `_config` table also carries `use_s3` and `s3_*` legacy keys, but the current storage layer is activated by `.storage(S3CompatibleStorage(...))`, not by those rows. Use the builder call as the source of truth; do not assume setting `use_s3` swaps the backend. An incomplete `use_s3=true` row logs a warning and yields no S3 config instead of crashing boot.
+The `_config` table also carries `use_s3` and `s3_*` legacy keys, but the current storage layer is activated by `.storage(S3CompatibleStorage(...))`, not by those rows. Use the builder call as the source of truth. Do not assume setting `use_s3` swaps the backend. An incomplete `use_s3=true` row logs a warning and yields no S3 config instead of crashing boot.
 
-SQLite is the only database backend today. `SqliteDatabase({ filename })` wires the `SqlClient` and `sqliteDialect`; use `":memory:"` in tests. Booleans are stored as `0`/`1` because the dialect declares it, not because the collection service hardcodes it.
+SQLite is the only database backend today. `SqliteDatabase({ filename })` wires the `SqlClient` and `sqliteDialect`. Use `":memory:"` in tests. Booleans are stored as `0`/`1` because the dialect declares it, not because the collection service hardcodes it.
 
 ## Email transport
 
-`.email(SmtpEmail(...))` selects an SMTP transport; without it Mira uses a no-op `EmailService`. Host, port, TLS, auth, From, and the reset URL are resolved once at layer build, and every field also accepts an Effect `Config` value. The transport is optional because local development and clients that do not use email should not need an SMTP server; the [email page](../email/) covers auth-collection options, routes, rate limits, plugin hooks, and Mailpit.
+`.email(SmtpEmail(...))` selects an SMTP transport. Without it Mira uses a no-op `EmailService`. Host, port, TLS, auth, From, and the reset URL are resolved once at layer build, and every field also accepts an Effect `Config` value. The transport is optional because local development and clients that do not use email should not need an SMTP server. The [email page](../email/) covers auth-collection options, routes, rate limits, plugin hooks, and Mailpit.
 
 ## Rate limits
 
-Rate limits use a `RateLimitStore` service. The app's default store is SQLite (`_rate_limits`); tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQLite store is single-node; a multi-instance deployment needs a shared store. Request policies fail open on store errors; send policies fail closed with `503 rate_limit_unavailable`.
+Rate limits use a `RateLimitStore` service. The app's default store is SQLite (`_rate_limits`). Tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQLite store is single-node. A multi-instance deployment needs a shared store. Request policies fail open on store errors. Send policies fail closed with `503 rate_limit_unavailable`.
 
 ## Migrations at boot
 
@@ -122,7 +122,7 @@ Auto-migration runs during layer initialization, before any request, and a faile
 
 The desired schema is diffed against `_collections`. The whole plan is rendered through the active dialect and validated to contain real SQL before a transaction opens, so an impossible plan fails before `BEGIN`. Applied plans commit with their `_migrations` row, and only then is `_collections` upserted.
 
-`allowDestructive` gates data-losing work: dropped tables and columns always qualify, and an `alterColumn` qualifies only on a type change or `nullable → NOT NULL`. Nullability relaxation and default changes are safe. With the flag off the whole plan is skipped and each destructive step is logged; removed collections drop only with the flag on.
+`allowDestructive` gates data-losing work: dropped tables and columns always qualify, and an `alterColumn` qualifies only on a type change or `nullable → NOT NULL`. Nullability relaxation and default changes are safe. With the flag off the whole plan is skipped and each destructive step is logged. Removed collections drop only with the flag on.
 
 SQLite cannot `ALTER COLUMN`, so the dialect rebuilds any table targeted by a column change: scratch table, `INSERT … SELECT`, `sqlite_sequence` transfer, `DROP`, `RENAME`, then index recreation. When a column becomes `NOT NULL` and has a default, existing rows are copied through `COALESCE(column, default)`. `PRAGMA legacy_alter_table = ON` is emitted before the rebuild and `OFF` runs as cleanup on both commit and rollback paths. Step order is global: drop views, drop indexes, table changes, create indexes, create views.
 
@@ -147,19 +147,19 @@ On Bun, import `SqliteClient` from `@effect/sql-sqlite-bun` and keep the same sh
 
 The layer applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` at construction, then migrates `logs` and `spans`. Both tables index `created`, so retention scans do not read the whole table. The connection is re-provided as `TelemetrySqlClient` for the admin telemetry routes.
 
-Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-entry queue, each drained by a scoped fiber, so span and record completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports log rows dropped because the bounded queue was full. `logConsole` echoes to stdout; `pretty` affects only that echo, never the stored rows.
+Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-entry queue, each drained by a scoped fiber, so span and record completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports log rows dropped because the bounded queue was full. `logConsole` echoes to stdout. `pretty` affects only that echo, never the stored rows.
 
-`logCleanupCronDef` is a daily `0 0 * * *` job deleting `logs` and `spans` older than `AppConfig.logRetentionDays`; add it to `.crons([...])`. Deletes run in batches of 1,000 using the `created` index, then the job runs `PRAGMA wal_checkpoint(TRUNCATE)` and logs a warning when the checkpoint is busy. It requires `TelemetrySqlClient`, so use it only with `makeSqliteTelemetryLayer`; the default console telemetry does not provide the table client. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
+`logCleanupCronDef` is a daily `0 0 * * *` job deleting `logs` and `spans` older than `AppConfig.logRetentionDays`. Add it to `.crons([...])`. Deletes run in batches of 1,000 using the `created` index, then the job runs `PRAGMA wal_checkpoint(TRUNCATE)` and logs a warning when the checkpoint is busy. It requires `TelemetrySqlClient`, so use it only with `makeSqliteTelemetryLayer`. The default console telemetry does not provide the table client. Reading persisted telemetry needs a superadmin session. See the [HTTP API](../http-api/).
 
 ## Thumbnails and the platform boundary
 
-`ThumbnailServicePhotonLive` is wired into the foundation layer and supports JPEG, PNG, and WebP through `@cf-wasm/photon`. The file-serving route accepts a `thumb` spec in `WxH[tbf]` form: `t` is cover, `b` is contain, `f` is fill, and no suffix defaults to cover. A `0` axis scales proportionally; `0x0` returns the source size. Results are cached best-effort at `_thumbs/<filename>/<spec>`, and a resize failure falls back to the original. The app hardcodes the Photon layer; `ThumbnailServiceNoopLive` exists internally for tests and is not a public builder option.
+`ThumbnailServicePhotonLive` is wired into the foundation layer and supports JPEG, PNG, and WebP through `@cf-wasm/photon`. The file-serving route accepts a `thumb` spec in `WxH[tbf]` form: `t` is cover, `b` is contain, `f` is fill, and no suffix defaults to cover. A `0` axis scales proportionally. `0x0` returns the source size. Results are cached best-effort at `_thumbs/<filename>/<spec>`, and a resize failure falls back to the original. The app hardcodes the Photon layer. `ThumbnailServiceNoopLive` exists internally for tests and is not a public builder option.
 
-`NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. `BunPlatform` does the same with native Bun filesystem, path, HTTP server, and runtime; it reuses the Node-compatible crypto, password, and SMTP layers. `BunSqliteDatabase` pairs Bun SQLite with the same dialect.
+`NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. `BunPlatform` does the same with native Bun filesystem, path, HTTP server, and runtime. It reuses the Node-compatible crypto, password, and SMTP layers. `BunSqliteDatabase` pairs Bun SQLite with the same dialect.
 
 Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic. Photon works under both runtimes, and SQLite telemetry works on both when you pass the matching `SqlClient` layer.
 
-For hook ordering and cron state see [plugins](../plugins/); for routes and status codes see the [HTTP API](../http-api/); for the admin UI see the [dashboard](../dashboard/).
+For hook ordering and cron state see [plugins](../plugins/). For routes and status codes see the [HTTP API](../http-api/). For the admin UI see the [dashboard](../dashboard/).
 
 ## Next
 

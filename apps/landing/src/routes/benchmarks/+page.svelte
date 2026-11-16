@@ -46,7 +46,7 @@
   });
 
   const formatRange = (values: ReadonlyArray<number>, format: (value: number) => string) =>
-    `${format(range(values).min)}–${format(range(values).max)}`;
+    `${format(range(values).min)}-${format(range(values).max)}`;
 
   type Runtime = 'node' | 'bun';
   type MetricGroup = 'speed' | 'latency';
@@ -314,7 +314,7 @@
 </script>
 
 <svelte:head>
-  <title>Node vs Bun benchmarks — Mira</title>
+  <title>Node vs Bun benchmarks | Mira</title>
   <meta
     name="description"
     content="A single-machine Mira benchmark: the same TypeScript app and SQLite collection on Node 24 and Bun 1.4, with startup, create, list, cache and latency ranges."
@@ -347,7 +347,7 @@
       class="mt-10 grid items-start gap-8 animate-[rise_520ms_80ms_var(--ease)_both] motion-reduce:animate-none lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-16"
     >
       <p class="max-w-[52ch] text-[18px] leading-[1.6] text-[var(--fg)]">
-        One Mira app, one SQLite collection, one load generator. Five interleaved pairs; every metric is
+        One Mira app, one SQLite collection, one load generator. Five interleaved pairs. Every metric is
         compared on its own.
       </p>
       <div class="lg:pt-1">
@@ -379,10 +379,10 @@
           The result.
         </h2>
         <p class="mt-2.5 max-w-[62ch] text-[18px] leading-[1.6] text-[var(--fg)]">
-          Values are medians of five interleaved pairs; ranges are min–max. The table shows four headline metrics and two p50s; all six rows are separated. A full bar is the faster result.
+          Values are medians of five interleaved pairs. Ranges are min-max. The table shows four headline metrics and two p50s. All six rows are separated. A full bar is the faster result.
         </p>
         <p class="mt-2 text-[14px] text-[var(--muted)]">
-          Separation is descriptive; five pairs are not a significance claim.
+          Separation is descriptive. Five pairs are not a significance claim.
         </p>
       </div>
       <div class="inline-flex flex-none gap-0.5 rounded-[var(--radius-sm)] bg-[var(--surface)] p-[3px]" role="group" aria-label="Filter metrics">
@@ -443,8 +443,8 @@
         Latency.
       </h2>
       <p class="mt-2.5 max-w-[62ch] text-[18px] leading-[1.6] text-[var(--fg)]">
-        Lower is better. Medians of five interleaved pairs; per-run ranges are in the raw JSON.
-        Some percentile ranges overlap; read those medians as direction, not separation. Fifty
+        Lower is better. Medians of five interleaved pairs. Per-run ranges are in the raw JSON.
+        Some percentile ranges overlap. Read those medians as direction, not separation. Fifty
         requests in flight, so each row includes queue time, not single-request service time.
       </p>
     </div>
@@ -556,7 +556,7 @@
         <p>
           This is a directional, single-machine comparison, not a universal claim. Both servers
           run the same Mira code. Console telemetry is off on both. Node 24 strips types at
-          startup; Bun uses its native loader. Bun uses its native HTTP server, SQLite driver and
+          startup. Bun uses its native loader. Bun uses its native HTTP server, SQLite driver and
           runtime. Node uses
           <code class="rounded-[3px] bg-[var(--code-bg)] px-1 py-px [font-family:var(--font-mono)] text-[0.92em] text-[var(--code-fg)]"
             >node:http</code
@@ -565,7 +565,7 @@
             >node:sqlite</code
           >
           (under active development in Node 24) and the Node platform preset. A compiled Node bundle would be a different experiment.
-          The load generator is a small Node script; no external benchmark binary is used. It
+          The load generator is a small Node script. No external benchmark binary is used. It
           runs on the same machine and was not separately benchmarked for saturation.
         </p>
         <p>
@@ -575,10 +575,10 @@
             >GET /api/collections/posts?limit=1</code
           >
           (HTTP 200). Runs alternate Node-first and Bun-first (Node, Bun, Bun, Node…). Create batching is enabled
-          with a 0 ms window and a 100-write cap; concurrent single-record writes coalesce into a
+          with a 0 ms window and a 100-write cap. Concurrent single-record writes coalesce into a
           SQL batch, bounded by the 50 requests in flight. Five interleaved pairs can reach a
           two-sided sign-test
-          floor of p = 0.0625; this is not a significance claim. One concurrency point is not a
+          floor of p = 0.0625. This is not a significance claim. One concurrency point is not a
           capacity curve. Create writes are durable and I/O-bound, which makes create the noisiest
           metric.
         </p>
@@ -596,7 +596,7 @@
             target="_blank"
             rel="noreferrer">Raw per-run results</a
           >
-          · Links point at the latest main; the raw file changes when the benchmark is rerun.
+          · Links point at the latest main. The raw file changes when the benchmark is rerun.
         </p>
       </div>
     </details>
