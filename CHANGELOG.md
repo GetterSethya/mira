@@ -17,6 +17,17 @@ published by CI.
 
 ### Added
 
+- **Landing benchmark page and header rebuild.** The shared nav is now four
+  primary links plus a Quickstart action, with a current-page marker and a
+  simpler mobile drawer. The benchmark report leads with a `4 of 4` headline
+  metric tally and `8 of 9` percentile summary, precise delta wording
+  (`1.3× throughput`, `4.7× faster startup`), an interleaved-run strip, a
+  filterable scoreboard, a light/dark method panel and compact mobile latency
+  groups. Copy was audited against `benchmarks.json` and the harness for
+  claim, median, run-order, batching and overlap accuracy.
+- **Tailwind v4 in the landing app.** `@tailwindcss/vite` and `tailwindcss`
+  are now wired into `apps/landing`; the benchmark page uses utility classes
+  over the existing mono/paper design tokens.
 - **Collection-aware auth email templates.** `.emailTemplates({ defaults, collections })`
   lets an app override any of the six built-in auth emails (verification, login
   OTP, passwordless OTP, password reset, email change, login alert) per collection
