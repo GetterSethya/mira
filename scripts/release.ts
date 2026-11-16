@@ -112,6 +112,20 @@ function writeGithubOutput(values: Record<string, string>): void {
   appendFileSync(file, `${lines}\n`)
 }
 
+function changelogReleaseNotes(version: string): string | undefined {
+  const changelog = readFileSync("CHANGELOG.md", "utf8")
+  const marker = `## [${version}]`
+  const start = changelog.indexOf(marker)
+  if (start === -1) return undefined
+
+  const bodyStart = changelog.indexOf("\n", start)
+  if (bodyStart === -1) return undefined
+
+  const next = changelog.indexOf("\n## [", bodyStart)
+  const body = changelog.slice(bodyStart, next === -1 ? undefined : next).trim()
+  return body.length === 0 ? undefined : body
+}
+
 function printInfo(tag: string): void {
   if (!tag.startsWith("v")) fail(`tag "${tag}" must start with "v" (e.g. v0.1.0-alpha.33)`)
 
@@ -140,11 +154,20 @@ function bumpAndTag(channel: Channel, dryRun: boolean): void {
   const next = nextVersion(current, channel)
 
   if (dryRun) {
+    if (changelogReleaseNotes(next) === undefined) {
+      console.log(`release: note: CHANGELOG.md has no non-empty "## [${next}]" section`)
+    }
     console.log(`release: would bump ${current} -> ${next} and tag v${next}`)
     return
   }
 
   assertCleanTree()
+
+  if (changelogReleaseNotes(next) === undefined) {
+    fail(
+      `CHANGELOG.md has no non-empty "## [${next}]" section; add release notes before tagging`
+    )
+  }
 
   for (const manifest of manifests) {
     const parsed: unknown = JSON.parse(readFileSync(manifest.path, "utf8"))

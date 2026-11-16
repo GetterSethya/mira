@@ -1620,6 +1620,8 @@ pnpm --filter @gettersethya/mira-tanstack-adapter build
 
 Releases are tag-driven and published by `.github/workflows/publish.yml`. Nothing is published from a laptop.
 
+Before tagging, move the `## [Unreleased]` entries into a `## [<version>] - <YYYY-MM-DD>` section in `CHANGELOG.md` and commit it. That section is the GitHub release body; it must be non-empty. `pnpm release:alpha` / `pnpm release:stable` refuse to tag when it is missing, and the workflow extracts it with `scripts/release-notes.ts`.
+
 | Git tag | npm dist-tag | Notes |
 |---|---|---|
 | `v0.1.0-alpha.33` | `alpha` **and** `latest` | pre-release. While the project is pre-1.0 the newest alpha also becomes `latest`, so the npm package page shows it. |
@@ -1642,7 +1644,7 @@ What the workflow does, in order:
 2. **Build, typecheck, test** — `pnpm install --frozen-lockfile`, `pnpm build`, `pnpm build:ui`, `pnpm -r typecheck`, `pnpm -r test`.
 3. **Pack** — `pnpm pack` per package (rewrites `workspace:*` to exact versions) and uploads the tarballs as an artifact.
 4. **Publish** — `npm publish` of the exact tarballs in dependency order (`collection → client → mira → adapter → dashboard`), skipping versions that already exist. Alpha releases then move the `latest` dist-tag onto the new version.
-5. **Release** — a GitHub Release with generated notes (marked pre-release for alpha).
+5. **Release** — a GitHub Release whose body is the matching `CHANGELOG.md` section (marked pre-release for alpha).
 
 ### One-time npm setup
 

@@ -245,19 +245,26 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Create GitHub release
+      - name: Extract release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          node "$GITHUB_WORKSPACE/scripts/release-notes.ts" "$TAG" > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "release $TAG already exists, leaving it untouched"
-            exit 0
-          fi
-          args=(--verify-tag --generate-notes --title "$TAG")
+          args=(--notes-file "$RUNNER_TEMP/release-notes.md" --title "$TAG")
           if [ "$PRERELEASE" = "true" ]; then
             args+=(--prerelease)
           fi
-          gh release create "$TAG" "${args[@]}"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" "${args[@]}"
+          else
+            gh release create "$TAG" --verify-tag "${args[@]}"
+          fi

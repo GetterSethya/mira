@@ -19,6 +19,12 @@ published by CI.
 
 ### Changed
 
+- **GitHub release notes.** The Publish workflow now extracts the matching
+  `## [<version>]` section from `CHANGELOG.md` with `scripts/release-notes.ts`
+  and uses it as the GitHub release body instead of `--generate-notes`.
+  `pnpm release:alpha` / `pnpm release:stable` refuse to tag when that section
+  is missing or empty.
+
 ### Fixed
 
 ## [0.1.0-alpha.38] - 2026-11-16
