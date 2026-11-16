@@ -7,6 +7,7 @@
   import ThemeToggle from './ThemeToggle.svelte';
 
   let open = $state(false);
+  let showCta = $state(false);
 
   const home = resolve('/');
   const links = [
@@ -24,12 +25,27 @@
   }
 
   onMount(() => {
-    const onResize = () => {
+    const onScroll = () => {
       if (window.innerWidth > 767) open = false;
+
+      const quickstart = document.querySelector('#quickstart');
+      const cta = document.querySelector('#cta');
+      const quickstartVisible = quickstart
+        ? quickstart.getBoundingClientRect().top < window.innerHeight &&
+          quickstart.getBoundingClientRect().bottom > 0
+        : false;
+      const ctaVisible = cta ? cta.getBoundingClientRect().top < window.innerHeight : false;
+      showCta = !quickstartVisible && !ctaVisible;
     };
 
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
   });
 </script>
 
@@ -50,7 +66,11 @@
     <div class="actions">
       <GitHubLink />
       <ThemeToggle />
-      <a class="quickstart" href={`${home}#quickstart`}>Quickstart</a>
+      <span class="cta-slot" class:visible={showCta} inert={!showCta} aria-hidden={!showCta}>
+        <a class="quickstart" href={`${home}#quickstart`} tabindex={showCta ? 0 : -1}
+          >Quickstart</a
+        >
+      </span>
       <button
         class="toggle"
         type="button"
@@ -149,12 +169,34 @@
     gap: 6px;
   }
 
+  .cta-slot {
+    display: block;
+    max-width: 0;
+    margin-left: -6px;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateX(6px);
+    pointer-events: none;
+    transition:
+      max-width 240ms var(--ease),
+      margin-left 240ms var(--ease),
+      opacity 160ms var(--ease),
+      transform 240ms var(--ease);
+  }
+
+  .cta-slot.visible {
+    max-width: 180px;
+    margin-left: 0;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+
   .quickstart {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     min-height: 36px;
-    margin-left: 6px;
     padding: 0 15px;
     border-radius: var(--radius-sm);
     background: var(--ink);
@@ -256,7 +298,7 @@
 
   @media (max-width: 767px) {
     .links,
-    .quickstart {
+    .cta-slot {
       display: none;
     }
 
