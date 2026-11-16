@@ -125,6 +125,57 @@ export interface AppConfigResponse {
   email: EmailDescription
 }
 
+/** Actions a collection rule map can carry. `manage` is auth-collections-only. */
+export type RuleAction = "list" | "view" | "create" | "update" | "delete" | "manage"
+
+/**
+ * Display-only mirror of `x-rules`. The dashboard never evaluates these
+ * expressions; each action's value is kept as `unknown` so inspection helpers
+ * can narrow it with runtime guards instead of trusting the payload.
+ */
+export type RuleMap = Partial<Record<RuleAction, unknown>>
+
+/** One server-computed rule verdict row from `/api/_schema`. */
+export interface SchemaRuleSummary {
+  action: RuleAction
+  kind: "deny" | "public" | "expr"
+  fields: string[]
+}
+
+/** One physical or view index from `/api/_schema` (`x-indexes`). */
+export interface SchemaIndex {
+  fields: string[]
+  unique: boolean
+  /** True for indexes Mira injects itself (e.g. the auth `email` index). */
+  system?: boolean
+}
+
+export type EmailTemplateId =
+  | "verification"
+  | "loginOtp"
+  | "passwordless"
+  | "passwordReset"
+  | "emailChange"
+  | "loginAlert"
+
+export type EmailTemplateSource = "builtin" | "global" | "collection"
+
+/** One effective email template rendered with sentinel inputs. */
+export interface EmailTemplatePreview {
+  id: EmailTemplateId
+  label: string
+  source: EmailTemplateSource
+  subject: string
+  text: string
+  html: string | null
+}
+
+export interface EmailTemplatesResponse {
+  collection: string
+  transportEnabled: boolean
+  templates: EmailTemplatePreview[]
+}
+
 export const dashboardApi = {
   bootstrapStatus: (): DashboardEffect<{ bootstrapped: boolean }> => execute(HCR.get("/bootstrap-status")),
 
@@ -144,12 +195,22 @@ export const dashboardApi = {
   emailTest: (to?: string): DashboardEffect<{ ok: true }> =>
     executeWithBody(HCR.bodyJson(HCR.post("/email/test"), to === undefined ? {} : { to })),
 
+  emailTemplates: (collection: string): DashboardEffect<EmailTemplatesResponse> =>
+    execute(HCR.get(`/email/templates?collection=${encodeURIComponent(collection)}`)),
+
   crons: {
     getAll: (): DashboardEffect<CronApiState[]> => execute(HCR.get("/crons")),
     runNow: (name: string): DashboardEffect<void> => execute(HCR.post(`/crons/${name}/run`))
   }
 }
 
-export type CollectionSchema = ApiCollectionSchema
+/**
+ * The dashboard's view of a collection schema. `rules` and `indexes` stay
+ * loosely typed because `ApiCollectionSchema` predates the inspection payload;
+ * `schema-inspection.ts` narrows them at runtime and exposes typed rows.
+ */
+export type CollectionSchema = ApiCollectionSchema & {
+  ruleSummary?: SchemaRuleSummary[]
+}
 export type FieldSchema = ApiFieldSchema
 export type { LogsResponse, SpanRow, SpansResponse }

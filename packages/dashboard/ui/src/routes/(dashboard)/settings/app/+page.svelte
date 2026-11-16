@@ -319,6 +319,11 @@
             Read-only. The live email transport is selected in code with
             <code>.email(SmtpEmail(...))</code>. Credentials are never shown here.
           </p>
+          <p class="text-xs text-muted-foreground">
+            Message templates are configured in code with <code>.emailTemplates(...)</code>. To
+            preview the effective templates for a collection, open that collection's
+            <span class="font-medium">Schema → Email</span> tab.
+          </p>
         </div>
       </Card.Content>
     </Card.Root>

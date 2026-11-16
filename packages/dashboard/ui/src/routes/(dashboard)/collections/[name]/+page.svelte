@@ -22,9 +22,8 @@
     type FilterCondition,
     type FilterConnector
   } from "$lib/components/CollectionFilterBuilder.svelte"
-  import FieldIcon from "$lib/components/FieldIcon.svelte"
+  import SchemaInspector from "$lib/components/SchemaInspector.svelte"
   import { Button } from "$lib/components/ui/button/index.js"
-  import { Badge } from "$lib/components/ui/badge/index.js"
   import { Input } from "$lib/components/ui/input/index.js"
   import * as Select from "$lib/components/ui/select/index.js"
   import * as Sheet from "$lib/components/ui/sheet/index.js"
@@ -659,7 +658,7 @@
 
 {#if schema}
   <Dialog.Root bind:open={schemaDialogOpen}>
-    <Dialog.Content class="flex max-h-[min(86vh,42rem)] flex-col overflow-hidden p-0 sm:max-w-xl">
+    <Dialog.Content class="flex max-h-[min(86vh,42rem)] flex-col overflow-hidden p-0 sm:max-w-2xl">
       <Dialog.Header class="shrink-0 border-b px-5 py-4 pr-12">
         <Dialog.Title>{collectionTitle} schema</Dialog.Title>
         <Dialog.Description>
@@ -670,30 +669,7 @@
       </Dialog.Header>
 
       <div class="min-h-0 flex-1 overflow-y-auto px-5 py-3">
-        <div class="space-y-1">
-          {#each schemaFields as field (field.name)}
-            <div class="hover:bg-muted/40 flex items-center gap-3 rounded-md px-2 py-2">
-              <span class="text-muted-foreground flex size-5 shrink-0 items-center justify-center [&_svg]:size-3.5">
-                <FieldIcon name={field.name} field={schema.fields[field.name]} />
-              </span>
-              <div class="min-w-0 flex-1">
-                <p class="font-mono text-[0.8125rem]">{field.name}</p>
-                <p class="text-muted-foreground text-xs">{field.kind}</p>
-              </div>
-              <div class="flex flex-wrap justify-end gap-1">
-                {#if field.required}<Badge variant="outline">required</Badge>{/if}
-                {#if field.hidden}<Badge variant="outline">hidden</Badge>{/if}
-              </div>
-            </div>
-          {/each}
-        </div>
-
-        {#if schema.kind === "view" && schema.viewQuery}
-          <div class="mt-4">
-            <h3 class="text-xs font-medium">View query</h3>
-            <pre class="bg-muted/40 mt-2 max-h-48 overflow-auto rounded-md border p-3 font-mono text-[0.6875rem] leading-relaxed">{schema.viewQuery}</pre>
-          </div>
-        {/if}
+        <SchemaInspector {schema} open={schemaDialogOpen} />
       </div>
 
       <Dialog.Footer class="shrink-0 border-t px-5 py-3">
