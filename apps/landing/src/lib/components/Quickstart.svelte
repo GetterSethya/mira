@@ -838,6 +838,9 @@
     overflow: visible;
     overflow-wrap: normal;
     word-break: normal;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transform: translateZ(0);
   }
 
   .editor-code :global(pre.shiki) {
