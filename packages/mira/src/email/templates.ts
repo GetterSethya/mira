@@ -286,7 +286,7 @@ type RequiredTemplateRenderers = {
 
 /** Strip CR/LF so user-supplied subjects cannot inject mail headers. */
 export const sanitizeEmailSubject = (subject: string) =>
-  subject.replaceAll("\r", " ").replaceAll("\n", " ").trim()
+  subject.replace(/[\r\n]+/g, " ").trim()
 
 /** Build an `EmailMessage` without its `to` field. */
 const withoutRecipient = (message: EmailMessage): EmailTemplateContent => ({

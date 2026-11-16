@@ -104,7 +104,7 @@ describe("makeEmailTemplates", () => {
 
   it("previews all six templates with sentinel inputs and source labels", () => {
     const templates = makeEmailTemplates({
-      collections: { users: { loginAlert: () => ({ subject: "Alert", text: "sample" }) } }
+      collections: { admins: { loginAlert: () => ({ subject: "Alert", text: "sample" }) } }
     })
     const preview = templates.preview("users", "Acme")
     expect(preview.map((entry) => entry.id)).toEqual(EMAIL_TEMPLATE_IDS)
@@ -114,8 +114,10 @@ describe("makeEmailTemplates", () => {
       expect(entry.text.length).toBeGreaterThan(0)
       expect(entry.html === null || entry.html.includes("<")).toBe(true)
     }
-    expect(preview.find((entry) => entry.id === "loginAlert")?.source).toBe("collection")
     expect(preview.find((entry) => entry.id === "verification")?.source).toBe("builtin")
+    expect(templates.preview("admins", "Acme").find((entry) => entry.id === "loginAlert")?.source).toBe(
+      "collection"
+    )
 
     // No live data: only the documented sentinel values appear.
     const allText = preview.map((entry) => `${entry.subject}\n${entry.text}\n${entry.html ?? ""}`).join("\n")
