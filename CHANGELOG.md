@@ -17,8 +17,30 @@ published by CI.
 
 ### Added
 
+- **Collection-aware auth email templates.** `.emailTemplates({ defaults, collections })`
+  lets an app override any of the six built-in auth emails (verification, login
+  OTP, passwordless OTP, password reset, email change, login alert) per collection
+  or app-wide. Overrides are typed render functions, not string templates;
+  resolution is collection → global → built-in. Subjects are CRLF-sanitised and
+  `escapeHtml` is exported for custom bodies. The dashboard shows each auth
+  collection's effective templates read-only at **Schema → Email**, with source
+  labels and sentinel preview data; the preview route is auth-wrapped and never
+  returns recipients, live links or SMTP credentials.
+- **Dashboard schema inspector for rules and indexes.** The collection schema
+  dialog now has Fields / Indexes / Rules / Email / View query tabs. Rules show
+  one row per action (including auth `manage`), a readable verdict, referenced
+  fields, and collapsible raw JSON; missing rules are explicitly reported as
+  deny-all. Indexes show single/composite coverage, unique/system flags, and
+  decidable structural findings. `GET /api/_schema` now returns `rules`,
+  server-computed `ruleSummary`, and normalized `indexes` including the injected
+  auth email index's `system` marker.
+
 ### Changed
 
+- **Plugin routes may depend on the collection set.** `MiraPlugin.routes` accepts
+  either a static route array or a function receiving the final resolved
+  collection list, so plugin routes can validate names (the dashboard email
+  template preview uses this to 404 non-auth collections).
 - **GitHub release notes.** The Publish workflow now extracts the matching
   `## [<version>]` section from `CHANGELOG.md` with `scripts/release-notes.ts`
   and uses it as the GitHub release body instead of `--generate-notes`.
