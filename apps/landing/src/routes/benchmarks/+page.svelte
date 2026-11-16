@@ -360,7 +360,7 @@
         </p>
         <div class="mt-7 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
           <a
-            class="inline-flex min-h-11 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--ink)] px-[18px] text-[14px] font-medium text-[color:var(--bg)]! transition-opacity hover:opacity-85"
+            class="inline-flex min-h-11 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--ink)] px-[18px] text-[14px] font-medium text-[color:var(--bg)]! no-underline transition-opacity hover:opacity-85"
             href="#result">See the numbers</a
           >
           <a
