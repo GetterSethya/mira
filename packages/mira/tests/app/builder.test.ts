@@ -4,6 +4,7 @@ import { Layer } from "effect"
 import { describe, expect,it } from "vitest"
 
 import { MiraApp } from "@/app/app.js"
+import { assertValidEmailTemplateCollections } from "@/app/app.js"
 import { MiraBuilder } from "@/app/builder.js"
 import { defineRule } from "@/app/index.js"
 import { MiraPlugin } from "@/app/plugin.js"
@@ -123,6 +124,42 @@ describe("MiraBuilder.rules()", () => {
     const rb = defineRule(postsDef, (R) => ({ list: R.public() }))
     const app = fullBuilder().rules([rb]).build()
     expect(app._getConfig().rules).toEqual([rb])
+  })
+})
+
+describe("MiraBuilder.emailTemplates()", () => {
+  const postsDef = BaseCollection.define("posts", { title: Field.text() })
+  const usersDef = AuthCollection.define("users", {})
+
+  it("stores config on the builder and defaults it to {}", () => {
+    const config = { defaults: { loginOtp: () => ({ subject: "s", text: "t" }) } }
+    const b = fullBuilder().emailTemplates(config)
+    expect(b._getPartialConfig().emailTemplates).toEqual(config)
+    expect(fullBuilder().build()._getConfig().emailTemplates).toEqual({})
+  })
+
+  it("accepts registered auth collections", () => {
+    expect(() =>
+      assertValidEmailTemplateCollections([postsDef, usersDef], {
+        collections: { users: {} }
+      })
+    ).not.toThrow()
+  })
+
+  it("rejects an unknown collection key", () => {
+    expect(() =>
+      assertValidEmailTemplateCollections([postsDef, usersDef], {
+        collections: { missing: {} }
+      })
+    ).toThrow('emailTemplates.collections references unknown collection "missing"')
+  })
+
+  it("rejects a non-auth collection key", () => {
+    expect(() =>
+      assertValidEmailTemplateCollections([postsDef, usersDef], {
+        collections: { posts: {} }
+      })
+    ).toThrow('"posts" is not an auth collection')
   })
 })
 

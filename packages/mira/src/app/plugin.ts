@@ -136,7 +136,15 @@ export interface MiraPlugin<R = never> {
   readonly onCronError?: CronObserverHook<CronErrorContext>
 
   readonly layer?: Layer.Layer<never, never, PlatformServices | AppConfig | Repository>
-  readonly routes?: ReadonlyArray<HttpRouter.Route<never, R>>
+  /**
+   * Plugin routes, either a static array or a function of the final collection
+   * list (app config + plugin collections + admin collections, rules applied).
+   * Use the function form when a route must validate names against the served
+   * collection set at build time.
+   */
+  readonly routes?:
+    | ReadonlyArray<HttpRouter.Route<never, R>>
+    | ((collections: ReadonlyArray<AnyCollectionDef>) => ReadonlyArray<HttpRouter.Route<never, R>>)
   readonly collections?: ReadonlyArray<AnyCollectionDef>
   /**
    * Auth collections whose authenticated tokens are granted `admin: true` on the

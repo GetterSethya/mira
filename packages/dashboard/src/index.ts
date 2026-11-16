@@ -6,7 +6,7 @@ import { makeDashboardRouter } from "./router.js"
 export const MiraDashboard = MiraPlugin.define({
   adminCollections: [SuperAdminCollection],
 
-  routes: makeDashboardRouter([SuperAdminCollection]),
+  routes: makeDashboardRouter,
 
   onBootstrap: () =>
     Effect.gen(function* () {

@@ -4,6 +4,7 @@ import type { Layer } from "effect"
 import type { MiraCacheConfig } from "@/cache/types.js"
 import type { MiraBatchMutationConfig } from "@/collection-service/mutation-batcher.js"
 import type { CronDef } from "@/cron/types.js"
+import type { EmailTemplatesConfig } from "@/email/templates.js"
 import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
 import { NoopEmail } from "@/email/noop.js"
@@ -43,6 +44,7 @@ export interface MiraAppConfig<Telemetry = never> {
   rateLimits?: MiraRateLimits
   cache?: MiraCacheConfig
   batchMutation?: MiraBatchMutationConfig
+  emailTemplates?: EmailTemplatesConfig
 }
 
 function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraAppConfig<any> {
@@ -77,6 +79,9 @@ function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraApp
  *
  * Optional step: `.cache(c)` — in-memory collection cache tuning, or
  * `{ enabled: false }` to read straight from the database
+ *
+ * Optional step: `.emailTemplates(t)` — per-collection and app-wide auth email
+ * overrides
  *
  * @example
  * const app = Mira.builder()
@@ -145,6 +150,38 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    */
   email(e: MiraEmail): MiraBuilder<Has | "email", R, Telemetry> {
     return new MiraBuilder({ ...this.#config, email: e })
+  }
+
+  /**
+   * Override auth email templates (optional).
+   *
+   * Resolution order is per-collection override → app-wide default → built-in
+   * message. Overrides are render functions, not mustache strings:
+   *
+   * ```ts
+   * .emailTemplates({
+   *   defaults: {
+   *     loginOtp: ({ appName, code }) => ({
+   *       subject: `Your ${appName} login code`,
+   *       text: `Your code is ${code}.`
+   *     })
+   *   },
+   *   collections: {
+   *     users: { verification: ({ code }) => ({ ... }) }
+   *   }
+   * })
+   * ```
+   *
+   * Every `collections` key must name a registered auth collection; an unknown
+   * or non-auth key fails at build time. The recipient (`to`) stays owned by the
+   * auth flow. Custom HTML is trusted application code — see `escapeHtml` for
+   * interpolating user data.
+   *
+   * @param t - An `EmailTemplatesConfig`
+   * @returns A new builder (same phantom type — templates are optional)
+   */
+  emailTemplates(t: EmailTemplatesConfig): MiraBuilder<Has, R, Telemetry> {
+    return new MiraBuilder({ ...this.#config, emailTemplates: t })
   }
 
   /**
@@ -345,7 +382,8 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
       migrations: config.migrations ?? {},
       rateLimits: config.rateLimits ?? {},
       cache: config.cache ?? { enabled: true },
-      batchMutation: config.batchMutation ?? {}
+      batchMutation: config.batchMutation ?? {},
+      emailTemplates: config.emailTemplates ?? {}
     })
   }
 }

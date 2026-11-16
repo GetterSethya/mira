@@ -13,6 +13,8 @@ import {
 } from "@/collection-service/index.js"
 import { AppConfig, AppConfigLive } from "@/config/index.js"
 import { makeHookedEmailServiceLayer } from "@/email/index.js"
+import { EmailTemplates, makeEmailTemplates } from "@/email/index.js"
+import type { EmailTemplatesConfig } from "@/email/index.js"
 import { makeCronServiceLayer } from "@/cron/cron-service.js"
 import type { CronDef } from "@/cron/types.js"
 import { makeHookCollectionServiceLayer } from "@/hooks/hook-collection.js"
@@ -54,6 +56,35 @@ function assertUniqueCronNames(defs: ReadonlyArray<CronDef<any>>) {
       throw new Error(`Duplicate cron name: "${def.name}". Cron names must be globally unique.`)
     }
     seen.add(def.name)
+  }
+}
+
+/**
+ * Validates `.emailTemplates({ collections })` keys at build time. Every key
+ * must name a registered auth collection; unknown or non-auth keys throw so a
+ * typo cannot silently fall back to built-in mail.
+ */
+export function assertValidEmailTemplateCollections(
+  collections: ReadonlyArray<AnyCollectionDef>,
+  config: EmailTemplatesConfig
+) {
+  const names = Object.keys(config.collections ?? {})
+  if (names.length === 0) return
+  const byName = new Map(collections.map((c) => [c.name, c]))
+  for (const name of names) {
+    const collection = byName.get(name)
+    if (collection === undefined) {
+      throw new Error(
+        `emailTemplates.collections references unknown collection "${name}". ` +
+          `Available collections: ${[...byName.keys()].join(", ")}.`
+      )
+    }
+    if (collection.schema["x-collection-kind"] !== "auth") {
+      throw new Error(
+        `emailTemplates.collections key "${name}" is not an auth collection. ` +
+          `Email template overrides apply only to auth collections.`
+      )
+    }
   }
 }
 
@@ -227,6 +258,7 @@ export class MiraApp<R = never, Telemetry = never> {
     const allPlugins = this.#getAllPlugins()
     const allCronDefs = this.#getAllCrons()
     assertUniqueCronNames(allCronDefs)
+    assertValidEmailTemplateCollections(allCollections, this.#config.emailTemplates ?? {})
 
     const pluginLayers = allPlugins.filter((p) => p.layer !== undefined).map((p) => p.layer!)
 
@@ -276,7 +308,8 @@ export class MiraApp<R = never, Telemetry = never> {
       rateLimiterLayer,
       rateLimitKeySecretLayer,
       emailRateLimitConfigLayer,
-      authRateLimitConfigLayer
+      authRateLimitConfigLayer,
+      Layer.succeed(EmailTemplates, makeEmailTemplates(this.#config.emailTemplates ?? {}))
     ).pipe(Layer.provideMerge(foundation))
 
     // Hook service is independent of the collection service; email hooks need it early.
@@ -361,7 +394,9 @@ export class MiraApp<R = never, Telemetry = never> {
     const allCollections = this.#getAllCollections()
     const adminCollections = this.#getAdminCollections().map((c) => c.name)
     const collectionRoutes = makeCollectionRouter(allCollections, adminCollections)
-    const pluginRoutes = this.#extras.flatMap((p) => p.routes ?? [])
+    const pluginRoutes = this.#extras.flatMap((p) =>
+      typeof p.routes === "function" ? p.routes(allCollections) : p.routes ?? []
+    )
     const routes = [...collectionRoutes, ...pluginRoutes]
 
     const serviceLayer = this.buildServiceLayer()

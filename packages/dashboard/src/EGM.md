@@ -22,8 +22,8 @@ would break the browser build. Rules are therefore attached to the collection se
 
 ### Plugin entry point
 
-- `MiraDashboard` — the `MiraPlugin` definition: `adminCollections`, `routes`, lifecycle hooks, and audit hooks. [index.ts:MiraDashboard]
-- `makeDashboardRouter` (re-export) — builds the `/_dashboard` route array for a given collection list. [index.ts:makeDashboardRouter], [router.ts:makeDashboardRouter]
+- `MiraDashboard` — the `MiraPlugin` definition: `adminCollections`, `routes` (a function of the final collection list), lifecycle hooks, and audit hooks. [index.ts:MiraDashboard]
+- `makeDashboardRouter(collections)` — builds the `/_dashboard` route array; the collection list supplies the auth names for the email-template preview. [index.ts:makeDashboardRouter], [router.ts:makeDashboardRouter]
 - `SuperAdminCollection` (re-export) — the rule-bearing superadmin collection definition. [index.ts:SuperAdminCollection], [superadmin.ts:SuperAdminCollection]
 - `getRegisterToken` / `setRegisterToken` / `generateRegisterToken` (re-exports) — in-memory first-boot registration token. [index.ts:getRegisterToken], [superadmin.ts:getRegisterToken], [superadmin.ts:setRegisterToken], [superadmin.ts:generateRegisterToken]
 - `MiraPlugin` (type, re-exported from `@gettersethya/mira`) — plugin interface type. [index.ts:MiraPlugin]
@@ -43,7 +43,7 @@ would break the browser build. Rules are therefore attached to the collection se
 
 ### Routing
 
-- `makeDashboardRouter(_collections)` — returns the ordered route list for the SPA plus every `/_dashboard/api/*` route; the `_collections` argument is currently unused. [router.ts:makeDashboardRouter]
+- `makeDashboardRouter(collections)` — returns the ordered route list for the SPA plus every `/_dashboard/api/*` route; `collections` is the final served set (app + plugin + admin), used to recognise auth collections for the email-template preview. [router.ts:makeDashboardRouter]
 
 | Method | Path | Handler | Registration |
 |---|---|---|---|
@@ -57,6 +57,8 @@ would break the browser build. Rules are therefore attached to the collection se
 | PUT | `/_dashboard/api/config` | `configUpdateRoute` (auth-wrapped) | [router.ts:makeDashboardRouter] |
 | GET | `/_dashboard/api/crons` | `cronsRoute` (auth-wrapped) | [router.ts:makeDashboardRouter] |
 | POST | `/_dashboard/api/crons/:name/run` | `cronRunNowRoute` (auth-wrapped) | [router.ts:makeDashboardRouter] |
+| POST | `/_dashboard/api/email/test` | `emailTestRoute` (auth-wrapped) | [router.ts:makeDashboardRouter] |
+| GET | `/_dashboard/api/email/templates` | `makeEmailTemplatesRoute(collections)` (auth-wrapped) | [router.ts:makeDashboardRouter] |
 
 Auth-wrapped routes are guarded by `requireDashboardAuth`, see [./api/EGM.md](./api/EGM.md).
 
@@ -86,7 +88,7 @@ Auth-wrapped routes are guarded by `requireDashboardAuth`, see [./api/EGM.md](./
 
 ### Subdirectories
 
-- [api](./api/EGM.md) — dashboard HTTP handlers: auth guard, bootstrap status, first-boot registration, superadmin CRUD, config read/write, cron list/run-now.
+- [api](./api/EGM.md) — dashboard HTTP handlers: auth guard, bootstrap status, first-boot registration, superadmin CRUD, config read/write, cron list/run-now, test email, email-template preview.
 
 ## Invariants
 
@@ -96,7 +98,7 @@ Auth-wrapped routes are guarded by `requireDashboardAuth`, see [./api/EGM.md](./
 - `onBootstrap` generates a fresh registration token on every boot, but only calls `setRegisterToken` and logs a registration URL when the `_superadmin` list is empty; otherwise it logs the dashboard URL. [index.ts:MiraDashboard]
 - The registration token lives in a module-level `let` and is lost on restart; it is not persisted. [superadmin.ts:setRegisterToken]
 - `generateRegisterToken` requires `globalThis.crypto.getRandomValues` and Node's `Buffer`. [superadmin.ts:generateRegisterToken]
-- `makeDashboardRouter` ignores its `_collections` argument; routes are static. [router.ts:makeDashboardRouter]
+- `makeDashboardRouter` takes the final served collection list (app + plugin + admin) and uses it only to recognise auth collection names for the email-template preview; every other route is static. [router.ts:makeDashboardRouter]
 - The SPA route strips the `/_dashboard` prefix, serves the matching file from `ui/dist`, and falls back to `index.html` when the file does not exist (client-side routing). [router.ts:makeDashboardSpaRoute]
 - `wrapRoute` maps a `DashboardUnauthorizedError` failure to 401, any other failure to 400, and a defect (no failure) to 500. [router.ts:wrapRoute]
 - `wrapAuthRoute` runs `requireDashboardAuth` first, returns 401 when it fails, and annotates `auth.collection` on the current span and its parent. [router.ts:wrapAuthRoute]
@@ -111,7 +113,7 @@ Auth-wrapped routes are guarded by `requireDashboardAuth`, see [./api/EGM.md](./
 
 ## Side Effects
 
-- Registers the dashboard HTTP routes (SPA catch-all + nine `/api` routes) with the host router. [router.ts:makeDashboardRouter]
+- Registers the dashboard HTTP routes (SPA catch-all + `/_dashboard/api` routes, including the email-template preview) with the host router. [router.ts:makeDashboardRouter]
 - Reads the SvelteKit SPA bundle from disk at `<module dir>/../../ui/dist`, including an `index.html` fallback read. [router.ts:makeDashboardSpaRoute]
 - Requires `SqlClient` in its route service set, so the plugin's routes touch the SQLite database through the handler layer. [router.ts:DashboardRouteServices]
 - Verifies JWTs on every auth-wrapped route via `requireDashboardAuth`, which reads `AppConfig.jwtSecret`. [router.ts:wrapAuthRoute], [./api/EGM.md](./api/EGM.md)

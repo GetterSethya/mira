@@ -82,6 +82,59 @@ All options default to off:
 
 The flags are serialized as `x-auth.email` and are available from the public `GET /api/collections/:name/auth-config` projection, with defaults applied. The admin `GET /api/_schema` also carries them for the dashboard and codegen.
 
+## Customize templates
+
+`.emailTemplates()` replaces any of the six built-in messages. Overrides are render functions, not mustache strings, so each template keeps its typed input:
+
+```typescript
+Mira.builder()
+  // ... required steps
+  .emailTemplates({
+    defaults: {
+      loginOtp: ({ appName, code, expiresMinutes }) => ({
+        subject: `Your ${appName} login code`,
+        text: `Your code is ${code}. It expires in ${expiresMinutes} minutes.`
+      })
+    },
+    collections: {
+      users: {
+        verification: ({ appName, code }) => ({
+          subject: `Confirm your ${appName} address`,
+          text: `Your code is ${code}.`,
+          html: `<p>Your code is <strong>${escapeHtml(code)}</strong>.</p>`
+        })
+      }
+    }
+  })
+```
+
+| Template id | Input | Default subject |
+|---|---|---|
+| `verification` | `appName`, `email`, `code`, `expiresMinutes` | `Verify your <app> email` |
+| `loginOtp` | `appName`, `email`, `code`, `expiresMinutes` | `Your <app> login code` |
+| `passwordless` | `appName`, `email`, `code`, `expiresMinutes` | `Your <app> sign-in code` |
+| `passwordReset` | `appName`, `email`, `resetUrl`, `expiresMinutes` | `Reset your <app> password` |
+| `emailChange` | `appName`, `currentEmail`, `newEmail`, `confirmUrl`, `expiresMinutes` | `Confirm your new <app> email` |
+| `loginAlert` | `appName`, `collection`, `email`, `ip`, `userAgent`, `time` | `New sign-in to <app>` |
+
+A renderer returns `{ subject, text, html?, replyTo?, headers? }`. The recipient (`to`) belongs to the auth flow, so an override cannot silently send mail somewhere else. Resolution order is:
+
+1. `collections[<name>][<id>]` — one auth collection
+2. `defaults[<id>]` — every collection
+3. the built-in renderer
+
+A collection that only overrides `verification` keeps the built-in login OTP, password reset, email-change, login-alert, and passwordless messages unchanged. With no `.emailTemplates()` at all, every message is byte-for-byte the default.
+
+`collections` keys are validated at build time: an unknown name or a non-auth collection throws instead of silently falling back.
+
+Custom HTML is trusted application code. Escape any interpolated user data with the exported `escapeHtml(value)` helper, and do not pass untrusted input into `subject`. Mira strips CR/LF from rendered subjects so a custom subject cannot inject mail headers; `sanitizeEmailSubject` is exported for the same check in your own tooling.
+
+## Preview in the dashboard
+
+The dashboard's collection schema dialog includes an email tab for auth collections. It reads `GET /_dashboard/api/email/templates?collection=<name>` (superadmin-authenticated) and shows all six effective templates with a `source` badge (`builtin`, `global`, or `collection`), the subject, the plain text, and the HTML source.
+
+The preview uses fixed sentinel inputs (`user@example.invalid`, `203.0.113.10`, sample tokens, a fixed timestamp), never live challenge data. It returns no recipient, no live reset link, and no SMTP configuration, and it works while the transport is disabled — the response's `transportEnabled` flag tells the UI whether mail can actually be sent. HTML is displayed as escaped source text, never rendered.
+
 ## Routes
 
 Auth email routes live under `/api/collections/:name`. [HTTP API and files](../http-api/) owns the exact rows and status codes; the groups below explain each flow.

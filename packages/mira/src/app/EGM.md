@@ -7,7 +7,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 ## Interface
 
 - `Mira` — entry object exposing `builder()`: `[index.ts:Mira]`
-- `MiraBuilder<Has, R, Telemetry>` — fluent, immutable builder. Required steps: `platform`, `database`, `storage`, `collections`; optional: `rules`, `crons`, `telemetry`, `cors`, `migrations`; terminal: `build`: `[builder.ts:MiraBuilder]`
+- `MiraBuilder<Has, R, Telemetry>` — fluent, immutable builder. Required steps: `platform`, `database`, `storage`, `collections`; optional: `rules`, `crons`, `telemetry`, `cors`, `migrations`, `emailTemplates`; terminal: `build`: `[builder.ts:MiraBuilder]`
 - `MiraBuilder.platform(p)` — records a `MiraPlatform` and adds `"platform"` to the phantom type: `[builder.ts:MiraBuilder.platform]`
 - `MiraBuilder.database(d)` — records a `MiraDatabase` and adds `"database"`: `[builder.ts:MiraBuilder.database]`
 - `MiraBuilder.storage(s)` — records a `MiraStorage` and adds `"storage"`: `[builder.ts:MiraBuilder.storage]`
@@ -17,6 +17,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - `MiraBuilder.telemetry(l)` — overrides telemetry layer and adds `"telemetry"`: `[builder.ts:MiraBuilder.telemetry]`
 - `MiraBuilder.cors(c)` — validates and stores a `CorsConfig`: `[builder.ts:MiraBuilder.cors]`
 - `MiraBuilder.migrations(m)` — stores `MigrateOptions` for auto-migration: `[builder.ts:MiraBuilder.migrations]`
+- `MiraBuilder.emailTemplates(t)` — stores per-collection/app-wide auth email overrides (`EmailTemplatesConfig`): `[builder.ts:MiraBuilder.emailTemplates]`
 - `MiraBuilder.build()` — requires all four required phantom tags; defaults telemetry, CORS, and migrations: `[builder.ts:MiraBuilder.build]`
 - `MiraAppConfig<Telemetry>` (type) — the fully-defaulted configuration consumed by `MiraApp`; `telemetry` is `Layer<Telemetry, never, PlatformServices>`: `[builder.ts:MiraAppConfig]`
 - `MiraApp<R, Telemetry>` — assembled application with `extend`, `buildServiceLayer`, `buildLayer`, `serve`, plus `_getConfig`/`_getExtras`/`_resolveAdminCollections` test accessors. `Telemetry` is the output of the `.telemetry(...)` layer, so `TelemetrySqlClient` is visible to `Context.get` from the built app layer: `[app.ts:MiraApp]`
@@ -26,10 +27,11 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - `MiraApp.serve(options?)` — starts the server through `MiraPlatform.runMain`, runs bootstrap and serve hooks: `[app.ts:MiraApp.serve]`
 - `ServeOptions` (type) — `port?`, `maxPortAttempts?`: `[app.ts:ServeOptions]`
 - `applyRulesToCollections(collections, rules)` — merges `RuleBinding`s onto collection schemas; exported: `[app.ts:applyRulesToCollections]`
+- `assertValidEmailTemplateCollections(collections, config)` — build-time validation that every `.emailTemplates({ collections })` key names a registered auth collection; exported: `[app.ts:assertValidEmailTemplateCollections]`
 - `RuleBinding` (type) — tagged `{ _tag: "RuleBinding", collectionName, ruleMap }`: `[define-rule.ts:RuleBinding]`
 - `ViewRuleMap` (type) — `list?`/`view?` rules only, for view collections: `[define-rule.ts:ViewRuleMap]`
 - `defineRule(collection, cb)` — overloaded per collection kind; auth overload adds system auth fields plus `selfId()`; base overload forbids `manage`: `[define-rule.ts:defineRule]`
-- `MiraPlugin` — plugin contract (interface + value with `define`, `fromLayer`, `isMiraPlugin`): `[plugin.ts:MiraPlugin]`
+- `MiraPlugin` — plugin contract (interface + value with `define`, `fromLayer`, `isMiraPlugin`); `routes` is either a static array or `(collections) => routes` over the final served set: `[plugin.ts:MiraPlugin]`
 - `RecordHook`, `RecordSuccessHook`, `ListHook`, `ListSuccessHook`, `CronHook`, `CronObserverHook` (types) — plugin hook shapes with optional `collections`/`crons` allowlists: `[plugin.ts:RecordHook]`
 - `onCollection(collections, handler)` / `onCollectionSuccess(collections, handler)` — hook constructors: `[plugin.ts:onCollection]`
 - `PlatformServices`, `DatabaseServices` (types) — service unions a preset must provide: `[types.ts:PlatformServices]`
@@ -39,7 +41,9 @@ Turns collection definitions plus platform/database/storage presets into a runna
 ## Invariants
 
 - `build()` is only callable once `platform`, `database`, `storage`, and `collections` are present, enforced by the phantom `Has` type; runtime re-checks via `isMiraAppConfig`: `[builder.ts:MiraBuilder.build]`
-- `build()` defaults `telemetry` to `ConsoleTelemetryLayer`, `cors` to `defaultCorsConfig`, `rules`/`crons` to `[]`, `migrations` to `{}`: `[builder.ts:MiraBuilder.build]`
+- `build()` defaults `telemetry` to `ConsoleTelemetryLayer`, `cors` to `defaultCorsConfig`, `rules`/`crons` to `[]`, `migrations` to `{}`, `emailTemplates` to `{}`: `[builder.ts:MiraBuilder.build]`
+- `buildServiceLayer` throws when an `emailTemplates.collections` key is unknown or names a non-auth collection: `[app.ts:assertValidEmailTemplateCollections]`
+- The mid layer supplies `Layer.succeed(EmailTemplates, makeEmailTemplates(config.emailTemplates ?? {}))`, so auth flows and plugin routes resolve the reference without adding a requirement: `[app.ts:MiraApp.buildServiceLayer]`
 - `rules()` throws on a duplicate `collectionName` binding: `[builder.ts:MiraBuilder.rules]`
 - `applyRulesToCollections` throws if a binding names a collection that is not in the provided list: `[app.ts:applyRulesToCollections]`
 - Collection set = config collections (with rules applied) → plugin `collections` → `adminCollections`, deduped by name with the first occurrence winning (app config precedence): `[app.ts:#getAllCollections]`
@@ -49,7 +53,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - Plugin layers are provided after the mid layer, so they may depend on `AppConfig`, `Repository`, and platform services: `[app.ts:MiraApp.buildServiceLayer]`
 - The mid layer includes the rate-limit store, limiter, key secret, and email policy config. The default store is SQLite; `.rateLimits({ store, emailPolicies })` overrides it. `hookedEmail` is given the same `mid` output so it sees the SQLite `RateLimiter`, not the in-memory default: `[app.ts:MiraApp.buildServiceLayer]`
 - Collection service layer stack is hook → cached → base; cron fibers are scoped to the service layer: `[app.ts:MiraApp.buildServiceLayer]`
-- `buildLayer` route list is built-in collection routes first, then plugin routes: `[app.ts:MiraApp.buildLayer]`
+- `buildLayer` route list is built-in collection routes first, then plugin routes; a function-form plugin `routes` is resolved with the final deduped collection list: `[app.ts:MiraApp.buildLayer]`
 - Middleware order is IP annotation wrapping CORS (`ipAnnotationMiddleware(makeCorsMiddleware(cors)(effect))`): `[app.ts:MiraApp.buildLayer]`
 - Effective port is `options.port ?? AppConfig.port`, and the bound port is reported back through `cfg.updateBoundPort`: `[app.ts:MiraApp.buildLayer]`
 - `cors()` rejects `credentials: true` combined with a wildcard/omitted origin list: `[builder.ts:MiraBuilder.cors]`

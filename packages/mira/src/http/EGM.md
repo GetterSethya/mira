@@ -60,7 +60,9 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `TokenStore` — `Context.Reference` with an in-memory default: `[token-store.ts:TokenStore]`
 - `TokenStoreLive` — SQLite-backed durable implementation: `[token-store.ts:TokenStoreLive]`
 - `inMemoryTokenStore`, `TokenStoreShape` (type): `[token-store.ts:inMemoryTokenStore]`
-- `makeSchemaRoute` — returns `name`, `kind`, `fields`, `required`, `indexes`, `viewQuery` per collection: `[schema.ts:makeSchemaRoute]`
+- `makeSchemaRoute(collections)` — returns `name`, `kind`, `fields`, `required`, `indexes`, `rules`, `ruleSummary`, `auth`, `viewQuery` per collection: `[schema.ts:makeSchemaRoute]`
+- `schemaSnapshot(collections)` — the pure payload builder used by the route (tests inspect it without a server): `[schema.ts:schemaSnapshot]`
+- `RuleSummary`, `RuleAction`, `RuleSummaryKind` (types) and `makeRuleSummary(kind, rules)` — display-only per-action `deny`/`public`/`expr` rows with referenced field names: `[rule-summary.ts:makeRuleSummary]`
 - Barrel re-exports (`FileTokenPayload`, `JwtPayload`, `AuthService`, `hashPassword`, `signFileToken`, `signJwt`, `verifyFileToken`, `verifyJwt`, `verifyPassword`, `CorsConfig`, `assertValidCorsConfig`, `defaultCorsConfig`, `makeCorsMiddleware`, `catchCollectionErrors`, `FileServeServices`, `makeFileServeRoute`, `makeFileTokenRoute`, `makeFileKey`, `processMultipartUpload`, `makeCollectionRouter`, `HttpServerFactory`, `telemetryLogsRoute`, `telemetrySpansRoute`): `[index.ts:makeCollectionRouter]`
 
 ## Invariants
@@ -105,6 +107,10 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - Node → Bun password migration is automatic; Bun → Node is not. The Node scrypt verifier fails closed on `$argon2id$...` rows, so `BunPortablePlatform` exists for databases that must move both ways: `[auth-node.ts:NodeAuthServiceLayer]` `[platforms/bun.ts:BunPortablePlatform]`
 - Telemetry logs cap `limit` at 1000 and page backward by `seqId`; spans clamp `limit` to 1–200, group by trace without a filter, and return all spans for `traceId`: `[telemetry-routes.ts:telemetryLogsRoute]`
 - Schema introspection deliberately preserves `x-system`/`x-hidden`/`x-generated`/`x-kind` annotations: `[schema.ts:makeSchemaRoute]`
+- Schema `indexes` is always an array (`[]` when none); the injected auth `email` unique index is marked `system: true` at projection time, not in the serialized schema: `[schema.ts:schemaIndexes]`
+- `rules` is the raw `x-rules` map or `null`; `ruleSummary` lists every action for the collection kind (auth adds `manage`, views only list/view) with `deny` for missing rules: `[schema.ts:schemaSnapshot]`, `[rule-summary.ts:makeRuleSummary]`
+- Rule summaries only walk expressions to collect `kind: "field"` names; they never execute or validate rules, and subquery conditions (other collections' fields) are excluded: `[rule-summary.ts:collectFields]`
+- Auth email flows render through `EmailTemplates.render(collection, id, input)` and own the `to` recipient themselves: `[auth-email.ts:requestPasswordReset]`
 
 ## Side Effects
 

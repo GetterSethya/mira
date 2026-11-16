@@ -150,6 +150,7 @@ Mira.builder()
 | `.database(d)` | yes | SQL backend. Currently `SqliteDatabase({ filename })`. |
 | `.storage(s)` | yes | File storage. `LocalFileStorage({ directory })` for local disk, or `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for S3-compatible buckets (AWS S3, MinIO, R2, LocalStack). |
 | `.email(e)` | no | Email transport. `SmtpEmail({ host, port, secure, auth, from })`. Without it, a no-op `EmailService` is used. |
+| `.emailTemplates(t)` | no | Auth email overrides: `{ defaults?, collections? }`. Resolution is per-collection → app-wide → built-in. |
 | `.collections(c)` | yes | Array of collection definitions. |
 | `.rules(r)` | no | Array of `RuleBinding` from `defineRule(collection, cb)`. Collections without rules deny all actions. |
 | `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
@@ -270,6 +271,36 @@ New auth routes:
 | `GET` | `/api/collections/:name/auth-config` | Public auth capability flags |
 
 Plugins can use `EmailService` directly and observe sends with `onEmailSend`, `onEmailSent`, and `onEmailError`.
+
+#### Email templates
+
+Override the six auth emails with `.emailTemplates()`:
+
+```typescript
+.emailTemplates({
+  defaults: {
+    loginOtp: ({ appName, code, expiresMinutes }) => ({
+      subject: `Your ${appName} login code`,
+      text: `Your code is ${code}. It expires in ${expiresMinutes} minutes.`
+    })
+  },
+  collections: {
+    users: {
+      verification: ({ code }) => ({
+        subject: "Confirm your address",
+        text: `Your code is ${code}.`,
+        html: `<p>Your code is <strong>${code}</strong>.</p>`
+      })
+    }
+  }
+})
+```
+
+Template ids are `verification`, `loginOtp`, `passwordless`, `passwordReset`, `emailChange`, and `loginAlert`. A renderer receives the flow's typed input and returns `{ subject, text, html?, replyTo?, headers? }`; the recipient (`to`) stays owned by the auth flow, so an override cannot retarget mail. Resolution is per-collection override → `defaults` → built-in, and untouched templates keep the default output exactly.
+
+`collections` keys must be registered auth collections — an unknown or non-auth key throws at build time. Custom HTML is trusted application code: use `escapeHtml(value)` for interpolated user data. Rendered subjects are stripped of CR/LF so a custom subject cannot inject mail headers.
+
+The dashboard's collection schema dialog has a read-only email preview (`GET /_dashboard/api/email/templates?collection=...`) that renders all six effective templates with sentinel sample values and a `source` label. It works while email is disabled and never returns live links or SMTP configuration.
 
 For local testing, Mailpit is enough — no paid provider is required:
 

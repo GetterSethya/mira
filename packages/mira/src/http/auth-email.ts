@@ -35,20 +35,13 @@ import { Dialect } from "@/dialect/dialect.js"
 import {
   EmailNotConfiguredError,
   EmailSendError,
-  EmailService
+  EmailService,
+  EmailTemplates
 } from "@/email/index.js"
 import type {
   EmailMessage,
   EmailSendOptions,
   EmailServiceShape
-} from "@/email/index.js"
-import {
-  emailChangeEmail,
-  loginAlertEmail,
-  loginOtpEmail,
-  passwordlessOtpEmail,
-  passwordResetEmail,
-  verificationOtpEmail
 } from "@/email/index.js"
 import {
   EmailRateLimitConfig,
@@ -331,12 +324,16 @@ export const requestPasswordReset = (
     const resetUrl = description.passwordResetUrl
       .replaceAll("{{token}}", encodeURIComponent(built.secret))
       .replaceAll("{{collection}}", encodeURIComponent(collection.name))
-    const message = passwordResetEmail({
-      appName: yield* appName,
-      email: emailAddress,
-      resetUrl,
-      expiresMinutes: Math.round(PASSWORD_RESET_TTL_MS / 60_000)
-    })
+    const templates = yield* EmailTemplates
+    const message = {
+      to: emailAddress,
+      ...templates.render(collection.name, "passwordReset", {
+        appName: yield* appName,
+        email: emailAddress,
+        resetUrl,
+        expiresMinutes: Math.round(PASSWORD_RESET_TTL_MS / 60_000)
+      })
+    }
     yield* detachSend(message, {
       purpose: "password_reset",
       collection: collection.name,
@@ -406,12 +403,16 @@ export const requestEmailVerification = (
     const userId = String(user["id"])
     const built = yield* buildChallenge(collection, userId, "verify_email")
     yield* storeChallenge(built.record)
-    const message = verificationOtpEmail({
-      appName: yield* appName,
-      email: emailAddress,
-      code: built.secret,
-      expiresMinutes: Math.round(VERIFY_EMAIL_TTL_MS / 60_000)
-    })
+    const templates = yield* EmailTemplates
+    const message = {
+      to: emailAddress,
+      ...templates.render(collection.name, "verification", {
+        appName: yield* appName,
+        email: emailAddress,
+        code: built.secret,
+        expiresMinutes: Math.round(VERIFY_EMAIL_TTL_MS / 60_000)
+      })
+    }
     yield* detachSend(message, { purpose: "verify_email", collection: collection.name, userId })
     return {
       challengeId: built.record.id,
@@ -524,13 +525,17 @@ export const requestEmailChange = (
     const confirmUrl = description.emailChangeUrl
       .replaceAll("{{token}}", encodeURIComponent(built.secret))
       .replaceAll("{{collection}}", encodeURIComponent(collection.name))
-    const message = emailChangeEmail({
-      appName: yield* appName,
-      currentEmail,
-      newEmail,
-      confirmUrl,
-      expiresMinutes: Math.round(CHANGE_EMAIL_TTL_MS / 60_000)
-    })
+    const templates = yield* EmailTemplates
+    const message = {
+      to: newEmail,
+      ...templates.render(collection.name, "emailChange", {
+        appName: yield* appName,
+        currentEmail,
+        newEmail,
+        confirmUrl,
+        expiresMinutes: Math.round(CHANGE_EMAIL_TTL_MS / 60_000)
+      })
+    }
     yield* detachSend(message, { purpose: "change_email", collection: collection.name, userId })
     return { requested: true as const }
   })
@@ -626,12 +631,16 @@ export const requestPasswordlessLogin = (
     const userId = String(user["id"])
     const built = yield* buildChallenge(collection, userId, "passwordless")
     yield* storeChallenge(built.record)
-    const message = passwordlessOtpEmail({
-      appName: yield* appName,
-      email: emailAddress,
-      code: built.secret,
-      expiresMinutes: Math.round(OTP_TTL_MS / 60_000)
-    })
+    const templates = yield* EmailTemplates
+    const message = {
+      to: emailAddress,
+      ...templates.render(collection.name, "passwordless", {
+        appName: yield* appName,
+        email: emailAddress,
+        code: built.secret,
+        expiresMinutes: Math.round(OTP_TTL_MS / 60_000)
+      })
+    }
     yield* detachSend(message, { purpose: "passwordless_otp", collection: collection.name, userId })
     return {
       challengeId: built.record.id,
@@ -704,12 +713,16 @@ export const issueLoginOtp = (
     const userId = String(user["id"])
     yield* consumeEmailRequestLimits(emailAddress, ip, "login_otp")
     const built = yield* buildChallenge(collection, userId, "login_otp")
-    const message = loginOtpEmail({
-      appName: yield* appName,
-      email: emailAddress,
-      code: built.secret,
-      expiresMinutes: Math.round(OTP_TTL_MS / 60_000)
-    })
+    const templates = yield* EmailTemplates
+    const message = {
+      to: emailAddress,
+      ...templates.render(collection.name, "loginOtp", {
+        appName: yield* appName,
+        email: emailAddress,
+        code: built.secret,
+        expiresMinutes: Math.round(OTP_TTL_MS / 60_000)
+      })
+    }
     yield* sendEmail(message, { purpose: "login_otp", collection: collection.name, userId })
     yield* storeChallenge(built.record)
     return built.record
@@ -751,14 +764,18 @@ export const sendLoginAlert = (
     const emailAddress = record["email"]
     if (typeof emailAddress !== "string") return
     const name = yield* appName
-    const message = loginAlertEmail({
-      appName: name,
-      collection: collection.name,
-      email: emailAddress,
-      ip: clientIp(req) ?? "unknown",
-      userAgent: userAgent(req),
-      time: new Date().toISOString()
-    })
+    const templates = yield* EmailTemplates
+    const message = {
+      to: emailAddress,
+      ...templates.render(collection.name, "loginAlert", {
+        appName: name,
+        collection: collection.name,
+        email: emailAddress,
+        ip: clientIp(req) ?? "unknown",
+        userAgent: userAgent(req),
+        time: new Date().toISOString()
+      })
+    }
     yield* Effect.forkDetach(
       email.send(message, {
         purpose: "login_alert",

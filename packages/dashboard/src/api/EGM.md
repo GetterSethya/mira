@@ -8,8 +8,9 @@ them register routes themselves — the route table lives in the parent module
 ([../EGM.md](../EGM.md)). All handlers resolve their dependencies (`CollectionService`,
 `CronService`, `AppConfig`, `SqlClient`) from the Effect context.
 
-The directory covers five concerns: the `_superadmin` JWT guard, first-boot status and registration,
-authenticated superadmin CRUD, `_config` read/write with key allow-lists, and cron status / run-now.
+The directory covers six concerns: the `_superadmin` JWT guard, first-boot status and registration,
+authenticated superadmin CRUD, `_config` read/write with key allow-lists, cron status / run-now, and
+email diagnostics plus the read-only template preview.
 
 ## Interface
 
@@ -42,6 +43,12 @@ authenticated superadmin CRUD, `_config` read/write with key allow-lists, and cr
 - `cronsRoute` — `GET /_dashboard/api/crons`; returns every cron's state with ISO dates and stringified errors. [crons.ts:cronsRoute]
 - `cronRunNowRoute` — `POST /_dashboard/api/crons/:name/run`; triggers `runNow(name)`, 204 on success, 404 on `CronNotFoundError`. [crons.ts:cronRunNowRoute]
 
+### Email
+
+- `emailTestRoute` — `POST /_dashboard/api/email/test`; sends a test message only to the authenticated superadmin's own address, under the `email:dashboard:test` budget. [email.ts:emailTestRoute]
+- `makeEmailTemplatesRoute(collections)` — `GET /_dashboard/api/email/templates?collection=<name>`; 400 without `collection`, 404 when the name is unknown or non-auth, otherwise `{ collection, transportEnabled, templates }` from `EmailTemplates.preview`. [email-templates.ts:makeEmailTemplatesRoute]
+- `authCollectionNames(collections)` — the auth-name set used for that 404 decision. [email-templates.ts:authCollectionNames]
+
 ### Route table
 
 Routes are registered in the parent router; paths and methods below are the contract.
@@ -57,6 +64,8 @@ Routes are registered in the parent router; paths and methods below are the cont
 | PUT | `/_dashboard/api/config` | `configUpdateRoute` (auth) | [../router.ts:makeDashboardRouter] ([../EGM.md](../EGM.md)) |
 | GET | `/_dashboard/api/crons` | `cronsRoute` (auth) | [../router.ts:makeDashboardRouter] ([../EGM.md](../EGM.md)) |
 | POST | `/_dashboard/api/crons/:name/run` | `cronRunNowRoute` (auth) | [../router.ts:makeDashboardRouter] ([../EGM.md](../EGM.md)) |
+| POST | `/_dashboard/api/email/test` | `emailTestRoute` (auth) | [../router.ts:makeDashboardRouter] ([../EGM.md](../EGM.md)) |
+| GET | `/_dashboard/api/email/templates` | `makeEmailTemplatesRoute(collections)` (auth) | [../router.ts:makeDashboardRouter] ([../EGM.md](../EGM.md)) |
 
 ## Invariants
 
@@ -79,6 +88,9 @@ Routes are registered in the parent router; paths and methods below are the cont
 - `SECRET_KEYS` (`jwt_secret`, `s3_access_key`, `s3_secret`) tells the UI which values to mask. [config.ts:SECRET_KEYS]
 - `configUpdateRoute` rejects the whole request with `400 not_editable` (listing offending keys) if any key is outside `EDITABLE_KEYS`. [config.ts:configUpdateRoute]
 - Config writes are upserts into `_config` (`ON CONFLICT(key) DO UPDATE`), so a new value takes effect only after restart. [config.ts:configUpdateRoute]
+- The template preview resolves `EmailTemplates` and `AppConfig` directly; it never calls `EmailService.describe()` or `send()`, so it works with the transport disabled and leaks no SMTP settings. [email-templates.ts:makeEmailTemplatesRoute]
+- Preview rows use sentinel inputs only (`user@example.invalid`, `203.0.113.10`, sample tokens, a fixed timestamp) and contain no `to`, live reset token, or live link. [email-templates.ts:makeEmailTemplatesRoute]
+- `transportEnabled` is `EmailService.enabled`; the UI uses it to explain that previews exist but mail cannot be sent. [email-templates.ts:makeEmailTemplatesRoute]
 
 ## Side Effects
 
@@ -89,6 +101,8 @@ Routes are registered in the parent router; paths and methods below are the cont
 - Deletes superadmin records. [superadmin.ts:deleteSuperadminRoute]
 - Reads the `_config` table with `SqlSchema.findAll` and writes it with `INSERT … ON CONFLICT` upserts. [config.ts:readRows], [config.ts:configUpdateRoute]
 - Queries and triggers cron runs via `CronService.getAll` / `CronService.runNow`. [crons.ts:cronsRoute], [crons.ts:cronRunNowRoute]
+- Sends a test email through `EmailService.send` only to the authenticated superadmin. [email.ts:emailTestRoute]
+- Reads `EmailTemplates`, `AppConfig`, and `EmailService.enabled` for the template preview; no SMTP call. [email-templates.ts:makeEmailTemplatesRoute]
 - Returns HTTP responses (JSON or empty) from the handlers. [bootstrap-status.ts:bootstrapStatusRoute], [config.ts:configRoute], [crons.ts:cronRunNowRoute], [register.ts:registerRoute], [superadmin.ts:deleteSuperadminRoute]
 - No logging calls are made in this directory.
 

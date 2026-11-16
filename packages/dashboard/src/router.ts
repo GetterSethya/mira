@@ -18,6 +18,7 @@ import { createSuperadminRoute, listSuperadminsRoute, deleteSuperadminRoute } fr
 import { configRoute, configUpdateRoute } from "./api/config.js"
 import { cronsRoute, cronRunNowRoute } from "./api/crons.js"
 import { emailTestRoute } from "./api/email.js"
+import { makeEmailTemplatesRoute } from "./api/email-templates.js"
 import { DashboardUnauthorizedError, requireDashboardAuth } from "./api/auth.js"
 
 function makeContentType(ext: string): string {
@@ -133,7 +134,7 @@ type DashboardRouteServices =
   | RateLimitKeySecret
 
 export function makeDashboardRouter(
-  _collections: ReadonlyArray<AnyCollectionDef>
+  collections: ReadonlyArray<AnyCollectionDef>
 ): ReadonlyArray<HttpRouter.Route<never, DashboardRouteServices>> {
   return [
     ...makeDashboardSpaRoute(),
@@ -146,6 +147,11 @@ export function makeDashboardRouter(
     HttpRouter.route("PUT", "/_dashboard/api/config", wrapAuthRoute("config_update", configUpdateRoute)),
     HttpRouter.route("GET", "/_dashboard/api/crons", wrapAuthRoute("crons_list", cronsRoute)),
     HttpRouter.route("POST", "/_dashboard/api/crons/:name/run", wrapAuthRoute("crons_run", cronRunNowRoute)),
-    HttpRouter.route("POST", "/_dashboard/api/email/test", wrapAuthRoute("email_test", emailTestRoute))
+    HttpRouter.route("POST", "/_dashboard/api/email/test", wrapAuthRoute("email_test", emailTestRoute)),
+    HttpRouter.route(
+      "GET",
+      "/_dashboard/api/email/templates",
+      wrapAuthRoute("email_templates", makeEmailTemplatesRoute(collections))
+    )
   ]
 }

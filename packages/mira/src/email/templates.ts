@@ -1,6 +1,8 @@
+import { Context } from "effect"
+
 import type { EmailMessage } from "./types.js"
 
-const escapeHtml = (value: string) =>
+export const escapeHtml = (value: string) =>
   value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -210,3 +212,235 @@ export const passwordlessOtpEmail = (input: LoginOtpEmailInput): EmailMessage =>
     html: layout(input.appName, subject, body)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Collection-aware templates
+// ---------------------------------------------------------------------------
+
+/** The six built-in auth email templates. */
+export type EmailTemplateId =
+  | "verification"
+  | "loginOtp"
+  | "passwordless"
+  | "passwordReset"
+  | "emailChange"
+  | "loginAlert"
+
+/** Input shape per template, reusing the built-in builders' input interfaces. */
+export type EmailTemplateInputs = {
+  readonly verification: VerificationOtpEmailInput
+  readonly loginOtp: LoginOtpEmailInput
+  readonly passwordless: LoginOtpEmailInput
+  readonly passwordReset: PasswordResetEmailInput
+  readonly emailChange: EmailChangeEmailInput
+  readonly loginAlert: LoginAlertEmailInput
+}
+
+/** A rendered message without the recipient — the flow owns `to`. */
+export type EmailTemplateContent = Omit<EmailMessage, "to">
+
+/**
+ * A renderer for a single template. Overrides are trusted application code
+ * (`(input) => content`), not mustache strings.
+ */
+export type EmailTemplateOverrides = {
+  readonly [K in EmailTemplateId]?: (input: EmailTemplateInputs[K]) => EmailTemplateContent
+}
+
+/**
+ * Template overrides: `defaults` apply app-wide, `collections` overrides apply
+ * to one registered auth collection. Resolution order is collection → global
+ * default → built-in.
+ */
+export interface EmailTemplatesConfig {
+  readonly defaults?: EmailTemplateOverrides
+  readonly collections?: Readonly<Record<string, EmailTemplateOverrides>>
+}
+
+/** Where the effective template came from. */
+export type EmailTemplateSource = "builtin" | "global" | "collection"
+
+/** Read-only preview of one effective template, safe to send to the dashboard. */
+export interface EmailTemplatePreview {
+  readonly id: EmailTemplateId
+  readonly label: string
+  readonly source: EmailTemplateSource
+  readonly subject: string
+  readonly text: string
+  readonly html: string | null
+}
+
+export interface EmailTemplatesShape {
+  render<K extends EmailTemplateId>(
+    collection: string,
+    id: K,
+    input: EmailTemplateInputs[K]
+  ): EmailTemplateContent
+  preview(collection: string, appName: string): ReadonlyArray<EmailTemplatePreview>
+  source(collection: string, id: EmailTemplateId): EmailTemplateSource
+}
+
+type RequiredTemplateRenderers = {
+  readonly [K in EmailTemplateId]: (input: EmailTemplateInputs[K]) => EmailTemplateContent
+}
+
+/** Strip CR/LF so user-supplied subjects cannot inject mail headers. */
+export const sanitizeEmailSubject = (subject: string) =>
+  subject.replaceAll("\r", " ").replaceAll("\n", " ").trim()
+
+/** Build an `EmailMessage` without its `to` field. */
+const withoutRecipient = (message: EmailMessage): EmailTemplateContent => ({
+  subject: message.subject,
+  text: message.text,
+  ...(message.html === undefined ? {} : { html: message.html }),
+  ...(message.replyTo === undefined ? {} : { replyTo: message.replyTo }),
+  ...(message.headers === undefined ? {} : { headers: message.headers })
+})
+
+export const EMAIL_TEMPLATE_IDS: ReadonlyArray<EmailTemplateId> = [
+  "verification",
+  "loginOtp",
+  "passwordless",
+  "passwordReset",
+  "emailChange",
+  "loginAlert"
+]
+
+const EMAIL_TEMPLATE_LABELS: { readonly [K in EmailTemplateId]: string } = {
+  verification: "Verification OTP",
+  loginOtp: "Login OTP",
+  passwordless: "Passwordless OTP",
+  passwordReset: "Password reset",
+  emailChange: "Email change",
+  loginAlert: "Login alert"
+}
+
+/**
+ * The built-in renderers, minus the recipient. These are the exact messages
+ * `auth-email.ts` sent before the template service existed.
+ */
+const BUILTIN_TEMPLATES: RequiredTemplateRenderers = {
+  verification: (input) => withoutRecipient(verificationOtpEmail(input)),
+  loginOtp: (input) => withoutRecipient(loginOtpEmail(input)),
+  passwordless: (input) => withoutRecipient(passwordlessOtpEmail(input)),
+  passwordReset: (input) => withoutRecipient(passwordResetEmail(input)),
+  emailChange: (input) => withoutRecipient(emailChangeEmail(input)),
+  loginAlert: (input) => withoutRecipient(loginAlertEmail(input))
+}
+
+const overrideFor = <K extends EmailTemplateId>(
+  config: EmailTemplatesConfig,
+  collection: string,
+  id: K
+): ((input: EmailTemplateInputs[K]) => EmailTemplateContent) | undefined => {
+  const perCollection = config.collections?.[collection]
+  const fromCollection = perCollection?.[id]
+  if (fromCollection !== undefined) return fromCollection
+  return config.defaults?.[id]
+}
+
+const sourceFor = <K extends EmailTemplateId>(
+  config: EmailTemplatesConfig,
+  collection: string,
+  id: K
+): EmailTemplateSource => {
+  if (config.collections?.[collection]?.[id] !== undefined) return "collection"
+  if (config.defaults?.[id] !== undefined) return "global"
+  return "builtin"
+}
+
+const PREVIEW_EMAIL = "user@example.invalid"
+const PREVIEW_NEW_EMAIL = "new-user@example.invalid"
+const PREVIEW_TOKEN = "sample-token-not-valid"
+const PREVIEW_IP = "203.0.113.10"
+const PREVIEW_TIME = "2026-01-01T00:00:00.000Z"
+
+const previewUrl = (collection: string, path: string) =>
+  `https://example.invalid/${path}?token=${PREVIEW_TOKEN}&collection=${encodeURIComponent(collection)}`
+
+/**
+ * Pure template resolver. Defaults to the six built-ins; overrides are looked
+ * up per collection first, then app-wide.
+ */
+export const makeEmailTemplates = (config: EmailTemplatesConfig = {}): EmailTemplatesShape => {
+  const render = <K extends EmailTemplateId>(
+    collection: string,
+    id: K,
+    input: EmailTemplateInputs[K]
+  ): EmailTemplateContent => {
+    const override = overrideFor(config, collection, id)
+    const content = override === undefined ? BUILTIN_TEMPLATES[id](input) : override(input)
+    return { ...content, subject: sanitizeEmailSubject(content.subject) }
+  }
+
+  const source = (collection: string, id: EmailTemplateId) => sourceFor(config, collection, id)
+
+  const previewOf = <K extends EmailTemplateId>(
+    id: K,
+    collection: string,
+    appName: string,
+    input: EmailTemplateInputs[K]
+  ): EmailTemplatePreview => {
+    const content = render(collection, id, input)
+    return {
+      id,
+      label: EMAIL_TEMPLATE_LABELS[id],
+      source: sourceFor(config, collection, id),
+      subject: content.subject,
+      text: content.text,
+      html: content.html ?? null
+    }
+  }
+
+  const preview = (collection: string, appName: string): ReadonlyArray<EmailTemplatePreview> => [
+    previewOf("verification", collection, appName, {
+      appName,
+      email: PREVIEW_EMAIL,
+      code: "123456",
+      expiresMinutes: 10
+    }),
+    previewOf("loginOtp", collection, appName, {
+      appName,
+      email: PREVIEW_EMAIL,
+      code: "123456",
+      expiresMinutes: 10
+    }),
+    previewOf("passwordless", collection, appName, {
+      appName,
+      email: PREVIEW_EMAIL,
+      code: "123456",
+      expiresMinutes: 10
+    }),
+    previewOf("passwordReset", collection, appName, {
+      appName,
+      email: PREVIEW_EMAIL,
+      resetUrl: previewUrl(collection, "reset-password"),
+      expiresMinutes: 30
+    }),
+    previewOf("emailChange", collection, appName, {
+      appName,
+      currentEmail: PREVIEW_EMAIL,
+      newEmail: PREVIEW_NEW_EMAIL,
+      confirmUrl: previewUrl(collection, "email-change"),
+      expiresMinutes: 30
+    }),
+    previewOf("loginAlert", collection, appName, {
+      appName,
+      collection,
+      email: PREVIEW_EMAIL,
+      ip: PREVIEW_IP,
+      userAgent: "Mira preview (sample)",
+      time: PREVIEW_TIME
+    })
+  ]
+
+  return { render, preview, source }
+}
+
+/**
+ * Template service tag. The default value is the six built-ins, so callers and
+ * plugin routes never have to add a layer requirement.
+ */
+export const EmailTemplates = Context.Reference<EmailTemplatesShape>("mira/EmailTemplates", {
+  defaultValue: () => makeEmailTemplates()
+})

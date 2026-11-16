@@ -34,7 +34,7 @@ export type {
   MiraBatchOperationConfig
 } from "@/collection-service/mutation-batcher.js"
 export type { MiraApp, ServeOptions } from "./app.js"
-export { applyRulesToCollections } from "./app.js"
+export { applyRulesToCollections, assertValidEmailTemplateCollections } from "./app.js"
 export type { MiraAppConfig } from "./builder.js"
 export { MiraBuilder } from "./builder.js"
 export type { RuleBinding } from "./define-rule.js"

@@ -1,4 +1,4 @@
-import type { AuthCollectionOptions, FilterNode } from "@gettersethya/mira-collection"
+import type { AuthCollectionOptions, FilterNode, RuleMap } from "@gettersethya/mira-collection"
 import { HttpClientRequest as HCR } from "effect/http"
 
 import type { ClientHandler, ExecuteFn } from "./handler.js"
@@ -27,14 +27,35 @@ export type ApiFieldSchema = {
   "x-mimeTypes"?: ReadonlyArray<string>
 }
 
+export type ApiRuleAction = "list" | "view" | "create" | "update" | "delete" | "manage"
+
+/** Display-only verdict for one rule action, computed by the server. */
+export type ApiRuleSummary = {
+  action: ApiRuleAction
+  kind: "deny" | "public" | "expr"
+  /** Record fields referenced by the expression; empty for deny/public. */
+  fields: Array<string>
+}
+
+/** One normalized index from `x-indexes`. */
+export type ApiIndexSchema = {
+  fields: Array<string>
+  unique: boolean
+  /** True for indexes Mira injects (the auth email unique index). */
+  system?: boolean
+}
+
 export type ApiCollectionSchema = {
   name: string
   kind: "base" | "auth" | "view"
   fields: Record<string, ApiFieldSchema>
   required?: Array<string>
-  indexes?: Array<unknown>
+  indexes?: Array<ApiIndexSchema>
   auth?: AuthCollectionOptions
-  rules?: unknown
+  /** Raw `x-rules`, display-only; `null` when no rules are configured. */
+  rules?: RuleMap | null
+  /** One row per action; missing rules are reported as `deny`. */
+  ruleSummary?: Array<ApiRuleSummary>
   viewQuery?: string
 }
 

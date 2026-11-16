@@ -13,7 +13,7 @@ import { AppConfig } from "@/config/index.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
-import { EmailService } from "@/email/index.js"
+import { EmailService, EmailTemplates, makeEmailTemplates } from "@/email/index.js"
 import type { EmailMessage, EmailServiceShape } from "@/email/index.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
@@ -258,6 +258,37 @@ describe("auth email HTTP flows", () => {
       expect(verifyRes.status).toBe(200)
     }).pipe(Effect.provide(testLayer))
   )
+
+  it.effect("honours a per-collection template override in the sent message", () => {
+    const templates = Layer.succeed(
+      EmailTemplates,
+      makeEmailTemplates({
+        collections: {
+          users: {
+            verification: ({ code }) => ({
+              subject: "Custom users verification",
+              text: `Custom code ${code}`
+            })
+          }
+        }
+      })
+    )
+    return Effect.gen(function* () {
+      yield* setupTables
+      yield* serve
+      const createRes = yield* post("/api/collections/users", {
+        email: "custom@example.com",
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "Custom"
+      })
+      expect(createRes.status).toBe(201)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.to).toBe("custom@example.com")
+      expect(sent[0]?.subject).toBe("Custom users verification")
+      expect(sent[0]?.text).toContain("Custom code")
+    }).pipe(Effect.provide(Layer.merge(testLayer, templates)))
+  })
 
   it.effect("runs password reset and invalidates the old password", () =>
     Effect.gen(function* () {
