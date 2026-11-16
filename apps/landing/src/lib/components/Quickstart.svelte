@@ -1,6 +1,6 @@
 <script lang="ts">
   import { siReact, siSvelte, siTypescript, siVuedotjs } from 'simple-icons';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { reveal } from '$lib/reveal';
   import { quickstartGroups } from '$lib/quickstart-samples';
   import type { QuickstartSample } from '$lib/quickstart-samples';
@@ -13,8 +13,9 @@
   let expanded = $state(false);
   let copied = $state(false);
   let copyTimer: number | undefined;
-  let explorerElement = $state<HTMLDivElement>();
+  let dialogElement = $state<HTMLDialogElement>();
   let editorScroll = $state<HTMLDivElement>();
+  let pointerOnBackdrop = false;
 
   const installSample = $derived(samples.find((sample) => sample.key === 'install'));
   const restSample = $derived(samples.find((sample) => sample.key === 'rest'));
@@ -82,13 +83,10 @@
   $effect(() => {
     if (!expanded) return;
 
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    queueMicrotask(() => explorerElement?.focus());
-
-    return () => {
-      document.body.style.overflow = previous;
-    };
+    const dialog = dialogElement;
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    requestAnimationFrame(() => editorScroll?.focus());
   });
 
   onDestroy(() => {
@@ -113,8 +111,12 @@
     if (index < 0) return;
 
     let nextIndex: number | undefined;
-    if (event.key === 'ArrowDown') nextIndex = (index + 1) % files.length;
-    if (event.key === 'ArrowUp') nextIndex = (index - 1 + files.length) % files.length;
+    if (event.key === 'ArrowDown') {
+      nextIndex = index + 1 < files.length ? index + 1 : undefined;
+    }
+    if (event.key === 'ArrowUp') {
+      nextIndex = index > 0 ? index - 1 : undefined;
+    }
     if (event.key === 'Home') nextIndex = 0;
     if (event.key === 'End') nextIndex = files.length - 1;
     if (nextIndex === undefined) return;
@@ -132,6 +134,8 @@
     const sample = activeFile;
     if (!sample) return;
 
+    let copiedOk = true;
+
     try {
       await navigator.clipboard.writeText(sample.code);
     } catch {
@@ -142,9 +146,11 @@
       fallback.style.opacity = '0';
       document.body.appendChild(fallback);
       fallback.select();
-      document.execCommand('copy');
+      copiedOk = document.execCommand('copy');
       fallback.remove();
     }
+
+    if (!copiedOk) return;
 
     copied = true;
     clearCopyTimer();
@@ -154,58 +160,180 @@
     }, 1600);
   }
 
-  function closeExpanded() {
-    expanded = false;
-    queueMicrotask(() => document.getElementById('explorer-expand')?.focus());
+  async function focusExpand() {
+    await tick();
+    document.getElementById('explorer-expand')?.focus();
   }
 
-  function onWindowKeydown(event: KeyboardEvent) {
-    if (!expanded) return;
+  function closeExpanded() {
+    if (dialogElement?.open) dialogElement.close();
+    expanded = false;
+    void focusExpand();
+  }
 
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeExpanded();
-      return;
-    }
+  function onDialogClose() {
+    expanded = false;
+    void focusExpand();
+  }
 
-    if (event.key !== 'Tab' || !explorerElement) return;
+  function onDialogPointerDown(event: PointerEvent) {
+    pointerOnBackdrop = event.target === dialogElement;
+  }
 
-    const focusables = Array.from(
-      explorerElement.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      )
-    ).filter(
-      (element) =>
-        element.tabIndex >= 0 &&
-        !element.hasAttribute('disabled') &&
-        element.getClientRects().length > 0
-    );
-
-    const first = focusables[0];
-    const last = focusables.at(-1);
-    if (!first || !last) {
-      event.preventDefault();
-      explorerElement.focus();
-      return;
-    }
-
-    const current = document.activeElement;
-    if (event.shiftKey && (current === first || current === explorerElement)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (current === last || current === explorerElement)) {
-      event.preventDefault();
-      first.focus();
-    }
+  function onDialogClick(event: MouseEvent) {
+    if (event.target === dialogElement && pointerOnBackdrop) closeExpanded();
+    pointerOnBackdrop = false;
   }
 </script>
 
-<svelte:window onkeydown={onWindowKeydown} />
+{#snippet explorerPanel(file: Sample & { iconClass: string }, inDialog: boolean)}
+  <div class="explorer-chrome">
+    <div class="explorer-chrome__left">
+      <span class="explorer-tab">
+        <svg class="explorer-tab__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
+        </svg>
+        Code Explorer
+      </span>
+    </div>
+
+    <div class="explorer-actions">
+      <button
+        type="button"
+        class="explorer-action"
+        class:is-copied={copied}
+        aria-label={`Copy ${file.label}`}
+        title="Copy active file"
+        onclick={copyActive}
+      >
+        {#if copied}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m5 12 4 4L19 6" />
+          </svg>
+        {:else}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="8" y="8" width="11" height="11" rx="1.5" />
+            <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+          </svg>
+        {/if}
+      </button>
+
+      <button
+        id="explorer-expand"
+        type="button"
+        class="explorer-action"
+        aria-label={inDialog ? 'Close code explorer' : 'Expand code explorer'}
+        aria-expanded={inDialog ? undefined : false}
+        aria-haspopup={inDialog ? undefined : 'dialog'}
+        aria-controls={inDialog ? undefined : 'explorer-body'}
+        title={inDialog ? 'Close code explorer' : 'Expand code explorer'}
+        onclick={() => {
+          if (inDialog) closeExpanded();
+          else expanded = true;
+        }}
+      >
+        {#if inDialog}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        {:else}
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
+          </svg>
+        {/if}
+      </button>
+    </div>
+
+    <span class="sr-only" role="status" aria-live="polite">
+      {copied ? 'Copied to clipboard' : ''}
+    </span>
+  </div>
+
+  <div class="explorer-body" id="explorer-body">
+    <label class="mobile-picker">
+      <span class="sr-only">Quickstart file</span>
+      <select
+        aria-label="Quickstart file"
+        value={file.key}
+        onchange={(event) => select(event.currentTarget.value)}
+      >
+        {#each groups as group (group.id)}
+          <optgroup label={group.label}>
+            {#each group.files as item (item.key)}
+              <option value={item.key}>{item.label}</option>
+            {/each}
+          </optgroup>
+        {/each}
+      </select>
+    </label>
+
+    <div class="explorer-tree" role="listbox" aria-label="Quickstart files">
+      {#each groups as group (group.id)}
+        <div class="tree-group" role="group" aria-labelledby={`explorer-group-${group.id}`}>
+          <p id={`explorer-group-${group.id}`} class="tree-group__label" role="presentation">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
+            </svg>
+            {group.label}
+          </p>
+
+          {#each group.files as item (item.key)}
+            <button
+              id={fileId(item.key)}
+              type="button"
+              class="tree-file"
+              role="option"
+              aria-selected={file.key === item.key}
+              tabindex={file.key === item.key ? 0 : -1}
+              onclick={() => select(item.key)}
+              onkeydown={(event) => onFileKeyDown(event, item.key)}
+            >
+              <span class="file-icon {item.iconClass}">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d={iconFor(item.key).path} />
+                </svg>
+              </span>
+              <span class="tree-file__name">{item.label}</span>
+            </button>
+          {/each}
+        </div>
+      {/each}
+    </div>
+
+    <div class="explorer-main">
+      <div class="explorer-breadcrumb">
+        <span>{activeGroup?.label ?? ''}</span>
+        <span class="explorer-breadcrumb__sep" aria-hidden="true">/</span>
+        <span class="explorer-breadcrumb__file">{file.label}</span>
+      </div>
+
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class="editor-scroll"
+        id="explorer-code"
+        bind:this={editorScroll}
+        tabindex="0"
+        role="region"
+        aria-label={`${file.label} code, scroll to read`}
+      >
+        <div class="code-block editor-code">{@html file.html}</div>
+      </div>
+
+      <div class="explorer-statusbar">
+        <span class="explorer-statusbar__lang">{languageLabel(file.lang)}</span>
+        <span class="explorer-statusbar__meta">
+          <span>UTF-8</span>
+          <span>LF</span>
+          <span>Spaces: 2</span>
+        </span>
+      </div>
+    </div>
+  </div>
+{/snippet}
 
 <section id="quickstart" class="section">
   <div class="container">
     <div class="section-head" use:reveal>
-      <p class="eyebrow">Install to client</p>
       <h2>The server, then the client.</h2>
       <p class="lede">
         Install the packages, define collections, serve them, then call the API from React,
@@ -241,146 +369,22 @@
       {#if activeFile}
         <div class="block block--explorer">
           {#if expanded}
-            <button
-              class="explorer-backdrop"
-              type="button"
-              tabindex="-1"
-              aria-label="Close expanded code explorer"
-              onclick={closeExpanded}
-            ></button>
+            <div class="explorer-placeholder" aria-hidden="true"></div>
+            <dialog
+              class="explorer-dialog"
+              bind:this={dialogElement}
+              aria-label="Code explorer"
+              onclose={onDialogClose}
+              onpointerdown={onDialogPointerDown}
+              onclick={onDialogClick}
+            >
+              {@render explorerPanel(activeFile, true)}
+            </dialog>
+          {:else}
+            <div class="explorer" use:reveal={90} role="region" aria-label="Code explorer">
+              {@render explorerPanel(activeFile, false)}
+            </div>
           {/if}
-
-          <div
-            class="explorer"
-            class:is-expanded={expanded}
-            use:reveal={90}
-            bind:this={explorerElement}
-            tabindex="-1"
-            role={expanded ? 'dialog' : 'region'}
-            aria-modal={expanded ? 'true' : undefined}
-            aria-label="Code explorer"
-          >
-            <div class="explorer-chrome">
-              <div class="explorer-chrome__left">
-                <span class="explorer-tab">
-                  <svg class="explorer-tab__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
-                  </svg>
-                  Code Explorer
-                </span>
-                <span class="explorer-title">mira-quickstart</span>
-              </div>
-
-              <div class="explorer-actions">
-                <button
-                  type="button"
-                  class="explorer-action"
-                  class:is-copied={copied}
-                  aria-label={copied ? 'Copied to clipboard' : `Copy ${activeFile.label}`}
-                  title={copied ? 'Copied' : 'Copy active file'}
-                  onclick={copyActive}
-                >
-                  {#if copied}
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="m5 12 4 4L19 6" />
-                    </svg>
-                  {:else}
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <rect x="8" y="8" width="11" height="11" rx="1.5" />
-                      <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
-                    </svg>
-                  {/if}
-                </button>
-
-                <button
-                  id="explorer-expand"
-                  type="button"
-                  class="explorer-action"
-                  aria-label={expanded ? 'Collapse code explorer' : 'Expand code explorer'}
-                  aria-expanded={expanded}
-                  aria-controls="explorer-body"
-                  title={expanded ? 'Collapse code explorer' : 'Expand code explorer'}
-                  onclick={() => (expanded = !expanded)}
-                >
-                  {#if expanded}
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M8 3v3a2 2 0 0 1-2 2H3M16 3v3a2 2 0 0 0 2 2h3M8 21v-3a2 2 0 0 0-2-2H3M16 21v-3a2 2 0 0 1 2-2h3" />
-                    </svg>
-                  {:else}
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
-                    </svg>
-                  {/if}
-                </button>
-              </div>
-
-              <span class="sr-only" role="status" aria-live="polite">
-                {copied ? 'Copied to clipboard' : ''}
-              </span>
-            </div>
-
-            <div class="explorer-body" id="explorer-body">
-              <nav class="explorer-tree" aria-label="Quickstart files">
-                {#each groups as group (group.id)}
-                  <div class="tree-group">
-                    <p class="tree-group__label">
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
-                      </svg>
-                      {group.label}
-                    </p>
-
-                    {#each group.files as file (file.key)}
-                      <button
-                        id={fileId(file.key)}
-                        type="button"
-                        class="tree-file"
-                        aria-current={active === file.key ? 'true' : undefined}
-                        tabindex={active === file.key ? 0 : -1}
-                        onclick={() => select(file.key)}
-                        onkeydown={(event) => onFileKeyDown(event, file.key)}
-                      >
-                        <span class="file-icon {file.iconClass}">
-                          <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d={iconFor(file.key).path} />
-                          </svg>
-                        </span>
-                        <span class="tree-file__name">{file.label}</span>
-                      </button>
-                    {/each}
-                  </div>
-                {/each}
-              </nav>
-
-              <div class="explorer-main">
-                <div class="explorer-breadcrumb">
-                  <span>{activeGroup?.label ?? ''}</span>
-                  <span class="explorer-breadcrumb__sep" aria-hidden="true">/</span>
-                  <span class="explorer-breadcrumb__file">{activeFile.label}</span>
-                </div>
-
-                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-                <div
-                  class="editor-scroll"
-                  bind:this={editorScroll}
-                  tabindex="0"
-                  role="region"
-                  aria-label={`${activeFile.label} code, scroll to read`}
-                >
-                  <div class="code-block editor-code">{@html activeFile.html}</div>
-                </div>
-
-                <div class="explorer-statusbar">
-                  <span class="explorer-statusbar__lang">{languageLabel(activeFile.lang)}</span>
-                  <span class="explorer-statusbar__meta">
-                    <span>UTF-8</span>
-                    <span>LF</span>
-                    <span>Spaces: 2</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       {/if}
 
@@ -452,33 +456,65 @@
     min-width: 0;
     overflow: hidden;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--surface);
     box-shadow: 0 1px 2px rgba(10, 10, 10, 0.04);
   }
 
-  .explorer.is-expanded {
-    position: fixed;
-    inset: clamp(12px, 2.4vw, 36px);
-    z-index: 61;
+  .explorer-placeholder {
+    height: calc(clamp(380px, 48vh, 460px) + 42px);
+    border: 1px solid transparent;
     border-radius: var(--radius-md);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
-    background: var(--surface);
   }
 
-  .explorer-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 60;
+  .explorer-dialog {
+    width: min(calc(100vw - 2 * clamp(12px, 2.4vw, 36px)), var(--container));
+    height: fit-content;
+    max-width: none;
+    max-height: calc(100dvh - 2 * clamp(12px, 2.4vw, 36px));
+    margin: auto;
     padding: 0;
-    border: 0;
-    background: rgba(8, 8, 10, 0.42);
-    cursor: pointer;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--fg);
+    overflow: hidden;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
   }
 
-  .explorer-backdrop:focus-visible {
-    outline: 2px solid var(--bg);
-    outline-offset: -4px;
+  .explorer-dialog[open] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .explorer-dialog:modal {
+    overscroll-behavior: contain;
+  }
+
+  .explorer-dialog::backdrop {
+    overflow: hidden;
+    overscroll-behavior: contain;
+    background: rgba(8, 8, 10, 0.42);
+  }
+
+  .explorer-dialog .explorer-body {
+    flex: 0 0 auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  .explorer-dialog .explorer-main {
+    min-height: 0;
+  }
+
+  .explorer-dialog .editor-scroll {
+    flex: 0 1 auto;
+    max-height: calc(100dvh - 2 * clamp(12px, 2.4vw, 36px) - 94px);
+  }
+
+  .explorer-dialog .editor-code {
+    height: auto;
+    min-height: 0;
   }
 
   .explorer-chrome {
@@ -527,16 +563,6 @@
     stroke-linejoin: round;
   }
 
-  .explorer-title {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-2xs);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .explorer-actions {
     display: flex;
     flex: none;
@@ -548,8 +574,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 30px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     border: 1px solid transparent;
     border-radius: 4px;
@@ -590,14 +616,12 @@
   .explorer-body {
     display: grid;
     grid-template-columns: 208px minmax(0, 1fr);
-    height: clamp(460px, 62vh, 640px);
+    height: clamp(380px, 48vh, 460px);
     min-height: 0;
   }
 
-  .explorer.is-expanded .explorer-body {
-    flex: 1 1 auto;
-    height: auto;
-    min-height: 0;
+  .mobile-picker {
+    display: none;
   }
 
   .explorer-tree {
@@ -643,9 +667,10 @@
     align-items: center;
     gap: 7px;
     width: 100%;
-    min-height: 27px;
+    min-height: 30px;
     padding: 0 8px 0 19px;
     border: 0;
+    border-left: 2px solid transparent;
     border-radius: 4px;
     background: transparent;
     color: var(--fg);
@@ -663,9 +688,9 @@
     background: color-mix(in srgb, var(--ink) 5%, transparent);
   }
 
-  .tree-file[aria-current='true'] {
+  .tree-file[aria-selected='true'] {
+    border-left-color: var(--ink);
     background: color-mix(in srgb, var(--ink) 8%, transparent);
-    box-shadow: inset 2px 0 0 var(--ink);
     color: var(--ink);
   }
 
@@ -755,6 +780,17 @@
     scrollbar-width: thin;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .editor-scroll::after {
+    content: '';
+    position: sticky;
+    bottom: 0;
+    display: block;
+    height: 28px;
+    margin-top: -28px;
+    background: linear-gradient(to bottom, transparent, var(--code-bg));
+    pointer-events: none;
   }
 
   .editor-scroll:focus-visible {
@@ -851,49 +887,98 @@
       height: auto;
     }
 
+    .explorer,
+    .explorer-body,
+    .explorer-tree,
+    .explorer-main,
+    .editor-scroll,
+    .editor-code {
+      max-width: 100%;
+      min-width: 0;
+    }
+
     .explorer-tree {
+      display: none;
+    }
+
+    .mobile-picker {
       display: flex;
-      gap: 6px;
+      align-items: center;
       padding: 8px;
-      overflow-x: auto;
-      overflow-y: hidden;
-      border-right: 0;
       border-bottom: 1px solid var(--border);
       background: var(--surface);
     }
 
-    .tree-group {
-      display: contents;
-    }
-
-    .tree-group__label {
-      display: none;
-    }
-
-    .tree-file {
-      flex: none;
-      width: auto;
-      min-height: 32px;
+    .mobile-picker select {
+      width: 100%;
+      min-height: 44px;
       padding: 0 10px;
       border: 1px solid var(--border);
-      font-size: var(--text-2xs);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--ink);
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      cursor: pointer;
     }
 
-    .tree-file[aria-current='true'] {
-      border-color: var(--border-strong);
+    .mobile-picker select:focus-visible {
+      outline: 2px solid var(--ink);
+      outline-offset: 1px;
     }
 
     .editor-scroll {
       max-height: 440px;
+      overflow-x: hidden;
     }
 
-    .explorer.is-expanded .explorer-body {
+    .explorer-statusbar {
+      padding-right: 52px;
+    }
+
+    .editor-code :global(pre) {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .explorer-dialog {
+      width: calc(100vw - 24px);
+      height: calc(100dvh - 24px);
+      max-height: none;
+    }
+
+    .explorer-dialog .explorer-body {
+      flex: 1 1 auto;
       height: auto;
       min-height: 0;
     }
 
-    .explorer.is-expanded .editor-scroll {
+    .explorer-placeholder {
+      display: none;
+    }
+
+    .explorer-dialog .editor-scroll {
       max-height: none;
+    }
+  }
+
+  @media (max-width: 820px) {
+    .explorer-chrome {
+      min-height: 44px;
+    }
+
+    .explorer-tab {
+      height: 44px;
+    }
+
+    .explorer-action {
+      width: 44px;
+      height: 44px;
     }
   }
 
@@ -905,14 +990,6 @@
     .explorer-tab {
       gap: 6px;
       padding: 0 10px;
-    }
-
-    .explorer-title {
-      display: none;
-    }
-
-    .explorer-action {
-      width: 28px;
     }
 
     .explorer-breadcrumb,

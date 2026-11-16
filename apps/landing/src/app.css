@@ -126,10 +126,11 @@ html[data-theme='dark'] {
 }
 
 html {
+  background: var(--bg);
   -webkit-text-size-adjust: 100%;
   scroll-behavior: smooth;
   scroll-padding-top: 88px;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
 }
 
 .nav,
