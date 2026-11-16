@@ -5,6 +5,25 @@ export type QuickstartSample = {
   code: string;
 };
 
+export type QuickstartGroup = {
+  id: 'server' | 'client';
+  label: string;
+  keys: ReadonlyArray<string>;
+};
+
+export const quickstartGroups: ReadonlyArray<QuickstartGroup> = [
+  {
+    id: 'server',
+    label: 'server',
+    keys: ['collections', 'feed', 'rules', 'hooks', 'server']
+  },
+  {
+    id: 'client',
+    label: 'client',
+    keys: ['client', 'react', 'svelte', 'vue']
+  }
+];
+
 export const quickstartSamples: ReadonlyArray<QuickstartSample> = [
   {
     key: 'install',
