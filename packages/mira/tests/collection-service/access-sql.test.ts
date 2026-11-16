@@ -58,7 +58,19 @@ const postsRules = defineRule(postsDef, (R) => ({
 }))
 const Posts = applyRulesToCollections([postsDef], [postsRules])[0]
 
-const serviceLayer = makeCollectionServiceLayer([Members, Posts]).pipe(
+const reservedDef = BaseCollection.define("reserved", {
+  "__mira_access_rule": Field.text({ required: true })
+})
+const reservedRules = defineRule(reservedDef, (R) => ({
+  list: R.public(),
+  view: R.public(),
+  create: R.public(),
+  update: R.public(),
+  delete: R.public()
+}))
+const Reserved = applyRulesToCollections([reservedDef], [reservedRules])[0]
+
+const serviceLayer = makeCollectionServiceLayer([Members, Posts, Reserved]).pipe(
   Layer.provide(RepositoryLive),
   Layer.provide(sqliteLayer),
   Layer.provide(FileStorageTest),
@@ -90,8 +102,18 @@ const setupTables = Effect.gen(function* () {
       "updated" TEXT NOT NULL
     )
   `)
+  yield* sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS "reserved" (
+      "seqId"              INTEGER PRIMARY KEY AUTOINCREMENT,
+      "id"                 TEXT NOT NULL UNIQUE,
+      "__mira_access_rule" TEXT NOT NULL,
+      "created"            TEXT NOT NULL,
+      "updated"            TEXT NOT NULL
+    )
+  `)
   yield* sql.unsafe(`DELETE FROM "members"`)
   yield* sql.unsafe(`DELETE FROM "posts"`)
+  yield* sql.unsafe(`DELETE FROM "reserved"`)
 })
 
 const anonCtx: RequestCtx = { headers: {}, query: {} }
@@ -122,5 +144,19 @@ describe("update access SQL", () => {
         Effect.result
       )
       expectTag(missing, "NotFoundError")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("falls back when a collection field collides with the access alias prefix", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      const svc = yield* CollectionService
+      const created = yield* svc.create(Reserved, { "__mira_access_rule": "x" }, anonCtx)
+      const updated = yield* svc.update(
+        Reserved,
+        String(created["id"]),
+        { "__mira_access_rule": "y" },
+        anonCtx
+      )
+      expect(updated["__mira_access_rule"]).toBe("y")
     }).pipe(Effect.provide(testLayer)))
 })

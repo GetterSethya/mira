@@ -448,6 +448,9 @@ function makeCollectionServiceLayerWith(
 
       const asString = (value: unknown) => (typeof value === "string" ? value : undefined)
 
+      const hasReservedAccessField = (collection: AnyCollectionDef) =>
+        Object.keys(collection.schema.properties).some((key) => key.startsWith("__mira_access_"))
+
       /**
        * Builds the binding plan for an update rule's `@request_body_*` keys.
        *
@@ -956,6 +959,7 @@ function makeCollectionServiceLayerWith(
 
           const fastPath =
             viewWithAccess !== undefined &&
+            !hasReservedAccessField(collection) &&
             updateEnforcer !== null &&
             updateRefs !== null &&
             updateBodyPlan !== null &&
@@ -1181,6 +1185,7 @@ function makeCollectionServiceLayerWith(
           const fastPath =
             viewWithAccess !== undefined &&
             deleteExisting !== undefined &&
+            !hasReservedAccessField(prepared.collection) &&
             (prepared.admin ||
               (refs !== null &&
                 refs.bodyKeys.length === 0 &&
