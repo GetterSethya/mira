@@ -68,7 +68,8 @@ No subdirectories.
 ## Invariants
 
 - `QueueSpan.end` calls `super.end` first, then offers the span with `Queue.offerUnsafe` — span completion never blocks on I/O. [tracer.ts:QueueSpan]
-- `withSpanWhenEnabled` is identity-safe for tracing-on span names/attributes; when tracing is off it skips the no-op span but preserves the `CurrentStackFrame` chain, so `Cause.pretty` still names the operation. It is used for repository CRUD spans only. [span.ts:withSpanWhenEnabled]
+- `withSpanWhenEnabled` is identity-safe for tracing-on span names/attributes; when tracing is off it skips the no-op span but preserves the `CurrentStackFrame` chain, so `Cause.pretty` still names the operation. It is used by the hot request path (HTTP, collection service, cache, hooks, mutation batcher, repository). [span.ts:withSpanWhenEnabled]
+- `annotateCurrentSpanWhenEnabled` guards on `fiber.cache.tracerEnabled` *and* a native `fiber.cache.span`, so a tracing-disabled child scope cannot write attributes onto an enclosing span; it is used for `auth.*`, `cache.hit`, and `http.forwarded_for`. [span.ts:annotateCurrentSpanWhenEnabled]
 - Only attributes whose value is `string | number | boolean` are copied into `CompletedSpan.attributes`; other attribute types are dropped. [tracer.ts:QueueSpan]
 - Span status is `"ok"` for `Exit.isSuccess` and `"error"` (with `Cause.pretty`) otherwise. [tracer.ts:QueueSpan]
 - Shutdown finalizers are registered so the drain fiber stops first and the remaining queue items are flushed last (LIFO ordering, documented inline). [tracer.ts:makeConsoleTracerLayer]

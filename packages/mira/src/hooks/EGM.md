@@ -70,7 +70,7 @@ No subdirectories.
 
 - Forks detached fibers for every success/error/cron-observer dispatch (`Effect.forkDetach`), i.e. background work that outlives the calling effect. [hook-service.ts:runRecordCreateSuccess] [hook-service.ts:runCronFinished]
 - Executes arbitrary plugin-supplied effects (pre/execute stages) inline, so plugin I/O blocks the request path until it completes. [hook-service.ts:makeHookServiceLayer]
-- Emits internal tracing spans via `Effect.withSpan` for each wrapped collection action. [hook-collection.ts:makeHookCollectionServiceLayer]
+- Emits internal tracing spans via `withSpanWhenEnabled` for each wrapped collection action, so tracing-off requests skip no-op span construction. [hook-collection.ts:makeHookCollectionServiceLayer]
 - No filesystem, network, timer, or environment access in this directory.
 
 ## Verification

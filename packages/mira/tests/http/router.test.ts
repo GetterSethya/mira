@@ -1,11 +1,13 @@
+import { randomBytes } from "node:crypto"
+
 import { NodeHttpServer } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
 import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
-import { Effect, Layer, Option, Redacted } from "effect"
-import { Cookies, Headers, HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { Effect, Layer, Option, Queue, Redacted, Tracer } from "effect"
+import { Cookies, Headers, HttpClient, HttpClientRequest, HttpMiddleware, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 
 import { applyRulesToCollections,defineRule } from "@/app/index.js"
@@ -20,6 +22,8 @@ import { makeCollectionRouter } from "@/http/router.js"
 import { defaultAuthRateLimitPolicies } from "@/rate-limit/index.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
+import type { CompletedSpan } from "@/telemetry/tracer.js"
+import { makeConsoleTracer } from "@/telemetry/tracer.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
 import { makeRateLimitTestLayer, rateLimitTestLayer } from "../_rate-limit.js"
 
@@ -125,6 +129,8 @@ const makeBaseLayer = (authLayer: Layer.Layer<AuthService>) =>
 
 const baseLayer = makeBaseLayer(NodeAuthServiceLayer)
 const testLayer = Layer.mergeAll(baseLayer, rateLimitTestLayer)
+
+const serveWithTracer = HttpServer.serveEffect(HttpMiddleware.tracer)
 
 // ---------------------------------------------------------------------------
 // Table setup helper
@@ -234,6 +240,86 @@ describe("makeCollectionRouter", () => {
       yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/collections/no_such_collection")
       assert.strictEqual(res.status, 404)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("tracing on emits the HTTP/list span chain with auth attributes", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      yield* Effect.gen(function* () {
+        yield* setupTables
+        yield* Effect.flatMap(
+          HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+          serveWithTracer
+        )
+        yield* HttpClient.get("/api/collections/posts")
+        const completed = yield* Queue.clear(queue)
+        const handler = completed.find(
+          (span) => span.name === "http.handler" && span.attributes["collection"] === "posts"
+        )
+        assert.ok(handler !== undefined)
+        assert.strictEqual(handler.attributes["auth.result"], "anonymous")
+        assert.ok(completed.some((span) => span.name === "http.auth"))
+        assert.ok(completed.some((span) => span.name === "collection.list"))
+        assert.ok(
+          completed.some(
+            (span) => span.name.startsWith("http.server") && span.spanId === handler.parentSpanId
+          )
+        )
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("tracing off emits no request-path spans", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      yield* Effect.gen(function* () {
+        yield* setupTables
+        yield* Effect.flatMap(
+          HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+          serveWithTracer
+        )
+        yield* HttpClient.get("/api/collections/posts")
+        assert.deepStrictEqual(yield* Queue.clear(queue), [])
+      }).pipe(
+        Effect.provideService(Tracer.Tracer, tracer),
+        Effect.withTracerEnabled(false)
+      )
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("authenticated request writes auth.collection to the parent server span", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      yield* Effect.gen(function* () {
+        yield* setupTables
+        yield* seedUser("spanparent@example.com", "secret")
+        yield* Effect.flatMap(
+          HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+          serveWithTracer
+        )
+        const login = yield* HttpClient.execute(
+          HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+            HttpClientRequest.bodyJsonUnsafe({ email: "spanparent@example.com", password: "secret" })
+          )
+        )
+        const token = yield* tokenFromLogin(yield* login.json)
+        yield* Queue.clear(queue)
+        yield* HttpClient.get("/api/collections/posts", {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        const completed = yield* Queue.clear(queue)
+        const handler = completed.find(
+          (span) => span.name === "http.handler" && span.attributes["collection"] === "posts"
+        )
+        assert.ok(handler !== undefined)
+        const parent = completed.find((span) => span.spanId === handler.parentSpanId)
+        assert.ok(parent !== undefined)
+        assert.strictEqual(parent.attributes["auth.collection"], "users")
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
     }).pipe(Effect.provide(testLayer))
   )
 

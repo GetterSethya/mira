@@ -1,6 +1,5 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
-import type { Tracer } from "effect";
 import { Effect, Layer, Option } from "effect"
 import type { SqlClient } from "effect/sql"
 
@@ -14,6 +13,7 @@ import type { AuthService } from "@/http/auth.js"
 import type { Repository } from "@/repository/repository.js"
 import type { SortOrder } from "@/repository/types.js"
 import type { FileStorage } from "@/storage/storage.js"
+import { annotateCurrentSpanWhenEnabled, withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import { CollectionCache, makeCollectionCacheLayer } from "./collection-cache.js"
 import { buildCtxCacheTag } from "./ctx-key.js"
@@ -138,7 +138,7 @@ export function makeCachedCollectionServiceLayer(
           // Reads that expand a relation are not cached.
           if (expand != null && expand.length > 0) {
             return svc.list(collection, cursor, perPage, ctx, filter, sort, select, expand).pipe(
-              Effect.withSpan(
+              withSpanWhenEnabled(
                 "cache.list",
                 { kind: "internal", attributes: { collection: collection.name, "cache.bypass": true } },
                 { captureStackTrace: false }
@@ -150,18 +150,15 @@ export function makeCachedCollectionServiceLayer(
           const key = `${collection.name}:${stableListKey(cursor, perPage, filter, sort, select, expand)}::${ctxTag}`
           return Effect.gen(function* () {
             const cached = yield* cache.getList(key)
-            yield* Effect.currentSpan.pipe(
-              Effect.tap((span: Tracer.Span) =>
-                Effect.sync(() => span.attribute("cache.hit", Option.isSome(cached)))
-              ),
-              Effect.ignore
+            yield* annotateCurrentSpanWhenEnabled((span) =>
+              span.attribute("cache.hit", Option.isSome(cached))
             )
             if (Option.isSome(cached)) return cached.value
             const page = yield* svc.list(collection, cursor, perPage, ctx, filter, sort, select, expand)
             yield* cache.putList(key, page)
             return page
           }).pipe(
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "cache.list",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -173,7 +170,7 @@ export function makeCachedCollectionServiceLayer(
           // Reads that expand a relation are not cached.
           if (expand != null && expand.length > 0) {
             return svc.view(collection, id, ctx, select, expand).pipe(
-              Effect.withSpan(
+              withSpanWhenEnabled(
                 "cache.view",
                 { kind: "internal", attributes: { collection: collection.name, "cache.bypass": true } },
                 { captureStackTrace: false }
@@ -185,18 +182,15 @@ export function makeCachedCollectionServiceLayer(
           const key = `${stableViewKey(collection.name, id, select, expand)}::${ctxTag}`
           return Effect.gen(function* () {
             const cached = yield* cache.getRecord(key)
-            yield* Effect.currentSpan.pipe(
-              Effect.tap((span: Tracer.Span) =>
-                Effect.sync(() => span.attribute("cache.hit", Option.isSome(cached)))
-              ),
-              Effect.ignore
+            yield* annotateCurrentSpanWhenEnabled((span) =>
+              span.attribute("cache.hit", Option.isSome(cached))
             )
             if (Option.isSome(cached)) return cached.value
             const record = yield* svc.view(collection, id, ctx, select, expand)
             yield* cache.putRecord(key, record)
             return record
           }).pipe(
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "cache.view",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -207,7 +201,7 @@ export function makeCachedCollectionServiceLayer(
         create: (collection, data, ctx) =>
           svc.create(collection, data, ctx).pipe(
             Effect.tap(() => cache.nukeListsFor(collection.name)),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "cache.create",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -219,7 +213,7 @@ export function makeCachedCollectionServiceLayer(
         createMany: (collection, records, ctx) =>
           svc.createMany(collection, records, ctx).pipe(
             Effect.tap(() => cache.nukeListsFor(collection.name)),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "cache.createMany",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -234,7 +228,7 @@ export function makeCachedCollectionServiceLayer(
                 { concurrency: "unbounded" }
               )
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "cache.update",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -255,7 +249,7 @@ export function makeCachedCollectionServiceLayer(
                 { concurrency: "unbounded" }
               )
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "cache.updateMany",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -270,7 +264,7 @@ export function makeCachedCollectionServiceLayer(
                 { concurrency: "unbounded" }
               )
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "cache.delete",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -288,7 +282,7 @@ export function makeCachedCollectionServiceLayer(
                 { concurrency: "unbounded" }
               )
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "cache.deleteMany",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }

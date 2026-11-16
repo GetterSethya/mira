@@ -1,9 +1,9 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import type { Tracer } from "effect";
 import { Cause, Duration, Effect, Option, Redacted, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 
 import { CollectionService, MAX_BULK_RECORDS } from "@/collection-service/collection-service.js"
+import { annotateCurrentSpanWhenEnabled, withSpanWhenEnabled } from "@/telemetry/span.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { toPublicRecord } from "@/collection-service/decode.js"
 import { PayloadTooLargeError, ValidationError } from "@/collection-service/errors.js"
@@ -273,7 +273,7 @@ function readJsonBody(req: HttpServerRequest.HttpServerRequest, collection: AnyC
     }
     return result
   }).pipe(
-    Effect.withSpan(
+    withSpanWhenEnabled(
       "http.body.parse",
       { kind: "internal", attributes: { content_type: "json" } },
       { captureStackTrace: false }
@@ -285,7 +285,7 @@ function getBody(req: HttpServerRequest.HttpServerRequest, collection: AnyCollec
   const ct = req.headers["content-type"] ?? ""
   if (ct.includes("multipart/form-data")) {
     return processMultipartUpload(req, collection.schema, collection.name).pipe(
-      Effect.withSpan(
+      withSpanWhenEnabled(
         "http.body.parse",
         { kind: "internal", attributes: { content_type: "multipart" } },
         { captureStackTrace: false }
@@ -336,19 +336,14 @@ export function makeCollectionRouter(
           const auth = yield* resolveAuth(req)
           const isAdmin = auth !== undefined && adminSet.has(auth.collection)
           const ctx = buildRequestCtx(auth ?? undefined, req, isAdmin)
-          yield* Effect.currentSpan.pipe(
-            Effect.tap((span: Tracer.Span) =>
-              Effect.sync(() => {
-                span.attribute("auth.result", auth !== undefined ? "authenticated" : "anonymous")
-                span.attribute("auth.collection", auth?.collection ?? "")
-                const parent = span.parent
-                if (Option.isSome(parent) && parent.value._tag === "Span") {
-                  parent.value.attribute("auth.collection", auth?.collection ?? "")
-                }
-              })
-            ),
-            Effect.ignore
-          )
+          yield* annotateCurrentSpanWhenEnabled((span) => {
+            span.attribute("auth.result", auth !== undefined ? "authenticated" : "anonymous")
+            span.attribute("auth.collection", auth?.collection ?? "")
+            const parent = span.parent
+            if (Option.isSome(parent) && parent.value._tag === "Span") {
+              parent.value.attribute("auth.collection", auth?.collection ?? "")
+            }
+          })
           return yield* Effect.catchCause(body(col, ctx, req, params), (cause) => {
             const failure = Cause.findErrorOption(cause)
             if (Option.isSome(failure)) {
@@ -361,7 +356,7 @@ export function makeCollectionRouter(
           // as the third argument): the captured stack is never exported, and taking
           // it on every request costs measurable CPU. The other request-path spans
           // here and in the repository/cache/hook layers do the same.
-          Effect.withSpan(
+          withSpanWhenEnabled(
             "http.handler",
             { kind: "server", attributes: { collection: col.name, operation } },
             { captureStackTrace: false }
@@ -376,10 +371,7 @@ export function makeCollectionRouter(
 
     return Effect.gen(function* () {
       const annotate = (key: string, value: string | boolean) =>
-        Effect.currentSpan.pipe(
-          Effect.tap((span: Tracer.Span) => Effect.sync(() => span.attribute(key, value))),
-          Effect.ignore
-        )
+        annotateCurrentSpanWhenEnabled((span) => span.attribute(key, value))
 
       if (token === null) {
         yield* annotate("auth.result", "anonymous")
@@ -390,7 +382,7 @@ export function makeCollectionRouter(
       // file-token mint route: session typ + jti deny-list + record existence +
       // `pwf` credential binding + generation check.
       const auth = yield* authenticateSession(token, isAuthCol).pipe(
-        Effect.withSpan("http.session-auth", { kind: "internal" }, { captureStackTrace: false })
+        withSpanWhenEnabled("http.session-auth", { kind: "internal" }, { captureStackTrace: false })
       )
       if (auth === undefined) {
         yield* annotate("auth.result", "invalid_token")
@@ -400,7 +392,7 @@ export function makeCollectionRouter(
       yield* annotate("auth.result", "authenticated")
       yield* annotate("auth.collection", auth.collection)
       return { collection: auth.collection, record: auth.record }
-    }).pipe(Effect.withSpan("http.auth", { kind: "internal" }, { captureStackTrace: false }))
+    }).pipe(withSpanWhenEnabled("http.auth", { kind: "internal" }, { captureStackTrace: false }))
   }
 
   const listRoute = collectionRoute("list", (col, ctx) =>
@@ -930,7 +922,7 @@ export function makeCollectionRouter(
       yield* store.bumpGeneration(auth.collection, userId).pipe(Effect.orElseSucceed(() => undefined))
       return clearCookie
     }).pipe(
-      Effect.withSpan(
+      withSpanWhenEnabled(
         "http.handler",
         { kind: "server", attributes: { operation: "logout_all" } },
         { captureStackTrace: false }
@@ -941,19 +933,14 @@ export function makeCollectionRouter(
   const meRoute = Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
     Effect.gen(function* () {
       const auth = yield* resolveAuth(req)
-      yield* Effect.currentSpan.pipe(
-        Effect.tap((span: Tracer.Span) =>
-          Effect.sync(() => {
-            span.attribute("auth.result", auth !== undefined ? "authenticated" : "anonymous")
-            span.attribute("auth.collection", auth?.collection ?? "")
-            const parent = span.parent
-            if (Option.isSome(parent) && parent.value._tag === "Span") {
-              parent.value.attribute("auth.collection", auth?.collection ?? "")
-            }
-          })
-        ),
-        Effect.ignore
-      )
+      yield* annotateCurrentSpanWhenEnabled((span) => {
+        span.attribute("auth.result", auth !== undefined ? "authenticated" : "anonymous")
+        span.attribute("auth.collection", auth?.collection ?? "")
+        const parent = span.parent
+        if (Option.isSome(parent) && parent.value._tag === "Span") {
+          parent.value.attribute("auth.collection", auth?.collection ?? "")
+        }
+      })
       if (!auth) {
         return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
       }
@@ -976,7 +963,7 @@ export function makeCollectionRouter(
         { status: 200 }
       )
     }).pipe(
-      Effect.withSpan(
+      withSpanWhenEnabled(
         "http.handler",
         { kind: "server", attributes: { operation: "me" } },
         { captureStackTrace: false }
@@ -994,10 +981,7 @@ export function makeCollectionRouter(
       const token = extractToken(req)
 
       const annotate = (key: string, value: string) =>
-        Effect.currentSpan.pipe(
-          Effect.tap((span: Tracer.Span) => Effect.sync(() => span.attribute(key, value))),
-          Effect.ignore
-        )
+        annotateCurrentSpanWhenEnabled((span) => span.attribute(key, value))
 
       const gate = yield* Effect.gen(function* () {
         if (token === null) {
@@ -1009,7 +993,7 @@ export function makeCollectionRouter(
         // revoked token, a token for a deleted user, a stale `pwf`, or a
         // pre-`logout-all` generation all land here as `undefined` → 401.
         const auth = yield* authenticateSession(token, isAuthCol).pipe(
-          Effect.withSpan("http.session-auth", { kind: "internal" }, { captureStackTrace: false })
+          withSpanWhenEnabled("http.session-auth", { kind: "internal" }, { captureStackTrace: false })
         )
         if (auth === undefined) {
           yield* annotate("auth.result", "invalid_token")
@@ -1024,19 +1008,14 @@ export function makeCollectionRouter(
 
         yield* annotate("auth.result", "authenticated")
         yield* annotate("auth.collection", auth.collection)
-        yield* Effect.currentSpan.pipe(
-          Effect.tap((span) =>
-            Effect.sync(() => {
-              const parent = span.parent
-              if (Option.isSome(parent) && parent.value._tag === "Span") {
-                parent.value.attribute("auth.collection", auth.collection)
-              }
-            })
-          ),
-          Effect.ignore
-        )
+        yield* annotateCurrentSpanWhenEnabled((span) => {
+          const parent = span.parent
+          if (Option.isSome(parent) && parent.value._tag === "Span") {
+            parent.value.attribute("auth.collection", auth.collection)
+          }
+        })
         return "ok" as const
-      }).pipe(Effect.withSpan("http.auth", { kind: "internal" }, { captureStackTrace: false }))
+      }).pipe(withSpanWhenEnabled("http.auth", { kind: "internal" }, { captureStackTrace: false }))
 
       if (gate === "forbidden") {
         return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
@@ -1049,7 +1028,7 @@ export function makeCollectionRouter(
         Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })))
       )
     }).pipe(
-      Effect.withSpan(
+      withSpanWhenEnabled(
         "http.handler",
         { kind: "server", attributes: { operation } },
         { captureStackTrace: false }

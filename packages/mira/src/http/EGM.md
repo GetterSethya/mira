@@ -118,7 +118,7 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - Filesystem: file serve reads originals/thumbnails and may write a thumbnail cache entry: `[file-serve.ts:serveFile]`
 - Caches: `TokenStore` default keeps revoked-jti and generation maps in process memory: `[token-store.ts:inMemoryTokenStore]`
 - Caches: thumbnails are persisted under `_thumbs/<filename>/<spec>`: `[file-serve.ts:serveFile]`
-- Logging/tracing: `http.handler`, `http.auth`, `http.session-auth`, `http.body.parse` spans; port retry warnings/info: `[router.ts:makeCollectionRouter]`
+- Logging/tracing: `http.handler`, `http.auth`, `http.session-auth`, `http.body.parse` spans are created through `withSpanWhenEnabled`, so tracing-off requests skip no-op spans while tracing-on topology is unchanged; `auth.*` attributes use `annotateCurrentSpanWhenEnabled`; port retry warnings/info: `[router.ts:makeCollectionRouter]`
 - CPU/randomness: scrypt password hashing and salt generation on Node; native Argon2id hashing on Bun: `[password-scrypt.ts:hashScryptPassword]` `[auth-bun.ts:BunAuthServiceLayer]`
 
 ## Verification

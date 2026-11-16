@@ -89,7 +89,7 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - SQL rule check `SELECT 1 AS ok WHERE <ctx-bound manage rule>` for `canManagePayload`: `[collection-service.ts:canManagePayload]`
 - Filesystem: file deletion and thumbnail-directory listing/deletion via `FileStorage`: `[collection-service.ts:CollectionService]`
 - Logging: `Effect.logWarning` for body-referencing bodiless rules: `[collection-service.ts:makeCollectionServiceLayer]`
-- Tracing: `collection.list` / `collection.view` / `collection.create` / `collection.update` / `collection.delete` spans with a `collection` attribute: `[collection-service.ts:CollectionService]`
+- Tracing: `collection.list` / `collection.view` / `collection.create` / `collection.update` / `collection.delete` spans with a `collection` attribute, created through `withSpanWhenEnabled` so tracing-off requests skip no-op spans: `[collection-service.ts:CollectionService]`
 - CPU: password hashing/verification via `AuthService`: `[collection-service.ts:hashAuthPassword]`
 
 ## Verification

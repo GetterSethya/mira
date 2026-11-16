@@ -2,6 +2,8 @@ import { Effect, Option } from "effect"
 import type { HttpServerResponse } from "effect/http";
 import { Headers, HttpServerRequest } from "effect/http"
 
+import { annotateCurrentSpanWhenEnabled } from "@/telemetry/span.js"
+
 function extractClientIp(headers: Headers.Headers) {
   const forwarded = Headers.get(headers, "x-forwarded-for")
   if (Option.isSome(forwarded)) {
@@ -22,17 +24,12 @@ export const ipAnnotationMiddleware = <E, R>(
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const ip = extractClientIp(request.headers)
-    yield* Effect.currentSpan.pipe(
-      Effect.tap((span) =>
-        Effect.sync(() => {
-          span.attribute("auth.collection", "")
-          if (ip !== undefined) {
-            // Header-derived and spoofable. Enforcement uses remoteAddress.
-            span.attribute("http.forwarded_for", ip ?? "")
-          }
-        })
-      ),
-      Effect.ignore
-    )
+    yield* annotateCurrentSpanWhenEnabled((span) => {
+      span.attribute("auth.collection", "")
+      if (ip !== undefined) {
+        // Header-derived and spoofable. Enforcement uses remoteAddress.
+        span.attribute("http.forwarded_for", ip ?? "")
+      }
+    })
     return yield* app
   })

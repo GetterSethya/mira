@@ -36,7 +36,7 @@ compiled row-level rule references, preventing a cached row from leaking across 
 - Referenced values are encoded with the rule resolver's semantics: arrays collapse to their first element, absent values become the `\N` marker, and `\`, NUL, `,`, `=`, `|` are escaped [ctx-key.ts:encodeCtxValue] [ctx-key.ts:encodeScalar] [ctx-key.ts:ABSENT]
 - `select`/`expand` list parts are sorted so key order cannot split a cache entry [cached-collection.ts:stableViewKey] [cached-collection.ts:stableListKey]
 - Defaults are 30 s record TTL, 10 s list TTL, 50 000 records, 5 000 lists [cached-collection.ts:defaultConfig]
-- Cache spans set `cache.hit` from the lookup result and never fail the call even if no span is active [cached-collection.ts:makeCachedCollectionServiceLayer]
+- Cache spans set `cache.hit` from the lookup result through `annotateCurrentSpanWhenEnabled`, so a tracing-disabled request does no span lookup and never fails if no span is active [cached-collection.ts:makeCachedCollectionServiceLayer]
 
 ## Side Effects
 

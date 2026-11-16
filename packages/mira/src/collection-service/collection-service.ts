@@ -12,6 +12,7 @@ import { Repository } from "@/repository/repository.js"
 import type { AccessPredicate, ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
 import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage } from "@/storage/storage.js"
+import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import type { CursorPage, RequestCtx } from "./context.js"
 import { MutationBatcher, MutationBatcherDisabledLive, estimateRowBytes, makeMutationBatcherLayer } from "./mutation-batcher.js"
@@ -724,7 +725,7 @@ function makeCollectionServiceLayerWith(
           const items = rows.items.map(mapRow)
           return { items, nextCursor }
         }).pipe(
-          Effect.withSpan("collection.list", {
+          withSpanWhenEnabled("collection.list", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -756,7 +757,7 @@ function makeCollectionServiceLayerWith(
           }
           return yield* decodeRow(collection, rows[0])
         }).pipe(
-          Effect.withSpan("collection.view", {
+          withSpanWhenEnabled("collection.view", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -850,7 +851,7 @@ function makeCollectionServiceLayerWith(
           }
           return row
         }).pipe(
-          Effect.withSpan("collection.create", {
+          withSpanWhenEnabled("collection.create", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -883,7 +884,7 @@ function makeCollectionServiceLayerWith(
           )
           return results.map((result) => result.value)
         }).pipe(
-          Effect.withSpan("collection.createMany", {
+          withSpanWhenEnabled("collection.createMany", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -1154,7 +1155,7 @@ function makeCollectionServiceLayerWith(
           const result = yield* executeUpdate(prepared, false)
           return result.value
         }).pipe(
-          Effect.withSpan("collection.update", {
+          withSpanWhenEnabled("collection.update", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -1182,7 +1183,7 @@ function makeCollectionServiceLayerWith(
           }
           return row
         }).pipe(
-          Effect.withSpan("collection.update", {
+          withSpanWhenEnabled("collection.update", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -1207,7 +1208,7 @@ function makeCollectionServiceLayerWith(
             })
           )
         }).pipe(
-          Effect.withSpan("collection.updateMany", {
+          withSpanWhenEnabled("collection.updateMany", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -1342,7 +1343,7 @@ function makeCollectionServiceLayerWith(
           const result = yield* executeDelete(prepared, false)
           void result
         }).pipe(
-          Effect.withSpan("collection.delete", {
+          withSpanWhenEnabled("collection.delete", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -1370,7 +1371,7 @@ function makeCollectionServiceLayerWith(
             })
           }
         }).pipe(
-          Effect.withSpan("collection.delete", {
+          withSpanWhenEnabled("collection.delete", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })
@@ -1388,7 +1389,7 @@ function makeCollectionServiceLayerWith(
           // input order is also the order of the rows that were actually deleted.
           return ids
         }).pipe(
-          Effect.withSpan("collection.deleteMany", {
+          withSpanWhenEnabled("collection.deleteMany", {
             kind: "internal",
             attributes: { collection: collection.name }
           }, { captureStackTrace: false })

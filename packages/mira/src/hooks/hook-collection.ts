@@ -5,6 +5,7 @@ import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import type { CollectionError } from "@/collection-service/errors.js"
 import type { RepoRecord, SortOrder } from "@/repository/types.js"
+import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import { HookService } from "./hook-service.js"
 import type { AuthContext } from "./types.js"
@@ -68,7 +69,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
                 .runRecordListError({ collection, action: "list", error, auth: toAuth(ctx.auth) })
                 .pipe(Effect.andThen(Effect.fail(error)))
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "hook.list",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -94,7 +95,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
                 .runRecordViewError({ collection, action: "view", error, auth: toAuth(ctx.auth) })
                 .pipe(Effect.andThen(Effect.fail(error)))
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "hook.view",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -115,7 +116,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
                 .runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) })
                 .pipe(Effect.andThen(Effect.fail(error)))
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "hook.create",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -163,7 +164,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
                 { concurrency: "unbounded" }
               ).pipe(Effect.andThen(Effect.fail(error)))
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "hook.createMany",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -185,7 +186,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
                 .runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) })
                 .pipe(Effect.andThen(Effect.fail(error)))
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "hook.update",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -241,7 +242,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
                 { concurrency: "unbounded" }
               ).pipe(Effect.andThen(Effect.fail(error)))
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "hook.updateMany",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -262,7 +263,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
                 .runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) })
                 .pipe(Effect.andThen(Effect.fail(error)))
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "hook.delete",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }
@@ -312,7 +313,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
                 { concurrency: "unbounded" }
               ).pipe(Effect.andThen(Effect.fail(error)))
             ),
-            Effect.withSpan(
+            withSpanWhenEnabled(
               "hook.deleteMany",
               { kind: "internal", attributes: { collection: collection.name } },
               { captureStackTrace: false }

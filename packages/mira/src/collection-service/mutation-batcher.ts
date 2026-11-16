@@ -5,6 +5,7 @@ import type { SqlError } from "effect/sql"
 import { isSqlError } from "effect/sql/SqlError"
 
 import type { RepoRecord } from "@/repository/types.js"
+import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import type { BatchOperation, CollectionError } from "./errors.js"
 import {
@@ -892,7 +893,7 @@ export function makeMutationBatcherLayer(
                     })
                   : Effect.void
               ),
-              Effect.withSpan(
+              withSpanWhenEnabled(
                 "collection.mutateInBatch",
                 {
                   kind: "internal",
@@ -979,7 +980,7 @@ export function makeMutationBatcherLayer(
         const startedAt = yield* Clock.currentTimeMillis
 
         yield* sql.withTransaction(runBatchBody(taken, outcomes, aborted)).pipe(
-          Effect.withSpan(
+          withSpanWhenEnabled(
             "collection.mutationBatch",
             {
               kind: "internal",

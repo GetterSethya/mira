@@ -1555,6 +1555,30 @@ describe("create batching instrumentation", () => {
     })
   )
 
+  it.effect("does not emit flusher spans when the batched layer is built with tracing disabled", () =>
+    Effect.gen(function* () {
+      const queue = yield* Queue.unbounded<CompletedSpan>()
+      const tracer = makeConsoleTracer(queue, (size) => randomBytes(size))
+      const statsLayer = makeBatchMutationStatsLayer()
+      const service = serviceDeps(makeBatchedCollectionServiceLayer([Posts], batchedConfig, statsLayer))
+
+      yield* Effect.gen(function* () {
+        yield* setupPostsTable
+        const svc = yield* CollectionService
+        const exits = yield* collectBatched([svc.create(Posts, { title: "no-flusher-span" }, noCtx)])
+        expect(exits.every(Exit.isSuccess)).toBe(true)
+
+        const spans = yield* Queue.clear(queue)
+        expect(spans.some((span) => span.name === "collection.mutationBatch")).toBe(false)
+        expect(spans.some((span) => span.name === "collection.mutateInBatch")).toBe(false)
+      }).pipe(
+        Effect.provide(Layer.mergeAll(service, statsLayer, sqliteLayer, FileStorageTest, NodeCryptoLayer)),
+        Effect.provideService(Tracer.Tracer, tracer),
+        Effect.withTracerEnabled(false)
+      )
+    })
+  )
+
   it.effect("emits a batch span with size and per-entry insert spans", () =>
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
