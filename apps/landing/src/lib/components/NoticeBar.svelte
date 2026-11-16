@@ -73,8 +73,9 @@
 
   p {
     margin: 0;
-    font-size: var(--text-xs);
-    letter-spacing: 0.02em;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    letter-spacing: 0;
     line-height: 1.5;
   }
 

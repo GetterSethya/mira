@@ -40,11 +40,9 @@
 <style>
   .footer {
     padding-block: 56px 28px;
-    border-top: 1px solid var(--border);
     background: var(--surface);
-    transition:
-      background-color var(--motion-base) var(--ease),
-      border-color var(--motion-base) var(--ease);
+    font-family: var(--font-mono);
+    transition: background-color var(--motion-base) var(--ease);
   }
 
   .top {
@@ -76,15 +74,14 @@
   h3 {
     margin-bottom: 2px;
     color: var(--muted);
-    font-size: var(--text-2xs);
-    font-weight: 500;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0;
   }
 
   .col a {
     color: var(--fg);
-    font-size: var(--text-sm);
+    font-size: 14px;
     text-decoration: none;
   }
 
@@ -99,10 +96,8 @@
     justify-content: space-between;
     gap: 16px;
     margin-top: 48px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border);
     color: var(--muted);
-    font-size: var(--text-xs);
+    font-size: 14px;
     flex-wrap: wrap;
   }
 

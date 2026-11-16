@@ -2,67 +2,55 @@
   import { onMount } from 'svelte';
   import { fly } from 'svelte/transition';
   import { resolve } from '$app/paths';
+  import { page } from '$app/state';
   import GitHubLink from './GitHubLink.svelte';
   import ThemeToggle from './ThemeToggle.svelte';
 
   let open = $state(false);
-  let solid = $state(false);
-  let showCta = $state(false);
 
   const home = resolve('/');
   const links = [
-    { href: `${home}#features`, label: 'Features' },
-    { href: `${home}#how-it-works`, label: 'How it works' },
-    { href: `${home}#quickstart`, label: 'Quickstart' },
-    { href: `${home}#faq`, label: 'FAQ' },
-    { href: resolve('/docs/'), label: 'Docs' },
-    { href: resolve('/benchmarks/'), label: 'Benchmarks' },
-    { href: resolve('/changelog/'), label: 'Changelog' }
-  ];
+    { href: `${home}#features`, label: 'Features', match: null },
+    { href: resolve('/docs/'), label: 'Docs', match: '/docs' },
+    { href: resolve('/benchmarks/'), label: 'Benchmarks', match: '/benchmarks' },
+    { href: resolve('/changelog/'), label: 'Changelog', match: '/changelog' }
+  ] as const;
+
+  const active = (match: string | null) =>
+    match !== null && page.url.pathname.split('/').includes(match.replace('/', ''));
 
   function close() {
     open = false;
   }
 
   onMount(() => {
-    const onScroll = () => {
+    const onResize = () => {
       if (window.innerWidth > 767) open = false;
-
-      solid = window.scrollY > 24;
-      const hero = document.querySelector('#top');
-      const cta = document.querySelector('#cta');
-      const pastHero = hero ? hero.getBoundingClientRect().bottom <= 0 : false;
-      const ctaVisible = cta ? cta.getBoundingClientRect().top < window.innerHeight : false;
-      showCta = pastHero && !ctaVisible;
     };
 
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
-
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   });
 </script>
 
-<header class="nav" class:solid>
+<header class="nav">
   <div class="container inner">
     <a class="wordmark" href={resolve('/')} onclick={close}>mira</a>
 
     <nav class="links" aria-label="Primary">
       {#each links as link}
-        <a href={link.href}>{link.label}</a>
+        <a
+          href={link.href}
+          class:active={active(link.match)}
+          aria-current={active(link.match) ? 'page' : undefined}
+        >{link.label}</a>
       {/each}
     </nav>
 
     <div class="actions">
       <GitHubLink />
       <ThemeToggle />
-      <span class="cta-slot" class:visible={showCta} inert={!showCta} aria-hidden={!showCta}>
-        <a class="btn desk-cta" href={`${home}#quickstart`} tabindex={showCta ? 0 : -1}>Quickstart</a>
-      </span>
+      <a class="quickstart" href={`${home}#quickstart`}>Quickstart</a>
       <button
         class="toggle"
         type="button"
@@ -78,16 +66,17 @@
   </div>
 
   {#if open}
-    <div
-      id="mobile-menu"
-      class="mobile"
-      transition:fly={{ y: -8, duration: 180 }}
-    >
+    <div id="mobile-menu" class="mobile" transition:fly={{ y: -8, duration: 180 }}>
       <nav aria-label="Mobile">
         {#each links as link}
-          <a href={link.href} onclick={close}>{link.label}</a>
+          <a
+            href={link.href}
+            class:active={active(link.match)}
+            aria-current={active(link.match) ? 'page' : undefined}
+            onclick={close}>{link.label}</a
+          >
         {/each}
-        <a class="btn mobile-cta" href={`${home}#quickstart`} onclick={close}>Quickstart</a>
+        <a class="mobile-cta" href={`${home}#quickstart`} onclick={close}>Quickstart</a>
       </nav>
     </div>
   {/if}
@@ -95,64 +84,15 @@
 
 <style>
   .nav {
-    --nav-fg: var(--hero-fg);
-    --nav-line: var(--hero-line);
-    --nav-hole: var(--hero-bg);
-    /* Opaque chip surfaces so the theme control never sinks into the dither.
-       Mixing against nav-hole (always a solid page/hero colour) keeps them
-       readable in both themes and both nav states. */
-    --nav-chip-bg: color-mix(in srgb, var(--nav-hole) 90%, var(--nav-fg));
-    --nav-chip-bg-hover: color-mix(in srgb, var(--nav-hole) 82%, var(--nav-fg));
-    --nav-chip-border: color-mix(in srgb, var(--nav-fg) 34%, transparent);
-    --nav-cta-bg: var(--ink);
-    --nav-cta-fg: var(--bg);
+    --nav-fg: var(--ink);
+    --nav-line: var(--border);
+    --nav-chip-bg-hover: var(--code-bg);
 
     position: relative;
     z-index: 40;
-    border-bottom: 1px solid transparent;
-    background: transparent;
+    background: var(--surface);
     color: var(--nav-fg);
-    transition:
-      background-color var(--motion-base) var(--ease),
-      border-color var(--motion-base) var(--ease);
-  }
-
-  /* Top-of-page scrim: a translucent hero-coloured veil plus blur so the
-     transparent nav stays legible over the light/dark dither, without
-     becoming the heavy `.solid` bar. Fades out as the solid bar fades in. */
-  .nav::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--hero-bg) 88%, transparent) 0%,
-      color-mix(in srgb, var(--hero-bg) 66%, transparent) 58%,
-      color-mix(in srgb, var(--hero-bg) 32%, transparent) 100%
-    );
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    opacity: 1;
-    pointer-events: none;
-    transition: opacity var(--motion-base) var(--ease);
-  }
-
-  .nav.solid::before {
-    opacity: 0;
-  }
-
-  .nav.solid {
-    --nav-fg: var(--ink);
-    --nav-line: var(--border);
-    --nav-hole: var(--bg);
-    --nav-cta-bg: var(--ink);
-    --nav-cta-fg: var(--bg);
-
-    border-bottom-color: var(--border);
-    background: var(--bg);
-    background: color-mix(in srgb, var(--bg) 86%, transparent);
-    backdrop-filter: blur(12px);
+    transition: background-color var(--motion-base) var(--ease);
   }
 
   .inner {
@@ -164,71 +104,71 @@
   }
 
   .wordmark {
+    flex: none;
     color: var(--nav-fg);
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    text-decoration: none;
   }
 
   .links {
     display: flex;
     align-items: center;
-    gap: 28px;
+    gap: 26px;
+    margin-left: auto;
+    margin-right: auto;
   }
 
   .links a {
-    color: color-mix(in srgb, var(--nav-fg) 80%, transparent);
-    font-size: var(--text-sm);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 500;
     text-decoration: none;
     transition: color var(--motion-fast) var(--ease);
   }
 
-  .links a:hover {
-    color: var(--nav-fg);
+  .links a:hover,
+  .links a.active {
+    color: var(--ink);
+  }
+
+  .links a.active {
+    padding-bottom: 3px;
+    border-bottom: 2px solid currentColor;
+    color: var(--ink);
+    font-weight: 600;
   }
 
   .actions {
     display: flex;
+    flex: none;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
 
-  .cta-slot {
-    display: block;
-    max-width: 0;
-    margin-left: -8px;
-    overflow: hidden;
-    opacity: 0;
-    transform: translateX(6px);
-    pointer-events: none;
-    transition:
-      max-width 240ms var(--ease),
-      margin-left 240ms var(--ease),
-      opacity 160ms var(--ease),
-      transform 240ms var(--ease);
-  }
-
-  .cta-slot.visible {
-    max-width: 180px;
-    margin-left: 0;
-    opacity: 1;
-    transform: none;
-    pointer-events: auto;
-  }
-
-  .cta-slot .desk-cta {
-    white-space: nowrap;
-  }
-
-  .desk-cta {
+  .quickstart {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     min-height: 36px;
-    padding: 0 14px;
-    border-color: var(--nav-cta-bg);
-    background: var(--nav-cta-bg);
-    color: var(--nav-cta-fg);
+    margin-left: 6px;
+    padding: 0 15px;
+    border-radius: var(--radius-sm);
+    background: var(--ink);
+    color: var(--bg);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: opacity var(--motion-fast) var(--ease);
   }
 
-  .desk-cta:hover {
-    opacity: 0.9;
-    background: var(--nav-cta-bg);
-    border-color: var(--nav-cta-bg);
+  .quickstart:hover {
+    opacity: 0.86;
   }
 
   .toggle {
@@ -239,7 +179,7 @@
     width: 44px;
     height: 44px;
     padding: 0 11px;
-    border: 1px solid var(--nav-line);
+    border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--nav-fg);
@@ -273,32 +213,33 @@
     max-height: calc(100svh - 100px);
     padding: 8px var(--gutter) 20px;
     overflow-y: auto;
-    border-top: 1px solid var(--nav-line);
-    background: var(--hero-bg);
-  }
-
-  .nav.solid .mobile {
     background: var(--surface);
   }
-
-
 
   .mobile a {
     display: flex;
     align-items: center;
-    min-height: 44px;
-    border-bottom: 1px solid var(--nav-line);
-    color: var(--nav-fg);
-    font-size: var(--text-base);
+    min-height: 46px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 500;
     text-decoration: none;
   }
 
+  .mobile a.active {
+    border-bottom: 2px solid currentColor;
+    color: var(--ink);
+    font-weight: 600;
+  }
+
   .mobile .mobile-cta {
-    margin-top: 14px;
-    border-bottom: none;
-    border-color: var(--nav-cta-bg);
-    background: var(--nav-cta-bg);
-    color: var(--nav-cta-fg);
+    justify-content: center;
+    min-height: 44px;
+    margin-top: 12px;
+    border-radius: var(--radius-sm);
+    background: var(--ink);
+    color: var(--bg);
   }
 
   @media (min-width: 768px) {
@@ -307,10 +248,15 @@
     }
   }
 
+  @media (max-width: 980px) {
+    .links {
+      gap: 18px;
+    }
+  }
+
   @media (max-width: 767px) {
     .links,
-    .desk-cta,
-    .cta-slot {
+    .quickstart {
       display: none;
     }
 
