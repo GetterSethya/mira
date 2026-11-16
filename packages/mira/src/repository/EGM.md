@@ -46,8 +46,9 @@ prefixed columns that are reshaped back into a nested `row.expand` object.
 - `expand` selects each target column as `__e_<localField>__<col>`; `reshapeExpand` moves those into `row.expand[<localField>]` and deletes the flat keys [repository.ts:reshapeExpand]
 - A relation is materialised only when at least one target column is non-`null`; a left-join miss leaves the field absent from `row.expand` [repository.ts:reshapeExpand]
 - `onClause` params are interpolated in the JOIN before the WHERE, preserving textual parameter order, and the clause's compile-time `t.` alias is rewritten to the join alias [repository.ts:buildJoins]
-- `ORDER BY` is only emitted when a `SortOrder` is supplied, and always as `t."<field>" ASC|DESC` [repository.ts:orderFrag]
-- Every operation is wrapped in `Effect.withSpan` with `kind: "client"` and a `table` attribute [repository.ts:RepositoryLive]
+- `ORDER BY` is only emitted when a `SortOrder` is supplied, and always as `t."<field>" ASC|DESC`; `CollectionService.list` supplies `seqId ASC` by default [repository.ts:orderFrag]
+- The list shape `WHERE ... ORDER BY seqId LIMIT` is index-friendly: a single-value equality filter on an indexed column uses `(column, rowid)` order for seqId without a sort; `IN` uses the index plus a temp B-tree; default case-insensitive `LIKE` cannot use a B-tree index. Composite indexes are the application's choice via `Index.on(...)`: `pnpm --filter mira-benchmarks query-plan` reproduces the plans [repository.ts:RepositoryLive]
+- Every operation is wrapped in `withSpanWhenEnabled` with `kind: "client"` and a `table` attribute, so tracing-off requests skip no-op spans [repository.ts:RepositoryLive]
 - The repository never decodes booleans or hashes passwords; it stores exactly the values it is handed [repository.ts:Repository]
 
 ## Side Effects
