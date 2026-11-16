@@ -17,6 +17,14 @@ published by CI.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.1.0-alpha.38] - 2026-11-16
+
+### Added
+
 - **Opt-in transparent mutation batching (create, update, delete).**
   `.batchMutation({ create: {}, update: {}, delete: {} })` merges concurrent
   single-record mutations into one SQLite transaction. Create prepares
