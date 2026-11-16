@@ -45,12 +45,6 @@
     max: Math.max(...values)
   });
 
-  const overlaps = (a: ReadonlyArray<number>, b: ReadonlyArray<number>) => {
-    const left = range(a);
-    const right = range(b);
-    return left.max >= right.min && right.max >= left.min;
-  };
-
   const formatRange = (values: ReadonlyArray<number>, format: (value: number) => string) =>
     `${format(range(values).min)}–${format(range(values).max)}`;
 
@@ -295,20 +289,6 @@
     rows: latencyRows.filter((row) => row.label.startsWith(label))
   }));
 
-  const workloadRows = orderedRows.filter((row) => row.group === 'speed');
-  const createP99 = latencyRows.find((row) => row.label === 'Create p99');
-  const createP99Overlap = overlaps(
-    values(node.runs, (run) => run.create.p99),
-    values(bun.runs, (run) => run.create.p99)
-  );
-  const createP99Delta = createP99
-    ? `${createP99.delta}${createP99Overlap ? ' (ranges overlap)' : ''}`
-    : '';
-  const cardRows = [
-    ...workloadRows.map((row) => ({ id: row.id, label: row.id === 'list' ? 'List' : row.id === 'list-cached' ? 'Cached list' : row.label, delta: row.delta })),
-    ...(createP99 ? [{ id: 'create-p99', label: 'Create p99', delta: createP99Delta }] : [])
-  ];
-
   const facts = [
     { label: 'Runs', value: `${method.runs} interleaved pairs` },
     { label: 'Records', value: `${method.seedRecords} seed + ${method.createRequests} creates` },
@@ -331,7 +311,6 @@
   ] as const;
 
   const cpu = environment.cpu.trim().replace(' with Radeon Graphics', '');
-  const osLabel = environment.os.startsWith('win32') ? 'Windows x64' : environment.os;
 </script>
 
 <svelte:head>
@@ -356,71 +335,41 @@
   id="main"
   class="mx-auto w-full max-w-[1200px] px-[var(--gutter)] pb-24 pt-14 [font-family:var(--font-mono)] text-[16px] leading-[1.6] text-[var(--fg)] max-sm:pt-10"
 >
-  <header class="grid items-start gap-10 pt-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)] lg:gap-16">
+  <header class="pt-6">
     <div class="animate-[rise_520ms_var(--ease)_both] motion-reduce:animate-none">
       <h1
         class="max-w-[12ch] text-[clamp(44px,6.2vw,78px)] font-semibold leading-[1.02] tracking-[-0.045em] text-[var(--ink)] max-sm:text-[44px]"
       >
         Node vs Bun, measured.
       </h1>
-      <p class="mt-6 max-w-[52ch] text-[18px] leading-[1.6] text-[var(--fg)] max-sm:text-[18px]">
-        One Mira app, one SQLite collection, one load generator. Five interleaved pairs; measured
-        differences below.
+    </div>
+    <div
+      class="mt-10 grid items-start gap-8 animate-[rise_520ms_80ms_var(--ease)_both] motion-reduce:animate-none lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-16"
+    >
+      <p class="max-w-[52ch] text-[18px] leading-[1.6] text-[var(--fg)]">
+        One Mira app, one SQLite collection, one load generator. Five interleaved pairs; every metric is
+        compared on its own.
       </p>
-      <p class="mt-5 flex flex-col gap-0.5 text-[14px] leading-[1.7] text-[var(--muted)] sm:flex-row sm:flex-wrap sm:gap-x-3">
-        <span>{cpu}</span>
-        <span>Node {environment.node}</span>
-        <span>Bun {environment.bun}</span>
-      </p>
-      <div class="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
-        <a
-          class="inline-flex min-h-11 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--ink)] px-[18px] text-[14px] font-medium text-[color:var(--bg)]! transition-opacity hover:opacity-85"
-          href="#result">See the numbers</a
+      <div class="lg:pt-1">
+        <p
+          class="flex flex-col gap-0.5 text-[14px] leading-[1.7] text-[var(--muted)] sm:flex-row sm:flex-wrap sm:gap-x-3"
         >
-        <a
-          class="text-[14px] font-medium text-[var(--ink)]! underline underline-offset-4"
-          href="#method">Run it yourself</a
-        >
+          <span>{cpu}</span>
+          <span>Node {environment.node}</span>
+          <span>Bun {environment.bun}</span>
+        </p>
+        <div class="mt-7 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
+          <a
+            class="inline-flex min-h-11 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--ink)] px-[18px] text-[14px] font-medium text-[color:var(--bg)]! transition-opacity hover:opacity-85"
+            href="#result">See the numbers</a
+          >
+          <a
+            class="text-[14px] font-medium text-[var(--ink)]! underline underline-offset-4"
+            href="#method">Run it yourself</a
+          >
+        </div>
       </div>
     </div>
-
-    <aside
-      class="w-full rounded-[var(--radius-md)] bg-[var(--surface)] p-6 animate-[rise_560ms_80ms_var(--ease)_both] motion-reduce:animate-none lg:max-w-[560px]"
-      data-ui
-      aria-label="Measured differences"
-    >
-      <p class="text-[14px] font-medium text-[var(--muted)]">Measured differences</p>
-      <div
-        class="mt-3 flex flex-wrap items-center gap-2"
-        role="img"
-        aria-label="Five interleaved pairs, alternating which runtime starts"
-      >
-        <span class="flex items-center gap-1 text-[14px] text-[var(--muted)]">
-          <span class="block h-2 w-2 bg-[var(--border-strong)]"></span>N
-        </span>
-        <span class="flex items-center gap-1 text-[14px] text-[var(--muted)]">
-          <span class="block h-2 w-2 bg-[var(--ink)]"></span>B
-        </span>
-        <span class="ml-1 flex items-center gap-0.5">
-          {#each Array(10) as _, runIndex}
-            <span
-              class="block h-2 w-2 {runIndex % 4 === 0 || runIndex % 4 === 3
-                ? 'bg-[var(--border-strong)]'
-                : 'bg-[var(--ink)]'}"
-            ></span>
-          {/each}
-        </span>
-        <span class="ml-1 text-[14px] text-[var(--muted)]">5 pairs</span>
-      </div>
-      <ul class="mt-[18px] flex flex-col gap-1.5 border-t border-[var(--border)] pt-4 text-[14px]">
-        {#each cardRows as row (row.id)}
-          <li class="flex items-baseline justify-between gap-4">
-            <span class="text-[var(--muted)] {row.id === 'create-p99' ? '' : 'whitespace-nowrap'}">{row.label}</span>
-            <span class="text-right tabular-nums text-[var(--fg)] {row.id === 'create-p99' ? '' : 'whitespace-nowrap'}">{row.delta}</span>
-          </li>
-        {/each}
-      </ul>
-    </aside>
   </header>
 
   <section id="result" class="mt-24 scroll-mt-28">
