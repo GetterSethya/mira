@@ -86,6 +86,16 @@ published by CI.
 
 ### Changed
 
+- **Delete fast path with dialect-aware affected-row reporting.** Delete now reads
+  the stored row and the delete-rule result in one `SELECT` via
+  `Repository.viewWithAccess`, then removes the row with
+  `Repository.deleteExisting` instead of a separate existence query (service-layer
+  statements 4 → 2; full HTTP 5 → 3). `DialectType.deleteResult` selects the
+  strategy: `returning` for SQLite/Postgres/MariaDB, `affectedRows` for MySQL
+  when its driver exposes an affected count, and `precheck` as the portable
+  fallback. SQLite `DELETE ... RETURNING` is verified on Node 24 and Bun 1.4.
+  Body-placeholder and anonymous `@auth_*` delete rules keep the existing
+  fallback, preserving 404-before-403 and body semantics.
 - **SQLite WAL is explicit for Node and Bun.** `SqliteDatabase` and `BunSqliteDatabase`
   now issue `PRAGMA journal_mode = WAL` themselves when the connection opens, immediately
   before the optional `PRAGMA synchronous` mode. The Effect SQLite drivers already default
