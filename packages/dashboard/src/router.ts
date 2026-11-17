@@ -5,6 +5,7 @@ import type {
   AppConfig,
   CollectionService,
   CronService,
+  Dialect,
   FileStorage,
   RateLimiter,
   RateLimitKeySecret,
@@ -127,6 +128,7 @@ type DashboardRouteServices =
   | CollectionService
   | AppConfig
   | CronService
+  | Dialect
   | SqlClient.SqlClient
   | Repository
   | FileStorage

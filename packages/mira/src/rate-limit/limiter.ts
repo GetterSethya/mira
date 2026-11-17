@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 import { RateLimitUnavailableError } from "./errors.js"
 import type {
@@ -12,6 +12,10 @@ import type {
 
 export const PRUNE_INTERVAL_MS = 60_000
 export const PRUNE_RETENTION_MS = 5 * 60_000
+
+const encodeBucketKey = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Tuple([Schema.String, Schema.String, Schema.Number]))
+)
 
 const scopeForPolicy = (policy: string): "request" | "send" | "cooldown" => {
   if (policy.includes("cooldown")) return "cooldown"
@@ -81,7 +85,7 @@ export const makeRateLimiter = (store: RateLimitStoreShape): RateLimiterShape =>
         }
         const windowStart = windowFor(request.policy.windowMs, now)
         entries.push({
-          bucket: JSON.stringify([request.policy.name, request.key, windowStart]),
+          bucket: encodeBucketKey([request.policy.name, request.key, windowStart]),
           limit: request.policy.limit,
           cost,
           expiresAt: windowStart + request.policy.windowMs
@@ -127,14 +131,13 @@ export const makeRateLimiter = (store: RateLimitStoreShape): RateLimiterShape =>
       }
 
       const decisions = requests.map((request, index) => {
-        const entry = entries[index]!
         const used = result.counts[index] ?? 0
         const allowed = result.ok || !result.blockedIndices.includes(index)
         return decisionFor(
           request.policy.name,
           request.policy.limit,
           used,
-          entry.expiresAt,
+          windowFor(request.policy.windowMs, now) + request.policy.windowMs,
           now,
           allowed,
           false

@@ -36,7 +36,7 @@ function propertyToSchema(prop: JsonSchemaProperty, fieldDef: FieldDef | undefin
       return base.pipe(
         Schema.check(
           Schema.makeFilter(
-            (a: string): boolean => literalSet.has(a),
+            (a: string) => literalSet.has(a),
             filterAnnotations("literal", errorFn)
           )
         )

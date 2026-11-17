@@ -784,7 +784,7 @@ describe("view", () => {
 })
 
 // ---------------------------------------------------------------------------
-// create
+// create inserts a row after validating input and enforcing the create rule
 // ---------------------------------------------------------------------------
 
 describe("create", () => {
@@ -937,7 +937,7 @@ describe("create", () => {
 })
 
 // ---------------------------------------------------------------------------
-// update
+// update patches supplied fields after validating input and enforcing the update rule
 // ---------------------------------------------------------------------------
 
 describe("update", () => {
@@ -1054,7 +1054,7 @@ describe("update", () => {
 })
 
 // ---------------------------------------------------------------------------
-// delete
+// delete removes a row after enforcing the delete rule
 // ---------------------------------------------------------------------------
 
 describe("delete", () => {
@@ -1394,7 +1394,8 @@ describe("AuthCollection create", () => {
       yield* setupSuperAdminTable
       const svc = yield* CollectionService
       const created = yield* svc.create(SuperAdmin, { email: "upd@example.com", password: "first-pw" }, adminCtx)
-      const id = created["id"] as string
+      const id = created["id"]
+      if (typeof id !== "string") throw new Error("expected string id")
       const updated = yield* svc.update(SuperAdmin, id, { password: "second-pw" }, adminCtx)
       expect(updated["password"]).not.toBe("second-pw")
       expect(String(updated["password"]).startsWith("scrypt$")).toBe(true)
@@ -1405,7 +1406,8 @@ describe("AuthCollection create", () => {
       yield* setupSuperAdminTable
       const svc = yield* CollectionService
       const created = yield* svc.create(SuperAdmin, { email: "keep@example.com", password: "keep-pw" }, adminCtx)
-      const id = created["id"] as string
+      const id = created["id"]
+      if (typeof id !== "string") throw new Error("expected string id")
       const before = created["password"]
       const updated = yield* svc.update(SuperAdmin, id, { password: "" }, adminCtx)
       expect(updated["password"]).toBe(before)

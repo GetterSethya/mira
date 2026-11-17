@@ -77,7 +77,7 @@ describe("CronService unit tests", () => {
           {
             name: "fail-job",
             schedule: Schedule.once,
-            handler: () => Effect.fail(new Error("boom") as never),
+            handler: () => Effect.fail(new Error("boom")),
           },
         ])
       )
@@ -110,8 +110,10 @@ describe("CronService unit tests", () => {
         const failure = Cause.findErrorOption(result.cause)
         expect(Option.isSome(failure)).toBe(true)
         if (Option.isSome(failure)) {
-          expect(failure.value instanceof CronNotFoundError).toBe(true)
-          expect((failure.value as CronNotFoundError).name).toBe("no-such-cron")
+          const value = failure.value
+          expect(value instanceof CronNotFoundError).toBe(true)
+          if (!(value instanceof CronNotFoundError)) throw new Error("expected CronNotFoundError")
+          expect(value.name).toBe("no-such-cron")
         }
       }
     }).pipe(

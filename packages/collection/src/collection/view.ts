@@ -41,7 +41,7 @@ function makeViewBuilder<F extends ViewFields & FieldsMap>(
           viewQuery: query,
         })
       }
-      return _schema!
+      return _schema
     },
   }
 }

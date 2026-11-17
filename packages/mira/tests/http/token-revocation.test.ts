@@ -23,7 +23,7 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { hashPassword, signJwt } from "@/http/auth.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
 import { TokenStore, TokenStoreLive } from "@/http/token-store.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
@@ -93,7 +93,7 @@ const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 // Every sub-layer shares the one sqlite connection via the merge memo map, so
 // the TokenStore, Repository and the test body all act on the same database.
-const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
 
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
   Layer.provide(repoWithSql),
@@ -233,7 +233,6 @@ describe("TokenStore durability", () => {
   it.effect("an expired jti is not reported as revoked", () =>
     Effect.gen(function* () {
       yield* setupTables
-      const sql = yield* SqlClient.SqlClient
       const ctx = yield* Effect.scoped(Layer.build(Layer.fresh(TokenStoreLive)))
       const store = Context.get(ctx, TokenStore)
 

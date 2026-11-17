@@ -88,6 +88,18 @@ function collectSpans(queue: Queue.Queue<CompletedSpan>) {
   return Queue.clear(queue)
 }
 
+function requireSpan(
+  spans: ReadonlyArray<CompletedSpan>,
+  predicate: (span: CompletedSpan) => boolean
+): CompletedSpan {
+  const span = spans.find(predicate)
+  expect(span).toBeDefined()
+  if (span === undefined) {
+    throw new Error("expected the instrumentation span to be recorded")
+  }
+  return span
+}
+
 describe("instrumentation integration", () => {
   it.effect("repository.create span has correct table attribute", () =>
     Effect.gen(function* () {
@@ -97,9 +109,8 @@ describe("instrumentation integration", () => {
         const cs = yield* CollectionService
         yield* cs.create(testCollection, { title: "hello" }, noCtx)
         const spans = yield* collectSpans(queue)
-        const span = spans.find((s) => s.name === "repository.create")
-        expect(span).toBeDefined()
-        expect(span!.attributes["table"]).toBe(testCollection.name)
+        const span = requireSpan(spans, (s) => s.name === "repository.create")
+        expect(span.attributes["table"]).toBe(testCollection.name)
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -114,9 +125,11 @@ describe("instrumentation integration", () => {
         yield* collectSpans(queue)
         yield* cs.view(testCollection, String(created["id"]), noCtx)
         const spans = yield* collectSpans(queue)
-        const span = spans.find((s) => s.name === "repository.view" || s.name === "repository.viewFilter")
-        expect(span).toBeDefined()
-        expect(span!.attributes["table"]).toBe(testCollection.name)
+        const span = requireSpan(
+          spans,
+          (s) => s.name === "repository.view" || s.name === "repository.viewFilter"
+        )
+        expect(span.attributes["table"]).toBe(testCollection.name)
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -129,9 +142,8 @@ describe("instrumentation integration", () => {
         const cs = yield* CollectionService
         yield* cs.list(testCollection, null, 10, noCtx)
         const spans = yield* collectSpans(queue)
-        const span = spans.find((s) => s.name === "repository.list")
-        expect(span).toBeDefined()
-        expect(span!.attributes["table"]).toBe(testCollection.name)
+        const span = requireSpan(spans, (s) => s.name === "repository.list")
+        expect(span.attributes["table"]).toBe(testCollection.name)
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -144,10 +156,9 @@ describe("instrumentation integration", () => {
         const cs = yield* CollectionService
         yield* cs.create(testCollection, { title: "col-span" }, noCtx)
         const spans = yield* collectSpans(queue)
-        const span = spans.find((s) => s.name === "collection.create")
-        expect(span).toBeDefined()
-        expect(span!.attributes["collection"]).toBe(testCollection.name)
-        expect(span!.kind).toBe("internal")
+        const span = requireSpan(spans, (s) => s.name === "collection.create")
+        expect(span.attributes["collection"]).toBe(testCollection.name)
+        expect(span.kind).toBe("internal")
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -162,9 +173,8 @@ describe("instrumentation integration", () => {
         yield* collectSpans(queue)
         yield* cs.view(testCollection, String(created["id"]), noCtx)
         const spans = yield* collectSpans(queue)
-        const span = spans.find((s) => s.name === "collection.view")
-        expect(span).toBeDefined()
-        expect(span!.attributes["collection"]).toBe(testCollection.name)
+        const span = requireSpan(spans, (s) => s.name === "collection.view")
+        expect(span.attributes["collection"]).toBe(testCollection.name)
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -177,8 +187,7 @@ describe("instrumentation integration", () => {
         const cs = yield* CollectionService
         yield* cs.list(testCollection, null, 10, noCtx)
         const spans = yield* collectSpans(queue)
-        const span = spans.find((s) => s.name === "collection.list")
-        expect(span).toBeDefined()
+        requireSpan(spans, (s) => s.name === "collection.list")
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -191,12 +200,10 @@ describe("instrumentation integration", () => {
         const cs = yield* CollectionService
         yield* cs.create(testCollection, { title: "nesting" }, noCtx)
         const spans = yield* collectSpans(queue)
-        const colSpan = spans.find((s) => s.name === "collection.create")
-        const repoSpan = spans.find((s) => s.name === "repository.create")
-        expect(colSpan).toBeDefined()
-        expect(repoSpan).toBeDefined()
-        expect(repoSpan!.traceId).toBe(colSpan!.traceId)
-        expect(repoSpan!.parentSpanId).toBe(colSpan!.spanId)
+        const colSpan = requireSpan(spans, (s) => s.name === "collection.create")
+        const repoSpan = requireSpan(spans, (s) => s.name === "repository.create")
+        expect(repoSpan.traceId).toBe(colSpan.traceId)
+        expect(repoSpan.parentSpanId).toBe(colSpan.spanId)
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -209,9 +216,8 @@ describe("instrumentation integration", () => {
         const cs = yield* CollectionService
         yield* cs.list(testCollection, null, 10, noCtx)
         const spans = yield* collectSpans(queue)
-        const cacheSpan = spans.find((s) => s.name === "cache.list")
-        expect(cacheSpan).toBeDefined()
-        expect(cacheSpan!.parentSpanId).toBeUndefined()
+        const cacheSpan = requireSpan(spans, (s) => s.name === "cache.list")
+        expect(cacheSpan.parentSpanId).toBeUndefined()
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -226,12 +232,10 @@ describe("instrumentation integration", () => {
         yield* collectSpans(queue)
         yield* cs.view(testCollection, String(created["id"]), noCtx)
         const spans = yield* collectSpans(queue)
-        const cacheSpan = spans.find((s) => s.name === "cache.view")
-        expect(cacheSpan).toBeDefined()
-        expect(cacheSpan!.attributes["cache.hit"]).toBe(false)
-        const colSpan = spans.find((s) => s.name === "collection.view")
-        expect(colSpan).toBeDefined()
-        expect(colSpan!.parentSpanId).toBe(cacheSpan!.spanId)
+        const cacheSpan = requireSpan(spans, (s) => s.name === "cache.view")
+        expect(cacheSpan.attributes["cache.hit"]).toBe(false)
+        const colSpan = requireSpan(spans, (s) => s.name === "collection.view")
+        expect(colSpan.parentSpanId).toBe(cacheSpan.spanId)
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -247,9 +251,8 @@ describe("instrumentation integration", () => {
         yield* collectSpans(queue)
         yield* cs.view(testCollection, String(created["id"]), noCtx)
         const spans = yield* collectSpans(queue)
-        const cacheSpan = spans.find((s) => s.name === "cache.view")
-        expect(cacheSpan).toBeDefined()
-        expect(cacheSpan!.attributes["cache.hit"]).toBe(true)
+        const cacheSpan = requireSpan(spans, (s) => s.name === "cache.view")
+        expect(cacheSpan.attributes["cache.hit"]).toBe(true)
         const colSpan = spans.find((s) => s.name === "collection.view")
         expect(colSpan).toBeUndefined()
       }).pipe(Effect.provide(makeTestLayer(queue)))
@@ -264,9 +267,8 @@ describe("instrumentation integration", () => {
         const cs = yield* CollectionService
         yield* cs.list(testCollection, null, 10, noCtx)
         const spans = yield* collectSpans(queue)
-        const cacheSpan = spans.find((s) => s.name === "cache.list")
-        expect(cacheSpan).toBeDefined()
-        expect(cacheSpan!.attributes["cache.hit"]).toBe(false)
+        const cacheSpan = requireSpan(spans, (s) => s.name === "cache.list")
+        expect(cacheSpan.attributes["cache.hit"]).toBe(false)
       }).pipe(Effect.provide(makeTestLayer(queue)))
     })
   )
@@ -281,9 +283,8 @@ describe("instrumentation integration", () => {
         yield* collectSpans(queue)
         yield* cs.list(testCollection, null, 10, noCtx)
         const spans = yield* collectSpans(queue)
-        const cacheSpan = spans.find((s) => s.name === "cache.list")
-        expect(cacheSpan).toBeDefined()
-        expect(cacheSpan!.attributes["cache.hit"]).toBe(true)
+        const cacheSpan = requireSpan(spans, (s) => s.name === "cache.list")
+        expect(cacheSpan.attributes["cache.hit"]).toBe(true)
         const colSpan = spans.find((s) => s.name === "collection.list")
         expect(colSpan).toBeUndefined()
       }).pipe(Effect.provide(makeTestLayer(queue)))

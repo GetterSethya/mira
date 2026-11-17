@@ -3,15 +3,15 @@ import type { AnyCollectionDef, AuthRuleFields, FieldsMap, InferFieldValue } fro
 import type { ExprNode, OperandNode } from "./types.js"
 
 type FieldOperandMethods<K extends string, V = unknown> = {
-  eq(right: OperandNode<any, V>): ExprNode<K>
-  neq(right: OperandNode<any, V>): ExprNode<K>
-  gt(right: OperandNode<any, V>): ExprNode<K>
-  gte(right: OperandNode<any, V>): ExprNode<K>
-  lt(right: OperandNode<any, V>): ExprNode<K>
-  lte(right: OperandNode<any, V>): ExprNode<K>
-  in(right: OperandNode<any, V | ReadonlyArray<V>>): ExprNode<K>
-  startsWith(right: OperandNode<any, V>): ExprNode<K>
-  contains(right: OperandNode<any, V>): ExprNode<K>
+  eq(right: OperandNode<string, V>): ExprNode<K>
+  neq(right: OperandNode<string, V>): ExprNode<K>
+  gt(right: OperandNode<string, V>): ExprNode<K>
+  gte(right: OperandNode<string, V>): ExprNode<K>
+  lt(right: OperandNode<string, V>): ExprNode<K>
+  lte(right: OperandNode<string, V>): ExprNode<K>
+  in(right: OperandNode<string, V | ReadonlyArray<V>>): ExprNode<K>
+  startsWith(right: OperandNode<string, V>): ExprNode<K>
+  contains(right: OperandNode<string, V>): ExprNode<K>
 }
 
 /** An operand node with fluent comparison methods attached. */
@@ -24,13 +24,13 @@ type RuleBase = {
     _collection: C,
     field: K
   ) => FieldOperand<string, InferFieldValue<(C["fields"] & AuthRuleFields)[K]>>
-  authId: <C extends AnyCollectionDef>(_collection: C) => FieldOperand<any, string>
+  authId: <C extends AnyCollectionDef>(_collection: C) => FieldOperand<string, string>
   /** The collection name of the authenticated user. Use to restrict access to a specific auth collection. */
-  authCollection: () => FieldOperand<any, string>
-  literal: <V>(value: V) => OperandNode<any, V>
-  now: () => OperandNode<any, string>
-  dateAdd: (operand: OperandNode<any>, amount: number, unit: "day" | "hour" | "minute") => OperandNode<any, string>
-  dateDiff: (left: OperandNode<any>, right: OperandNode<any>, unit: "day" | "hour" | "minute") => OperandNode<any, number>
+  authCollection: () => FieldOperand<string, string>
+  literal: <V>(value: V) => OperandNode<string, V>
+  now: () => OperandNode<string, string>
+  dateAdd: (operand: OperandNode<string>, amount: number, unit: "day" | "hour" | "minute") => OperandNode<string, string>
+  dateDiff: (left: OperandNode<string>, right: OperandNode<string>, unit: "day" | "hour" | "minute") => OperandNode<string, number>
   and: <K extends string = string>(...exprs: Array<ExprNode<K>>) => ExprNode<K>
   or: <K extends string = string>(...exprs: Array<ExprNode<K>>) => ExprNode<K>
   not: <K extends string = string>(expr: ExprNode<K>) => ExprNode<K>
@@ -47,7 +47,7 @@ export type RuleBuilder<F extends FieldsMap> = RuleBase & {
   subquery: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(
     _collection: C,
     field: K
-  ) => { where: (expr: ExprNode<any> | ((R: RuleBuilder<C["fields"]>) => ExprNode<any>)) => OperandNode<any, string> }
+  ) => { where: (expr: ExprNode<string> | ((R: RuleBuilder<C["fields"]>) => ExprNode<string>)) => OperandNode<string, string> }
 }
 
 /** Attaches fluent comparison methods to a raw operand node. */
@@ -63,7 +63,8 @@ export function toChainable<K extends string, V>(operand: OperandNode<K, V>): Fi
     startsWith(right) { return { op: "startsWith", left: operand, right } },
     contains(right) { return { op: "contains", left: operand, right } }
   }
-  return Object.assign(Object.create(methods) as FieldOperand<K, V>, operand)
+  const proto: FieldOperand<K, V> = Object.create(methods)
+  return Object.assign(proto, operand)
 }
 
 /**
@@ -106,7 +107,7 @@ export const Rule: RuleBase & {
   subquery: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(
     _collection: C,
     field: K
-  ) => { where: (expr: ExprNode<any> | ((R: RuleBuilder<C["fields"]>) => ExprNode<any>)) => OperandNode<any, string> }
+  ) => { where: (expr: ExprNode<string> | ((R: RuleBuilder<C["fields"]>) => ExprNode<string>)) => OperandNode<string, string> }
 } = {
   /** Reference a record field by name. Returns a chainable operand. Value type is unknown; use via RuleBuilder for typed comparisons. */
   field: <const K extends string>(name: K): FieldOperand<K, unknown> =>
@@ -128,15 +129,15 @@ export const Rule: RuleBase & {
     }),
 
   /** Reference the ID of the currently authenticated user. */
-  authId: <C extends AnyCollectionDef>(_collection: C): FieldOperand<any, string> =>
-    toChainable<any, string>({ kind: "authId", collection: _collection.name }),
+  authId: <C extends AnyCollectionDef>(_collection: C): FieldOperand<string, string> =>
+    toChainable<string, string>({ kind: "authId", collection: _collection.name }),
 
   /** Reference the collection name of the currently authenticated user. */
-  authCollection: (): FieldOperand<any, string> =>
-    toChainable<any, string>({ kind: "authCollection" }),
+  authCollection: (): FieldOperand<string, string> =>
+    toChainable<string, string>({ kind: "authCollection" }),
 
   /** A literal value for comparison. The value type `V` is inferred from the argument. */
-  literal: <V>(value: V): OperandNode<any, V> => ({
+  literal: <V>(value: V): OperandNode<string, V> => ({
     kind: "literal",
     value
   }),
@@ -159,7 +160,7 @@ export const Rule: RuleBase & {
   subquery: <C extends AnyCollectionDef, K extends keyof C["fields"] & string>(
     _collection: C,
     field: K
-  ): { where: (expr: ExprNode<any> | ((R: RuleBuilder<C["fields"]>) => ExprNode<any>)) => OperandNode<any, string> } => ({
+  ): { where: (expr: ExprNode<string> | ((R: RuleBuilder<C["fields"]>) => ExprNode<string>)) => OperandNode<string, string> } => ({
     where: (expr) => ({
       kind: "subquery",
       collection: _collection.name,
@@ -169,10 +170,10 @@ export const Rule: RuleBase & {
   }),
 
   /** Current timestamp operand. Compiles to `datetime('now')` in SQLite. */
-  now: (): OperandNode<any, string> => ({ kind: "now" }),
+  now: (): OperandNode<string, string> => ({ kind: "now" }),
 
   /** Add a duration to a date operand for date arithmetic. */
-  dateAdd: (operand: OperandNode<any>, amount: number, unit: "day" | "hour" | "minute"): OperandNode<any, string> => ({
+  dateAdd: (operand: OperandNode<string>, amount: number, unit: "day" | "hour" | "minute"): OperandNode<string, string> => ({
     kind: "dateAdd",
     operand,
     amount,
@@ -180,7 +181,7 @@ export const Rule: RuleBase & {
   }),
 
   /** Compute the difference between two date operands. */
-  dateDiff: (left: OperandNode<any>, right: OperandNode<any>, unit: "day" | "hour" | "minute"): OperandNode<any, number> => ({
+  dateDiff: (left: OperandNode<string>, right: OperandNode<string>, unit: "day" | "hour" | "minute"): OperandNode<string, number> => ({
     kind: "dateDiff",
     left,
     right,
@@ -189,16 +190,18 @@ export const Rule: RuleBase & {
 
   /** Logical AND of expressions. */
   and: <K extends string = string>(...exprs: Array<ExprNode<K>>): ExprNode<K> => {
-    if (exprs.length === 0) return { op: "public" }
-    if (exprs.length === 1) return exprs[0]!
-    return exprs.slice(1).reduce<ExprNode<K>>((acc, curr) => ({ op: "and", left: acc, right: curr }), exprs[0]!)
+    const [first, ...rest] = exprs
+    if (!first) return { op: "public" }
+    if (rest.length === 0) return first
+    return rest.reduce<ExprNode<K>>((acc, curr) => ({ op: "and", left: acc, right: curr }), first)
   },
 
   /** Logical OR of expressions. */
   or: <K extends string = string>(...exprs: Array<ExprNode<K>>): ExprNode<K> => {
-    if (exprs.length === 0) return { op: "public" }
-    if (exprs.length === 1) return exprs[0]!
-    return exprs.slice(1).reduce<ExprNode<K>>((acc, curr) => ({ op: "or", left: acc, right: curr }), exprs[0]!)
+    const [first, ...rest] = exprs
+    if (!first) return { op: "public" }
+    if (rest.length === 0) return first
+    return rest.reduce<ExprNode<K>>((acc, curr) => ({ op: "or", left: acc, right: curr }), first)
   },
 
   /** Logical negation of a sub-expression. */

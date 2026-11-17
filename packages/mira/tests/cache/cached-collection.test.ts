@@ -6,7 +6,7 @@ import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
-import { Effect, Layer,Result } from "effect"
+import { Effect, Layer, Predicate, Result } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -48,6 +48,11 @@ const slowViewRules = defineRule(slowViewDef, (R) => ({ list: R.public(), view: 
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
 const adminCtx: RequestCtx = { headers: {}, query: {}, admin: true }
+
+const requireString = (value: unknown): string => {
+  if (!Predicate.isString(value)) throw new Error("Expected a string value")
+  return value
+}
 
 // Dummy collection — only its `.name` is used by Rule.authId(), never queried.
 const usersDef = BaseCollection.define("users", {
@@ -265,7 +270,7 @@ describe("CachedCollectionService", () => {
       const sql = yield* SqlClient.SqlClient
 
       const created = yield* svc.create(Posts, { title: "Cached" }, noCtx)
-      const id = created["id"] as string
+      const id = requireString(created["id"])
 
       // First view — populates cache
       const first = yield* svc.view(Posts, id, noCtx)
@@ -285,7 +290,7 @@ describe("CachedCollectionService", () => {
       const svc = yield* CollectionService
 
       const created = yield* svc.create(Posts, { title: "Original" }, noCtx)
-      const id = created["id"] as string
+      const id = requireString(created["id"])
 
       // Prime the cache
       yield* svc.view(Posts, id, noCtx)
@@ -304,7 +309,7 @@ describe("CachedCollectionService", () => {
       const svc = yield* CollectionService
 
       const created = yield* svc.create(Posts, { title: "ToDelete" }, noCtx)
-      const id = created["id"] as string
+      const id = requireString(created["id"])
 
       // Prime the cache
       yield* svc.view(Posts, id, noCtx)
@@ -444,7 +449,7 @@ describe("CachedCollectionService", () => {
       const svc = yield* CollectionService
 
       const created = yield* svc.create(Posts, { title: "Before" }, noCtx)
-      const id = created["id"] as string
+      const id = requireString(created["id"])
 
       // Prime the list cache
       const first = yield* svc.list(Posts, null, 10, noCtx)
@@ -465,7 +470,7 @@ describe("CachedCollectionService", () => {
 
       yield* svc.create(Posts, { title: "Keep" }, noCtx)
       const r2 = yield* svc.create(Posts, { title: "Remove" }, noCtx)
-      const id2 = r2["id"] as string
+      const id2 = requireString(r2["id"])
 
       // Prime the list cache
       const first = yield* svc.list(Posts, null, 10, noCtx)
@@ -490,7 +495,7 @@ describe("Cache key authorization scoping (security)", () => {
       const svc = yield* CollectionService
 
       const created = yield* svc.create(Notes, { ownerId: "userA", body: "secret" }, noCtx)
-      const id = created["id"] as string
+      const id = requireString(created["id"])
 
       const ctxOwner: RequestCtx = { headers: {}, query: {}, auth: { collection: "users", record: { id: "userA" } } }
       const ctxOther: RequestCtx = { headers: {}, query: {}, auth: { collection: "users", record: { id: "userB" } } }
@@ -515,7 +520,7 @@ describe("Cache key authorization scoping (security)", () => {
       const svc = yield* CollectionService
 
       const created = yield* svc.create(TenantDocs, { tenantId: "tenant-1", body: "secret" }, noCtx)
-      const id = created["id"] as string
+      const id = requireString(created["id"])
 
       const ctxTenant1: RequestCtx = { headers: {}, query: { tenantId: "tenant-1" } }
       const ctxTenant2: RequestCtx = { headers: {}, query: { tenantId: "tenant-2" } }
@@ -540,7 +545,7 @@ describe("Cache key authorization scoping (security)", () => {
       const svc = yield* CollectionService
 
       const created = yield* svc.create(Accounts, { email: "a@b.com", password: "hashed-secret" }, adminCtx)
-      const id = created["id"] as string
+      const id = requireString(created["id"])
 
       // Admin views the record — password is x-hidden but admin bypasses field hiding —
       // populates the cache with the password included. The password is hashed on

@@ -15,13 +15,25 @@ type BunPasswordApi = {
   verify(password: string, hash: string): Promise<boolean>
 }
 
-const bunPassword = (): BunPasswordApi | undefined =>
-  (globalThis as { Bun?: { password?: BunPasswordApi } }).Bun?.password
+const isBunPasswordApi = (value: unknown): value is BunPasswordApi => {
+  if (typeof value !== "object" || value === null) return false
+  return (
+    typeof Reflect.get(value, "hash") === "function" &&
+    typeof Reflect.get(value, "verify") === "function"
+  )
+}
+
+const bunPassword = (): BunPasswordApi | undefined => {
+  const bun: unknown = Reflect.get(globalThis, "Bun")
+  if (typeof bun !== "object" || bun === null) return undefined
+  const password: unknown = Reflect.get(bun, "password")
+  return isBunPasswordApi(password) ? password : undefined
+}
 
 const ARGON2_PREFIX = "$argon2"
 const BCRYPT_PREFIXES = ["$2a$", "$2b$", "$2y$"] as const
 
-const isBunPasswordHash = (stored: string): boolean =>
+const isBunPasswordHash = (stored: string) =>
   stored.startsWith(ARGON2_PREFIX) || BCRYPT_PREFIXES.some((prefix) => stored.startsWith(prefix))
 
 /**

@@ -64,11 +64,6 @@ export interface AuthChallengeStoreShape {
 
 const liveChallenges = new Map<string, ChallengeRecord>()
 
-const key = (collection: string, userId: string, purpose: ChallengePurpose) =>
-  `${collection}\u0000${userId}\u0000${purpose}`
-
-const liveKey = (record: ChallengeRecord) => key(record.collection, record.userId, record.purpose)
-
 const isLive = (record: ChallengeRecord, now: number) =>
   record.consumedAt === null && record.expiresAt > now
 

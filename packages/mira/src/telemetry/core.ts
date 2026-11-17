@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, Layer, Logger, Queue, Ref, Semaphore, Tracer } from "effect"
+import { Cause, Duration, Effect, Layer, Logger, Queue, Ref, Schema, Semaphore, Tracer } from "effect"
 import { Base64Url } from "effect/encoding"
 
 import { CryptoService } from "@/crypto/crypto.js"
@@ -20,6 +20,7 @@ import {
 const LOG_QUEUE_CAPACITY = 10_000
 const DRAIN_TIMEOUT = "2 seconds"
 const MAX_BATCH_SIZE = 1_000
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 export interface TelemetryCoreConfig {
   /** Also print each log entry and span to stdout. Defaults to `false`. */
@@ -145,7 +146,7 @@ const echoLog = (entry: TelemetryLogEntry, pretty: boolean) =>
     }
     if (entry.traceId !== null) line.traceId = entry.traceId
     if (entry.spanId !== null) line.spanId = entry.spanId
-    console.log(pretty ? formatPrettyLog(line) : JSON.stringify(line))
+    console.log(pretty ? formatPrettyLog(line) : encodeJson(line))
   })
 
 const toSpanEntry = (
@@ -198,7 +199,7 @@ const echoSpan = (entry: TelemetrySpanEntry, pretty: boolean) =>
     if (Object.keys(entry.attributes).length > 0) line.attributes = entry.attributes
     if (entry.parentSpanId !== null) line.parentSpanId = entry.parentSpanId
     if (entry.error !== null) line.error = entry.error
-    console.log(`[trace] ${JSON.stringify(line)}`)
+    console.log(`[trace] ${encodeJson(line)}`)
   })
 
 const startConsumer = <A>(
@@ -213,7 +214,10 @@ const startConsumer = <A>(
     const buffer = yield* Ref.make<ReadonlyArray<A>>([])
 
     const flushBuffer = Effect.gen(function* () {
-      const rows = yield* Ref.modify(buffer, (current) => [current, [] as ReadonlyArray<A>])
+      const rows = yield* Ref.modify(
+        buffer,
+        (current): readonly [ReadonlyArray<A>, ReadonlyArray<A>] => [current, []]
+      )
       if (rows.length > 0) yield* processBatch(rows)
     })
 

@@ -7,7 +7,7 @@ import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/ht
 import { SqlClient } from "effect/sql"
 
 import { applyRulesToCollections, defineRule } from "@/app/index.js"
-import { buildCtxCacheTag } from "@/cache/ctx-key.js"
+import { buildCtxCacheTag as buildCtxCacheTagRaw } from "@/cache/ctx-key.js"
 import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { AppConfig } from "@/config/index.js"
@@ -16,7 +16,7 @@ import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
@@ -34,6 +34,12 @@ import {
   seedUser,
   setupTables
 } from "./_harness.js"
+
+const buildCtxCacheTag = (
+  collection: Parameters<typeof buildCtxCacheTagRaw>[0],
+  action: Parameters<typeof buildCtxCacheTagRaw>[1],
+  ctx: Parameters<typeof buildCtxCacheTagRaw>[2]
+) => buildCtxCacheTagRaw(collection, action, ctx, sqliteDialect)
 
 // ---------------------------------------------------------------------------
 // Extra collections — base collections whose read rules resolve a request
@@ -131,7 +137,7 @@ const AppConfigTest = Layer.succeed(
 /** Fresh layer per test: the cached service + all of its dependencies. */
 function makeCachedSecurityLayer(collections: ReadonlyArray<typeof CACHED_COLLECTIONS[number]>) {
   const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-  const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+  const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
   const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
   // >>> the swap <<< — uses the cached collection service
@@ -350,7 +356,7 @@ describe("H2: @request_body_* rule on list/view (fail-closed?)", () => {
       yield* seedRow("body_rules", { title: "body-secret-row", token: "body-secret" })
       yield* serveCachedRouter()
 
-      const compiled = enforcerForAction(BodyRule.schema, "list")
+      const compiled = enforcerForAction(BodyRule.schema, "list", sqliteDialect)
       // eslint-disable-next-line no-console
       console.log(`[H2] compiled list rule: sql=${pretty(compiled?.sql)} params=${pretty(compiled?.params)}`)
 
@@ -494,7 +500,7 @@ describe("H4 (REGRESSION): a request whose rule value differs from the one that 
       yield* seedRow("query_rules", { title: "control-row", token: "c,d" })
       yield* serveCachedRouter()
 
-      const compiled = enforcerForAction(QueryRule.schema, "list")
+      const compiled = enforcerForAction(QueryRule.schema, "list", sqliteDialect)
       // eslint-disable-next-line no-console
       console.log(`[H4] compiled list rule: sql=${pretty(compiled?.sql)}`)
 

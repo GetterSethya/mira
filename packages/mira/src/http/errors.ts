@@ -5,7 +5,6 @@ import type { SqlError } from "effect/sql"
 import type { AuthEmailError } from "@/auth/errors.js"
 import type { CollectionError } from "@/collection-service/errors.js"
 import type { EmailNotConfiguredError, EmailSendError } from "@/email/types.js"
-import type { RateLimitedError } from "@/rate-limit/errors.js"
 import type { AuthError } from "./auth.js"
 import type { FileStorageError } from "@/storage/storage.js"
 

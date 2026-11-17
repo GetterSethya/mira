@@ -3,7 +3,8 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
 import { AuthCollection, Field } from "@gettersethya/mira-client"
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter, HttpServer } from "effect/http"
+import type { HttpClientResponse } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -20,7 +21,7 @@ import { makeCollectionRouter } from "@/http/router.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
 
 const UsersDef = AuthCollection.define(
   "users",
@@ -102,7 +103,7 @@ const FileStorageTest = Layer.succeed(
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
-const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
   Layer.provide(repoWithSql),
   Layer.provide(FileStorageTest),
@@ -176,8 +177,6 @@ const responseBody = <S extends Schema.Constraint>(schema: S) => (res: HttpClien
   res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
 
 const ChallengeResponse = Schema.Struct({ challengeId: Schema.String })
-const MessageResponse = Schema.Struct({ message: Schema.String })
-const ErrorResponse = Schema.Struct({ error: Schema.String })
 const TokenResponse = Schema.Struct({
   token: Schema.String,
   record: Schema.Record(Schema.String, Schema.Unknown)

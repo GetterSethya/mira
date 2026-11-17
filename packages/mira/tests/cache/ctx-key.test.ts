@@ -3,8 +3,16 @@ import { describe, expect, it } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 
 import { applyRulesToCollections, defineRule } from "@/app/index.js"
-import { buildCtxCacheTag } from "@/cache/ctx-key.js"
+import { buildCtxCacheTag as buildCtxCacheTagRaw } from "@/cache/ctx-key.js"
 import type { RequestCtx } from "@/collection-service/context.js"
+import { postgresRuleSql } from "@/dialect/dialect-postgres.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+
+const buildCtxCacheTag = (
+  collection: Parameters<typeof buildCtxCacheTagRaw>[0],
+  action: Parameters<typeof buildCtxCacheTagRaw>[1],
+  ctx: Parameters<typeof buildCtxCacheTagRaw>[2]
+) => buildCtxCacheTagRaw(collection, action, ctx, sqliteDialect)
 
 const docsDef = BaseCollection.define("docs", {
   owner: Field.text({ required: false })
@@ -49,5 +57,15 @@ describe("buildCtxCacheTag body segment", () => {
   it("collections without body refs carry no b: segment", () => {
     const tag = buildCtxCacheTag(PlainDocs, "view", { headers: {}, query: {}, body: { owner: "alice" } })
     expect(tag).not.toContain("b:")
+  })
+})
+
+describe("cache tag after dialect rendering", () => {
+  it("captures the same refs for SQLite and PostgreSQL", () => {
+    const ctx = { headers: {}, query: {}, body: { owner: "alice" } }
+    const sqliteTag = buildCtxCacheTagRaw(Docs, "view", ctx, sqliteDialect)
+    const pgTag = buildCtxCacheTagRaw(Docs, "view", ctx, postgresRuleSql)
+    expect(pgTag).toBe(sqliteTag)
+    expect(sqliteTag).toContain("b:owner=alice")
   })
 })

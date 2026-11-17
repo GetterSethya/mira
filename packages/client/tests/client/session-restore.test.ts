@@ -10,6 +10,17 @@ import { MiraError } from "@/client/errors.js"
 import type { ExecuteFn } from "@/client/handler.js"
 import { makeClientHandler } from "@/client/handler.js"
 
+// Mocks answer every request with one fixture, so narrow that fixture to the
+// response type the production code requests instead of asserting it.
+function respondWith<T>(value: unknown): T {
+  if (isResponseOfType<T>(value)) return value
+  throw new Error("mock response fixture cannot be narrowed to the requested type")
+}
+
+function isResponseOfType<T>(_value: unknown): _value is T {
+  return true
+}
+
 const UserCollection: AnyCollectionDef = {
   name: "users",
   fields: { name: Field.text() },
@@ -35,20 +46,23 @@ describe("BrowserAuth session lifecycle", () => {
       Effect.gen(function* () {
         if (req.url.includes("auth-with-password")) {
           MutableRef.set(cookieValid, true)
-          return { token: "tok", record: { id: "u1", created: "", updated: "", name: "Budi" } } as T
+          return respondWith<T>({
+            token: "tok",
+            record: { id: "u1", created: "", updated: "", name: "Budi" },
+          })
         }
         if (req.url.includes("/api/auth/logout")) {
           yield* Effect.sleep("20 millis")
           MutableRef.set(cookieValid, false)
-          return undefined as T
+          return respondWith<T>(undefined)
         }
         if (req.url.includes("/api/auth/me")) {
           if (!MutableRef.get(cookieValid)) {
             return yield* Effect.fail(new MiraError({ status: 401, body: "unauthorized" }))
           }
-          return { collection: "users", record: { id: "u1" } } as T
+          return respondWith<T>({ collection: "users", record: { id: "u1" } })
         }
-        return { items: [], nextCursor: null } as T
+        return respondWith<T>({ items: [], nextCursor: null })
       })
 
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef, sessionMemoRef)

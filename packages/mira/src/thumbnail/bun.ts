@@ -54,8 +54,15 @@ export interface BunThumbnailOptions {
   readonly allowPhotonFallback?: boolean
 }
 
-const bunImage = (): BunImageConstructor | undefined =>
-  (globalThis as { Bun?: { Image?: BunImageConstructor } }).Bun?.Image
+const isBunImageConstructor = (value: unknown): value is BunImageConstructor =>
+  typeof value === "function"
+
+const bunImage = (): BunImageConstructor | undefined => {
+  const bun: unknown = Reflect.get(globalThis, "Bun")
+  if (typeof bun !== "object" || bun === null) return undefined
+  const Image: unknown = Reflect.get(bun, "Image")
+  return isBunImageConstructor(Image) ? Image : undefined
+}
 
 const encode = (image: BunImagePipeline, mimeType: string): BunImagePipeline => {
   if (mimeType === "image/jpeg") return image.jpeg({ quality: 80 })

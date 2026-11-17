@@ -1,4 +1,5 @@
-import { Effect, Layer, Redacted, Stream } from "effect"
+import type { Redacted } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { Files as FilesClient } from "files-sdk"
 import type { FilesService } from "files-sdk/effect"
 import { make as makeFilesService } from "files-sdk/effect"
@@ -176,8 +177,8 @@ export const makeFileStorageFromFiles = (
     ...(description === undefined ? {} : { describe: () => description }),
     // The upstream stream is drained *inside* the Effect and only then handed
     // to the adapter, so streaming errors (e.g. the upload size limit's
-    // `PayloadTooLargeError`) stay in the error channel with their original
-    // type instead of being rewritten by the adapter's error mapping.
+    // `PayloadTooLargeError`) keep their original shape in the error channel
+    // instead of being rewritten by the adapter's error mapping.
     upload: <E>(key: string, stream: Stream.Stream<Uint8Array, E>, mimeType: string) =>
       Effect.gen(function* () {
         const chunks = yield* Stream.runCollect(stream)

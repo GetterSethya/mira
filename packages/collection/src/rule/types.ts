@@ -1,3 +1,6 @@
+/** Unit accepted by the date rule operands. */
+export type TimestampUnit = "day" | "hour" | "minute"
+
 /**
  * A value node in a rule expression — can be a field reference, literal, auth context, subquery, date operation, or request value.
  *
@@ -18,11 +21,11 @@ export type OperandNode<K extends string = string, V = unknown> =
   | { kind: "auth"; collection: string; field: string }
   | { kind: "authId"; collection: string }
   | { kind: "authCollection" }
-  | { kind: "subquery"; collection: string; field: string; where: ExprNode<any> }
+  | { kind: "subquery"; collection: string; field: string; where: ExprNode }
   | { kind: "request"; source: "header" | "query" | "body"; key: string }
   | { kind: "now" }
-  | { kind: "dateAdd"; operand: OperandNode<any>; amount: number; unit: "day" | "hour" | "minute" }
-  | { kind: "dateDiff"; left: OperandNode<any>; right: OperandNode<any>; unit: "day" | "hour" | "minute" }
+  | { kind: "dateAdd"; operand: OperandNode; amount: number; unit: TimestampUnit }
+  | { kind: "dateDiff"; left: OperandNode; right: OperandNode; unit: TimestampUnit }
 
 /**
  * A boolean expression node in a rule — the result of comparing operands or combining sub-expressions.
@@ -34,18 +37,18 @@ export type OperandNode<K extends string = string, V = unknown> =
  * - `public` — always-true marker
  */
 export type ExprNode<K extends string = string> =
-  | { op: "eq"; left: OperandNode<K>; right: OperandNode<any> }
-  | { op: "neq"; left: OperandNode<K>; right: OperandNode<any> }
-  | { op: "gt"; left: OperandNode<K>; right: OperandNode<any> }
-  | { op: "gte"; left: OperandNode<K>; right: OperandNode<any> }
-  | { op: "lt"; left: OperandNode<K>; right: OperandNode<any> }
-  | { op: "lte"; left: OperandNode<K>; right: OperandNode<any> }
-  | { op: "in"; left: OperandNode<K>; right: OperandNode<any> }
+  | { op: "eq"; left: OperandNode<K>; right: OperandNode }
+  | { op: "neq"; left: OperandNode<K>; right: OperandNode }
+  | { op: "gt"; left: OperandNode<K>; right: OperandNode }
+  | { op: "gte"; left: OperandNode<K>; right: OperandNode }
+  | { op: "lt"; left: OperandNode<K>; right: OperandNode }
+  | { op: "lte"; left: OperandNode<K>; right: OperandNode }
+  | { op: "in"; left: OperandNode<K>; right: OperandNode }
   | { op: "and"; left: ExprNode<K>; right: ExprNode<K> }
   | { op: "or"; left: ExprNode<K>; right: ExprNode<K> }
   | { op: "not"; expr: ExprNode<K> }
-  | { op: "startsWith"; left: OperandNode<K>; right: OperandNode<any> }
-  | { op: "contains"; left: OperandNode<K>; right: OperandNode<any> }
+  | { op: "startsWith"; left: OperandNode<K>; right: OperandNode }
+  | { op: "contains"; left: OperandNode<K>; right: OperandNode }
   | { op: "public" }
 
 /**

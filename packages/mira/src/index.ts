@@ -91,6 +91,15 @@ export { defaultCorsConfig, makeCorsMiddleware } from "./http/cors.js"
 export { catchCollectionErrors } from "./http/errors.js"
 export { TokenStore, TokenStoreLive } from "./http/token-store.js"
 export { Repository, RepositoryLive } from "./repository/index.js"
+export { Dialect } from "./dialect/dialect.js"
+export { sqliteDialect } from "./dialect/dialect-sqlite.js"
+export type {
+  DialectType,
+  FieldValueType,
+  Quote,
+  RuleSqlDialect
+} from "./dialect/dialect.js"
+export type { TimestampUnit } from "@gettersethya/mira-client"
 export {
   DEFAULT_THUMBNAIL_MAX_PIXELS,
   makeThumbnailServicePhotonLive,

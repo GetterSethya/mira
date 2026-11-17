@@ -62,8 +62,8 @@ describe("schemaToColumns", () => {
       required: ["title"]
     }
     const cols = schemaToColumns(schema)
-    expect(cols.find((c) => c.name === "content")!.nullable).toBe(true)
-    expect(cols.find((c) => c.name === "title")!.nullable).toBe(false)
+    expect(cols.find((c) => c.name === "content")?.nullable).toBe(true)
+    expect(cols.find((c) => c.name === "title")?.nullable).toBe(false)
   })
 })
 

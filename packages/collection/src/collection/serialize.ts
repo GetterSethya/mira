@@ -91,7 +91,7 @@ export function toJSONSchema<K extends "base" | "auth" | "view">(
     type: "object",
     properties: {
       ...(kind !== "view" ? { id: ID_PROPERTY, seqId: SEQID_PROPERTY } : {}),
-      ...(options.systemFields ?? {}),
+      ...options.systemFields,
       ...properties,
       ...(kind !== "view" ? { created: CREATED_PROPERTY, updated: UPDATED_PROPERTY } : {})
     },
@@ -140,13 +140,15 @@ function fieldToProperty(field: FieldDef): JsonSchemaProperty {
       return { type: "string", "x-kind": "date" }
     case "json":
       return { "x-kind": "json" }
-    case "relation":
+    case "relation": {
+      const targetCollection = field.targetCollection
       return {
         type: "string",
         "x-kind": "relation",
-        "x-collection": field.targetCollection!,
+        ...(targetCollection !== undefined ? { "x-collection": targetCollection } : {}),
         "x-field": field.targetField ?? "id"
       }
+    }
     case "seqId":
       return { type: "integer", "x-kind": "seqId", "x-system": true }
     case "file":

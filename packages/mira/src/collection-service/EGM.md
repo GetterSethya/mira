@@ -6,40 +6,40 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 
 ## Interface
 
-- `CollectionService` — service tag with `list`, `view`, `create`, `createMany`, `update`, `delete`: `[collection-service.ts:CollectionService]`
-- `CollectionService.list(collection, cursor, perPage, ctx, filter?, sort?, select?, expand?)` — returns `CursorPage` (items + `nextCursor`): `[collection-service.ts:CollectionService]`
-- `CollectionService.view(collection, id, ctx, select?, expand?)` — returns one `RepoRecord` or `NotFoundError`: `[collection-service.ts:CollectionService]`
+- `CollectionService` â€” service tag with `list`, `view`, `create`, `createMany`, `update`, `delete`: `[collection-service.ts:CollectionService]`
+- `CollectionService.list(collection, cursor, perPage, ctx, filter?, sort?, select?, expand?)` â€” returns `CursorPage` (items + `nextCursor`): `[collection-service.ts:CollectionService]`
+- `CollectionService.view(collection, id, ctx, select?, expand?)` â€” returns one `RepoRecord` or `NotFoundError`: `[collection-service.ts:CollectionService]`
 - `CollectionService.create(collection, data, ctx)` / `update(collection, id, data, ctx)` / `delete(collection, id, ctx)`: `[collection-service.ts:CollectionService]`
-- `CollectionService.createMany(collection, records, ctx)` — inserts every record through the `create` path inside one `sql.withTransaction`; returns the created rows in input order: `[collection-service.ts:CollectionService]`
-- `CollectionService.updateMany(collection, updates, ctx)` — updates `{ id, data }` entries through the `update` path inside one transaction; returns updated rows in input order: `[collection-service.ts:CollectionService]`
-- `CollectionService.deleteMany(collection, ids, ctx)` — deletes every id through the `delete` path inside one transaction; returns the ids deleted, in input order: `[collection-service.ts:CollectionService]`
-- `MAX_BULK_RECORDS` — 1 000; the shared maximum batch size for bulk create/update/delete. `MAX_BULK_CREATE_RECORDS` remains as a deprecated alias: `[collection-service.ts:MAX_BULK_RECORDS]`
-- `makeCollectionServiceLayer(allCollections)` — builds the layer; requires `Repository`, `SqlClient`, `FileStorage`, `Dialect`, `AuthService`: `[collection-service.ts:makeCollectionServiceLayer]`
-- `CollectionServiceLive` — deprecated empty-collection layer kept for compatibility: `[collection-service.ts:CollectionServiceLive]`
-- `RequestCtx` (type) — `auth?`, `headers`, `query`, `body?`, `admin?`: `[context.ts:RequestCtx]`
-- `CursorPage` (type) — `items`, `nextCursor`: `[context.ts:CursorPage]`
-- `NotFoundError` — tagged 404 error (`collection`, `id`): `[errors.ts:NotFoundError]`
-- `ForbiddenError` — tagged 403 error (`collection`, `action`): `[errors.ts:ForbiddenError]`
-- `ReadOnlyError` — tagged 405 error raised by view collections: `[errors.ts:ReadOnlyError]`
-- `PayloadTooLargeError` — tagged 413 error (`limit`, `detail`): `[errors.ts:PayloadTooLargeError]`
-- `CollectionError` (type) — union of the above plus `ValidationError` and `SqlError`: `[errors.ts:CollectionError]`
-- `ValidationError` — re-exported from the client package: `[errors.ts:ValidationError]`
-- `makeRowDecoder` / `makeRowEncoder` — dialect-gated `0`/`1` ⇄ boolean conversion: `[decode.ts:makeRowDecoder]`
-- `makeProjectedListRowMapper(schema, storesBooleanAsInteger, projection)` — maps a list row in SELECT order, skips `seqId`, and preserves only projected keys plus `expand`: `[decode.ts:makeProjectedListRowMapper]`
-- `RowDecoder`, `RowEncoder` (types) — decoder returns an `Effect`, encoder is pure: `[decode.ts:RowDecoder]`
-- `stripHiddenFields(schema, record)` — allowlist filter dropping `x-hidden` and unknown keys: `[decode.ts:stripHiddenFields]`
-- `toPublicRecord(schema, storesBooleanAsInteger, record)` — decode + strip for direct-read responses: `[decode.ts:toPublicRecord]`
-- `InputSchemas` (type) — `create` and `update` Effect Schema codecs: `[input-schema.ts:InputSchemas]`
-- `buildInputSchemas(colDef)` — derives create/update codecs from JSON Schema + field error callbacks: `[input-schema.ts:buildInputSchemas]`
-- `parseErrToValidationError(collection)` — formats `Schema.SchemaError` into issue strings: `[input-schema.ts:parseErrToValidationError]`
-- `andWhere(a, b)` — AND-combines two `WhereClause`s and concatenates params: `[where.ts:andWhere]`
-- `idClause(id)` — `t.id = ?`: `[where.ts:idClause]`
-- `cursorClause(after)` - `t.seqId > ?`: `[where.ts:cursorClause]`
-- `keysetClause(sort, value, after)` - `(t."<field>", t.seqId) > (?, ?)` for ASC / `<` for DESC: `[where.ts:keysetClause]`
-- `resolveCtxPlaceholders(result, ctx, collection, action)` — binds `@auth_*` / `@request_*` placeholders: `[where.ts:resolveCtxPlaceholders]`
-- `extractCtxRefs(sql)` — reports exactly which ctx fields a rule references: `[where.ts:extractCtxRefs]`
-- `CtxRefs` (type) — `authFields`, `queryKeys`, `headerKeys`, `bodyKeys`: `[where.ts:CtxRefs]`
-- `resolveFieldRefs(clause, record)` — replaces `t.<field>` with bound payload values: `[where.ts:resolveFieldRefs]`
+- `CollectionService.createMany(collection, records, ctx)` â€” inserts every record through the `create` path inside one `sql.withTransaction`; returns the created rows in input order: `[collection-service.ts:CollectionService]`
+- `CollectionService.updateMany(collection, updates, ctx)` â€” updates `{ id, data }` entries through the `update` path inside one transaction; returns updated rows in input order: `[collection-service.ts:CollectionService]`
+- `CollectionService.deleteMany(collection, ids, ctx)` â€” deletes every id through the `delete` path inside one transaction; returns the ids deleted, in input order: `[collection-service.ts:CollectionService]`
+- `MAX_BULK_RECORDS` â€” 1 000; the shared maximum batch size for bulk create/update/delete. `MAX_BULK_CREATE_RECORDS` remains as a deprecated alias: `[collection-service.ts:MAX_BULK_RECORDS]`
+- `makeCollectionServiceLayer(allCollections)` â€” builds the layer; requires `Repository`, `SqlClient`, `FileStorage`, `Dialect`, `AuthService`: `[collection-service.ts:makeCollectionServiceLayer]`
+- `CollectionServiceLive` â€” deprecated empty-collection layer kept for compatibility: `[collection-service.ts:CollectionServiceLive]`
+- `RequestCtx` (type) â€” `auth?`, `headers`, `query`, `body?`, `admin?`: `[context.ts:RequestCtx]`
+- `CursorPage` (type) â€” `items`, `nextCursor`: `[context.ts:CursorPage]`
+- `NotFoundError` â€” tagged 404 error (`collection`, `id`): `[errors.ts:NotFoundError]`
+- `ForbiddenError` â€” tagged 403 error (`collection`, `action`): `[errors.ts:ForbiddenError]`
+- `ReadOnlyError` â€” tagged 405 error raised by view collections: `[errors.ts:ReadOnlyError]`
+- `PayloadTooLargeError` â€” tagged 413 error (`limit`, `detail`): `[errors.ts:PayloadTooLargeError]`
+- `CollectionError` (type) â€” union of the above plus `ValidationError` and `SqlError`: `[errors.ts:CollectionError]`
+- `ValidationError` â€” re-exported from the client package: `[errors.ts:ValidationError]`
+- `makeRowDecoder` / `makeRowEncoder` â€” dialect-gated `0`/`1` â‡„ boolean conversion: `[decode.ts:makeRowDecoder]`
+- `makeProjectedListRowMapper(schema, storesBooleanAsInteger, projection)` â€” maps a list row in SELECT order, skips `seqId`, and preserves only projected keys plus `expand`: `[decode.ts:makeProjectedListRowMapper]`
+- `RowDecoder`, `RowEncoder` (types) â€” decoder returns an `Effect`, encoder is pure: `[decode.ts:RowDecoder]`
+- `stripHiddenFields(schema, record)` â€” allowlist filter dropping `x-hidden` and unknown keys: `[decode.ts:stripHiddenFields]`
+- `toPublicRecord(schema, storesBooleanAsInteger, record)` â€” decode + strip for direct-read responses: `[decode.ts:toPublicRecord]`
+- `InputSchemas` (type) â€” `create` and `update` Effect Schema codecs: `[input-schema.ts:InputSchemas]`
+- `buildInputSchemas(colDef)` â€” derives create/update codecs from JSON Schema + field error callbacks: `[input-schema.ts:buildInputSchemas]`
+- `parseErrToValidationError(collection)` â€” formats `Schema.SchemaError` into issue strings: `[input-schema.ts:parseErrToValidationError]`
+- `andWhere(a, b)` â€” AND-combines two `WhereClause`s and concatenates params: `[where.ts:andWhere]`
+- `idClause(id, quote)` â€” `t.id = ?`: `[where.ts:idClause]`
+- `cursorClause(after, quote)` - `t.seqId > ?`: `[where.ts:cursorClause]`
+- `keysetClause(sort, value, after, quote)` - `(t."<field>", t.seqId) > (?, ?)` for ASC / `<` for DESC: `[where.ts:keysetClause]`
+- `resolveCtxPlaceholders(result, ctx, collection, action, options, bodyPlan?)` â€” binds `@auth_*` / `@request_*` placeholders: `[where.ts:resolveCtxPlaceholders]`
+- `extractCtxRefs(sql)` â€” reports exactly which ctx fields a rule references: `[where.ts:extractCtxRefs]`
+- `CtxRefs` (type) â€” `authFields`, `queryKeys`, `headerKeys`, `bodyKeys`: `[where.ts:CtxRefs]`
+- `resolveFieldRefs(clause, record, options)` â€” replaces `t.<field>` with bound payload values: `[where.ts:resolveFieldRefs]`
 - Barrel re-exports (`CollectionService`, `CollectionServiceLive`, `makeCollectionServiceLayer`, `CursorPage`, `RequestCtx`, `CollectionError`, `ForbiddenError`, `NotFoundError`, `ReadOnlyError`, `ValidationError`): `[index.ts:CollectionService]`
 
 ## Invariants
@@ -98,3 +98,11 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+
+## Dialect boundary (issue #45)
+
+- idClause(id, quote), cursorClause(after, quote), seqIdEqualsClause(seqId, quote), keysetClause(sort, value, after, quote), and ieldEqualsClause(field, value, quote) quote every identifier with the active dialect [where.ts:idClause] [where.ts:seqIdEqualsClause] [where.ts:fieldEqualsClause].
+- esolveCtxPlaceholders requires ResolveOptions with encodeParam, quoteIdentifier, and castValue. Body-column bindings use the dialect quoter [where.ts:ResolveOptions] [where.ts:resolveCtxPlaceholders].
+- esolveFieldRefs replaces typed @field_<type>_<base64url>@ markers with cast ? params. It never parses quoted identifiers [where.ts:resolveFieldRefs].
+- Create and canManagePayload compile with payloadEnforcerForAction and execute enderRuleCheck through sql.unsafe, so no raw ? reaches PostgreSQL [collection-service.ts:prepareCreate] [collection-service.ts:canManagePayload] [repository/sql.ts:renderRuleCheck].
+- Sorted-cursor lookup uses seqIdEqualsClause, not a raw 	.seqId = ? string [collection-service.ts:list].

@@ -151,7 +151,7 @@ describe("expanded reads bypass the cache", () => {
   it.effect("list with a non-empty expand sees an out-of-band insert (no cache hit)", () =>
     Effect.gen(function* () {
       yield* setupTables
-      const postId = yield* seedPost
+      yield* seedPost
       const svc = yield* CollectionService
       const sql = yield* SqlClient.SqlClient
 

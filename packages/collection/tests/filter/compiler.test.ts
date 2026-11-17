@@ -3,8 +3,20 @@ import { describe, expect, it } from "vitest"
 
 import type { CollectionSchema } from "@/collection/types.js"
 import { Filter } from "@/filter/builder.js"
-import { filterNodeToWhereClause } from "@/filter/compiler.js"
+import { filterNodeToWhereClause as filterNodeToWhereClauseRaw } from "@/filter/compiler.js"
+import type { FilterCompileOptions } from "@/filter/compiler.js"
 import type { FilterNode } from "@/filter/types.js"
+
+const filterNodeToWhereClause = (
+  node: FilterNode,
+  schema: CollectionSchema,
+  collectionName: string,
+  options: Partial<FilterCompileOptions> = {}
+) =>
+  filterNodeToWhereClauseRaw(node, schema, collectionName, {
+    quoteIdentifier: (field) => `"${field}"`,
+    ...options
+  })
 
 const testSchema: CollectionSchema = {
   "x-collection-kind": "base",

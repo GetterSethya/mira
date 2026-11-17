@@ -1,3 +1,4 @@
+import type { TimestampUnit } from "@gettersethya/mira-client"
 import { Effect } from "effect"
 
 import type { TranslatePlanContext } from "./dialect.js"
@@ -31,7 +32,7 @@ const SUBSUMED_BY_REBUILD: ReadonlySet<MigrationStep["kind"]> = new Set([
   "dropIndex"
 ])
 
-const quote = (name: string) => `"${name}"`
+const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
 const quoteLiteral = (value: unknown) => {
   if (value === null) return "NULL"
@@ -42,7 +43,7 @@ const quoteLiteral = (value: unknown) => {
 
 const isSqliteBusy = (error: unknown) => errorHasCode(error, ["SQLITE_BUSY", "SQLITE_LOCKED"])
 
-const isSqliteUniqueViolation = (error: unknown) =>
+export const isSqliteUniqueViolation = (error: unknown) =>
   errorHasCode(error, [
     "SQLITE_CONSTRAINT_PRIMARYKEY",
     "SQLITE_CONSTRAINT_UNIQUE",
@@ -94,9 +95,9 @@ function columnSql(col: ColumnDef, syntheticDefault = false) {
   if (col.default !== undefined) {
     parts.push(`DEFAULT ${quoteLiteral(col.default)}`)
   } else if (syntheticDefault) {
-    // Match ADD COLUMN: a new NOT NULL column without a default needs a value
-    // for rows that already exist. The fallback is not part of the collection
-    // schema, but the physical table must accept the copy.
+    // A new NOT NULL column without a default needs a value for existing rows,
+    // matching ADD COLUMN. The fallback is not part of the collection schema, but
+    // the physical table must accept the copy.
     parts.push(`DEFAULT ${quoteLiteral(col.type === "text" ? "" : 0)}`)
   }
   if (col.primaryKey) parts.push("PRIMARY KEY")
@@ -138,7 +139,8 @@ function validateUniqueChanges(
 
       for (const index of shapes.desired.indexes) {
         if (!index.unique || index.fields.length !== 1) continue
-        const field = index.fields[0]!
+        const field = index.fields[0]
+        if (field === undefined) continue
 
         if (step.kind === "addColumn" && step.column.name === field && !storedNames.has(field)) {
           return yield* Effect.fail(
@@ -245,12 +247,35 @@ function rebuildStatements(table: string, desired: TableShape, stored: TableShap
   return statements
 }
 
+const timestampAddSql = (expr: string, amount: number, unit: TimestampUnit) =>
+  `datetime(${expr}, '${amount >= 0 ? "+" : ""}${amount} ${unit}s')`
+
+const timestampDiffSql = (left: string, right: string, unit: TimestampUnit) => {
+  const factor = unit === "day" ? 1 : unit === "hour" ? 24 : 1440
+  const base = `(julianday(${left}) - julianday(${right}))`
+  return factor === 1 ? base : `(${base} * ${factor})`
+}
+
+const caseInsensitiveLikeSql = (
+  left: string,
+  right: string,
+  mode: "prefix" | "contains"
+) =>
+  mode === "prefix"
+    ? `${left} LIKE (${right} || '%')`
+    : `${left} LIKE ('%' || ${right} || '%')`
+
 export const sqliteDialect: DialectType = {
   storesBooleanAsInteger: true,
   // SQLite 3.35+ supports DELETE ... RETURNING on both the Node and Bun drivers.
   deleteResult: { _tag: "returning" },
 
   quoteIdentifier: quote,
+  currentTimestamp: () => "datetime('now')",
+  timestampAdd: timestampAddSql,
+  timestampDiff: timestampDiffSql,
+  caseInsensitiveLike: caseInsensitiveLikeSql,
+  castValue: (expr) => expr,
   quoteLiteral,
   nativeType: nativeTypeOf,
   indexName: indexNameOf,

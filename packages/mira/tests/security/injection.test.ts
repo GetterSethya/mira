@@ -15,6 +15,7 @@ import {
   seedUser,
   serveRouter,
   setupTables,
+  toJsonText,
 } from "./_harness.js"
 
 const layer = makeSecurityLayer()
@@ -451,12 +452,12 @@ describe("H6 — filter field validation", () => {
   const unknownFields = ["does_not_exist", "t.id", `id";--`]
 
   for (const field of unknownFields) {
-    it.effect(`H6 SECURE — filter with unknown field ${JSON.stringify(field)} is 422`, () =>
+    it.effect(`H6 SECURE — filter with unknown field ${toJsonText(field)} is 422`, () =>
       Effect.gen(function* () {
         yield* setupTables
         yield* serveRouter()
 
-        const filter = `{"op":"eq","field":${JSON.stringify(field)},"value":1}`
+        const filter = `{"op":"eq","field":${toJsonText(field)},"value":1}`
         const res = yield* get(`/api/collections/posts?filter=${encodeURIComponent(filter)}`)
         const text = yield* res.text
         yield* log(`filter field=${field}`, res, text)
@@ -491,14 +492,14 @@ describe("H6 — filter field validation", () => {
       yield* serveRouter()
 
       for (const field of ["constructor", "__proto__", "toString"]) {
-        const filter = `{"op":"eq","field":${JSON.stringify(field)},"value":1}`
+        const filter = `{"op":"eq","field":${toJsonText(field)},"value":1}`
         const res = yield* get(`/api/collections/posts?filter=${encodeURIComponent(filter)}`)
         const text = yield* res.text
         yield* log(`filter inherited field=${field}`, res, text)
         assert.strictEqual(
           res.status,
           422,
-          `filter field ${JSON.stringify(field)} must be rejected as an unknown field (422), got ${res.status}`
+          `filter field ${toJsonText(field)} must be rejected as an unknown field (422), got ${res.status}`
         )
       }
     }).pipe(Effect.provide(layer))

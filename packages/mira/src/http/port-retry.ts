@@ -9,11 +9,13 @@ const DEFAULT_MAX_ATTEMPTS = 10
 
 const isAddressInUseValue = (value: unknown, depth = 0): boolean => {
   if (depth > 4 || typeof value !== "object" || value === null) return false
-  const record = value as { readonly code?: unknown; readonly message?: unknown; readonly cause?: unknown }
-  if (record.code === "EADDRINUSE") return true
-  if (typeof record.message === "string" && record.message.includes("EADDRINUSE")) return true
-  if (record.cause !== undefined && record.cause !== value) {
-    return isAddressInUseValue(record.cause, depth + 1)
+  const code: unknown = Reflect.get(value, "code")
+  if (code === "EADDRINUSE") return true
+  const message: unknown = Reflect.get(value, "message")
+  if (typeof message === "string" && message.includes("EADDRINUSE")) return true
+  const cause: unknown = Reflect.get(value, "cause")
+  if (cause !== undefined && cause !== value) {
+    return isAddressInUseValue(cause, depth + 1)
   }
   return false
 }
@@ -27,14 +29,15 @@ const serveErrorFromCause = (cause: Cause.Cause<unknown>): ServeError | null => 
   for (const reason of cause.reasons) {
     if (Cause.isFailReason(reason)) {
       const error: unknown = reason.error
+      const errorCause: unknown =
+        typeof error === "object" && error !== null ? Reflect.get(error, "cause") : undefined
       const isServeError =
         error instanceof ServeError ||
         (typeof error === "object" &&
           error !== null &&
-          "_tag" in error &&
-          (error as { readonly _tag?: unknown })._tag === "ServeError")
-      if (isServeError && isAddressInUseValue((error as ServeError).cause)) {
-        return error as ServeError
+          Reflect.get(error, "_tag") === "ServeError")
+      if (isServeError && isAddressInUseValue(errorCause)) {
+        return error instanceof ServeError ? error : new ServeError({ cause: errorCause })
       }
     }
     if (Cause.isDieReason(reason) && isAddressInUseValue(reason.defect)) {

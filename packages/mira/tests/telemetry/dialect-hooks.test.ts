@@ -88,7 +88,11 @@ describe("libSQL telemetry hooks", () => {
   })
 
   it("retries nested network and SQLite lock errors, and keeps the duplicate classifier", () => {
-    const remote = libsqlDialect("remote").telemetry!
+    const remote = libsqlDialect("remote").telemetry
+    expect(remote).toBeDefined()
+    if (remote === undefined) {
+      throw new Error("expected the remote libSQL dialect to expose telemetry hooks")
+    }
     expect(remote.isRetryable({ reason: { cause: { code: "ECONNREFUSED" } } })).toBe(true)
     expect(remote.isRetryable({ cause: { cause: { code: "SQLITE_BUSY" } } })).toBe(true)
     expect(remote.isRetryable({ reason: { _tag: "Other" } })).toBe(false)
@@ -102,7 +106,7 @@ describe("dialect-neutral store setup", () => {
     const statements: Array<string> = []
     const { telemetry: _telemetry, ...rest } = sqliteDialect
     void _telemetry
-    const fake = rest as DialectType
+    const fake: DialectType = rest
     const database = Layer.merge(
       recordingLayer(statements).pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" }))),
       Layer.succeed(Dialect, fake)

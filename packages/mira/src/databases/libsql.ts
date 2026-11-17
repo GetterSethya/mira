@@ -1,4 +1,5 @@
-import { Effect, Layer, Redacted } from "effect"
+import type { Redacted } from "effect"
+import { Effect, Layer } from "effect"
 
 import type { DatabaseServices, MiraDatabase } from "@/app/types.js"
 import { withSqlitePragmas } from "@/databases/pragmas.js"

@@ -6,7 +6,39 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
-import { enforcerForAction, enforceRule } from "@/rule/enforcer.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { postgresRuleSql } from "@/dialect/dialect-postgres.js"
+import type { RuleSqlDialect } from "@/dialect/dialect.js"
+import type { CompileCtx } from "@/rule/compiler.js"
+import { compileOperand as compileOperandRaw } from "@/rule/compiler.js"
+import { enforcerForAction as enforcerForActionRaw, enforceRule as enforceRuleRaw } from "@/rule/enforcer.js"
+
+const legacyDialect: RuleSqlDialect = {
+  ...sqliteDialect,
+  quoteIdentifier: (name) => name
+}
+
+const enforceRule = (rule: Parameters<typeof enforceRuleRaw>[0]) =>
+  enforceRuleRaw(rule, legacyDialect)
+
+const enforcerForAction = (
+  schema: Parameters<typeof enforcerForActionRaw>[0],
+  action: Parameters<typeof enforcerForActionRaw>[1]
+) => enforcerForActionRaw(schema, action, legacyDialect)
+
+function requireValue<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("Expected a present value")
+  return value
+}
+
+function enforcerOrThrow(
+  schema: Parameters<typeof enforcerForAction>[0],
+  action: Parameters<typeof enforcerForAction>[1]
+) {
+  const enforcer = enforcerForAction(schema, action)
+  if (enforcer === null) throw new Error(`Expected an enforcer for action "${action}"`)
+  return enforcer
+}
 
 describe("Rule enforcer integration", () => {
   const testLayer = SqliteClient.layer({ filename: ":memory:" })
@@ -35,11 +67,11 @@ describe("Rule enforcer integration", () => {
       )
       const { params, sql: compiledSql } = enforceRule(rule)
 
-      const rows = yield* sql.unsafe(`SELECT id, title FROM projects t WHERE ${compiledSql}`, params)
+      const rows = yield* sql.unsafe<{ id: string }>(`SELECT id, title FROM projects t WHERE ${compiledSql}`, params)
 
       expect(rows.length).toBe(3)
-      expect(rows.map((r: any) => r.id)).toEqual(expect.arrayContaining(["p1", "p2", "p3"]))
-      expect(rows.map((r: any) => r.id)).not.toContain("p4")
+      expect(rows.map((r) => r.id)).toEqual(expect.arrayContaining(["p1", "p2", "p3"]))
+      expect(rows.map((r) => r.id)).not.toContain("p4")
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("complex boolean rule filters correctly", () =>
@@ -69,9 +101,9 @@ describe("Rule enforcer integration", () => {
       )
       const { params, sql: compiledSql } = enforceRule(rule)
 
-      const rows = yield* sql.unsafe(`SELECT id, title FROM articles t WHERE ${compiledSql} ORDER BY id`, params)
+      const rows = yield* sql.unsafe<{ id: string }>(`SELECT id, title FROM articles t WHERE ${compiledSql} ORDER BY id`, params)
 
-      expect(rows.map((r: any) => r.id)).toEqual(["a1", "a3"])
+      expect(rows.map((r) => r.id)).toEqual(["a1", "a3"])
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("date-based rule filters correctly", () =>
@@ -96,9 +128,9 @@ describe("Rule enforcer integration", () => {
       )
       const { params, sql: compiledSql } = enforceRule(rule)
 
-      const rows = yield* sql.unsafe(`SELECT id, title FROM events t WHERE ${compiledSql} ORDER BY id`, params)
+      const rows = yield* sql.unsafe<{ id: string }>(`SELECT id, title FROM events t WHERE ${compiledSql} ORDER BY id`, params)
 
-      expect(rows.map((r: any) => r.id)).toEqual(["e2"])
+      expect(rows.map((r) => r.id)).toEqual(["e2"])
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("rule with gt/lt range filters correctly", () =>
@@ -125,9 +157,9 @@ describe("Rule enforcer integration", () => {
       )
       const { params, sql: compiledSql } = enforceRule(rule)
 
-      const rows = yield* sql.unsafe(`SELECT id, name FROM products t WHERE ${compiledSql} ORDER BY id`, params)
+      const rows = yield* sql.unsafe<{ id: string }>(`SELECT id, name FROM products t WHERE ${compiledSql} ORDER BY id`, params)
 
-      expect(rows.map((r: any) => r.id)).toEqual(["pr2"])
+      expect(rows.map((r) => r.id)).toEqual(["pr2"])
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("rule with in and startsWith", () =>
@@ -154,9 +186,9 @@ describe("Rule enforcer integration", () => {
       )
       const { params, sql: compiledSql } = enforceRule(rule)
 
-      const rows = yield* sql.unsafe(`SELECT id, name FROM files t WHERE ${compiledSql} ORDER BY id`, params)
+      const rows = yield* sql.unsafe<{ id: string }>(`SELECT id, name FROM files t WHERE ${compiledSql} ORDER BY id`, params)
 
-      expect(rows.map((r: any) => r.id)).toEqual(["f1"])
+      expect(rows.map((r) => r.id)).toEqual(["f1"])
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("rule with contains and neq", () =>
@@ -182,9 +214,9 @@ describe("Rule enforcer integration", () => {
       )
       const { params, sql: compiledSql } = enforceRule(rule)
 
-      const rows = yield* sql.unsafe(`SELECT id, body FROM comments t WHERE ${compiledSql} ORDER BY id`, params)
+      const rows = yield* sql.unsafe<{ id: string }>(`SELECT id, body FROM comments t WHERE ${compiledSql} ORDER BY id`, params)
 
-      expect(rows.map((r: any) => r.id)).toEqual(["c1"])
+      expect(rows.map((r) => r.id)).toEqual(["c1"])
     }).pipe(Effect.provide(testLayer)))
 })
 
@@ -224,11 +256,11 @@ describe("enforcerForAction", () => {
         delete: Rule.field("ownerId").eq(Rule.literal("user1"))
       }
     }
-    expect(enforcerForAction(schema, "list")!.sql).toBe("1 = 1")
-    expect(enforcerForAction(schema, "view")!.sql).toBe("t.ownerId = ?")
-    expect(enforcerForAction(schema, "create")!.sql).toBe("t.ownerId = ?")
-    expect(enforcerForAction(schema, "update")!.sql).toBe("NOT (t.status = ?)")
-    expect(enforcerForAction(schema, "delete")!.sql).toBe("t.ownerId = ?")
+    expect(enforcerOrThrow(schema, "list").sql).toBe("1 = 1")
+    expect(enforcerOrThrow(schema, "view").sql).toBe("t.ownerId = ?")
+    expect(enforcerOrThrow(schema, "create").sql).toBe("t.ownerId = ?")
+    expect(enforcerOrThrow(schema, "update").sql).toBe("NOT (t.status = ?)")
+    expect(enforcerOrThrow(schema, "delete").sql).toBe("t.ownerId = ?")
   })
 
   it("params are extracted as array", () => {
@@ -240,7 +272,7 @@ describe("enforcerForAction", () => {
         list: Rule.field("a").eq(Rule.literal("x"))
       }
     }
-    const result = enforcerForAction(schema, "list")!
+    const result = enforcerOrThrow(schema, "list")
     expect(result.params).toEqual(["x"])
   })
 
@@ -256,7 +288,7 @@ describe("enforcerForAction", () => {
         )
       }
     }
-    const result = enforcerForAction(schema, "list")!
+    const result = enforcerOrThrow(schema, "list")
     expect(result.params).toEqual([1, "hello", true])
   })
 
@@ -312,4 +344,64 @@ describe("enforcerForAction", () => {
     expect(second).not.toBe(first)
     expect(second).toEqual(first)
   })
+})
+
+describe("enforcer dialect cache and date units", () => {
+  const schema: CollectionSchema = {
+    "x-collection-kind": "base",
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      created: { type: "string" }
+    },
+    "x-rules": {
+      list: Rule.and(
+        Rule.field("name").startsWith(Rule.literal("a")),
+        Rule.field("created").gte(Rule.dateAdd(Rule.now(), -7, "day"))
+      )
+    }
+  }
+
+  it("caches per dialect and produces dialect-specific SQL", () => {
+    const sqlite = enforcerForActionRaw(schema, "list", sqliteDialect)
+    const pg = enforcerForActionRaw(schema, "list", postgresRuleSql)
+    expect(sqlite).not.toBeNull()
+    expect(pg).not.toBeNull()
+    expect(sqlite).not.toBe(pg)
+    expect(requireValue(sqlite).sql).not.toBe(requireValue(pg).sql)
+    expect(requireValue(sqlite).sql).toContain("LIKE")
+    expect(requireValue(pg).sql).toContain("ILIKE")
+    expect(enforcerForActionRaw(schema, "list", sqliteDialect)).toBe(sqlite)
+  })
+
+  it.effect("returns dateDiff in day, hour, and minute units", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(`CREATE TABLE events (id TEXT, start TEXT, finish TEXT)`)
+      yield* sql.unsafe(
+        `INSERT INTO events VALUES ('e1', '2026-01-01T00:00:00.000Z', '2026-01-02T06:00:00.000Z')`
+      )
+
+      const ctx: CompileCtx = {
+        tableAlias: "t",
+        nextParam: () => "@p0",
+        params: {},
+        columnOfField: (field) => field,
+        collectionSchemas: {}
+      }
+      const run = (unit: "day" | "hour" | "minute") => {
+        const expression = compileOperandRaw(
+          Rule.dateDiff(Rule.field("finish"), Rule.field("start"), unit),
+          ctx,
+          sqliteDialect
+        )
+        return sql
+          .unsafe<{ value: number }>(`SELECT ${expression} AS value FROM events t`)
+          .pipe(Effect.map((rows) => requireValue(rows[0]).value))
+      }
+
+      expect(yield* run("day")).toBe(1.25)
+      expect(yield* run("hour")).toBe(30)
+      expect(yield* run("minute")).toBe(1800)
+    }).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))))
 })

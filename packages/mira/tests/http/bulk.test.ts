@@ -17,7 +17,7 @@ import { makeCollectionRouter } from "@/http/router.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
 
 // ---------------------------------------------------------------------------
 // Collections
@@ -114,7 +114,7 @@ const FileStorageTest = Layer.succeed(
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
-const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
 
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
   Layer.provide(repoWithSql),
@@ -230,11 +230,19 @@ function bulkDeleteRequest(name: string, body: unknown) {
 
 type JsonObject = Record<string, unknown>
 
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isStringArray(value: unknown): value is Array<string> {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+}
+
 function recordsOf(body: unknown): ReadonlyArray<JsonObject> {
-  if (typeof body !== "object" || body === null) return []
-  const records: unknown = (body as JsonObject)["records"]
+  if (!isJsonObject(body)) return []
+  const records: unknown = body["records"]
   if (!Array.isArray(records)) return []
-  return records.filter((r): r is JsonObject => typeof r === "object" && r !== null)
+  return records.filter(isJsonObject)
 }
 
 function countRows(table: "posts" | "moderated" | "guarded" | "locked" | "users") {
@@ -539,8 +547,11 @@ describe("DELETE /api/collections/:name/bulk", () => {
 
       const res = yield* bulkDeleteRequest("posts", { ids: [third, first] })
       assert.strictEqual(res.status, 200)
-      const body = (yield* res.json) as { ids: ReadonlyArray<string> }
-      assert.deepStrictEqual(body.ids, [third, first])
+      const body: unknown = yield* res.json
+      if (!isJsonObject(body)) return yield* Effect.die("expected JSON object response")
+      const ids: unknown = body["ids"]
+      if (!isStringArray(ids)) return yield* Effect.die("expected ids string array")
+      assert.deepStrictEqual(ids, [third, first])
       assert.strictEqual(yield* countRows("posts"), 1)
       assert.strictEqual(yield* titleById("posts", second), "two")
     }).pipe(Effect.provide(testLayer))

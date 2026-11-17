@@ -6,8 +6,14 @@ type BunRuntimeApi = {
   readonly randomUUIDv7?: () => string
 }
 
-const bunRuntime = (): BunRuntimeApi =>
-  (globalThis as { Bun?: BunRuntimeApi }).Bun ?? {}
+const isUuid7Factory = (value: unknown): value is () => string => typeof value === "function"
+
+const bunRuntime = (): BunRuntimeApi => {
+  const bun: unknown = Reflect.get(globalThis, "Bun")
+  if (typeof bun !== "object" || bun === null) return {}
+  const randomUUIDv7: unknown = Reflect.get(bun, "randomUUIDv7")
+  return isUuid7Factory(randomUUIDv7) ? { randomUUIDv7 } : {}
+}
 
 const randomBytes = (size: number): Uint8Array => {
   const bytes = new Uint8Array(size)

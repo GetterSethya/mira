@@ -97,8 +97,14 @@ export function makeClientHandler<T>(
  */
 export function makeMutationHandler<TData, TInput>(
   fn: (input: TInput) => Effect.Effect<TData, MiraError, HttpClient.HttpClient>
-): ClientHandler<TData, TInput> {
-  const handler = {
+): ClientHandler<TData, TInput>
+export function makeMutationHandler<TData, TInput>(
+  fn: (input: TInput) => Effect.Effect<TData, MiraError, HttpClient.HttpClient>
+): {
+  raw: (input: TInput) => Promise<TData>
+  toEffect: (input: TInput) => Effect.Effect<TData, MiraError, HttpClient.HttpClient>
+} {
+  return {
     raw: (input: TInput) =>
       Effect.runPromiseExit(fn(input).pipe(Effect.provide(FetchHttpClient.layer))).then((exit) => {
         if (Exit.isSuccess(exit)) return exit.value
@@ -108,7 +114,6 @@ export function makeMutationHandler<TData, TInput>(
       }),
     toEffect: (input: TInput) => fn(input),
   }
-  return handler as ClientHandler<TData, TInput>
 }
 
 /**

@@ -29,8 +29,8 @@ import {
   GLOBAL_MAX_UPLOAD_BYTES
 } from "@/http/files.js"
 import { makeCollectionRouter } from "@/http/router.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
-import { Repository, RepositoryLive } from "@/repository/repository.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
+import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, makeFileStorageLayer } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
 
@@ -84,7 +84,7 @@ const AppConfigTest = Layer.succeed(
 const nodePlatform = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
 const storageLayer = makeFileStorageLayer("local", { directory: ROOT }).pipe(Layer.provide(nodePlatform))
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(

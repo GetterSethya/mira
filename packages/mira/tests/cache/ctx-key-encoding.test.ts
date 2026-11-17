@@ -3,8 +3,15 @@ import { describe, expect, it } from "vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 
 import { applyRulesToCollections, defineRule } from "@/app/index.js"
-import { buildCtxCacheTag } from "@/cache/ctx-key.js"
+import { buildCtxCacheTag as buildCtxCacheTagRaw } from "@/cache/ctx-key.js"
 import type { RequestCtx } from "@/collection-service/context.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+
+const buildCtxCacheTag = (
+  collection: Parameters<typeof buildCtxCacheTagRaw>[0],
+  action: Parameters<typeof buildCtxCacheTagRaw>[1],
+  ctx: Parameters<typeof buildCtxCacheTagRaw>[2]
+) => buildCtxCacheTagRaw(collection, action, ctx, sqliteDialect)
 
 // ---------------------------------------------------------------------------
 // Regression tests: the per-value encoding of a ctx cache tag must be injective.

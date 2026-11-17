@@ -91,20 +91,20 @@ const rateLimitFields = (
   body: unknown
 ): { rateLimitScope?: "request" | "send" | "cooldown"; restart?: boolean } => {
   if (typeof body !== "object" || body === null) return {}
-  const value = body as { readonly scope?: unknown; readonly restart?: unknown }
   const scope =
-    value.scope === "request" || value.scope === "send" || value.scope === "cooldown"
-      ? value.scope
+    "scope" in body &&
+    (body.scope === "request" || body.scope === "send" || body.scope === "cooldown")
+      ? body.scope
       : undefined
   return {
     ...(scope === undefined ? {} : { rateLimitScope: scope }),
-    ...(value.restart === true ? { restart: true } : {})
+    ...("restart" in body && body.restart === true ? { restart: true } : {})
   }
 }
 
 const retryAfterFrom = (body: unknown, headers: Headers.Headers): number | undefined => {
   if (typeof body === "object" && body !== null && "retryAfterSeconds" in body) {
-    const value = Number((body as { readonly retryAfterSeconds?: unknown }).retryAfterSeconds)
+    const value = Number(body.retryAfterSeconds)
     if (Number.isFinite(value) && value > 0) return value
   }
   const header = Headers.get(headers, "retry-after")
@@ -120,7 +120,8 @@ function createExecute(
   authTokenRef: MutableRef.MutableRef<string | null> | null,
   sendCredentials: boolean
 ): ExecuteFn {
-  return <T>(req: HCR.HttpClientRequest) => {
+  function execute<T>(req: HCR.HttpClientRequest): Effect.Effect<T, MiraError, HttpClient.HttpClient>
+  function execute(req: HCR.HttpClientRequest): Effect.Effect<unknown, MiraError, HttpClient.HttpClient> {
     const raw = Effect.gen(function* () {
       const http = yield* HttpClient.HttpClient
       const token = authTokenRef ? MutableRef.get(authTokenRef) : null
@@ -141,16 +142,17 @@ function createExecute(
       }
 
       if (res.status === 204) {
-        return undefined as T
+        return undefined
       }
 
-      return (yield* res.json) as T
+      return yield* res.json
     })
     const effect = catchAllErrors(raw)
     return sendCredentials
       ? Effect.provideService(effect, FetchHttpClient.RequestInit, { credentials: "include" })
       : effect
   }
+  return execute
 }
 
 /**
@@ -360,5 +362,5 @@ export function createMiraClient(
   opts: { type?: "browser" | "server"; defaultRetryOptions?: RetryOptions } = {}
 ) {
   const { defaultRetryOptions, type = "browser" } = opts
-  return createMiraClientInternal(baseUrl, type, defaultRetryOptions) as BrowserMiraClient | ServerMiraClient
+  return createMiraClientInternal(baseUrl, type, defaultRetryOptions)
 }

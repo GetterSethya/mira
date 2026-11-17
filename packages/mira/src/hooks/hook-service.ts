@@ -72,7 +72,7 @@ function matchesCron(hook: { crons?: ReadonlyArray<string> } | undefined, name: 
   return hook.crons.includes(name)
 }
 
-export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
+export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<unknown>>) {
   return Layer.succeed(HookService, {
     runRecordCreate: (ctx: RecordHookContext) =>
       Effect.gen(function* () {
@@ -343,14 +343,10 @@ export function makeHookServiceLayer(plugins: ReadonlyArray<MiraPlugin<any>>) {
     runBootstrap: () => Effect.forEach(plugins, (p) => (p.onBootstrap ? p.onBootstrap() : Effect.void)),
 
     runServe: () =>
-      Effect.forEach(plugins, (p) => (p.onServe ? p.onServe() : Effect.void)) as Effect.Effect<void, never, never>,
+      Effect.forEach(plugins, (p) => (p.onServe ? p.onServe() : Effect.void), { discard: true }),
 
     runTerminate: () =>
-      Effect.forEach(plugins, (p) => (p.onTerminate ? p.onTerminate() : Effect.void)) as Effect.Effect<
-        void,
-        never,
-        never
-      >,
+      Effect.forEach(plugins, (p) => (p.onTerminate ? p.onTerminate() : Effect.void), { discard: true }),
 
     runCronStart: (ctx: CronContext) =>
       Effect.gen(function* () {

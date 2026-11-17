@@ -48,7 +48,7 @@ const withLimits = (overrides: Partial<EmailRateLimitPolicies>): EmailRateLimitP
 const makeLayer = (
   policies: EmailRateLimitPolicies,
   options: {
-    readonly plugins?: ReadonlyArray<MiraPlugin<any>>
+    readonly plugins?: ReadonlyArray<MiraPlugin>
     readonly base?: EmailServiceShape
     readonly limiter?: ReturnType<typeof makeRateLimiter>
   } = {}

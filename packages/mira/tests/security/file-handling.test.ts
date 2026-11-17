@@ -6,7 +6,7 @@ import { HttpClient, HttpClientRequest } from "effect/http"
 
 import { FileStorage } from "@/storage/storage.js"
 
-import { get, makeSecurityLayer, postJson, serveRouter, setupTables } from "./_harness.js"
+import { get, makeSecurityLayer, postJson, serveRouter, setupTables, toJsonText } from "./_harness.js"
 
 // Relative to packages/mira (vitest cwd).
 const TMP = "./tests/security/.tmp"
@@ -85,7 +85,7 @@ describe("file handling security audit (regression: expects secure behaviour)", 
       const text = yield* dl.text.pipe(Effect.orElseSucceed(() => "<no-body>"))
 
       console.log("[H1][evidence] download status:", dl.status)
-      console.log("[H1][evidence] download headers:", JSON.stringify(dl.headers))
+      console.log("[H1][evidence] download headers:", toJsonText(dl.headers))
       console.log("[H1][evidence] download body:", text)
 
       // control: the file is served at all
@@ -118,7 +118,7 @@ describe("file handling security audit (regression: expects secure behaviour)", 
       const text = yield* dl.text.pipe(Effect.orElseSucceed(() => "<no-body>"))
 
       console.log("[H1b][evidence] download status:", dl.status)
-      console.log("[H1b][evidence] download headers:", JSON.stringify(dl.headers))
+      console.log("[H1b][evidence] download headers:", toJsonText(dl.headers))
       console.log("[H1b][evidence] download body:", text)
 
       assert.strictEqual(dl.status, 200)
@@ -226,7 +226,7 @@ describe("file handling security audit (regression: expects secure behaviour)", 
         const r = yield* get(`/api/files/posts/${rec.id}/${enc}`)
         const body = yield* r.text.pipe(Effect.orElseSucceed(() => "<no-body>"))
         observed.push({ enc, status: r.status, ct: r.headers["content-type"], body })
-        console.log(`[H3][evidence] enc=${enc} status=${r.status} content-type=${r.headers["content-type"]} body=${JSON.stringify(body.slice(0, 80))}`)
+        console.log(`[H3][evidence] enc=${enc} status=${r.status} content-type=${r.headers["content-type"]} body=${toJsonText(body.slice(0, 80))}`)
       }
 
       const leaked = observed.filter((o) => o.body.includes("SECRET-VICTIM-CONTENT"))
@@ -243,7 +243,7 @@ describe("file handling security audit (regression: expects secure behaviour)", 
       const pkgBody = yield* pkgRes.text.pipe(Effect.orElseSucceed(() => "<no-body>"))
       console.log("[H3][evidence] arbitrary package.json read status:", pkgRes.status)
       console.log("[H3][evidence] arbitrary package.json read ct:", pkgRes.headers["content-type"])
-      console.log("[H3][evidence] arbitrary package.json body (first 80):", JSON.stringify(pkgBody.slice(0, 80)))
+      console.log("[H3][evidence] arbitrary package.json body (first 80):", toJsonText(pkgBody.slice(0, 80)))
 
       // Combine into one assertion so both violations surface in the failure.
       const traversalSecure = leaked.length === 0
@@ -301,7 +301,7 @@ describe("file handling security audit (regression: expects secure behaviour)", 
       const listedCount = Result.isSuccess(listedResult) ? listedResult.success.length : 0
       console.log(
         "[H5][evidence] direct list('../evil-listed/') =>",
-        Result.isSuccess(listedResult) ? JSON.stringify(listedResult.success) : `failure: ${listedResult.failure}`
+        Result.isSuccess(listedResult) ? toJsonText(listedResult.success) : `failure: ${listedResult.failure}`
       )
 
       assert.strictEqual(

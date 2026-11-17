@@ -2,8 +2,22 @@ import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { Rule } from "@gettersethya/mira-client"
 import { describe, expect, it } from "vitest"
 
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { postgresRuleSql } from "@/dialect/dialect-postgres.js"
+import type { RuleSqlDialect } from "@/dialect/dialect.js"
 import type { CompileCtx } from "@/rule/compiler.js"
-import { compile, compileOperand } from "@/rule/compiler.js"
+import { compile as compileRaw, compileOperand as compileOperandRaw } from "@/rule/compiler.js"
+
+const legacyDialect: RuleSqlDialect = {
+  ...sqliteDialect,
+  quoteIdentifier: (name) => name
+}
+
+const compile = (node: Parameters<typeof compileRaw>[0], ctx: CompileCtx) =>
+  compileRaw(node, ctx, legacyDialect)
+
+const compileOperand = (node: Parameters<typeof compileOperandRaw>[0], ctx: CompileCtx) =>
+  compileOperandRaw(node, ctx, legacyDialect)
 
 const Users: AnyCollectionDef = {
   name: "users",
@@ -286,5 +300,81 @@ describe("compiler", () => {
     )
     const sql = compile(expr, ctx)
     expect(sql).toBe("teamId IN (SELECT teamId FROM members WHERE userId = @p0)")
+  })
+})
+
+describe("compiler dialect rendering", () => {
+  const Members: AnyCollectionDef = {
+    name: "members",
+    fields: {},
+    schema: { "x-collection-kind": "base", type: "object", properties: {} }
+  }
+
+  it("quotes SQLite identifiers and subqueries", () => {
+    const ctx = makeCtx()
+    const expr = Rule.field("teamId").in(
+      Rule.subquery(Members, "teamId").where(Rule.field("userId").eq(Rule.authId(Users)))
+    )
+    expect(compileRaw(expr, ctx, sqliteDialect)).toBe(
+      't."teamId" IN (SELECT "teamId" FROM "members" WHERE "userId" = @auth_id)'
+    )
+  })
+
+  it("renders PostgreSQL ILIKE, ISO timestamps, and interval arithmetic", () => {
+    const ctx = makeCtx()
+    const starts = compileRaw(
+      Rule.field("name").startsWith(Rule.literal("a")),
+      ctx,
+      postgresRuleSql
+    )
+    expect(starts).toContain("ILIKE")
+    expect(starts).toContain('t."name"')
+
+    const dateAdd = compileOperandRaw(
+      Rule.dateAdd(Rule.now(), 7, "day"),
+      ctx,
+      postgresRuleSql
+    )
+    expect(dateAdd).toContain("to_char")
+    expect(dateAdd).toContain("interval '7 day'")
+    expect(dateAdd).not.toContain("datetime(")
+    expect(dateAdd).not.toContain("julianday(")
+
+    const dateDiff = compileOperandRaw(
+      Rule.dateDiff(Rule.field("created"), Rule.now(), "hour"),
+      ctx,
+      postgresRuleSql
+    )
+    expect(dateDiff).toContain("EXTRACT(EPOCH")
+    expect(dateDiff).toContain("/ 3600")
+  })
+
+  it("emits typed payload markers and base64url field tokens", () => {
+    const ctx = makeCtx({ fieldRefMode: "param", fieldType: (field) => field === "age" ? "integer" : "text" })
+    expect(
+      compileOperandRaw(Rule.field("age"), ctx, postgresRuleSql)
+    ).toMatch(/^@field_integer_[A-Za-z0-9_-]+@$/)
+    expect(
+      compileOperandRaw(Rule.field("author's"), ctx, postgresRuleSql)
+    ).toMatch(/^@field_text_[A-Za-z0-9_-]+@$/)
+  })
+
+  it("uses a sentinel capability object instead of hardcoded SQL", () => {
+    const sentinel: RuleSqlDialect = {
+      quoteIdentifier: (name) => `q(${name})`,
+      currentTimestamp: () => "SENTINEL_NOW",
+      timestampAdd: (expr) => `SENTINEL_ADD(${expr})`,
+      timestampDiff: (left, right) => `SENTINEL_DIFF(${left},${right})`,
+      caseInsensitiveLike: (left, right) => `SENTINEL_LIKE(${left},${right})`,
+      castValue: (expr) => expr
+    }
+    const ctx = makeCtx()
+    expect(compileOperandRaw(Rule.now(), ctx, sentinel)).toBe("SENTINEL_NOW")
+    expect(compileRaw(Rule.field("name").startsWith(Rule.literal("a")), ctx, sentinel)).toContain(
+      "SENTINEL_LIKE"
+    )
+    expect(compileOperandRaw(Rule.dateAdd(Rule.now(), 1, "day"), ctx, sentinel)).toContain(
+      "SENTINEL_ADD"
+    )
   })
 })

@@ -6,26 +6,31 @@ Server-side compiler and enforcer for the rule DSL (`ExprNode` / `OperandNode`
 produced by `Rule.*` in `@gettersethya/mira-client`).
 
 `compiler.ts` is a pure tree walk that renders an expression into a SQL WHERE
-fragment. It has no database access: literal values are allocated
-placeholders and written into a caller-supplied `params` record, while
-authorization and request references are emitted as named placeholders
-(`@auth_<field>`, `@request_<source>_<key>`) that the caller resolves later.
+fragment using the active `Dialect` capability object. It has no database
+access: literal values are allocated placeholders and written into a
+caller-supplied `params` record, while authorization and request references are
+emitted as named placeholders (`@auth_<field>`, `@request_<source>_<key>`) that
+the caller resolves later. Identifiers, current time, date arithmetic, date
+difference, and case-insensitive LIKE are dialect-rendered.
 
 `enforcer.ts` adapts that output to Effect SQL: it rewrites the generated
-`@pN` placeholders to `?` and returns them in numeric order. `enforcerForAction`
-is the policy entry point — it looks a rule up by action on a collection schema
+`@pN` placeholders to `?` through the quote-aware SQL scanner and returns them
+in numeric order. `payloadEnforcerForAction` compiles create and manage
+pre-checks with typed `@field_<type>_<token>@` markers that `resolveFieldRefs`
+binds to payload values. `enforcerForAction`
+is the policy entry point â€” it looks a rule up by action on a collection schema
 and returns `null` when the rule is missing, which callers must treat as
 deny-by-default.
 
 ## Interface
 
-- (type) `CompileCtx` — column mapping, optional table alias, placeholder generator, param accumulator, collection schema map, and auth collection name [compiler.ts:CompileCtx]
-- `compile(node, ctx)` — compiles an `ExprNode` into a WHERE-clause string, mutating `ctx.params` [compiler.ts:compile]
-- `compileOperand(node, ctx)` — compiles an `OperandNode` (field, literal, auth, authId, authCollection, request, now, subquery, dateAdd, dateDiff) into SQL [compiler.ts:compileOperand]
-- (type) `EnforceResult` — `{ sql, params }` with `?` placeholders [enforcer.ts:EnforceResult]
-- (type) `EnforcementCtx` — the runtime values a rule may reference (`auth`, `headers`, `query`); declared but not referenced by `enforceRule` today [enforcer.ts:EnforcementCtx]
-- `enforceRule(rule, overrides?)` — compiles a rule with a default alias of `t` and returns `?`-style SQL plus ordered params [enforcer.ts:enforceRule]
-- `enforcerForAction(collection, action)` — resolves `collection["x-rules"][action]` and compiles it; returns `null` when `x-rules` or the action's rule is absent [enforcer.ts:enforcerForAction]
+- (type) `CompileCtx` â€” column mapping, optional table alias, placeholder generator, param accumulator, collection schema map, and auth collection name [compiler.ts:CompileCtx]
+- `compile(node, ctx, dialect)` â€” compiles an `ExprNode` into a WHERE-clause string, mutating `ctx.params` [compiler.ts:compile]
+- `compileOperand(node, ctx, dialect, typeHint?)` â€” compiles an `OperandNode` (field, literal, auth, authId, authCollection, request, now, subquery, dateAdd, dateDiff) into SQL [compiler.ts:compileOperand]
+- (type) `EnforceResult` â€” `{ sql, params }` with `?` placeholders [enforcer.ts:EnforceResult]
+- (type) `EnforcementCtx` â€” the runtime values a rule may reference (`auth`, `headers`, `query`); declared but not referenced by `enforceRule` today [enforcer.ts:EnforcementCtx]
+- `enforceRule(rule, dialect, overrides?)` â€” compiles a rule with a default alias of `t` and returns `?`-style SQL plus ordered params [enforcer.ts:enforceRule]
+- `enforcerForAction(collection, action, dialect)` â€” resolves `collection["x-rules"][action]` and compiles it; returns `null` when `x-rules` or the action's rule is absent [enforcer.ts:enforcerForAction]
 
 ## Invariants
 
@@ -35,13 +40,13 @@ deny-by-default.
 - `in` with an empty literal array compiles to `1 = 0` (deny), never to a syntactically invalid `IN ()` [compiler.ts:compile]
 - `in` with a non-empty literal array emits one placeholder per element, preserving element order [compiler.ts:compile]
 - `and`/`or`/`not` always parenthesise their sub-expressions, so precedence never depends on the surrounding SQL [compiler.ts:compile]
-- `startsWith` and `contains` compile to `LIKE` with a concatenated `%` pattern rather than escaped literal text [compiler.ts:compile]
+- `startsWith` and `contains` compile through `RuleSqlDialect.caseInsensitiveLike`; SQLite renders `LIKE`, PostgreSQL renders `ILIKE`, and the pattern is concatenated rather than escaped [compiler.ts:compile] [dialect-sqlite.ts:caseInsensitiveLikeSql] [dialect-postgres.ts:postgresRuleSql]
 - Auth and request operands are emitted as placeholders (`@auth_<field>`, `@auth_id`, `@auth_collection`, `@request_<source>_<key>`) and are bound by the caller, not by the compiler [compiler.ts:compileOperand]
-- A field operand is prefixed with the table alias only when `ctx.tableAlias` is set **and** the operand names no explicit collection [compiler.ts:compileOperand]
+- A field operand is quoted through `RuleSqlDialect.quoteIdentifier`; it is prefixed with the table alias only when `ctx.tableAlias` is set and the operand names no explicit collection. Payload mode emits a typed marker instead [compiler.ts:compileOperand]
 - A subquery operand strips `tableAlias` before compiling its `where`, so inner field references are not prefixed with the outer alias [compiler.ts:compileOperand]
-- `enforceRule` rewrites `@pN` to `?` and returns params in ascending `N` order, matching Effect SQL's positional binding [enforcer.ts:enforceRule]
+- `enforceRule` rewrites `@pN` to `?` through `transformSqlCode` and returns params in ascending `N` order, matching Effect SQL's positional binding [enforcer.ts:enforceRule] [sql-text.ts:transformSqlCode]
 - `enforceRule`'s default context uses alias `t`, `columnOfField` as identity, and an empty `collectionSchemas` map; `overrides` may replace any of them [enforcer.ts:enforceRule]
-- `enforcerForAction` returns `null` — not an allow-everything clause — when `x-rules` or the requested action rule is missing; the caller owns deny-by-default [enforcer.ts:enforcerForAction]
+- `enforcerForAction` returns `null` â€” not an allow-everything clause â€” when `x-rules` or the requested action rule is missing; the caller owns deny-by-default [enforcer.ts:enforcerForAction]
 
 ## Side Effects
 
@@ -51,3 +56,11 @@ deny-by-default.
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+
+## Dialect boundary (issue #45)
+
+- compile(node, ctx, dialect) and compileOperand(node, ctx, dialect, typeHint?) render identifiers, current time, date add/diff, and case-insensitive LIKE through RuleSqlDialect [compiler.ts:compile] [compiler.ts:compileOperand].
+- enforceRule(rule, dialect, overrides?) and enforcerForAction(schema, action, dialect) render normal column SQL. payloadEnforcerForAction(schema, action, dialect) renders typed payload markers for create and manage pre-checks [enforcer.ts:enforceRule] [enforcer.ts:payloadEnforcerForAction].
+- The compiled-rule cache is keyed by schema, dialect, field-ref mode, and action. A SQLite rule can never be reused for a PostgreSQL dialect [enforcer.ts:compiledRuleCache].
+- @pN and context placeholder replacement skip quoted identifiers and string literals through sql-text.ts [sql-text.ts:transformSqlCode] [sql-text.ts:forEachSqlCode].
+- SQLite keeps the legacy date SQL. PostgreSQL rendering lives in dialect-postgres.ts as a pure RuleSqlDialect, not a database preset [dialect-postgres.ts:postgresRuleSql].

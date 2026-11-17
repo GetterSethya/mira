@@ -1,4 +1,5 @@
-import { Context, Effect, type Redacted } from "effect"
+import type { Effect } from "effect"
+import { Context, type Redacted } from "effect"
 
 import type {
   RateLimitedError,

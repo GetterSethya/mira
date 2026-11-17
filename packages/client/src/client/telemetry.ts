@@ -1,4 +1,6 @@
 import type { AuthCollectionOptions, FilterNode, RuleMap } from "@gettersethya/mira-collection"
+import { FilterNodeSchema } from "@gettersethya/mira-collection"
+import { Schema } from "effect"
 import { HttpClientRequest as HCR } from "effect/http"
 
 import type { ClientHandler, ExecuteFn } from "./handler.js"
@@ -120,6 +122,8 @@ export type TelemetryClient = {
   getSchema(): ClientHandler<Array<ApiCollectionSchema>>
 }
 
+const encodeFilter = Schema.encodeSync(Schema.fromJsonString(FilterNodeSchema))
+
 function buildQueryParams(params: Record<string, string | undefined>): string {
   const sp = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -135,7 +139,7 @@ export function makeTelemetryClient(execute: ExecuteFn): TelemetryClient {
       const qs = buildQueryParams({
         limit: opts?.limit !== undefined ? String(opts.limit) : undefined,
         after: opts?.cursor != null ? String(opts.cursor) : undefined,
-        filter: opts?.filter !== undefined ? JSON.stringify(opts.filter) : undefined,
+        filter: opts?.filter !== undefined ? encodeFilter(opts.filter) : undefined,
       })
       return makeClientHandler(execute(HCR.get(`/api/_telemetry/logs${qs}`)))
     },
@@ -145,7 +149,7 @@ export function makeTelemetryClient(execute: ExecuteFn): TelemetryClient {
         limit: opts?.limit !== undefined ? String(opts.limit) : undefined,
         after: opts?.cursor != null ? String(opts.cursor) : undefined,
         traceId: opts?.traceId,
-        filter: opts?.filter !== undefined ? JSON.stringify(opts.filter) : undefined,
+        filter: opts?.filter !== undefined ? encodeFilter(opts.filter) : undefined,
       })
       return makeClientHandler(execute(HCR.get(`/api/_telemetry/spans${qs}`)))
     },

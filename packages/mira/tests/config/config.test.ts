@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer, Option, Redacted } from "effect"
+import { Effect, Layer, Option, Redacted } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -48,9 +48,9 @@ describe("AppConfig", () => {
     Effect.gen(function* () {
       const config = yield* AppConfig
       const sql = yield* SqlClient.SqlClient
-      const rows = yield* sql`SELECT value FROM ${sql("_config")} WHERE key = 'jwt_secret'`
+      const rows = yield* sql<{ value: string }>`SELECT value FROM ${sql("_config")} WHERE key = 'jwt_secret'`
       expect(rows).toHaveLength(1)
-      expect((rows[0] as { value: string })["value"]).toBe(Redacted.value(config.jwtSecret))
+      expect(rows[0]?.value).toBe(Redacted.value(config.jwtSecret))
     }).pipe(Effect.provide(AppConfigLive.pipe(Layer.provideMerge(db), Layer.provideMerge(NodeCryptoLayer))))
   )
 

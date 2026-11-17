@@ -273,11 +273,12 @@ export const mintSession = (
 export function authenticateSession(
   rawToken: string | null,
   isAuthCollection: (name: string) => boolean
-): Effect.Effect<SessionAuth | undefined, never, AppConfig | Repository> {
+): Effect.Effect<SessionAuth | undefined, never, AppConfig | Repository | Dialect> {
   return Effect.gen(function* () {
     if (rawToken === null) return undefined
 
     const config = yield* AppConfig
+    const dialect = yield* Dialect
     const jwtSecret = Redacted.value(config.jwtSecret)
 
     const payload = yield* verifyJwt(rawToken, jwtSecret).pipe(Effect.orElseSucceed(() => undefined))
@@ -294,7 +295,7 @@ export function authenticateSession(
 
     const repo = yield* Repository
     const rows = yield* repo
-      .viewFilter(payload.col, { where: idClause(payload.sub) })
+      .viewFilter(payload.col, { where: idClause(payload.sub, dialect.quoteIdentifier) })
       .pipe(Effect.orElseSucceed(() => []))
     if (rows.length === 0) return undefined
     const record = rows[0]

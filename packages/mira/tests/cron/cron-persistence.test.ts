@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Context, Effect, Layer, Queue, Schedule, Tracer } from "effect"
+import { Context, Effect, Layer, Queue, Schedule, Schema, Tracer } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -13,6 +13,17 @@ import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
 
 type StubDef = CronDef<never>
+
+const PersistedCronEntrySchema = Schema.Struct({
+  lastRunAt: Schema.NullOr(Schema.String),
+  lastStatus: Schema.NullOr(Schema.Literals(["success", "error"])),
+  lastDurationMs: Schema.NullOr(Schema.Number),
+  lastError: Schema.NullOr(Schema.String)
+})
+
+const decodePersistedCronState = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, PersistedCronEntrySchema))
+)
 
 // Boots a CronService against an already-open SqlClient context — simulates a "restart"
 // against the same database, since `:memory:` SQLite is per-connection and a fresh
@@ -52,12 +63,12 @@ describe("cron state persistence", () => {
         yield* Effect.yieldNow
         yield* Effect.sleep(0)
 
-        const rows = yield* sql`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
+        const rows = yield* sql<{ value: string }>`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
         expect(rows).toHaveLength(1)
-        const blob = JSON.parse((rows[0] as { value: string }).value) as Record<string, unknown>
+        const blob = yield* decodePersistedCronState(rows[0]?.value).pipe(Effect.orDie)
         expect(blob["ok-cron"]).toMatchObject({ lastStatus: "success", lastError: null })
-        expect((blob["ok-cron"] as { lastRunAt: unknown }).lastRunAt).toBeTruthy()
-        expect((blob["ok-cron"] as { lastDurationMs: unknown }).lastDurationMs).toBeGreaterThanOrEqual(0)
+        expect(blob["ok-cron"]?.lastRunAt).toBeTruthy()
+        expect(blob["ok-cron"]?.lastDurationMs).toBeGreaterThanOrEqual(0)
       })
     )
   )
@@ -82,13 +93,10 @@ describe("cron state persistence", () => {
         yield* Effect.yieldNow
         yield* Effect.sleep(0)
 
-        const rows = yield* sql`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
-        const blob = JSON.parse((rows[0] as { value: string }).value) as Record<
-          string,
-          { lastStatus: string; lastError: string }
-        >
-        expect(blob["fail-cron"].lastStatus).toBe("error")
-        expect(blob["fail-cron"].lastError).toContain("boom")
+        const rows = yield* sql<{ value: string }>`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
+        const blob = yield* decodePersistedCronState(rows[0]?.value).pipe(Effect.orDie)
+        expect(blob["fail-cron"]?.lastStatus).toBe("error")
+        expect(blob["fail-cron"]?.lastError).toContain("boom")
       })
     )
   )
@@ -140,8 +148,8 @@ describe("cron state persistence", () => {
         yield* Effect.yieldNow
         yield* Effect.sleep(0)
 
-        const rows = yield* sql`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
-        const blob = JSON.parse((rows[0] as { value: string }).value) as Record<string, unknown>
+        const rows = yield* sql<{ value: string }>`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
+        const blob = yield* decodePersistedCronState(rows[0]?.value).pipe(Effect.orDie)
         expect(Object.keys(blob)).toEqual(["cron-a"])
       })
     )

@@ -22,7 +22,7 @@ import {
   type CollectionSchema,
   Field
 } from "@gettersethya/mira-client"
-import { Effect, Layer, Schedule } from "effect"
+import { Effect, Layer, Schedule, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
@@ -36,6 +36,13 @@ import { LocalFileStorage } from "@/storage/local-preset.js"
 import { makeTelemetryLayer } from "@/telemetry/layer.js"
 import { TelemetryStore } from "@/telemetry/store.js"
 
+function closeEffect<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> {
+  // The built app layer is closed at runtime; the test graph widens R through
+  // plugin/cron config, so this helper restores the closed run type.
+  // oxlint-disable-next-line typescript/consistent-type-assertions
+  return effect as Effect.Effect<A, E, never>
+}
+
 const enabled = process.env["MIRA_LIBSQL_E2E"] === "1"
 const describeE2E = enabled ? describe : describe.skip
 const url = process.env["MIRA_LIBSQL_URL"] ?? "http://127.0.0.1:18080"
@@ -43,8 +50,17 @@ const url = process.env["MIRA_LIBSQL_URL"] ?? "http://127.0.0.1:18080"
 const delay = (millis: number) =>
   Effect.promise(() => new Promise((resolve) => setTimeout(resolve, millis)))
 
-const json = <A = Record<string, unknown>>(res: { json: Effect.Effect<unknown, unknown> }) =>
-  res.json as Effect.Effect<A, unknown>
+const IdItemSchema = Schema.Struct({ id: Schema.String })
+const TitleItemSchema = Schema.Struct({ title: Schema.String })
+const IdItemsSchema = Schema.Struct({ items: Schema.Array(IdItemSchema) })
+const TitleItemsSchema = Schema.Struct({ items: Schema.Array(TitleItemSchema) })
+
+const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
+  res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
+
+const encodeFilter = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Struct({ op: Schema.String, field: Schema.String, value: Schema.Unknown }))
+)
 
 const PostsDef = BaseCollection.define("e2e_posts", {
   title: Field.text({ required: true }),
@@ -150,7 +166,7 @@ describeE2E("libSQL remote sqld", () => {
         )
       )
       expect(created.status).toBe(201)
-      const first = yield* json<{ id: string }>(created)
+      const first = yield* json(created, IdItemSchema)
 
       const second = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/e2e_posts").pipe(
@@ -161,33 +177,33 @@ describeE2E("libSQL remote sqld", () => {
 
       const filtered = yield* HttpClient.get(
         `/api/collections/e2e_posts?filter=${encodeURIComponent(
-          JSON.stringify({ op: "eq", field: "title", value: "two" })
+          encodeFilter({ op: "eq", field: "title", value: "two" })
         )}`
       )
       expect(filtered.status).toBe(200)
-      const filteredBody = yield* json<{ items: Array<{ title: string }> }>(filtered)
+      const filteredBody = yield* json(filtered, TitleItemsSchema)
       expect(filteredBody.items.map((row) => row.title)).toEqual(["two"])
 
       const sorted = yield* HttpClient.get(
         "/api/collections/e2e_posts?sort=title&order=asc"
       )
       expect(sorted.status).toBe(200)
-      const sortedBody = yield* json<{ items: Array<{ title: string }> }>(sorted)
+      const sortedBody = yield* json(sorted, TitleItemsSchema)
       expect(sortedBody.items.map((row) => row.title)).toEqual(["one", "two"])
 
       const page = yield* HttpClient.get(
         "/api/collections/e2e_posts?limit=1&sort=title&order=asc"
       )
-      const pageBody = yield* json<{
-        items: Array<{ id: string }>
-        nextCursor: number | null
-      }>(page)
+      const pageBody = yield* json(
+        page,
+        Schema.Struct({ items: Schema.Array(IdItemSchema), nextCursor: Schema.NullOr(Schema.Number) })
+      )
       expect(pageBody.items).toHaveLength(1)
       expect(pageBody.nextCursor).not.toBeNull()
       const next = yield* HttpClient.get(
         `/api/collections/e2e_posts?limit=1&sort=title&order=asc&after=${pageBody.nextCursor}`
       )
-      const nextBody = yield* json<{ items: Array<{ id: string }> }>(next)
+      const nextBody = yield* json(next, IdItemsSchema)
       expect(nextBody.items[0]?.id).not.toBe(pageBody.items[0]?.id)
 
       const updated = yield* HttpClient.execute(
@@ -205,7 +221,7 @@ describeE2E("libSQL remote sqld", () => {
         )
       )
       expect(bulk.status).toBe(201)
-      expect((yield* json<{ records: unknown[] }>(bulk)).records).toHaveLength(2)
+      expect((yield* json(bulk, Schema.Struct({ records: Schema.Array(Schema.Unknown) }))).records).toHaveLength(2)
 
       const denied = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/e2e_locked").pipe(
@@ -234,7 +250,7 @@ describeE2E("libSQL remote sqld", () => {
         )
       )
       expect(login.status).toBe(200)
-      expect(typeof (yield* json<{ token?: string }>(login)).token).toBe("string")
+      expect(typeof (yield* json(login, Schema.Struct({ token: Schema.optional(Schema.String) }))).token).toBe("string")
     }).pipe(
       Effect.provide(Layer.mergeAll(app.buildServiceLayer(), NodeHttpServer.layerTest))
     )
@@ -342,13 +358,15 @@ describeE2E("libSQL remote sqld", () => {
       yield* Effect.void.pipe(Effect.withSpan("e2e-libsql-span"))
       yield* delay(2_000)
 
-      const logs = yield* store.read!.listLogs({
+      const read = store.read
+      if (read === null) throw new Error("expected telemetry read store")
+      const logs = yield* read.listLogs({
         limit: 100,
         after: null,
         filter: null,
         traceId: null
       })
-      const spans = yield* store.read!.listSpans({
+      const spans = yield* read.listSpans({
         limit: 100,
         after: null,
         filter: null,
@@ -383,6 +401,6 @@ describeE2E("libSQL remote sqld", () => {
       expect(deleted.logs).toBeGreaterThanOrEqual(1)
     }).pipe(Effect.provide(app.buildServiceLayer()), Effect.scoped)
 
-    await Effect.runPromise(program as Effect.Effect<void, never, never>)
+    await Effect.runPromise(closeEffect(program))
   }, 60_000)
 })

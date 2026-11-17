@@ -37,6 +37,7 @@ import {
   seedUser,
   serveRouter,
   setupTables,
+  toJsonText,
 } from "./_harness.js"
 
 const layer = makeSecurityLayer()
@@ -90,7 +91,7 @@ describe("H1 - privileged read endpoints reject a normal (non-admin) user token"
         yield* serveRouter()
         const token = yield* login("normal@example.com", "pw123")
         const decoded = payloadOf(token)
-        console.log("[H1] normal user token payload =", JSON.stringify(decoded))
+        console.log("[H1] normal user token payload =", toJsonText(decoded))
 
         // Control: anonymous is correctly rejected.
         const anon = yield* get("/api/_schema")
@@ -105,7 +106,7 @@ describe("H1 - privileged read endpoints reject a normal (non-admin) user token"
         console.log(
           "[H1] VULN EVIDENCE  GET /api/_schema (normal user token) ->",
           res.status,
-          JSON.stringify(names.map((c) => c.name))
+          toJsonText(names.map((c) => c.name))
         )
         assertDenied(res.status, "GET /api/_schema with a normal non-admin users token")
       }).pipe(Effect.provide(layer))
@@ -165,7 +166,7 @@ describe("H2 - a file token must not be accepted as a session token", () => {
         assert.strictEqual(tokenRes.status, 200, "control: file-token minting with a session token must succeed")
         const tokenBody = yield* decodeTokenResponse(tokenText).pipe(Effect.orDie)
         const fileToken = tokenBody.token
-        console.log("[H2] decoded FILE token payload =", JSON.stringify(payloadOf(fileToken)))
+        console.log("[H2] decoded FILE token payload =", toJsonText(payloadOf(fileToken)))
 
         // Control: the real session token authenticates /api/auth/me.
         const meSession = yield* get("/api/auth/me", session)
@@ -240,7 +241,7 @@ describe("H4 - logout must invalidate the JWT", () => {
       // Control: logout returns 204 and clears the cookie.
       const logout = yield* postJson("/api/auth/logout", {}, token)
       const setCookie = logout.headers["set-cookie"]
-      console.log("[H4] CONTROL  POST /api/auth/logout ->", logout.status, "set-cookie:", JSON.stringify(setCookie))
+      console.log("[H4] CONTROL  POST /api/auth/logout ->", logout.status, "set-cookie:", toJsonText(setCookie))
       assert.strictEqual(logout.status, 204)
 
       // Secure expectation: the token is revoked server-side.

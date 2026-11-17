@@ -3,7 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { describe, it } from "@effect/vitest"
-import { Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
+import type { Duration } from "effect"
+import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect, vi } from "vitest"
 
@@ -51,6 +52,11 @@ const queryLogs = <A extends object>(statement: string) =>
     return yield* sql.unsafe<A>(statement)
   })
 
+const consoleLogLineSchema = Schema.fromJsonString(
+  Schema.Struct({ message: Schema.String })
+)
+const decodeConsoleLogLine = Schema.decodeUnknownOption(consoleLogLineSchema)
+
 const readLogs = (store: TelemetryStoreShape) =>
   store.read?.listLogs({ limit: 100, after: null, filter: null, traceId: null }) ??
   Effect.succeed({ items: [], total: 0, nextCursor: null })
@@ -95,13 +101,11 @@ describe("makeTelemetryLayerForClient", () => {
 
     const calls = spy.mock.calls.slice()
     spy.mockRestore()
-    const call = calls.find((candidate) => {
-      try {
-        return JSON.parse(candidate[0] as string).message === "console check"
-      } catch {
-        return false
-      }
-    })
+    const call = calls.find((candidate) =>
+      decodeConsoleLogLine(candidate[0]).pipe(
+        Option.exists((line) => line.message === "console check")
+      )
+    )
     expect(call).toBeDefined()
   })
 

@@ -19,13 +19,12 @@ const Tasks: AnyCollectionDef = {
 const originalFetch = globalThis.fetch
 const captured: Array<RequestInit | undefined> = []
 
-globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+const fetchStub: typeof globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
   captured.push(init)
-  return new Response(JSON.stringify({ items: [], nextCursor: null }), {
-    status: 200,
-    headers: { "content-type": "application/json" }
-  })
-}) as typeof globalThis.fetch
+  return Response.json({ items: [], nextCursor: null }, { status: 200 })
+}
+
+globalThis.fetch = fetchStub
 
 afterAll(() => {
   globalThis.fetch = originalFetch

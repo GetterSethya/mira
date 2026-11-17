@@ -11,13 +11,20 @@ import { ThumbnailServiceBunLive } from "@/thumbnail/bun.js"
 import { isSupportedBunVersion, MINIMUM_BUN_VERSION } from "./bun-version.js"
 import { NodeMailTransportLayer } from "./node-email.js"
 
+const bunVersion = (): string | undefined => {
+  const bun: unknown = Reflect.get(globalThis, "Bun")
+  if (typeof bun !== "object" || bun === null) return undefined
+  const version: unknown = Reflect.get(bun, "version")
+  return typeof version === "string" ? version : undefined
+}
+
 /**
  * Fail the layer build early on an unsupported Bun instead of silently
  * degrading the native image path.
  */
 const assertSupportedBunRuntime = Layer.effectDiscard(
   Effect.sync(() => {
-    const version = (globalThis as { Bun?: { version?: string } }).Bun?.version
+    const version = bunVersion()
     if (version === undefined) return
     if (!isSupportedBunVersion(version)) {
       throw new Error(

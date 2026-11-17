@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 
-import { buildCtxCacheTag } from "@/cache/ctx-key.js"
+import { buildCtxCacheTag as buildCtxCacheTagRaw } from "@/cache/ctx-key.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Repository } from "@/repository/repository.js"
 
 import {
@@ -13,8 +14,15 @@ import {
   seedProfile,
   seedUser,
   serveRouter,
-  setupTables
+  setupTables,
+  toJsonText
 } from "./_harness.js"
+
+const buildCtxCacheTag = (
+  collection: Parameters<typeof buildCtxCacheTagRaw>[0],
+  action: Parameters<typeof buildCtxCacheTagRaw>[1],
+  ctx: Parameters<typeof buildCtxCacheTagRaw>[2]
+) => buildCtxCacheTagRaw(collection, action, ctx, sqliteDialect)
 
 // ---------------------------------------------------------------------------
 // Tiny reflection/printing helpers (no `as` assertions, no JSON.parse)
@@ -43,7 +51,7 @@ function pretty(value: unknown): string {
 /** Build a `filter=` query-string fragment from a plain object. */
 function filterQuery(url: string, node: unknown): string {
   const sep = url.includes("?") ? "&" : "?"
-  return `${url}${sep}filter=${encodeURIComponent(JSON.stringify(node))}`
+  return `${url}${sep}filter=${encodeURIComponent(toJsonText(node))}`
 }
 
 /** Find the item in a decoded list body whose `id` equals `id`. */
@@ -66,7 +74,7 @@ function firstItem(body: unknown): unknown {
 }
 
 /** True when a request was rejected by the API (any 4xx). */
-function isRejected(status: number): boolean {
+function isRejected(status: number) {
   return status >= 400 && status < 500
 }
 

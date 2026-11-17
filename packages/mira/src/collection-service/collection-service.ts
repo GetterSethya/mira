@@ -3,14 +3,16 @@ import type { FilterNode } from "@gettersethya/mira-client"
 import { filterNodeToWhereClause } from "@gettersethya/mira-client"
 import { Clock, Context, Effect, Layer, Option, References, Schema } from "effect"
 import { SqlClient } from "effect/sql"
-import { literal } from "effect/sql/Statement"
 
 import { AuthChallengeStore } from "@/auth/challenge-store.js"
 import { Dialect } from "@/dialect/dialect.js"
+import type { DialectType } from "@/dialect/dialect.js"
 import { AuthService } from "@/http/auth.js"
 import { Repository } from "@/repository/repository.js"
+import { renderRuleCheck } from "@/repository/sql.js"
 import type { AccessPredicate, ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
-import { enforcerForAction } from "@/rule/enforcer.js"
+import { enforcerForAction, payloadEnforcerForAction } from "@/rule/enforcer.js"
+import type { FieldRefMode } from "@/rule/compiler.js"
 import { FileStorage } from "@/storage/storage.js"
 import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
@@ -28,7 +30,7 @@ import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
 import type { BodyBinding, BodyBindingPlan, ResolveOptions } from "./where.js"
-import { andWhere, cursorClause, extractCtxRefs, idClause, keysetClause, resolveCtxPlaceholders, resolveFieldRefs } from "./where.js"
+import { andWhere, cursorClause, extractCtxRefs, idClause, keysetClause, resolveCtxPlaceholders, resolveFieldRefs, seqIdEqualsClause } from "./where.js"
 
 /**
  * Collection Service tag — the core business-logic layer sitting between
@@ -215,7 +217,9 @@ function resolveExpand(
   schema: CollectionSchema,
   expandFieldNames: ReadonlyArray<string> | null,
   allCollections: ReadonlyArray<AnyCollectionDef>,
-  ctx: RequestCtx
+  ctx: RequestCtx,
+  dialect: DialectType,
+  resolveOptions: ResolveOptions
 ) {
   return Effect.gen(function* () {
     if (expandFieldNames === null) return []
@@ -244,11 +248,17 @@ function resolveExpand(
       }
 
       // No view rule on the target → do not expand.
-      const targetView = enforcerForAction(target.schema, "view")
+      const targetView = enforcerForAction(target.schema, "view", dialect)
       if (targetView === null) continue
 
       // A rule that needs auth with no authenticated actor → do not expand.
-      const resolved = yield* resolveCtxPlaceholders(targetView, ctx, target.name, "view").pipe(
+      const resolved = yield* resolveCtxPlaceholders(
+        targetView,
+        ctx,
+        target.name,
+        "view",
+        resolveOptions
+      ).pipe(
         Effect.catchTag("ForbiddenError", () => Effect.succeed(null))
       )
       if (resolved === null) continue
@@ -336,9 +346,14 @@ function compileRule(
   collection: AnyCollectionDef,
   action: "list" | "view" | "create" | "update" | "delete",
   ctx: RequestCtx,
-  options?: ResolveOptions
+  dialect: DialectType,
+  mode: FieldRefMode,
+  options: ResolveOptions
 ) {
-  const result = enforcerForAction(collection.schema, action)
+  const result =
+    mode === "param"
+      ? payloadEnforcerForAction(collection.schema, "create", dialect)
+      : enforcerForAction(collection.schema, action, dialect)
   if (result === null) {
     return Effect.fail(new ForbiddenError({ collection: collection.name, action }))
   }
@@ -414,7 +429,9 @@ function makeCollectionServiceLayerWith(
       const resolveOptions: ResolveOptions = {
         encodeParam: dialect.storesBooleanAsInteger
           ? (value) => (typeof value === "boolean" ? (value ? 1 : 0) : value)
-          : (value) => value
+          : (value) => value,
+        quoteIdentifier: dialect.quoteIdentifier,
+        castValue: dialect.castValue
       }
 
       // One-time dev warning: a `@request_body_` reference in a list/view/delete
@@ -423,8 +440,8 @@ function makeCollectionServiceLayerWith(
       // here at layer-build time, never per request.
       for (const col of allCollections) {
         for (const action of ["list", "view", "delete"] as const) {
-          const compiled = enforcerForAction(col.schema, action)
-          if (compiled !== null && compiled.sql.includes("@request_body_")) {
+          const compiled = enforcerForAction(col.schema, action, dialect)
+          if (compiled !== null && extractCtxRefs(compiled.sql).bodyKeys.length > 0) {
             yield* Effect.logWarning(
               `Collection "${col.name}" ${action} rule references @request_body_* but ${action} requests carry no body — the reference always resolves to null`
             )
@@ -552,13 +569,13 @@ function makeCollectionServiceLayerWith(
         Effect.gen(function* () {
           if (ctx.admin === true) return true
           if (!isAuthCollection(collection) || ctx.auth === undefined) return false
-          const rule = enforcerForAction(collection.schema, "manage")
+          const rule = payloadEnforcerForAction(collection.schema, "manage", dialect)
           if (rule === null) return false
           const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage", resolveOptions)
           const bound = resolveFieldRefs(resolved, { ...payload, emailVerified: false }, resolveOptions)
-          const where = literal(bound.sql, bound.params)
-          const check = yield* sql<{ ok: number }>`SELECT 1 AS ok WHERE ${where}`
-          return check.length > 0
+          const check = renderRuleCheck(bound, dialect)
+          const rows = yield* sql.unsafe<{ ok: number }>(check.sql, check.params)
+          return rows.length > 0
         })
 
       const canManageRecord = (
@@ -569,11 +586,11 @@ function makeCollectionServiceLayerWith(
         Effect.gen(function* () {
           if (ctx.admin === true) return true
           if (!isAuthCollection(collection) || ctx.auth === undefined) return false
-          const rule = enforcerForAction(collection.schema, "manage")
+          const rule = enforcerForAction(collection.schema, "manage", dialect)
           if (rule === null) return false
           const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage", resolveOptions)
           const allowed = yield* repo.viewFilter(collection.name, {
-            where: andWhere(resolved, idClause(id))
+            where: andWhere(resolved, idClause(id, dialect.quoteIdentifier))
           })
           return allowed.length > 0
         })
@@ -678,11 +695,12 @@ function makeCollectionServiceLayerWith(
         expand?: ReadonlyArray<string> | null
       ) =>
         Effect.gen(function* () {
-          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "list", ctx, resolveOptions)
+          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "list", ctx, dialect, "column", resolveOptions)
           const userFilter =
             filter !== undefined
               ? yield* filterNodeToWhereClause(filter, collection.schema, collection.name, {
-                  allowHiddenFields: ctx.admin === true
+                  allowHiddenFields: ctx.admin === true,
+                  quoteIdentifier: dialect.quoteIdentifier
                 })
               : null
           const where: WhereClause | null =
@@ -693,7 +711,7 @@ function makeCollectionServiceLayerWith(
           let cursorWhere: WhereClause | null = null
           if (cursor !== null) {
             if (effectiveSort.field === "seqId") {
-              cursorWhere = cursorClause(cursor)
+              cursorWhere = cursorClause(cursor, dialect.quoteIdentifier)
             } else {
               if (isNullableSortField(collection.schema, effectiveSort.field)) {
                 return yield* Effect.fail(
@@ -706,7 +724,7 @@ function makeCollectionServiceLayerWith(
                 )
               }
               const cursorRows = yield* repo.viewFilter(collection.name, {
-                where: { sql: "t.seqId = ?", params: [cursor] },
+                where: seqIdEqualsClause(cursor, dialect.quoteIdentifier),
                 fields: [effectiveSort.field]
               })
               const cursorRow = cursorRows[0]
@@ -719,7 +737,7 @@ function makeCollectionServiceLayerWith(
                   })
                 )
               }
-              cursorWhere = keysetClause(effectiveSort, value, cursor)
+              cursorWhere = keysetClause(effectiveSort, value, cursor, dialect.quoteIdentifier)
             }
           }
           const combined =
@@ -729,7 +747,7 @@ function makeCollectionServiceLayerWith(
           const expandDefs =
             expand === null || expand === undefined || expand.length === 0
               ? []
-              : yield* resolveExpand(collection.schema, expand, allCollections, ctx)
+              : yield* resolveExpand(collection.schema, expand, allCollections, ctx, dialect, resolveOptions)
           const defaultProjection = select === null && expandDefs.length === 0
           const fieldsWithExpand = defaultProjection
             ? fields
@@ -781,11 +799,21 @@ function makeCollectionServiceLayerWith(
         expand?: ReadonlyArray<string> | null
       ) =>
         Effect.gen(function* () {
-          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "view", ctx, resolveOptions)
-          const combined = ruleWhere !== null ? andWhere(ruleWhere, idClause(id)) : idClause(id)
+          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "view", ctx, dialect, "column", resolveOptions)
+          const combined =
+            ruleWhere !== null
+              ? andWhere(ruleWhere, idClause(id, dialect.quoteIdentifier))
+              : idClause(id, dialect.quoteIdentifier)
 
           const fields = resolveFields(collection.schema, select ?? null, ctx.admin === true)
-          const expandDefs = yield* resolveExpand(collection.schema, expand ?? null, allCollections, ctx)
+          const expandDefs = yield* resolveExpand(
+            collection.schema,
+            expand ?? null,
+            allCollections,
+            ctx,
+            dialect,
+            resolveOptions
+          )
           const fieldsWithExpand = [...new Set([...fields, ...expandDefs.map((e) => e.localField)])]
 
           const rows = yield* repo.viewFilter(collection.name, {
@@ -830,14 +858,21 @@ function makeCollectionServiceLayerWith(
 
           if (!ctx.admin) {
             const ctxWithBody: RequestCtx = { ...ctx, body: cleaned }
-            const ruleWhere = yield* compileRule(collection, "create", ctxWithBody, resolveOptions)
+            const ruleWhere = yield* compileRule(
+              collection,
+              "create",
+              ctxWithBody,
+              dialect,
+              "param",
+              resolveOptions
+            )
 
             // Pre-check: evaluate the create rule against the payload (no table needed).
             const payloadBound = resolveFieldRefs(ruleWhere, cleaned, resolveOptions)
-            const where = literal(payloadBound.sql, payloadBound.params)
-            const check = yield* sql<{ ok: number }>`SELECT 1 AS ok WHERE ${where}`
+            const check = renderRuleCheck(payloadBound, dialect)
+            const rows = yield* sql.unsafe<{ ok: number }>(check.sql, check.params)
 
-            if (check.length === 0) {
+            if (rows.length === 0) {
               return yield* new ForbiddenError({ collection: collection.name, action: "create" })
             }
           }
@@ -988,7 +1023,7 @@ function makeCollectionServiceLayerWith(
 
           // If the collection has no rules at all, deny immediately (don't leak existence).
           if (!ctx.admin && ctx.internal === undefined) {
-            const enforcerResult = enforcerForAction(collection.schema, "update")
+            const enforcerResult = enforcerForAction(collection.schema, "update", dialect)
             if (enforcerResult === null) {
               return yield* new ForbiddenError({ collection: collection.name, action: "update" })
             }
@@ -1045,7 +1080,7 @@ function makeCollectionServiceLayerWith(
           const updateEnforcer =
             prepared.admin || prepared.ctx.internal !== undefined
               ? null
-              : enforcerForAction(collection.schema, "update")
+              : enforcerForAction(collection.schema, "update", dialect)
           const updateRefs = updateEnforcer === null ? null : extractCtxRefs(updateEnforcer.sql)
           const updateBodyPlan =
             updateEnforcer === null ? null : buildBodyPlan(collection, updateEnforcer.sql, prepared.cleaned)
@@ -1054,7 +1089,7 @@ function makeCollectionServiceLayerWith(
             prepared.ctx.auth !== undefined &&
             !prepared.admin &&
             prepared.ctx.internal === undefined
-              ? enforcerForAction(collection.schema, "manage")
+              ? enforcerForAction(collection.schema, "manage", dialect)
               : null
           const manageRefs = manageEnforcer === null ? null : extractCtxRefs(manageEnforcer.sql)
           const manageBodyPlan =
@@ -1126,10 +1161,12 @@ function makeCollectionServiceLayerWith(
                 collection,
                 "update",
                 ctxWithBody,
+                dialect,
+                "column",
                 resolveOptions
               )
               const allowed = yield* repo.viewFilter(collection.name, {
-                where: andWhere(ruleWhere, idClause(prepared.id))
+                where: andWhere(ruleWhere, idClause(prepared.id, dialect.quoteIdentifier))
               })
               if (allowed.length === 0) {
                 return yield* new ForbiddenError({ collection: collection.name, action: "update" })
@@ -1268,7 +1305,7 @@ function makeCollectionServiceLayerWith(
 
           // If the collection has no rules at all, deny immediately (don't leak existence).
           if (!ctx.admin) {
-            const enforcerResult = enforcerForAction(collection.schema, "delete")
+            const enforcerResult = enforcerForAction(collection.schema, "delete", dialect)
             if (enforcerResult === null) {
               return yield* new ForbiddenError({ collection: collection.name, action: "delete" })
             }
@@ -1286,7 +1323,7 @@ function makeCollectionServiceLayerWith(
           const deleteExisting = repo.deleteExisting
           const enforcer = prepared.admin
             ? null
-            : enforcerForAction(prepared.collection.schema, "delete")
+            : enforcerForAction(prepared.collection.schema, "delete", dialect)
           const refs = enforcer === null ? null : extractCtxRefs(enforcer.sql)
           const fastPath =
             viewWithAccess !== undefined &&
@@ -1303,6 +1340,8 @@ function makeCollectionServiceLayerWith(
               prepared.collection,
               "delete",
               prepared.ctx,
+              dialect,
+              "column",
               resolveOptions
             )
             const accesses = yield* viewWithAccess(
@@ -1338,10 +1377,12 @@ function makeCollectionServiceLayerWith(
                 prepared.collection,
                 "delete",
                 prepared.ctx,
+                dialect,
+                "column",
                 resolveOptions
               )
               const allowed = yield* repo.viewFilter(prepared.collection.name, {
-                where: andWhere(ruleWhere, idClause(prepared.id))
+                where: andWhere(ruleWhere, idClause(prepared.id, dialect.quoteIdentifier))
               })
               if (allowed.length === 0) {
                 return yield* new ForbiddenError({

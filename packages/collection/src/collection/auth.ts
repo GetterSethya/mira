@@ -84,22 +84,21 @@ function makeAuthBuilder<F extends FieldsMap>(
   authOptions?: AuthCollectionOptions,
   indexesCb?: IndexCb<F>
 ): AuthCollectionBuilder<F> {
-  type AF = (keyof F & string) | AuthRuleField
   let _schema: (CollectionSchema & { "x-collection-kind": "auth" }) | undefined
   return {
     name,
     fields: Object.assign({}, AUTH_SYSTEM_FIELD_DEFS, extraFields),
     get schema(): CollectionSchema & { "x-collection-kind": "auth" } {
       if (_schema === undefined) {
-        const indexes = indexesCb?.(Index as IndexBuilder<AF>)
+        const indexes = indexesCb?.(Index satisfies IndexBuilder<(keyof F & string) | AuthRuleField>)
         const email = normalizeEmailOptions(authOptions)
         _schema = toJSONSchema("auth", name, extraFields, {
           indexes: [...AUTH_SYSTEM_INDEXES, ...(indexes ?? [])],
           systemFields: AUTH_SYSTEM_PROPERTIES,
           ...(email === undefined ? {} : { auth: { email } })
-        }) as CollectionSchema & { "x-collection-kind": "auth" }
+        })
       }
-      return _schema!
+      return _schema
     },
     indexes: (cb) => makeAuthBuilder(name, extraFields, authOptions, cb)
   }

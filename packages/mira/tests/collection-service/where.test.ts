@@ -1,11 +1,46 @@
 import { describe, it } from "@effect/vitest"
+import { Rule } from "@gettersethya/mira-client"
 import { Effect, Result } from "effect"
 import { expect } from "vitest"
 
 import type { RequestCtx } from "@/collection-service/context.js"
-import { extractCtxRefs, resolveCtxPlaceholders } from "@/collection-service/where.js"
+import type { ResolveOptions } from "@/collection-service/where.js"
+import {
+  cursorClause,
+  extractCtxRefs,
+  fieldEqualsClause,
+  idClause,
+  keysetClause,
+  resolveCtxPlaceholders as resolveCtxPlaceholdersRaw,
+  resolveFieldRefs,
+  seqIdEqualsClause
+} from "@/collection-service/where.js"
+import { postgresRuleSql } from "@/dialect/dialect-postgres.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { enforceRule } from "@/rule/enforcer.js"
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
+const defaultResolveOptions: ResolveOptions = {
+  encodeParam: (value) => value,
+  quoteIdentifier: sqliteDialect.quoteIdentifier,
+  castValue: sqliteDialect.castValue
+}
+const resolveCtxPlaceholders = (
+  result: Parameters<typeof resolveCtxPlaceholdersRaw>[0],
+  ctx: Parameters<typeof resolveCtxPlaceholdersRaw>[1],
+  collection: Parameters<typeof resolveCtxPlaceholdersRaw>[2],
+  action: Parameters<typeof resolveCtxPlaceholdersRaw>[3],
+  options?: Partial<ResolveOptions>,
+  bodyPlan?: Parameters<typeof resolveCtxPlaceholdersRaw>[5]
+) =>
+  resolveCtxPlaceholdersRaw(
+    result,
+    ctx,
+    collection,
+    action,
+    { ...defaultResolveOptions, ...options },
+    bodyPlan
+  )
 
 describe("resolveCtxPlaceholders body resolution", () => {
   it.effect("create-style ctx with body resolves @request_body_* from the payload", () =>
@@ -220,5 +255,45 @@ describe("extractCtxRefs", () => {
 
     const unknown = extractCtxRefs("t.key = @request_cookie_session")
     expect(unknown.hasUnknownSource).toBe(true)
+  })
+})
+
+describe("dialect-aware predicates and payload markers", () => {
+  const backtick = (name: string) => `\`${name}\``
+  const pgOptions: ResolveOptions = {
+    encodeParam: (value) => value,
+    quoteIdentifier: postgresRuleSql.quoteIdentifier,
+    castValue: postgresRuleSql.castValue
+  }
+
+  it("quotes id, cursor, keyset, and field predicates", () => {
+    expect(idClause("p1", backtick).sql).toBe("t.`id` = ?")
+    expect(cursorClause(7, backtick).sql).toBe("t.`seqId` > ?")
+    expect(seqIdEqualsClause(7, backtick).sql).toBe("t.`seqId` = ?")
+    expect(keysetClause({ field: "name", direction: "asc" }, "a", 7, backtick).sql).toBe(
+      "(t.`name`, t.`seqId`) > (?, ?)"
+    )
+    expect(fieldEqualsClause("email", "a@b.c", backtick).sql).toBe("t.`email` = ?")
+  })
+
+  it.effect("does not rewrite tokens inside quoted identifiers", () =>
+    Effect.gen(function* () {
+      const refs = extractCtxRefs('t."note@auth_id" = ? AND t."a?b" = ?')
+      expect(refs.authFields).toEqual([])
+      const result = { sql: 't."note@auth_id" = ? AND t."a?b" = ?', params: [1, 2] }
+      const resolved = yield* resolveCtxPlaceholders(result, noCtx, "posts", "list")
+      expect(resolved.sql).toBe(result.sql)
+    }))
+
+  it("resolves typed payload markers", () => {
+    const compiled = enforceRule(
+      Rule.field("age").gt(Rule.literal(10)),
+      postgresRuleSql,
+      { fieldRefMode: "param", fieldType: (field) => field === "age" ? "integer" : "text" }
+    )
+    expect(compiled.sql).toContain("@field_integer_")
+    const resolved = resolveFieldRefs(compiled, { age: 20 }, pgOptions)
+    expect(resolved.sql).toBe("?::integer > ?::integer")
+    expect(resolved.params).toEqual([20, 10])
   })
 })
