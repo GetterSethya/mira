@@ -5,6 +5,7 @@ import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { Dialect, type DialectType, errorHasCode } from "@/dialect/dialect.js"
+import { libsqlConnectionMode, libsqlDialect } from "@/dialect/dialect-libsql.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
 import { TelemetryStore } from "@/telemetry/store.js"
@@ -69,6 +70,32 @@ const recordingLayer = (statements: Array<string>) =>
       })
     })
   )
+
+describe("libSQL telemetry hooks", () => {
+  it("classifies local and remote URLs", () => {
+    expect(libsqlConnectionMode(":memory:")).toBe("local")
+    expect(libsqlConnectionMode("file:./data.db")).toBe("local")
+    expect(libsqlConnectionMode("libsql://example.turso.io")).toBe("remote")
+    expect(libsqlConnectionMode("https://example.turso.io")).toBe("remote")
+    expect(libsqlConnectionMode("wss://example.turso.io")).toBe("remote")
+    expect(() => libsqlConnectionMode("postgres://example")).toThrow()
+  })
+
+  it("reuses the SQLite dialect locally and clears remote setup", () => {
+    expect(libsqlDialect("local")).toBe(sqliteDialect)
+    expect(libsqlDialect("remote").telemetry?.setup).toEqual([])
+    expect(libsqlDialect("remote").telemetry?.cleanup).toEqual([])
+  })
+
+  it("retries nested network and SQLite lock errors, and keeps the duplicate classifier", () => {
+    const remote = libsqlDialect("remote").telemetry!
+    expect(remote.isRetryable({ reason: { cause: { code: "ECONNREFUSED" } } })).toBe(true)
+    expect(remote.isRetryable({ cause: { cause: { code: "SQLITE_BUSY" } } })).toBe(true)
+    expect(remote.isRetryable({ reason: { _tag: "Other" } })).toBe(false)
+    expect(remote.isDuplicateKey(uniqueError)).toBe(true)
+    expect(remote.isDuplicateKey(busyError)).toBe(false)
+  })
+})
 
 describe("dialect-neutral store setup", () => {
   it.effect("does not emit PRAGMA when the dialect has no telemetry hooks", () => {

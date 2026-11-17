@@ -80,6 +80,45 @@ describe("telemetry app wiring", () => {
     await Effect.runPromise(program as Effect.Effect<void, never, never>)
   }, 20_000)
 
+  it("skips dedicated telemetry DDL when the database is a replica", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mira-telemetry-replica-"))
+    const appDb = join(dir, "app.db")
+    const telemetryDb = join(dir, "telemetry.db")
+    const uploads = join(dir, "uploads")
+    const preset = SqliteDatabase({ filename: telemetryDb })
+
+    const app = Mira.builder()
+      .platform(NodePlatform)
+      .database(SqliteDatabase({ filename: appDb }))
+      .storage(LocalFileStorage({ directory: uploads }))
+      .collections([Posts])
+      .telemetry(
+        makeTelemetryLayer({
+          storage: {
+            mode: "dedicated",
+            database: {
+              layer: preset.layer,
+              migrateAtStartup: false
+            }
+          }
+        })
+      )
+      .build()
+
+    const program = Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const tables = yield* sql<{ name: string }>`
+        SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('logs', 'spans')
+      `
+      expect(tables).toEqual([])
+    }).pipe(
+      Effect.provide(app.buildServiceLayer()),
+      Effect.ensuring(Effect.sync(() => rmSync(dir, { recursive: true, force: true })))
+    )
+
+    await Effect.runPromise(program as Effect.Effect<void, never, never>)
+  }, 20_000)
+
   it("keeps a non-SQL TelemetryStore in the built app context", async () => {
     const dir = mkdtempSync(join(tmpdir(), "mira-telemetry-custom-"))
     const appDb = join(dir, "app.db")

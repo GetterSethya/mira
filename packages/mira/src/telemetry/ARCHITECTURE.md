@@ -58,10 +58,13 @@ PGlite and browser OPFS.
 
 `DialectType.telemetry` supplies:
 
-- `setup`: connection statements for a dedicated connection (SQLite WAL,
-  `synchronous=NORMAL`, busy timeout).
-- `cleanup`: statements after retention (SQLite WAL checkpoint).
-- `isRetryable`: driver-specific busy/lock classifier.
+- `setup`: connection statements for a dedicated connection. SQLite and local
+  libSQL use WAL, `synchronous=NORMAL`, and a busy timeout; remote libSQL uses an
+  empty list because sqld rejects writable pragmas.
+- `cleanup`: statements after retention. SQLite and local libSQL use the WAL
+  checkpoint; remote libSQL uses an empty list.
+- `isRetryable`: driver-specific busy/lock classifier, plus nested network codes
+  for remote libSQL.
 - `isDuplicateKey`: driver-specific duplicate-id classifier.
 
 The SQL store reads these hooks. The core never imports `Dialect` and never

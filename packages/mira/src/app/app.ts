@@ -335,12 +335,15 @@ export class MiraApp<R = never, Telemetry = never> {
 
     // Auto-migrate on boot: runs during layer initialization before requests are served
     const schemas: Array<NamedSchema> = allCollections.map((c) => ({ name: c.name, schema: c.schema }))
-    const autoMigrateLayer = Layer.effectDiscard(
-      Effect.gen(function* () {
-        const migrator = yield* Migrator
-        yield* migrator.migrate(schemas, migrateOptions)
-      }).pipe(Effect.orDie)
-    ).pipe(Layer.provide(fullMid))
+    const autoMigrateLayer =
+      database.migrateAtStartup === false
+        ? Layer.empty
+        : Layer.effectDiscard(
+            Effect.gen(function* () {
+              const migrator = yield* Migrator
+              yield* migrator.migrate(schemas, migrateOptions)
+            }).pipe(Effect.orDie)
+          ).pipe(Layer.provide(fullMid))
 
     // Mutation batching. One stats value per app build: it is merged below (so
     // plugin routes can read it) and passed to the batched base service.

@@ -444,10 +444,14 @@ export type SqlTelemetryStoreConfig =
   | {
       readonly dedicated: true
       readonly manageConnection?: boolean
+      /** Defaults to true. False skips table creation, for replica presets. */
+      readonly migrate?: boolean
     }
   | {
       readonly dedicated: false
       readonly manageConnection?: false
+      /** Defaults to true. False skips table creation, for replica presets. */
+      readonly migrate?: boolean
     }
 
 /**
@@ -497,18 +501,20 @@ export const makeSqlTelemetryStoreLayer = (
         })
       )
 
-      yield* migrator
-        .migrate(
-          [
-            { name: "logs", schema: LogsCollection.schema },
-            { name: "spans", schema: SpansCollection.schema }
-          ],
-          { schemaTable, migrationsTable }
-        )
-        .pipe(
-          Effect.retry({ while: retryPredicate(dialect), schedule: migrationRetrySchedule }),
-          Effect.catchCause((cause) => Effect.fail(mapStoreError("migrate", cause)))
-        )
+      if (config.migrate !== false) {
+        yield* migrator
+          .migrate(
+            [
+              { name: "logs", schema: LogsCollection.schema },
+              { name: "spans", schema: SpansCollection.schema }
+            ],
+            { schemaTable, migrationsTable }
+          )
+          .pipe(
+            Effect.retry({ while: retryPredicate(dialect), schedule: migrationRetrySchedule }),
+            Effect.catchCause((cause) => Effect.fail(mapStoreError("migrate", cause)))
+          )
+      }
 
       return Layer.succeed(TelemetryStore, makeStore(sql, dialect, manageConnection))
     })

@@ -118,6 +118,7 @@ You should see one item in `items`: `title` `"Hello"`, `published` `false`, and 
 
 ## Next
 
+- [Server](../server/): libSQL, remote Turso/sqld, embedded replicas, and the migration rules.
 - [How Mira works](../how-mira-works/): the six parts and what one request does with them.
 - [Collections](../collections/): fields, relations, indexes, auth collections, and view collections.
 - [Access rules](../rules/): replace the public rules with owner checks and see the evaluation order.

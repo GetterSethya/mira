@@ -150,7 +150,7 @@ Mira.builder()
 | Step | Required | Description |
 |---|---|---|
 | `.platform(p)` | yes | Runtime environment. `NodePlatform`, or `BunPlatform` from the `@gettersethya/mira/bun` entry. |
-| `.database(d)` | yes | SQL backend. Currently `SqliteDatabase({ filename })`. |
+| `.database(d)` | yes | SQL backend. `SqliteDatabase({ filename })`, `BunSqliteDatabase({ filename })` on Bun, or `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` / `TursoDatabase` on Node. |
 | `.storage(s)` | yes | File storage. `LocalFileStorage({ directory })` for local disk, or `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for S3-compatible buckets (AWS S3, MinIO, R2, LocalStack). |
 | `.email(e)` | no | Email transport. `SmtpEmail({ host, port, secure, auth, from })`. Without it, a no-op `EmailService` is used. |
 | `.emailTemplates(t)` | no | Auth email overrides: `{ defaults?, collections? }`. Resolution is per-collection → app-wide → built-in. |
@@ -162,6 +162,50 @@ Mira.builder()
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
 | `.extend(plugin)` | — | Called on `MiraApp` after `.build()`. Registers a `MiraPlugin`. |
 | `.serve(opts?)` | — | Starts the HTTP server. Optional `{ port, maxPortAttempts }` overrides `AppConfig`. If the port is already in use, the server automatically retries on the next available port (up to `maxPortAttempts`, default 10). |
+
+### Databases
+
+SQLite is available on Node (`SqliteDatabase`) and Bun (`BunSqliteDatabase`).
+libSQL is available on Node as `LibsqlDatabase`, with `TursoDatabase` as an
+alias:
+
+```typescript
+import { LibsqlDatabase } from "@gettersethya/mira"
+import { Redacted } from "effect"
+
+// local file
+LibsqlDatabase({ url: "file:./mira.db" })
+
+// remote Turso or sqld
+LibsqlDatabase({
+  url: "libsql://your-db.turso.io",
+  authToken: Redacted.make(process.env.TURSO_AUTH_TOKEN!)
+})
+
+// embedded replica: file: URL plus a remote primary
+LibsqlDatabase({
+  url: "file:./replica.db",
+  syncUrl: "libsql://your-db.turso.io",
+  authToken: Redacted.make(process.env.TURSO_AUTH_TOKEN!),
+  syncInterval: 60
+})
+```
+
+Local libSQL applies WAL, an optional `synchronous` mode, `busy_timeout=5000`,
+and `foreign_keys=OFF`. Remote libSQL applies no writable pragmas; sqld rejects
+them. A remote URL with `synchronous`, a remote URL with `syncUrl`, or a plain
+local URL with `authToken` is rejected at construction instead of being silently
+ignored.
+
+`syncUrl` is an embedded replica. The preset sets `migrateAtStartup: false`, so
+Mira does not run DDL through the replica. Migrate the primary, sync the replica,
+then start the app. Mira does not call `sync()` for you and does not claim
+read-your-writes across the replica.
+
+`@libsql/client` ships platform-native binaries and is loaded only when the
+preset's layer is built. The driver is not loaded by importing
+`@gettersethya/mira`. libSQL is Node-only in this issue; the Bun entry is
+unchanged.
 
 ### Storage
 
@@ -1318,7 +1362,25 @@ const app = Mira.builder()
 
 On Bun, use `BunSqliteDatabase` from `@gettersethya/mira/bun` as the dedicated preset. Both entries export `makeTelemetryLayer`, `makeTelemetryLayerForClient`, `TelemetryStore`, `makeSqlTelemetryStoreLayer`, and `logCleanupCronDef`.
 
-Dedicated mode applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` during construction, then migrates two collections into that database. Set `manageConnection: false` to keep a preset's explicit `synchronous` setting.
+For libSQL, use `LibsqlDatabase` as the dedicated preset. Local `file:` telemetry reuses the SQLite WAL and checkpoint hooks. Remote libSQL skips setup and cleanup because sqld rejects writable pragmas. Each unbatched row is a network round trip, so set a batch and interval for remote:
+
+```typescript
+.telemetry(makeTelemetryLayer({
+  storage: {
+    mode: "dedicated",
+    database: LibsqlDatabase({
+      url: "libsql://your-db.turso.io",
+      authToken: Redacted.make(process.env.TURSO_AUTH_TOKEN!)
+    })
+  },
+  flushBatchSize: 100,
+  flushInterval: "1 second"
+}))
+```
+
+A `syncUrl` replica sets `TelemetryDatabase.migrateAtStartup` to false, so dedicated telemetry does not create tables on the replica. Shared telemetry on a replica needs `{ mode: "shared", migrate: false }`; migrate the tables on the primary and sync first.
+
+Dedicated mode applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` during construction, then migrates two collections into that database. Set `manageConnection: false` to keep a preset's explicit `synchronous` setting. Remote libSQL has no setup or cleanup statements; local libSQL gets `foreign_keys=OFF` as well.
 
 - **`logs`** — structured log entries from `Effect.log()`. Fields: `seqId`, `level`, `message`, `traceId?`, `spanId?`, `created`, `updated`.
 - **`spans`** — completed Effect spans. Fields: `seqId`, `name`, `traceId`, `spanId`, `parentSpanId?`, `kind`, `durationMs`, `status`, `error?`, `attributes`, `created`, `updated`.

@@ -35,7 +35,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - `RecordHook`, `RecordSuccessHook`, `ListHook`, `ListSuccessHook`, `CronHook`, `CronObserverHook` (types) — plugin hook shapes with optional `collections`/`crons` allowlists: `[plugin.ts:RecordHook]`
 - `onCollection(collections, handler)` / `onCollectionSuccess(collections, handler)` — hook constructors: `[plugin.ts:onCollection]`
 - `PlatformServices`, `DatabaseServices` (types) — service unions a preset must provide: `[types.ts:PlatformServices]`
-- `MiraPlatform`, `MiraDatabase`, `MiraStorage` (types) — preset interfaces (`layer`, and for platform `runMain`): `[types.ts:MiraPlatform]`
+- `MiraPlatform`, `MiraDatabase`, `MiraStorage` (types) - preset interfaces (`layer`, optional `migrateAtStartup` on a database, and `runMain` on a platform): `[types.ts:MiraPlatform]`
 - Barrel re-exports (`MigrateOptions`, `MiraApp`, `ServeOptions`, `MiraAppConfig`, `MiraBuilder`, `RuleBinding`, `defineRule`, hook types, `MiraPlugin`, `onCollection`, `onCollectionSuccess`, preset types) all name local symbols: `[index.ts:Mira]`
 
 ## Invariants

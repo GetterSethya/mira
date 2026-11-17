@@ -110,6 +110,8 @@ Use `makeThumbnailServiceBunLive({ maxPixels, allowPhotonFallback })` for a diff
 
 `SqliteDatabase` is also exported from the Bun entry as an alias for `BunSqliteDatabase`, so code that follows the Node docs keeps working after switching imports.
 
+libSQL is Node-only in this issue. The Bun entry does not export `LibsqlDatabase` or `TursoDatabase`; use the Node entry for libSQL local files, remote Turso/sqld, and embedded replicas.
+
 ## Telemetry
 
 Console telemetry is the default and has no SQLite dependency. To persist logs and spans under Bun, use a Bun database preset for dedicated telemetry:

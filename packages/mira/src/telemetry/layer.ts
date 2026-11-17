@@ -16,6 +16,12 @@ import { TelemetryStore } from "./store.js"
 /** A database preset that supplies both the SQL client and its dialect. */
 export interface TelemetryDatabase {
   readonly layer: Layer.Layer<SqlClient.SqlClient | Dialect, never, never>
+  /**
+   * Whether the store should create its telemetry tables. Defaults to true.
+   * A libSQL embedded-replica preset sets this to false because the tables must
+   * be created on the primary and synced, not written through the replica.
+   */
+  readonly migrateAtStartup?: boolean
 }
 
 export type TelemetryStorageConfig =
@@ -30,6 +36,12 @@ export type TelemetryStorageConfig =
     }
   | {
       readonly mode: "shared"
+      /**
+       * Whether the shared store should create `_telemetry_*` tables. Defaults
+       * to true. Set false when the application database is an embedded
+       * replica; migrate the tables on the primary and sync instead.
+       */
+      readonly migrate?: boolean
     }
 
 export interface TelemetryLoggerConfig extends TelemetryCoreConfig {
@@ -51,7 +63,8 @@ export function makeTelemetryLayer(
   if (config.storage.mode === "dedicated") {
     const store = makeSqlTelemetryStoreLayer({
       dedicated: true,
-      manageConnection: config.storage.manageConnection !== false
+      manageConnection: config.storage.manageConnection !== false,
+      migrate: config.storage.database.migrateAtStartup !== false
     })
     return core
       .pipe(
@@ -62,7 +75,10 @@ export function makeTelemetryLayer(
       .pipe(Layer.orDie)
   }
 
-  const store = makeSqlTelemetryStoreLayer({ dedicated: false })
+  const store = makeSqlTelemetryStoreLayer({
+    dedicated: false,
+    migrate: config.storage.migrate !== false
+  })
   return core.pipe(Layer.provideMerge(store), Layer.orDie)
 }
 

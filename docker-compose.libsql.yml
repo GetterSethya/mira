@@ -1,0 +1,5 @@
+services:
+  sqld:
+    image: ghcr.io/tursodatabase/libsql-server:v0.24.33
+    ports:
+      - "18080:8080"
