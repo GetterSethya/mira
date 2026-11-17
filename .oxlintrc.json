@@ -1,12 +1,27 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn", "oxc"],
+  "plugins": ["import", "typescript", "unicorn", "oxc"],
+  "jsPlugins": ["./tooling/oxlint-plugin-mira.ts"],
   "categories": {
     "correctness": "error"
   },
   "rules": {
     "object-shorthand": "error",
     "no-fallthrough": "off",
+    "no-warning-comments": "error",
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "JSON",
+        "property": "parse",
+        "message": "Use Effect Schema instead of JSON.parse."
+      },
+      {
+        "object": "JSON",
+        "property": "stringify",
+        "message": "Use Effect Schema instead of JSON.stringify."
+      }
+    ],
     "no-unused-vars": [
       "error",
       {
@@ -15,19 +30,37 @@
         "caughtErrorsIgnorePattern": "^_"
       }
     ],
-    "typescript/consistent-type-imports": "warn",
+    "import/no-relative-parent-imports": "error",
+    "mira/no-unnecessary-comment": "error",
+    "mira/no-unnecessary-return-type": "error",
+    "typescript/ban-ts-comment": [
+      "error",
+      {
+        "ts-check": false,
+        "ts-expect-error": "allow-with-description",
+        "ts-ignore": true,
+        "ts-nocheck": true
+      }
+    ],
+    "typescript/consistent-type-assertions": [
+      "error",
+      {
+        "assertionStyle": "never"
+      }
+    ],
+    "typescript/consistent-type-imports": "error",
     "typescript/array-type": [
-      "warn",
+      "error",
       {
         "default": "generic",
         "readonly": "generic"
       }
     ],
-    "typescript/no-non-null-assertion": "off",
-    "typescript/no-explicit-any": "off",
-    "typescript/ban-ts-comment": "off",
-    "typescript/no-namespace": "off",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-inferrable-types": "error",
+    "typescript/no-non-null-assertion": "error",
     "typescript/no-empty-object-type": "off",
+    "typescript/no-namespace": "off",
     "typescript/no-unsafe-function-type": "off",
     "typescript/no-wrapper-object-types": "off"
   },
