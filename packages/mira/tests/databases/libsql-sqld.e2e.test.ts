@@ -3,7 +3,7 @@
  *
  * Start the pinned service first:
  *
- *   docker compose -f docker-compose.libsql.yml up -d
+ *   docker run --rm -d --name mira-libsql-sqld -p 18080:8080 ghcr.io/tursodatabase/libsql-server:v0.24.33
  *   $env:MIRA_LIBSQL_E2E = "1"
  *   pnpm --filter @gettersethya/mira exec vitest run tests/databases/libsql-sqld.e2e.test.ts
  *

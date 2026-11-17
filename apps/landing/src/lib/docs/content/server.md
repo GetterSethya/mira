@@ -131,7 +131,7 @@ LibsqlDatabase({
 
 Local libSQL applies WAL, an optional `synchronous` mode, `busy_timeout=5000`, and `foreign_keys=OFF`. Remote libSQL applies no writable pragmas; sqld rejects them. A remote URL with `synchronous`, a remote URL with `syncUrl`, or a plain local URL with `authToken` fails at construction. `syncUrl` sets `migrateAtStartup: false`, so migrate the primary, sync the replica, then start the app. Mira does not call `sync()` and does not claim read-your-writes across a replica.
 
-The libSQL driver is loaded only when the preset is built, so importing `@gettersethya/mira` does not load the native addon. `@libsql/client` ships platform-native binaries. libSQL is Node-only in this issue; the Bun entry is unchanged. The tested set is Node 24, `@effect/sql-libsql` 4.0.0, `@libsql/client` 0.18.0, local SQLite 3.45.1, and sqld `v0.24.33` (SQLite 3.47.0).
+The libSQL driver is loaded only when the preset is built, so importing `@gettersethya/mira` does not load the native addon. `@libsql/client` ships platform-native binaries. The preset is available on Node and Bun; the Bun entry exports the same names. The tested set is Node 24, Bun 1.4.2, `@effect/sql-libsql` 4.0.0, `@libsql/client` 0.18.0, local SQLite 3.45.1, and sqld `v0.24.33` (SQLite 3.47.0).
 
 ## Email transport
 

@@ -5,6 +5,8 @@ export * from "@gettersethya/mira-client"
 // App builder + Bun runtime presets.
 export * from "./app/index.js"
 export { BunSqliteDatabase, BunSqliteDatabase as SqliteDatabase } from "./databases/sqlite-bun.js"
+export type { LibsqlDatabaseConfig } from "./databases/libsql.js"
+export { LibsqlConfigError, LibsqlDatabase, TursoDatabase } from "./databases/libsql.js"
 export * from "./platforms/bun.js"
 export * from "./storage/index.js"
 

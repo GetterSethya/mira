@@ -9,6 +9,7 @@
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
     "smoke": "bun run src/smoke.ts",
+    "libsql:smoke": "bun run src/libsql-smoke.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

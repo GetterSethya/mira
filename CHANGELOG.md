@@ -44,8 +44,8 @@ published by CI.
 
 ### Added
 
-- **libSQL database support.** `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` and the `TursoDatabase` alias run on Node through `@effect/sql-libsql`. Local `file:` and `:memory:` URLs use WAL, an optional synchronous mode, `busy_timeout=5000`, and `foreign_keys=OFF`. Remote `libsql:`, `http(s):`, and `ws(s):` URLs skip writable pragmas. A `syncUrl` embedded replica disables auto-migration so DDL is not sent through the replica. Telemetry works on local and remote databases; remote usage should set `flushBatchSize` and `flushInterval`.
-- **libSQL e2e and packaging coverage.** A Docker-backed sqld test covers migrations, CRUD, list/filter/sort/cursor, rules, auth, bulk, table rebuilds with views, telemetry, and retention. The pack smoke proves the Node root entry does not eagerly load the native libSQL addon.
+- **libSQL database support.** `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` and the `TursoDatabase` alias run on Node and Bun through `@effect/sql-libsql`. Local `file:` and `:memory:` URLs use WAL, an optional synchronous mode, `busy_timeout=5000`, and `foreign_keys=OFF`. Remote `libsql:`, `http(s):`, and `ws(s):` URLs skip writable pragmas. A `syncUrl` embedded replica disables auto-migration so DDL is not sent through the replica. Telemetry works on local and remote databases; remote usage should set `flushBatchSize` and `flushInterval`.
+- **libSQL e2e and packaging coverage.** A Docker-backed sqld test covers migrations, CRUD, list/filter/sort/cursor, rules, auth, bulk, table rebuilds with views, telemetry, and retention. The Node and Bun pack smokes prove the root entry does not eagerly load the native libSQL addon, and a Bun libSQL file/remote smoke runs in CI.
 
 ### Fixed
 

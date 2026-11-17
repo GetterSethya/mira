@@ -147,7 +147,7 @@ try {
   )
   run("bun", ["add", ...tarballs, "effect@4.0.0", "@effect/sql-sqlite-bun@4.0.0"], bunTemp, false)
   const bunExportCheck =
-    "if (!m.BunPlatform) throw new Error('Bun entry missing BunPlatform'); if (!m.BunPortablePlatform) throw new Error('Bun entry missing BunPortablePlatform'); if (!m.BunCryptoLayer) throw new Error('Bun entry missing BunCryptoLayer'); if (!m.BunAuthServiceLayer) throw new Error('Bun entry missing BunAuthServiceLayer'); if (!m.ThumbnailServiceBunLive) throw new Error('Bun entry missing ThumbnailServiceBunLive'); if (typeof m.makeTelemetryLayer !== 'function') throw new Error('Bun entry missing makeTelemetryLayer'); if (!m.TelemetryStore) throw new Error('Bun entry missing TelemetryStore'); if (!m.TelemetryStoreError) throw new Error('Bun entry missing TelemetryStoreError'); if (!m.TelemetryDuplicateEntryError) throw new Error('Bun entry missing TelemetryDuplicateEntryError'); if (typeof m.makeSqlTelemetryStoreLayer !== 'function') throw new Error('Bun entry missing makeSqlTelemetryStoreLayer'); if (!m.logCleanupCronDef) throw new Error('Bun entry missing logCleanupCronDef')"
+    "if (!m.BunPlatform) throw new Error('Bun entry missing BunPlatform'); if (!m.BunPortablePlatform) throw new Error('Bun entry missing BunPortablePlatform'); if (!m.BunCryptoLayer) throw new Error('Bun entry missing BunCryptoLayer'); if (!m.BunAuthServiceLayer) throw new Error('Bun entry missing BunAuthServiceLayer'); if (!m.ThumbnailServiceBunLive) throw new Error('Bun entry missing ThumbnailServiceBunLive'); if (typeof m.makeTelemetryLayer !== 'function') throw new Error('Bun entry missing makeTelemetryLayer'); if (!m.TelemetryStore) throw new Error('Bun entry missing TelemetryStore'); if (!m.TelemetryStoreError) throw new Error('Bun entry missing TelemetryStoreError'); if (!m.TelemetryDuplicateEntryError) throw new Error('Bun entry missing TelemetryDuplicateEntryError'); if (typeof m.makeSqlTelemetryStoreLayer !== 'function') throw new Error('Bun entry missing makeSqlTelemetryStoreLayer'); if (!m.logCleanupCronDef) throw new Error('Bun entry missing logCleanupCronDef'); if (typeof m.LibsqlDatabase !== 'function') throw new Error('Bun entry missing LibsqlDatabase'); if (m.TursoDatabase !== m.LibsqlDatabase) throw new Error('Bun entry TursoDatabase alias is wrong')"
   run(
     bunExecutable(),
     ["-e", `import('@gettersethya/mira').then((m) => { ${bunExportCheck} })`],
@@ -170,6 +170,12 @@ try {
     join(bunTemp, "pack-smoke-bun-telemetry.ts")
   )
   run(bunExecutable(), ["run", "pack-smoke-bun-telemetry.ts"], bunTemp, false)
+
+  copyFileSync(
+    join(repo, "scripts", "pack-smoke-bun-libsql.ts"),
+    join(bunTemp, "pack-smoke-bun-libsql.ts")
+  )
+  run(bunExecutable(), ["run", "pack-smoke-bun-libsql.ts"], bunTemp, false)
 
   // Bundle only the telemetry surface and assert the Node SQLite driver stays out.
   writeFileSync(

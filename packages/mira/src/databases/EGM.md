@@ -6,8 +6,8 @@ Preset `MiraDatabase` implementations that the App Builder's `.database()` step 
 Each preset bundles both the SQL client layer and the matching `Dialect` into one
 `{ layer }` object, so selecting a database also selects how its schema is generated.
 SQLite ships for Node (`@effect/sql-sqlite-node`), Bun
-(`@effect/sql-sqlite-bun`), and Node libSQL (`@effect/sql-libsql`). A Postgres
-preset would live here alongside them.
+(`@effect/sql-sqlite-bun`), and libSQL on Node and Bun (`@effect/sql-libsql`).
+A Postgres preset would live here alongside them.
 
 ## Interface
 
@@ -16,7 +16,7 @@ preset would live here alongside them.
 - `LibsqlDatabase(config)` - Node libSQL preset backed by `@effect/sql-libsql`; local `file:`/`:memory:` or remote `libsql:`, `http(s):`, `ws(s):` URLs [libsql.ts:LibsqlDatabase]
 - `TursoDatabase` - alias for `LibsqlDatabase` [libsql.ts:TursoDatabase]
 - `LibsqlConfigError` - thrown for an unknown URL scheme or invalid option combination [libsql.ts:LibsqlConfigError]
-- The Node barrel re-exports `SqliteDatabase`, `LibsqlDatabase`, and `TursoDatabase` [index.ts:SqliteDatabase]; the Bun entry exports `BunSqliteDatabase` and aliases it as `SqliteDatabase` [index.bun.ts:SqliteDatabase]. libSQL is Node-only in this issue.
+- The Node barrel re-exports `SqliteDatabase`, `LibsqlDatabase`, and `TursoDatabase` [index.ts:SqliteDatabase]; the Bun entry exports `BunSqliteDatabase` (aliased as `SqliteDatabase`) plus the same `LibsqlDatabase` and `TursoDatabase` names [index.bun.ts:SqliteDatabase] [index.bun.ts:LibsqlDatabase].
 
 ## Invariants
 
@@ -55,5 +55,5 @@ preset would live here alongside them.
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Bun smoke: `bun run apps/example-bun/src/smoke.ts`
-- libSQL remote e2e: `docker compose -f docker-compose.libsql.yml up -d`, then `MIRA_LIBSQL_E2E=1 pnpm --filter @gettersethya/mira exec vitest run tests/databases/libsql-sqld.e2e.test.ts`
+- libSQL remote e2e: `docker run --rm -d --name mira-libsql-sqld -p 18080:8080 ghcr.io/tursodatabase/libsql-server:v0.24.33`, then `MIRA_LIBSQL_E2E=1 pnpm --filter @gettersethya/mira exec vitest run tests/databases/libsql-sqld.e2e.test.ts`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`

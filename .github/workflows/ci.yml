@@ -36,6 +36,11 @@ jobs:
           node-version: "24"
           package-manager-cache: false
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
       - name: Install
         run: pnpm install --frozen-lockfile
 
@@ -44,6 +49,9 @@ jobs:
 
       - name: Run sqld e2e
         run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/libsql-sqld.e2e.test.ts
+
+      - name: Bun remote libSQL smoke
+        run: pnpm --filter mira-example-bun libsql:smoke
 
   bun-smoke:
     name: Bun smoke
@@ -93,6 +101,9 @@ jobs:
 
       - name: Bun smoke
         run: bun run apps/example-bun/src/smoke.ts
+
+      - name: Bun libSQL local smoke
+        run: pnpm --filter mira-example-bun libsql:smoke
 
       - name: Bun example boot
         run: |

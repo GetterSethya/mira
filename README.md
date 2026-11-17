@@ -204,8 +204,8 @@ read-your-writes across the replica.
 
 `@libsql/client` ships platform-native binaries and is loaded only when the
 preset's layer is built. The driver is not loaded by importing
-`@gettersethya/mira`. libSQL is Node-only in this issue; the Bun entry is
-unchanged.
+`@gettersethya/mira`. libSQL works on Node and Bun; the Bun entry exports the
+same `LibsqlDatabase` and `TursoDatabase` names.
 
 ### Storage
 
