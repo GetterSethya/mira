@@ -13,15 +13,12 @@ import type { FilterNode, WhereClause } from "./types.js"
  */
 export type FilterCompileOptions = {
   allowHiddenFields?: boolean
-  /**
-   * Wraps a column name in the target dialect's identifier quotes. Defaults to
-   * the current output, `"field"`, so existing callers keep the same SQL.
-   */
-  quoteIdentifier?: (field: string) => string
+  /** Wraps a column name in the active dialect's identifier quotes. */
+  quoteIdentifier: (field: string) => string
 }
 
 const fieldRef = (field: string, options: FilterCompileOptions) =>
-  `t.${(options.quoteIdentifier ?? ((name: string) => `"${name}"`))(field)}`
+  `t.${options.quoteIdentifier(field)}`
 
 /**
  * Compile a `FilterNode` AST into a `WhereClause` (`{ sql, params }`) suitable
@@ -66,7 +63,8 @@ const fieldRef = (field: string, options: FilterCompileOptions) =>
  * const effect = filterNodeToWhereClause(
  *   Filter.field("title").eq("hello"),
  *   schema,
- *   "posts"
+ *   "posts",
+ *   { quoteIdentifier: (field) => `"${field}"` }
  * )
  * // Resolves to: { sql: 't."title" = ?', params: ["hello"] }
  *
@@ -77,7 +75,7 @@ export function filterNodeToWhereClause(
   node: FilterNode,
   schema: CollectionSchema,
   collectionName: string,
-  options: FilterCompileOptions = {}
+  options: FilterCompileOptions
 ): Effect.Effect<WhereClause, ValidationError> {
   return compileNode(node, schema, collectionName, options)
 }

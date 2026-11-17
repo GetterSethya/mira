@@ -1,11 +1,20 @@
 import { Context, Data, Effect, Layer, Option } from "effect"
-import type { SqlError } from "effect/sql";
+import type { SqlError } from "effect/sql"
 import { SqlClient } from "effect/sql"
-import { literal } from "effect/sql/Statement"
 
 import { CryptoService } from "@/crypto/index.js"
 import { Dialect } from "@/dialect/dialect.js"
+import { rewritePlaceholders } from "@/dialect/dialect.js"
 import type { DeleteResultStrategy } from "@/dialect/dialect.js"
+import {
+  renderDelete,
+  renderDeleteReturning,
+  renderExists,
+  renderList,
+  renderView,
+  renderViewFilter,
+  renderViewWithAccess
+} from "@/repository/sql.js"
 import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord, SortOrder } from "./types.js"
@@ -18,30 +27,10 @@ class DeleteResultUnknownError extends Data.TaggedError("DeleteResultUnknownErro
 }> {}
 
 /**
- * Repository tag — schema-agnostic CRUD abstraction above SqlClient.
+ * Repository tag - schema-agnostic CRUD abstraction above SqlClient.
  *
- * Operates on `RepoRecord` (Record<string, unknown>) — no domain types at this layer.
+ * Operates on `RepoRecord` (Record<string, unknown>) - no domain types at this layer.
  * All field validation and type checking happens in `CollectionService` above.
- *
- * Provides:
- * - `create(table, record)` — INSERT with generated id/seqId/timestamps
- * - `update(table, id, patch)` — PATCH with updated timestamp
- * - `view(table, id)` — SELECT by id
- * - `viewFilter(table, filter, options?)` — SELECT by arbitrary filter
- * - `list(table, limit, options?)` — cursor-based paginated SELECT (no COUNT(*))
- * - `delete(table, id)` — DELETE by id
- *
- * @example
- * import { Repository } from "@gettersethya/mira"
- *
- * Effect.gen(function* () {
- *   const repo = yield* Repository
- *   const record = yield* repo.create("posts", { title: "Hello" })
- *   const page = yield* repo.list("posts", 20, { where: { sql: 't."published" = ?', params: [true] } })
- * })
- *
- * @see RepositoryLive — the default implementation layer
- * @see CollectionService — the layer above that uses Repository
  */
 export class Repository extends Context.Service<
   Repository,
@@ -67,72 +56,26 @@ export class Repository extends Context.Service<
   }
 >()("Repository") {}
 
-function orderFrag(sql: SqlClient.SqlClient, sort?: SortOrder, tieBreaker?: string) {
-  if (!sort) return sql.literal("")
-  const dir = sort.direction === "desc" ? "DESC" : "ASC"
-  const secondary =
-    tieBreaker !== undefined && tieBreaker !== sort.field ? `, t."${tieBreaker}" ${dir}` : ""
-  return sql.literal(` ORDER BY t."${sort.field}" ${dir}${secondary}`)
-}
-
-function buildSelect(sql: SqlClient.SqlClient, fields?: ReadonlyArray<string>, expand?: ReadonlyArray<ExpandDef>) {
-  if (!fields && !expand) return sql.literal("SELECT *")
-  const cols: Array<string> = []
-  if (fields) {
-    cols.push(...fields.map((f) => `t."${f}"`))
-  } else {
-    cols.push("t.*")
-  }
-  if (expand) {
-    for (const e of expand) {
-      for (const col of e.targetColumns) {
-        cols.push(`_e_${e.localField}."${col}" AS "__e_${e.localField}__${col}"`)
-      }
-    }
-  }
-  if (cols.length === 0) return sql.literal("SELECT *")
-  return sql.literal(`SELECT ${cols.join(", ")}`)
-}
-
-function buildJoins(sql: SqlClient.SqlClient, expand?: ReadonlyArray<ExpandDef>) {
-  if (!expand || expand.length === 0) return sql.literal("")
-  let result = sql.literal("")
-  for (const e of expand) {
-    const alias = `_e_${e.localField}`
-    const on = e.onClause
-    if (on !== undefined) {
-      // The onClause rule SQL is bound with `Statement.literal` so its params
-      // appear before the WHERE params in textual order. Its column references
-      // use the compile-time alias `t`; they are rebound to the join alias here.
-      const scoped = on.sql.replace(/\bt\./g, `${alias}.`)
-      result = sql`${result} LEFT JOIN ${sql(e.targetTable)} ${sql(alias)} ON ${sql(alias)}.${sql("id")} = t.${sql(e.localField)} AND (${literal(scoped, on.params)})`
-    } else {
-      result = sql`${result} LEFT JOIN ${sql(e.targetTable)} ${sql(alias)} ON ${sql(alias)}.${sql("id")} = t.${sql(e.localField)}`
-    }
-  }
-  return result
-}
-
 function reshapeExpand(row: RepoRecord, expand?: ReadonlyArray<ExpandDef>): RepoRecord {
   if (!expand || expand.length === 0) return row
   const expandObj: Record<string, RepoRecord> = {}
-  for (const e of expand) {
+  for (const item of expand) {
     const nested: RepoRecord = {}
     // A left join that does not match yields NULL for every target column; a
     // matched row always has a non-null primary key, so the relation is only
     // materialised when a row actually matched.
     let hasValue = false
-    for (const col of e.targetColumns) {
-      const flatKey = `__e_${e.localField}__${col}`
-      const val = row[flatKey]
-      if (val !== undefined) {
-        nested[col] = val
-        if (val !== null) hasValue = true
+    for (const column of item.targetColumns) {
+      const flatKey = `__e_${item.localField}__${column}`
+      const value = row[flatKey]
+      if (value !== undefined) {
+        nested[column] = value
+        if (value !== null) hasValue = true
       }
       delete row[flatKey]
     }
     if (hasValue) {
-      expandObj[e.localField] = nested
+      expandObj[item.localField] = nested
     }
   }
   if (Object.keys(expandObj).length > 0) {
@@ -143,23 +86,27 @@ function reshapeExpand(row: RepoRecord, expand?: ReadonlyArray<ExpandDef>): Repo
 
 /**
  * The default `Repository` implementation layer.
- * Provides schema-agnostic CRUD using Effect SQL template literals.
- * Generates IDs via `CryptoService.randomBytes`, manages `seqId` via auto-increment.
- *
- * @example
- * Layer.provideMerge(RepositoryLive)
- *
- * @see Repository — the service tag
+ * Requires the active `Dialect` for identifier quoting, placeholder translation,
+ * and DELETE result strategy.
  */
 export const RepositoryLive = Layer.effect(
   Repository,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const crypto = yield* CryptoService
-    const dialect = yield* Effect.serviceOption(Dialect)
-    const deleteResultStrategy: DeleteResultStrategy = Option.isSome(dialect)
-      ? dialect.value.deleteResult
-      : { _tag: "precheck" }
+    const dialect = yield* Dialect
+    const quote = dialect.quoteIdentifier
+    const deleteResultStrategy: DeleteResultStrategy = dialect.deleteResult
+
+    const run = <A extends object>(statement: string, params: ReadonlyArray<unknown>) =>
+      sql.unsafe<A>(rewritePlaceholders(statement, dialect), params)
+
+    const view = (table: string, id: string) =>
+      Effect.gen(function* () {
+        const rendered = renderView(quote, table, id)
+        const rows = yield* run<RepoRecord>(rendered.sql, rendered.params)
+        return rows.length > 0 ? Option.some(rows[0]!) : Option.none()
+      })
 
     return Repository.of({
       create: (table, data) =>
@@ -169,17 +116,14 @@ export const RepositoryLive = Layer.effect(
           const now = new Date().toISOString()
           const record: RepoRecord = { ...data, id, created: now, updated: now }
 
-          yield* sql`INSERT INTO ${sql(table)} ${sql.insert(record)}`
+          yield* sql`INSERT INTO ${sql.literal(quote(table))} ${sql.insert(record)}`
           return record
         }).pipe(
           withSpanWhenEnabled("repository.create", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         ),
 
       view: (table, id) =>
-        Effect.gen(function* () {
-          const rows = yield* sql<RepoRecord>`SELECT * FROM ${sql(table)} t WHERE t.id = ${id} LIMIT 1`
-          return rows.length > 0 ? Option.some(rows[0]) : Option.none()
-        }).pipe(
+        view(table, id).pipe(
           withSpanWhenEnabled("repository.view", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         ),
 
@@ -188,23 +132,17 @@ export const RepositoryLive = Layer.effect(
           const now = new Date().toISOString()
           const patch: RepoRecord = { ...data, updated: now }
 
-          yield* sql`UPDATE ${sql(table)} SET ${sql.update(patch, ["id", "created"])} WHERE id = ${id}`
-
-          const rows = yield* sql<RepoRecord>`SELECT * FROM ${sql(table)} t WHERE t.id = ${id} LIMIT 1`
-          return rows.length > 0 ? Option.some(rows[0]) : Option.none()
+          yield* sql`UPDATE ${sql.literal(quote(table))} SET ${sql.update(patch, ["id", "created"])} WHERE ${sql.literal(quote("id"))} = ${id}`
+          return yield* view(table, id)
         }).pipe(
           withSpanWhenEnabled("repository.update", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         ),
 
       viewFilter: (table, filter) =>
         Effect.gen(function* () {
-          const where = literal(filter.where.sql, filter.where.params)
-          const order = orderFrag(sql, filter.sort, filter.tieBreaker)
-          const select = buildSelect(sql, filter.fields, filter.expand)
-          const joins = buildJoins(sql, filter.expand)
-
-          const rows = yield* sql<RepoRecord>`${select} FROM ${sql(table)} t${joins} WHERE ${where}${order}`
-          return rows.map((r) => reshapeExpand(r, filter.expand))
+          const rendered = renderViewFilter(quote, table, filter)
+          const rows = yield* run<RepoRecord>(rendered.sql, rendered.params)
+          return rows.map((row) => reshapeExpand(row, filter.expand))
         }).pipe(
           withSpanWhenEnabled(
             "repository.viewFilter",
@@ -215,13 +153,8 @@ export const RepositoryLive = Layer.effect(
 
       viewWithAccess: (table, id, predicates) =>
         Effect.gen(function* () {
-          const select = buildSelect(sql)
-          const accessColumns = predicates.map(
-            (predicate) =>
-              sql`CASE WHEN (${literal(predicate.where.sql, predicate.where.params)}) THEN 1 ELSE 0 END AS ${sql(`__mira_access_${predicate.name}`)}`
-          )
-          const accessSql = sql.join(", ", false)(accessColumns)
-          const rows = yield* sql<RepoRecord>`${select}, ${accessSql} FROM ${sql(table)} t WHERE t.id = ${id} LIMIT 1`
+          const rendered = renderViewWithAccess(quote, table, id, predicates)
+          const rows = yield* run<RepoRecord>(rendered.sql, rendered.params)
           if (rows.length === 0) return Option.none()
           const row = rows[0]
           if (row === undefined) return Option.none()
@@ -249,11 +182,13 @@ export const RepositoryLive = Layer.effect(
         Effect.gen(function* () {
           switch (deleteResultStrategy._tag) {
             case "returning": {
-              const rows = yield* sql<{ id: string }>`DELETE FROM ${sql(table)} WHERE ${sql("id")} = ${id} RETURNING ${sql("id")}`
+              const rendered = renderDeleteReturning(quote, table, id)
+              const rows = yield* run<{ id: string }>(rendered.sql, rendered.params)
               return rows.length > 0 ? Option.some<void>(undefined) : Option.none()
             }
             case "affectedRows": {
-              const raw = yield* (sql`DELETE FROM ${sql(table)} WHERE ${sql("id")} = ${id}`).raw
+              const rendered = renderDelete(quote, table, id)
+              const raw = yield* sql.unsafe(rewritePlaceholders(rendered.sql, dialect), rendered.params).raw
               const affected = deleteResultStrategy.read(raw)
               if (Option.isNone(affected)) {
                 return yield* Effect.die(new DeleteResultUnknownError({ table, raw }))
@@ -261,9 +196,11 @@ export const RepositoryLive = Layer.effect(
               return affected.value > 0 ? Option.some<void>(undefined) : Option.none()
             }
             case "precheck": {
-              const check = yield* sql`SELECT 1 FROM ${sql(table)} WHERE ${sql("id")} = ${id} LIMIT 1`
+              const exists = renderExists(quote, table, id)
+              const check = yield* run<Record<string, unknown>>(exists.sql, exists.params)
               if (check.length === 0) return Option.none()
-              yield* sql`DELETE FROM ${sql(table)} WHERE ${sql("id")} = ${id}`
+              const remove = renderDelete(quote, table, id)
+              yield* run<Record<string, unknown>>(remove.sql, remove.params)
               return Option.some<void>(undefined)
             }
           }
@@ -277,24 +214,20 @@ export const RepositoryLive = Layer.effect(
 
       list: (table, limit, options) =>
         Effect.gen(function* () {
-          const order = orderFrag(sql, options?.sort, options?.tieBreaker)
-          const select = buildSelect(sql, options?.fields, options?.expand)
-          const joins = buildJoins(sql, options?.expand)
-
-          const items = options?.where
-            ? yield* sql<RepoRecord>`${select} FROM ${sql(table)} t${joins} WHERE ${literal(options.where.sql, options.where.params)}${order} LIMIT ${limit}`
-            : yield* sql<RepoRecord>`${select} FROM ${sql(table)} t${joins}${order} LIMIT ${limit}`
-
-          return { items: items.map((r) => reshapeExpand(r, options?.expand)) }
+          const rendered = renderList(quote, table, limit, options)
+          const items = yield* run<RepoRecord>(rendered.sql, rendered.params)
+          return { items: items.map((row) => reshapeExpand(row, options?.expand)) }
         }).pipe(
           withSpanWhenEnabled("repository.list", { kind: "client", attributes: { table } }, { captureStackTrace: false })
         ),
 
       delete: (table: string, id: string): Effect.Effect<Option.Option<void>, SqlError.SqlError> =>
         Effect.gen(function* () {
-          const check = yield* sql`SELECT 1 FROM ${sql(table)} WHERE id = ${id} LIMIT 1`
+          const exists = renderExists(quote, table, id)
+          const check = yield* run<Record<string, unknown>>(exists.sql, exists.params)
           if (check.length === 0) return Option.none()
-          yield* sql`DELETE FROM ${sql(table)} WHERE id = ${id}`
+          const remove = renderDelete(quote, table, id)
+          yield* run<Record<string, unknown>>(remove.sql, remove.params)
           return Option.some<void>(undefined)
         }).pipe(
           withSpanWhenEnabled("repository.delete", { kind: "client", attributes: { table } }, { captureStackTrace: false })

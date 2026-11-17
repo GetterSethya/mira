@@ -136,12 +136,14 @@ function serveFile(
     const resolveOptions = {
       encodeParam: dialect.storesBooleanAsInteger
         ? (value: unknown) => (typeof value === "boolean" ? (value ? 1 : 0) : value)
-        : (value: unknown) => value
+        : (value: unknown) => value,
+      quoteIdentifier: dialect.quoteIdentifier,
+      castValue: dialect.castValue
     }
 
     // Step 2: fetch record directly (no rule enforcement yet)
     const rows = yield* repo
-      .viewFilter(collection.name, { where: idClause(recordId) })
+      .viewFilter(collection.name, { where: idClause(recordId, dialect.quoteIdentifier) })
       .pipe(Effect.orElseSucceed(() => []))
 
     if (rows.length === 0) {
@@ -180,7 +182,7 @@ function serveFile(
 
       // Reconstruct auth context from file token sub + col
       const authRows = yield* repo
-        .viewFilter(tokenPayload.col, { where: idClause(tokenPayload.sub) })
+        .viewFilter(tokenPayload.col, { where: idClause(tokenPayload.sub, dialect.quoteIdentifier) })
         .pipe(Effect.orElseSucceed(() => []))
 
       if (authRows.length === 0) {
@@ -197,7 +199,7 @@ function serveFile(
       // the per-collection view rule for protected file downloads.
       if (!adminSet.has(tokenPayload.col)) {
         // Enforce the collection's view rule against the specific record
-        const ruleResult = enforcerForAction(collection.schema, "view")
+        const ruleResult = enforcerForAction(collection.schema, "view", dialect)
         if (ruleResult === null) {
           return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
         }
@@ -215,7 +217,9 @@ function serveFile(
         }
 
         const allowed = yield* repo
-          .viewFilter(collection.name, { where: andWhere(ruleWhere, idClause(recordId)) })
+          .viewFilter(collection.name, {
+            where: andWhere(ruleWhere, idClause(recordId, dialect.quoteIdentifier))
+          })
           .pipe(Effect.orElseSucceed(() => []))
 
         if (allowed.length === 0) {

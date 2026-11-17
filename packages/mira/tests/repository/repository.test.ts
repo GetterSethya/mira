@@ -17,7 +17,11 @@ const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 const returningInfra = Layer.mergeAll(sqliteLayer, NodeCryptoLayer, DialectTest)
 const testLayer = Layer.mergeAll(RepositoryLive.pipe(Layer.provide(returningInfra)), returningInfra)
-const precheckInfra = Layer.mergeAll(sqliteLayer, NodeCryptoLayer)
+const precheckDialect = Layer.succeed(Dialect, {
+  ...sqliteDialect,
+  deleteResult: { _tag: "precheck" as const }
+})
+const precheckInfra = Layer.mergeAll(sqliteLayer, NodeCryptoLayer, precheckDialect)
 const precheckLayer = Layer.mergeAll(RepositoryLive.pipe(Layer.provide(precheckInfra)), precheckInfra)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -401,7 +405,7 @@ describe("repository", () => {
         expect(Option.isNone(result)).toBe(true)
       }).pipe(Effect.provide(testLayer)))
 
-    it.effect("uses the precheck fallback when no Dialect is provided", () =>
+    it.effect("uses the dialect's explicit precheck strategy", () =>
       Effect.gen(function* () {
         yield* setupTable
         const repo = yield* Repository

@@ -34,6 +34,29 @@ published by CI.
   omits `seqId`; the filtered span cursor is fixed internally. Logs keep their
   existing fields and response shape.
 
+- **Rule SQL now compiles with the active dialect.** Identifier quoting,
+  current timestamp, timestamp add, timestamp diff, case-insensitive LIKE, and
+  typed parameter casts are dialect capabilities. `dateDiff` honors `day`,
+  `hour`, and `minute`. SQLite keeps its existing SQL and libSQL inherits it. A
+  pure `postgresRuleSql` renderer is validated on PostgreSQL 17.12; it is not a
+  database preset and adds no driver.
+- **Breaking: dialect is required for repository and rule APIs.**
+  `RepositoryLive` now requires `Dialect`. `enforceRule`, `enforcerForAction`,
+  `buildCtxCacheTag`, `authenticateSession`, `idClause`, `cursorClause`,
+  `keysetClause`, `resolveCtxPlaceholders`, `resolveFieldRefs`, and
+  `filterNodeToWhereClause` take stricter arguments. `enforcerForAction` is the
+  normal column-mode entry point; `payloadEnforcerForAction` handles create and
+  manage pre-checks. `DialectType` gains `currentTimestamp`, `timestampAdd`,
+  `timestampDiff`, `caseInsensitiveLike`, and `castValue`. The package root now
+  exports `Dialect`, `sqliteDialect`, `DialectType`, `RuleSqlDialect`,
+  `FieldValueType`, `Quote`, and `TimestampUnit` so custom layers can satisfy
+  the requirement.
+- **Placeholder translation is explicit.** The repository rewrites `?` to
+  `Dialect.placeholder` and executes raw statements through `sql.unsafe`;
+  `Statement.literal` does not perform that translation. Create and manage
+  pre-checks use the same rewrite. Token rewriting skips quoted identifiers and
+  string literals.
+
 ### Removed
 
 - **Breaking: telemetry API rename.** `makeSqliteTelemetryLayer` is now

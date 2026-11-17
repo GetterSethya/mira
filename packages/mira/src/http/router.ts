@@ -7,6 +7,7 @@ import { annotateCurrentSpanWhenEnabled, withSpanWhenEnabled } from "@/telemetry
 import type { RequestCtx } from "@/collection-service/context.js"
 import { toPublicRecord } from "@/collection-service/decode.js"
 import { PayloadTooLargeError, ValidationError } from "@/collection-service/errors.js"
+import { fieldEqualsClause } from "@/collection-service/where.js"
 import { AppConfig } from "@/config/index.js"
 import type { CryptoService } from "@/crypto/index.js"
 import { Dialect } from "@/dialect/dialect.js"
@@ -636,8 +637,11 @@ export function makeCollectionRouter(
       // submitted address exists.
       yield* consumeLoginRequestLimits(email, clientIp(req)).pipe(catchAuthEmailErrors)
       const repo = yield* Repository
+      const dialect = yield* Dialect
       const rows = yield* repo
-        .viewFilter(col.name, { where: { sql: "t.email = ?", params: [email] } })
+        .viewFilter(col.name, {
+          where: fieldEqualsClause("email", email, dialect.quoteIdentifier)
+        })
         .pipe(Effect.orElseSucceed(() => []))
       if (rows.length === 0) {
         return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })

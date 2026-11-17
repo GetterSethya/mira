@@ -51,7 +51,7 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `NodeAuthServiceLayer` — scrypt `hashPassword` / `verifyPassword` implementation: `[auth-node.ts:NodeAuthServiceLayer]`
 - `BunAuthServiceLayer` — Argon2id `hashPassword` via `Bun.password` plus legacy scrypt verification: `[auth-bun.ts:BunAuthServiceLayer]`
 - `scryptHash`, `hashScryptPassword`, `verifyScryptPassword` — shared async scrypt helpers and the `scrypt$<salt>$<hash>` format: `[password-scrypt.ts:verifyScryptPassword]`
-- `FileServeServices` (type) — `Repository | FileStorage | ThumbnailService | AppConfig`: `[file-serve.ts:FileServeServices]`
+- `FileServeServices` (type) — `Repository | FileStorage | ThumbnailService | AppConfig | Dialect`: `[file-serve.ts:FileServeServices]`
 - `makeFileKey`, `processMultipartUpload`, `uploadBudget`: `[files.ts:processMultipartUpload]`
 - `DEFAULT_MAX_FILE_SIZE`, `GLOBAL_MAX_UPLOAD_BYTES`, `CONTENT_OVERHEAD_BYTES`, `MAX_MULTIPART_PARTS`, `MAX_FIELD_SIZE` — size/count limits: `[files.ts:DEFAULT_MAX_FILE_SIZE]`
 - `makePortRetryServerLayer(factory, port, maxAttempts?, onBoundPort?)` — retries `EADDRINUSE` on incrementing ports: `[port-retry.ts:makePortRetryServerLayer]`
@@ -131,3 +131,9 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+## Dialect boundary (issue #45)
+
+- `authenticateSession(rawToken, isAuthCollection)` now requires `Dialect` and quotes the JWT subject lookup with the active quoter [auth.ts:authenticateSession].
+- `makeFileTokenRoute` and `issueToken` add `Dialect` to their requirement rows because they call `authenticateSession` [file-token.ts:makeFileTokenRoute].
+- Login and auth-email user lookup use `fieldEqualsClause` with the dialect quoter instead of raw `t.email = ?` [router.ts:authRoute] [auth-email.ts:findAuthUser].
+- File serving uses `idClause(id, dialect.quoteIdentifier)` and passes required resolve options to `resolveCtxPlaceholders` [file-serve.ts:serveFile].

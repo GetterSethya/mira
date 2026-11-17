@@ -93,7 +93,7 @@ const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 // Every sub-layer shares the one sqlite connection via the merge memo map, so
 // the TokenStore, Repository and the test body all act on the same database.
-const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
 
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
   Layer.provide(repoWithSql),

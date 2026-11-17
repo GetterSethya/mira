@@ -1,7 +1,15 @@
+import type { TimestampUnit } from "@gettersethya/mira-client"
 import { Context, Effect, Option } from "effect"
 
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
 import type { ColumnDef, IndexShape, MigrationStep, TableShapes } from "@/migrator/types.js"
+import { transformSqlCode } from "@/sql-text.js"
+
+/** Wraps an identifier in the dialect's quoting characters. */
+export type Quote = (name: string) => string
+
+/** Schema value types used by typed rule comparisons. */
+export type FieldValueType = "text" | "integer" | "number" | "boolean"
 
 /**
  * How a dialect reports whether a `DELETE` removed a row.
@@ -81,7 +89,21 @@ export type DialectType = {
   /** Returns the dialect's native SQL type keyword for a given `ColumnDef`. */
   nativeType: (col: ColumnDef) => string
   /** Wraps an identifier (table or column name) in dialect-appropriate quotes. */
-  quoteIdentifier: (name: string) => string
+  quoteIdentifier: Quote
+  /** Current time in a value comparable to this dialect's stored timestamp text. */
+  currentTimestamp: () => string
+  /** Adds a signed amount of a unit to a timestamp expression. */
+  timestampAdd: (expr: string, amount: number, unit: TimestampUnit) => string
+  /** Difference between two timestamp expressions in the requested unit. */
+  timestampDiff: (left: string, right: string, unit: TimestampUnit) => string
+  /** Case-insensitive prefix or infix match. */
+  caseInsensitiveLike: (
+    left: string,
+    right: string,
+    mode: "prefix" | "contains"
+  ) => string
+  /** Casts a value expression for a typed rule comparison. */
+  castValue: (expr: string, type: FieldValueType) => string
   /** Serializes a literal value to a SQL-safe string. */
   quoteLiteral: (value: unknown) => string
   /** Produces a deterministic index name from a table name and field list. */
@@ -110,6 +132,31 @@ export type DialectType = {
   ) => string
   /** Optional telemetry connection and error-classification hooks. */
   readonly telemetry?: TelemetryDialectHooks
+}
+
+/** Narrow dialect view used by rule compilation, caching, and cache tags. */
+export type RuleSqlDialect = Pick<
+  DialectType,
+  | "quoteIdentifier"
+  | "currentTimestamp"
+  | "timestampAdd"
+  | "timestampDiff"
+  | "caseInsensitiveLike"
+  | "castValue"
+>
+
+/**
+ * Rewrites anonymous `?` tokens to the dialect's placeholders. Quoted
+ * identifiers and string literals are left untouched.
+ */
+export function rewritePlaceholders(
+  statement: string,
+  dialect: Pick<DialectType, "placeholder">
+): string {
+  let index = 0
+  return transformSqlCode(statement, (code) =>
+    code.replace(/\?/g, () => dialect.placeholder(++index))
+  )
 }
 
 /**

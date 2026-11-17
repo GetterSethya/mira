@@ -1,5 +1,7 @@
 import { Effect } from "effect"
 
+import type { FieldValueType, Quote } from "@/dialect/dialect.js"
+import { forEachSqlCode, sqlCodeMatches, transformSqlCode } from "@/sql-text.js"
 import type { RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
 import type { EnforceResult } from "@/rule/enforcer.js"
 
@@ -15,13 +17,23 @@ export function andWhere(a: WhereClause, b: WhereClause): WhereClause {
 }
 
 /** Produces a WHERE clause that matches a single record by id. */
-export function idClause(id: string): WhereClause {
-  return { sql: "t.id = ?", params: [id] }
+export function idClause(id: string, quote: Quote): WhereClause {
+  return { sql: `t.${quote("id")} = ?`, params: [id] }
 }
 
-/** Produces a WHERE clause for cursor pagination: seqId strictly after the given cursor. */
-export function cursorClause(after: number): WhereClause {
-  return { sql: "t.seqId > ?", params: [after] }
+/** Produces a WHERE clause for cursor pagination: seqId strictly after the cursor. */
+export function cursorClause(after: number, quote: Quote): WhereClause {
+  return { sql: `t.${quote("seqId")} > ?`, params: [after] }
+}
+
+/** Produces an equality lookup for the row at a seqId cursor. */
+export function seqIdEqualsClause(seqId: number, quote: Quote): WhereClause {
+  return { sql: `t.${quote("seqId")} = ?`, params: [seqId] }
+}
+
+/** Produces an equality lookup on one field. */
+export function fieldEqualsClause(field: string, value: unknown, quote: Quote): WhereClause {
+  return { sql: `t.${quote(field)} = ?`, params: [value] }
 }
 
 /**
@@ -32,9 +44,17 @@ export function cursorClause(after: number): WhereClause {
  * fields; SQL row comparison with NULL is unknown, and null ordering differs by
  * dialect. The field name is validated against the schema before this point.
  */
-export function keysetClause(sort: SortOrder, value: unknown, after: number): WhereClause {
+export function keysetClause(
+  sort: SortOrder,
+  value: unknown,
+  after: number,
+  quote: Quote
+): WhereClause {
   const op = sort.direction === "asc" ? ">" : "<"
-  return { sql: `(t."${sort.field}", t.seqId) ${op} (?, ?)`, params: [value, after] }
+  return {
+    sql: `(t.${quote(sort.field)}, t.${quote("seqId")}) ${op} (?, ?)`,
+    params: [value, after]
+  }
 }
 
 /** Shared pattern for the `@auth_<field>` / `@request_<source>_<key>` placeholders emitted by the rule compiler. */
@@ -45,7 +65,8 @@ const CTX_PLACEHOLDER_PATTERN = String.raw`@auth_(\w+)|@request_(\w+)_(\w+)`
  * rule compiler into positional `?` params bound from `RequestCtx`.
  *
  * The replacement is done in a single left-to-right pass so that the param array stays
- * in the same order as the `?` placeholders in the resulting SQL.
+ * in the same order as the `?` placeholders in the resulting SQL. Quoted identifiers
+ * and string literals are skipped.
  *
  * Request sources resolve explicitly: `"query"` reads `ctx.query`, `"header"` reads
  * `ctx.headers`, and `"body"` reads `ctx.body` (absent for bodiless actions, in which
@@ -56,7 +77,11 @@ const CTX_PLACEHOLDER_PATTERN = String.raw`@auth_(\w+)|@request_(\w+)_(\w+)`
  */
 export interface ResolveOptions {
   /** Dialect-aware encoder for bound values (e.g. boolean -> 0/1 on SQLite). */
-  readonly encodeParam?: (value: unknown) => unknown
+  readonly encodeParam: (value: unknown) => unknown
+  /** Dialect-aware identifier quoter for body-column bindings. */
+  readonly quoteIdentifier: Quote
+  /** Dialect-aware cast for typed payload comparisons. */
+  readonly castValue: (expr: string, type: FieldValueType) => string
 }
 
 /**
@@ -78,27 +103,38 @@ export function resolveCtxPlaceholders(
   ctx: RequestCtx,
   collection: string,
   action: string,
-  options?: ResolveOptions,
+  options: ResolveOptions,
   bodyPlan?: BodyBindingPlan
 ) {
-  const encode = options?.encodeParam ?? ((value: unknown) => value)
+  const encode = options.encodeParam
   // A clause with no request placeholders and no positional params is already
   // resolved. Return a fresh object so a future caller cannot mutate the
   // enforcer's cached EnforceResult.
-  if (result.params.length === 0 && !/[@?]/.test(result.sql)) {
+  if (result.params.length === 0 && !sqlCodeMatches(result.sql, /[@?]/)) {
     return Effect.succeed({ sql: result.sql, params: [] })
   }
   return Effect.gen(function* () {
-    const needsAuth = /@auth_\w+/.test(result.sql)
+    const needsAuth = sqlCodeMatches(result.sql, /@auth_\w+/)
     if (needsAuth && ctx.auth === undefined) {
       return yield* new ForbiddenError({ collection, action })
     }
 
-    for (const match of result.sql.matchAll(new RegExp(CTX_PLACEHOLDER_PATTERN, "g"))) {
-      const reqSource = match[2]
-      if (reqSource !== undefined && reqSource !== "query" && reqSource !== "header" && reqSource !== "body") {
-        return yield* new ForbiddenError({ collection, action })
+    let unknownSource = false
+    forEachSqlCode(result.sql, (code) => {
+      for (const match of code.matchAll(new RegExp(CTX_PLACEHOLDER_PATTERN, "g"))) {
+        const reqSource = match[2]
+        if (
+          reqSource !== undefined &&
+          reqSource !== "query" &&
+          reqSource !== "header" &&
+          reqSource !== "body"
+        ) {
+          unknownSource = true
+        }
       }
+    })
+    if (unknownSource) {
+      return yield* new ForbiddenError({ collection, action })
     }
 
     const resolved: Array<unknown> = []
@@ -107,32 +143,37 @@ export function resolveCtxPlaceholders(
 
     // Single-pass left-to-right replacement preserves param ordering.
     // Groups: (1) @auth field, (2) @request source, (3) @request key
-    const newSql = result.sql.replace(new RegExp(`\\?|${CTX_PLACEHOLDER_PATTERN}`, "g"), (match, g1, g2, g3): string => {
-      const authField = typeof g1 === "string" ? g1 : undefined
-      const reqSource = typeof g2 === "string" ? g2 : undefined
-      const reqKey = typeof g3 === "string" ? g3 : undefined
+    const newSql = transformSqlCode(result.sql, (code) =>
+      code.replace(
+        new RegExp(`\\?|${CTX_PLACEHOLDER_PATTERN}`, "g"),
+        (match, g1, g2, g3): string => {
+          const authField = typeof g1 === "string" ? g1 : undefined
+          const reqSource = typeof g2 === "string" ? g2 : undefined
+          const reqKey = typeof g3 === "string" ? g3 : undefined
 
-      if (match === "?") {
-        resolved.push(encode(params[pIdx++]))
-      } else if (authField === "collection") {
-        resolved.push(encode(ctx.auth?.collection ?? null))
-      } else if (authField !== undefined) {
-        resolved.push(encode(ctx.auth?.record[authField] ?? null))
-      } else if (reqSource === "query" && reqKey !== undefined) {
-        const val = ctx.query[reqKey]
-        resolved.push(encode(Array.isArray(val) ? val[0] : (val ?? null)))
-      } else if (reqSource === "header" && reqKey !== undefined) {
-        resolved.push(encode(ctx.headers[reqKey] ?? null))
-      } else if (reqSource === "body" && reqKey !== undefined) {
-        const binding = bodyPlan?.get(reqKey)
-        if (binding?._tag === "column") {
-          return `t."${binding.column.replace(/"/g, '""')}"`
+          if (match === "?") {
+            resolved.push(encode(params[pIdx++]))
+          } else if (authField === "collection") {
+            resolved.push(encode(ctx.auth?.collection ?? null))
+          } else if (authField !== undefined) {
+            resolved.push(encode(ctx.auth?.record[authField] ?? null))
+          } else if (reqSource === "query" && reqKey !== undefined) {
+            const val = ctx.query[reqKey]
+            resolved.push(encode(Array.isArray(val) ? val[0] : (val ?? null)))
+          } else if (reqSource === "header" && reqKey !== undefined) {
+            resolved.push(encode(ctx.headers[reqKey] ?? null))
+          } else if (reqSource === "body" && reqKey !== undefined) {
+            const binding = bodyPlan?.get(reqKey)
+            if (binding?._tag === "column") {
+              return `t.${options.quoteIdentifier(binding.column)}`
+            }
+            const val = binding?._tag === "param" ? binding.value : ctx.body?.[reqKey]
+            resolved.push(encode(Array.isArray(val) ? val[0] : (val ?? null)))
+          }
+          return "?"
         }
-        const val = binding?._tag === "param" ? binding.value : ctx.body?.[reqKey]
-        resolved.push(encode(Array.isArray(val) ? val[0] : (val ?? null)))
-      }
-      return "?"
-    })
+      )
+    )
 
     return yield* Effect.succeed({ sql: newSql, params: resolved })
   })
@@ -162,10 +203,8 @@ const ctxRefsCache = new Map<string, CtxRefs>()
 
 /**
  * Scans compiled rule SQL for `@auth_<field>` / `@request_<source>_<key>` placeholders
- * and returns exactly which `RequestCtx` fields they reference — used to build a cache
- * key that captures everything a rule could depend on without serializing all of `ctx`.
- *
- * Results are memoized by `sql` and frozen; do not mutate them.
+ * and returns exactly which `RequestCtx` fields they reference. Quoted identifiers
+ * and string literals are skipped.
  */
 export function extractCtxRefs(sql: string): CtxRefs {
   const cached = ctxRefsCache.get(sql)
@@ -177,62 +216,77 @@ export function extractCtxRefs(sql: string): CtxRefs {
   const bodyKeys = new Set<string>()
   let hasUnknownSource = false
 
-  for (const match of sql.matchAll(new RegExp(CTX_PLACEHOLDER_PATTERN, "g"))) {
-    const [, authField, reqSource, reqKey] = match
-    if (authField !== undefined) {
-      authFields.add(authField)
-    } else if (reqSource !== undefined && reqKey !== undefined) {
-      if (reqSource === "query") {
-        queryKeys.add(reqKey)
-      } else if (reqSource === "body") {
-        bodyKeys.add(reqKey)
-      } else if (reqSource === "header") {
-        headerKeys.add(reqKey)
-      } else {
-        hasUnknownSource = true
-        headerKeys.add(reqKey)
+  forEachSqlCode(sql, (code) => {
+    for (const match of code.matchAll(new RegExp(CTX_PLACEHOLDER_PATTERN, "g"))) {
+      const [, authField, reqSource, reqKey] = match
+      if (authField !== undefined) {
+        authFields.add(authField)
+      } else if (reqSource !== undefined && reqKey !== undefined) {
+        if (reqSource === "query") {
+          queryKeys.add(reqKey)
+        } else if (reqSource === "body") {
+          bodyKeys.add(reqKey)
+        } else if (reqSource === "header") {
+          headerKeys.add(reqKey)
+        } else {
+          hasUnknownSource = true
+          headerKeys.add(reqKey)
+        }
       }
     }
-  }
+  })
 
   const refs: CtxRefs = Object.freeze({
     authFields: Object.freeze([...authFields].sort()),
     queryKeys: Object.freeze([...queryKeys].sort()),
     headerKeys: Object.freeze([...headerKeys].sort()),
     bodyKeys: Object.freeze([...bodyKeys].sort()),
-    hasSubquery: /\b(?:SELECT|EXISTS)\b/i.test(sql),
+    hasSubquery: sqlCodeMatches(sql, /\b(?:SELECT|EXISTS)\b/i),
     hasUnknownSource
   })
   ctxRefsCache.set(sql, refs)
   return refs
 }
 
+const decodeFieldToken = (token: string): string => {
+  const base64 = token.replaceAll("-", "+").replaceAll("_", "/")
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")
+  const binary = atob(padded)
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+  return new TextDecoder().decode(bytes)
+}
+
+const PAYLOAD_FIELD =
+  /@field_(text|integer|number|boolean)_([A-Za-z0-9_-]+)@|\?/g
+
 /**
- * Replaces `t.<fieldName>` column references in a WHERE clause with `?` params
- * bound to the corresponding values in `record`.
+ * Replaces compiler payload markers with `?` params bound to `record`.
  *
- * Used for the `create` permission pre-check: `SELECT 1 WHERE <rule>` without a FROM.
- * The replacement is done left-to-right to preserve param ordering with existing `?`.
+ * This runs only on SQL compiled with `fieldRefMode: "param"`. It never parses
+ * quoted identifiers, so a field named `a?b` or `note@auth_id` cannot shift the
+ * bind order.
  */
 export function resolveFieldRefs(
   clause: WhereClause,
   record: RepoRecord,
-  options?: ResolveOptions
+  options: ResolveOptions
 ): WhereClause {
-  const encode = options?.encodeParam ?? ((value: unknown) => value)
+  const encode = options.encodeParam
   const resolved: Array<unknown> = []
   let pIdx = 0
   const { params } = clause
 
-  const newSql = clause.sql.replace(/\?|\bt\.(\w+)\b/g, (_, g1): string => {
-    const field = typeof g1 === "string" ? g1 : undefined
-    if (field !== undefined) {
+  const newSql = transformSqlCode(clause.sql, (code) =>
+    code.replace(PAYLOAD_FIELD, (match, type: FieldValueType | undefined, token: string | undefined): string => {
+      if (match === "?") {
+        resolved.push(encode(params[pIdx++]))
+        return "?"
+      }
+      const field = decodeFieldToken(token ?? "")
       resolved.push(encode(record[field] ?? null))
-    } else {
-      resolved.push(encode(params[pIdx++]))
-    }
-    return "?"
-  })
+      return options.castValue("?", type ?? "text")
+    })
+  )
 
   return { sql: newSql, params: resolved }
 }

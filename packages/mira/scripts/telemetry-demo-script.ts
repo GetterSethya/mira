@@ -21,6 +21,8 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Effect, Layer, Logger, LogLevel } from "effect"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { defineRule, applyRulesToCollections } from "@/app/index.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import { makeCachedCollectionServiceLayer } from "@/cache/cached-collection.js"
@@ -72,7 +74,10 @@ const FileStorageStub = Layer.succeed(
 // ---------------------------------------------------------------------------
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const repoLayer = RepositoryLive.pipe(Layer.provide(Layer.merge(sqliteLayer, NodeCryptoLayer)))
+const dialectLayer = Layer.succeed(Dialect, sqliteDialect)
+const repoLayer = RepositoryLive.pipe(
+  Layer.provide(Layer.merge(sqliteLayer, NodeCryptoLayer, dialectLayer))
+)
 
 const serviceLayer = makeCachedCollectionServiceLayer([Posts], {
   recordTtlMs: 60_000,
@@ -82,6 +87,7 @@ const serviceLayer = makeCachedCollectionServiceLayer([Posts], {
 }).pipe(
   Layer.provide(repoLayer),
   Layer.provide(sqliteLayer),
+  Layer.provide(dialectLayer),
   Layer.provide(FileStorageStub),
   Layer.provide(NodeAuthServiceLayer)
 )

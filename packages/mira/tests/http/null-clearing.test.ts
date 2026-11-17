@@ -80,7 +80,7 @@ const AppConfigTest = Layer.succeed(AppConfig, AppConfig.of({
 }))
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 function makeServerLayer(storageLayer: Layer.Layer<FileStorage, never, FileSystem.FileSystem | Path.Path>) {

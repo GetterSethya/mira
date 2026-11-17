@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 
-import { buildCtxCacheTag } from "@/cache/ctx-key.js"
+import { buildCtxCacheTag as buildCtxCacheTagRaw } from "@/cache/ctx-key.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { Repository } from "@/repository/repository.js"
 
 import {
@@ -15,6 +16,12 @@ import {
   serveRouter,
   setupTables
 } from "./_harness.js"
+
+const buildCtxCacheTag = (
+  collection: Parameters<typeof buildCtxCacheTagRaw>[0],
+  action: Parameters<typeof buildCtxCacheTagRaw>[1],
+  ctx: Parameters<typeof buildCtxCacheTagRaw>[2]
+) => buildCtxCacheTagRaw(collection, action, ctx, sqliteDialect)
 
 // ---------------------------------------------------------------------------
 // Tiny reflection/printing helpers (no `as` assertions, no JSON.parse)

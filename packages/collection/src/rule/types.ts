@@ -1,3 +1,6 @@
+/** Unit accepted by the date rule operands. */
+export type TimestampUnit = "day" | "hour" | "minute"
+
 /**
  * A value node in a rule expression — can be a field reference, literal, auth context, subquery, date operation, or request value.
  *
@@ -21,8 +24,8 @@ export type OperandNode<K extends string = string, V = unknown> =
   | { kind: "subquery"; collection: string; field: string; where: ExprNode<any> }
   | { kind: "request"; source: "header" | "query" | "body"; key: string }
   | { kind: "now" }
-  | { kind: "dateAdd"; operand: OperandNode<any>; amount: number; unit: "day" | "hour" | "minute" }
-  | { kind: "dateDiff"; left: OperandNode<any>; right: OperandNode<any>; unit: "day" | "hour" | "minute" }
+  | { kind: "dateAdd"; operand: OperandNode<any>; amount: number; unit: TimestampUnit }
+  | { kind: "dateDiff"; left: OperandNode<any>; right: OperandNode<any>; unit: TimestampUnit }
 
 /**
  * A boolean expression node in a rule — the result of comparing operands or combining sub-expressions.

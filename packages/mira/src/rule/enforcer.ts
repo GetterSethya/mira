@@ -1,6 +1,9 @@
 import type { CollectionSchema, ExprNode } from "@gettersethya/mira-client"
 
-import type { CompileCtx } from "./compiler.js"
+import type { FieldValueType, RuleSqlDialect } from "@/dialect/dialect.js"
+import { transformSqlCode } from "@/sql-text.js"
+
+import type { CompileCtx, FieldRefMode } from "./compiler.js"
 import { compile } from "./compiler.js"
 
 /** Result of compiling a rule for runtime enforcement: SQL string + ordered params. */
@@ -16,24 +19,17 @@ export type EnforcementCtx = {
   query: Record<string, string | Array<string>>
 }
 
+type RuleAction = keyof NonNullable<CollectionSchema["x-rules"]>
+
 /**
  * Compiles a rule expression into a SQL snippet with `?` placeholders
  * and an ordered array of parameter values, ready for use with `@effect/sql`.
- *
- * @example
- * const { sql, params } = enforceRule(
- *   Rule.field("ownerId").eq(Rule.authId(Users))
- * )
- * // sql: "t.ownerId = ?"
- * // params: []
- *
- * const { sql, params } = enforceRule(
- *   Rule.field("status").eq(Rule.literal("active"))
- * )
- * // sql: "t.status = ?"
- * // params: ["active"]
  */
-export function enforceRule(rule: ExprNode, overrides?: Partial<CompileCtx>): EnforceResult {
+export function enforceRule(
+  rule: ExprNode,
+  dialect: RuleSqlDialect,
+  overrides?: Partial<CompileCtx>
+): EnforceResult {
   let i = 0
   const paramRecord: Record<string, unknown> = {}
   const ctx: CompileCtx = {
@@ -44,8 +40,10 @@ export function enforceRule(rule: ExprNode, overrides?: Partial<CompileCtx>): En
     collectionSchemas: {},
     ...overrides
   }
-  const rawSql = compile(rule, ctx)
-  const sql = rawSql.replace(/@p(\d+)/g, "?")
+  const rawSql = compile(rule, ctx, dialect)
+  const sql = transformSqlCode(rawSql, (code) =>
+    code.replace(/@p(\d+)/g, () => "?")
+  )
   const params: Array<unknown> = []
   for (let j = 0; j < i; j++) {
     params.push(paramRecord[`@p${j}`])
@@ -53,69 +51,97 @@ export function enforceRule(rule: ExprNode, overrides?: Partial<CompileCtx>): En
   return { sql, params }
 }
 
+const fieldTypeOf = (schema: CollectionSchema) => (field: string): FieldValueType | undefined => {
+  const prop = schema.properties[field]
+  if (prop === undefined) return undefined
+  if (prop["x-kind"] === "seqId") return "integer"
+  if (prop.type === "boolean") return "boolean"
+  if (prop.type === "integer") return "integer"
+  if (prop.type === "number") return "number"
+  if (prop.type === "string") return "text"
+  return undefined
+}
+
 /**
- * Per-schema compiled-rule cache. A collection schema is a stable object created
- * once per app boot, so a WeakMap keyed by it holds at most one entry per live
- * collection. Each entry maps action → compiled result (or `null` when no rule
- * exists), so repeated requests never recompile.
+ * Per-schema, per-dialect, per-mode, per-action compiled-rule cache.
  *
- * The cached objects are shared, so callers must treat them as immutable — the
- * compilation output is already read-only by contract (`sql` string, `params`
- * `ReadonlyArray`), and nothing in the codebase mutates it.
+ * A collection schema and a dialect are stable objects created once per app
+ * boot, so the weak outer keys hold at most one entry per live pair. The mode
+ * separates normal column SQL from payload marker SQL.
  */
 const compiledRuleCache = new WeakMap<
   CollectionSchema,
-  Map<keyof NonNullable<CollectionSchema["x-rules"]>, EnforceResult | null>
+  WeakMap<
+    RuleSqlDialect,
+    Record<FieldRefMode, Map<RuleAction, EnforceResult | null>>
+  >
 >()
 
 function compileForAction(
   collection: CollectionSchema,
-  action: keyof NonNullable<CollectionSchema["x-rules"]>
+  action: RuleAction,
+  dialect: RuleSqlDialect,
+  mode: FieldRefMode
 ): EnforceResult | null {
   const rules = collection["x-rules"]
-  if (rules === undefined) {
-    return null
-  }
+  if (rules === undefined) return null
   const rule = rules[action]
-  if (rule === undefined) {
-    return null
-  }
-  return enforceRule(rule)
+  if (rule === undefined) return null
+  return enforceRule(rule, dialect, {
+    fieldRefMode: mode,
+    fieldType: fieldTypeOf(collection)
+  })
 }
 
-/**
- * Resolves and compiles the rule for a specific action on a collection schema.
- * Returns `null` if the collection has no `x-rules` or the action has no rule defined.
- *
- * Results are memoized per schema object and action, so the compilation runs once
- * per collection/action for the lifetime of the collection schema. The returned
- * object is shared: do not mutate `sql` or `params`.
- *
- * @example
- * const schema = Posts.schema // CollectionSchema with x-rules
- * const result = enforcerForAction(schema, "list")
- * if (result) {
- *   sql.unsafe(`SELECT * FROM posts WHERE ${result.sql}`, result.params)
- * }
- */
-export function enforcerForAction(
+function cachedForAction(
   collection: CollectionSchema,
-  action: keyof NonNullable<CollectionSchema["x-rules"]>
+  action: RuleAction,
+  dialect: RuleSqlDialect,
+  mode: FieldRefMode
 ): EnforceResult | null {
-  let byAction = compiledRuleCache.get(collection)
-  if (byAction === undefined) {
-    byAction = new Map()
-    compiledRuleCache.set(collection, byAction)
+  let byDialect = compiledRuleCache.get(collection)
+  if (byDialect === undefined) {
+    byDialect = new WeakMap()
+    compiledRuleCache.set(collection, byDialect)
   }
 
-  // `null` is a legitimate cached value (rule absent) — `has` distinguishes it
-  // from "not compiled yet".
+  let byMode = byDialect.get(dialect)
+  if (byMode === undefined) {
+    byMode = { column: new Map(), param: new Map() }
+    byDialect.set(dialect, byMode)
+  }
+
+  const byAction = byMode[mode]
   if (byAction.has(action)) {
     const cached = byAction.get(action)
     return cached === undefined ? null : cached
   }
 
-  const compiled = compileForAction(collection, action)
+  const compiled = compileForAction(collection, action, dialect, mode)
   byAction.set(action, compiled)
   return compiled
+}
+
+/**
+ * Resolves and compiles the normal column-mode rule for an action.
+ * Returns `null` if the collection has no `x-rules` or the action has no rule.
+ */
+export function enforcerForAction(
+  collection: CollectionSchema,
+  action: RuleAction,
+  dialect: RuleSqlDialect
+): EnforceResult | null {
+  return cachedForAction(collection, action, dialect, "column")
+}
+
+/**
+ * Resolves and compiles the payload-mode rule for create or manage checks.
+ * Field refs become typed `@field_*@` markers consumed by `resolveFieldRefs`.
+ */
+export function payloadEnforcerForAction(
+  collection: CollectionSchema,
+  action: "create" | "manage",
+  dialect: RuleSqlDialect
+): EnforceResult | null {
+  return cachedForAction(collection, action, dialect, "param")
 }

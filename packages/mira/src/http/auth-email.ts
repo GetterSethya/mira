@@ -31,6 +31,7 @@ import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
 import { AppConfig } from "@/config/index.js"
 import { CryptoService } from "@/crypto/index.js"
+import { fieldEqualsClause } from "@/collection-service/where.js"
 import { Dialect } from "@/dialect/dialect.js"
 import {
   EmailNotConfiguredError,
@@ -104,8 +105,9 @@ const nowMs = () => Date.now()
 const findAuthUser = (collection: AnyCollectionDef, email: string) =>
   Effect.gen(function* () {
     const repo = yield* Repository
+    const dialect = yield* Dialect
     const rows = yield* repo.viewFilter(collection.name, {
-      where: { sql: "t.email = ?", params: [email] }
+      where: fieldEqualsClause("email", email, dialect.quoteIdentifier)
     })
     return rows[0]
   })

@@ -5,6 +5,7 @@ import { expect } from "vitest"
 
 import { defineRule } from "@/app/index.js"
 import { resolveCtxPlaceholders } from "@/collection-service/where.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { enforceRule } from "@/rule/enforcer.js"
 
 const Users = AuthCollection.define("users", { name: Field.text({ default: "" }) })
@@ -17,7 +18,7 @@ if (rule === undefined) throw new Error("Expected a list rule")
 describe("auth boolean rules", () => {
   it.effect("encodes the boolean literal and resolves the stored auth value", () =>
     Effect.gen(function* () {
-      const compiled = enforceRule(rule)
+      const compiled = enforceRule(rule, sqliteDialect)
       expect(compiled.sql).toContain("@auth_emailVerified")
       const resolved = yield* resolveCtxPlaceholders(
         compiled,
@@ -25,7 +26,9 @@ describe("auth boolean rules", () => {
         "users",
         "list",
         {
-          encodeParam: (value) => (typeof value === "boolean" ? (value ? 1 : 0) : value)
+          encodeParam: (value) => (typeof value === "boolean" ? (value ? 1 : 0) : value),
+          quoteIdentifier: sqliteDialect.quoteIdentifier,
+          castValue: sqliteDialect.castValue
         }
       )
       expect(resolved.params).toEqual([1, 1])

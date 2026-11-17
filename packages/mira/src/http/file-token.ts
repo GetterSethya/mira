@@ -4,6 +4,7 @@ import type { HttpRouter} from "effect/http";
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 
 import { AppConfig } from "@/config/index.js"
+import { Dialect } from "@/dialect/dialect.js"
 import { Repository } from "@/repository/repository.js"
 
 import { authenticateSession, signFileToken } from "./auth.js"
@@ -28,7 +29,7 @@ export function makeFileTokenRoute(
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   never,
-  Repository | AppConfig | HttpServerRequest.HttpServerRequest | HttpRouter.RouteContext
+  Repository | AppConfig | Dialect | HttpServerRequest.HttpServerRequest | HttpRouter.RouteContext
 > {
   const collectionMap = new Map(collections.map((c) => [c.name, c]))
 
@@ -44,7 +45,7 @@ export function makeFileTokenRoute(
 function issueToken(
   req: HttpServerRequest.HttpServerRequest,
   collectionMap: Map<string, AnyCollectionDef>
-): Effect.Effect<HttpServerResponse.HttpServerResponse, never, Repository | AppConfig> {
+): Effect.Effect<HttpServerResponse.HttpServerResponse, never, Repository | AppConfig | Dialect> {
   return Effect.gen(function* () {
     const config = yield* AppConfig
     const jwtSecret = Redacted.value(config.jwtSecret)

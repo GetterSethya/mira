@@ -84,7 +84,7 @@ const AppConfigTest = Layer.succeed(
 const nodePlatform = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
 const storageLayer = makeFileStorageLayer("local", { directory: ROOT }).pipe(Layer.provide(nodePlatform))
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const repoWithSql = RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer))
+const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(

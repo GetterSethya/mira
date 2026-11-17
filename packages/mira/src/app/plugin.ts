@@ -6,6 +6,7 @@ import type { SqlClient } from "effect/sql"
 import type { CollectionService } from "@/collection-service/collection-service.js"
 import type { BatchMutationStats } from "@/collection-service/mutation-batcher.js"
 import type { AppConfig } from "@/config/index.js"
+import type { Dialect } from "@/dialect/dialect.js"
 import type { CronDef } from "@/cron/types.js"
 import type {
   CronContext,
@@ -91,6 +92,7 @@ export const onCollectionSuccess = <T>(
 export type PluginRouteServices =
   | PlatformServices
   | AppConfig
+  | Dialect
   | Repository
   | CollectionService
   | BatchMutationStats

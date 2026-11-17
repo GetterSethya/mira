@@ -1,3 +1,4 @@
+import type { TimestampUnit } from "@gettersethya/mira-client"
 import { Effect } from "effect"
 
 import type { TranslatePlanContext } from "./dialect.js"
@@ -31,7 +32,7 @@ const SUBSUMED_BY_REBUILD: ReadonlySet<MigrationStep["kind"]> = new Set([
   "dropIndex"
 ])
 
-const quote = (name: string) => `"${name}"`
+const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
 const quoteLiteral = (value: unknown) => {
   if (value === null) return "NULL"
@@ -245,12 +246,35 @@ function rebuildStatements(table: string, desired: TableShape, stored: TableShap
   return statements
 }
 
+const timestampAddSql = (expr: string, amount: number, unit: TimestampUnit) =>
+  `datetime(${expr}, '${amount >= 0 ? "+" : ""}${amount} ${unit}s')`
+
+const timestampDiffSql = (left: string, right: string, unit: TimestampUnit) => {
+  const factor = unit === "day" ? 1 : unit === "hour" ? 24 : 1440
+  const base = `(julianday(${left}) - julianday(${right}))`
+  return factor === 1 ? base : `(${base} * ${factor})`
+}
+
+const caseInsensitiveLikeSql = (
+  left: string,
+  right: string,
+  mode: "prefix" | "contains"
+) =>
+  mode === "prefix"
+    ? `${left} LIKE (${right} || '%')`
+    : `${left} LIKE ('%' || ${right} || '%')`
+
 export const sqliteDialect: DialectType = {
   storesBooleanAsInteger: true,
   // SQLite 3.35+ supports DELETE ... RETURNING on both the Node and Bun drivers.
   deleteResult: { _tag: "returning" },
 
   quoteIdentifier: quote,
+  currentTimestamp: () => "datetime('now')",
+  timestampAdd: timestampAddSql,
+  timestampDiff: timestampDiffSql,
+  caseInsensitiveLike: caseInsensitiveLikeSql,
+  castValue: (expr) => expr,
   quoteLiteral,
   nativeType: nativeTypeOf,
   indexName: indexNameOf,

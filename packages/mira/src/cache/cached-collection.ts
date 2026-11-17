@@ -8,7 +8,7 @@ import type {
   BatchMutationStats,
   ResolvedBatchMutationConfig
 } from "@/collection-service/mutation-batcher.js"
-import type { Dialect } from "@/dialect/dialect.js"
+import { Dialect } from "@/dialect/dialect.js"
 import type { AuthService } from "@/http/auth.js"
 import type { Repository } from "@/repository/repository.js"
 import type { SortOrder } from "@/repository/types.js"
@@ -132,6 +132,7 @@ export function makeCachedCollectionServiceLayer(
     Effect.gen(function* () {
       const svc = yield* CollectionService
       const cache = yield* CollectionCache
+      const dialect = yield* Dialect
 
       return CollectionService.of({
         list: (collection, cursor, perPage, ctx, filter, sort, select, expand) => {
@@ -146,7 +147,7 @@ export function makeCachedCollectionServiceLayer(
             )
           }
 
-          const ctxTag = buildCtxCacheTag(collection, "list", ctx)
+          const ctxTag = buildCtxCacheTag(collection, "list", ctx, dialect)
           const key = `${collection.name}:${stableListKey(cursor, perPage, filter, sort, select, expand)}::${ctxTag}`
           return Effect.gen(function* () {
             const cached = yield* cache.getList(key)
@@ -178,7 +179,7 @@ export function makeCachedCollectionServiceLayer(
             )
           }
 
-          const ctxTag = buildCtxCacheTag(collection, "view", ctx)
+          const ctxTag = buildCtxCacheTag(collection, "view", ctx, dialect)
           const key = `${stableViewKey(collection.name, id, select, expand)}::${ctxTag}`
           return Effect.gen(function* () {
             const cached = yield* cache.getRecord(key)

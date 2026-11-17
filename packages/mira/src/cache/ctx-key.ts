@@ -2,6 +2,7 @@ import type { AnyCollectionDef } from "@gettersethya/mira-client"
 
 import type { RequestCtx } from "@/collection-service/context.js"
 import { extractCtxRefs } from "@/collection-service/where.js"
+import type { RuleSqlDialect } from "@/dialect/dialect.js"
 import { enforcerForAction } from "@/rule/enforcer.js"
 
 const NUL = "\u0000"
@@ -56,11 +57,12 @@ function encodeCtxValue(raw: unknown): string {
 export function buildCtxCacheTag(
   collection: AnyCollectionDef,
   action: "view" | "list",
-  ctx: RequestCtx
+  ctx: RequestCtx,
+  dialect: RuleSqlDialect
 ): string {
   if (ctx.admin === true) return "admin"
 
-  const compiled = enforcerForAction(collection.schema, action)
+  const compiled = enforcerForAction(collection.schema, action, dialect)
   if (compiled === null) return "denied"
 
   const refs = extractCtxRefs(compiled.sql)

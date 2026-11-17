@@ -6,7 +6,25 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
-import { enforcerForAction, enforceRule } from "@/rule/enforcer.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { postgresRuleSql } from "@/dialect/dialect-postgres.js"
+import type { RuleSqlDialect } from "@/dialect/dialect.js"
+import type { CompileCtx } from "@/rule/compiler.js"
+import { compileOperand as compileOperandRaw } from "@/rule/compiler.js"
+import { enforcerForAction as enforcerForActionRaw, enforceRule as enforceRuleRaw } from "@/rule/enforcer.js"
+
+const legacyDialect: RuleSqlDialect = {
+  ...sqliteDialect,
+  quoteIdentifier: (name) => name
+}
+
+const enforceRule = (rule: Parameters<typeof enforceRuleRaw>[0]) =>
+  enforceRuleRaw(rule, legacyDialect)
+
+const enforcerForAction = (
+  schema: Parameters<typeof enforcerForActionRaw>[0],
+  action: Parameters<typeof enforcerForActionRaw>[1]
+) => enforcerForActionRaw(schema, action, legacyDialect)
 
 describe("Rule enforcer integration", () => {
   const testLayer = SqliteClient.layer({ filename: ":memory:" })
@@ -312,4 +330,64 @@ describe("enforcerForAction", () => {
     expect(second).not.toBe(first)
     expect(second).toEqual(first)
   })
+})
+
+describe("enforcer dialect cache and date units", () => {
+  const schema: CollectionSchema = {
+    "x-collection-kind": "base",
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      created: { type: "string" }
+    },
+    "x-rules": {
+      list: Rule.and(
+        Rule.field("name").startsWith(Rule.literal("a")),
+        Rule.field("created").gte(Rule.dateAdd(Rule.now(), -7, "day"))
+      )
+    }
+  }
+
+  it("caches per dialect and produces dialect-specific SQL", () => {
+    const sqlite = enforcerForActionRaw(schema, "list", sqliteDialect)
+    const pg = enforcerForActionRaw(schema, "list", postgresRuleSql)
+    expect(sqlite).not.toBeNull()
+    expect(pg).not.toBeNull()
+    expect(sqlite).not.toBe(pg)
+    expect(sqlite!.sql).not.toBe(pg!.sql)
+    expect(sqlite!.sql).toContain("LIKE")
+    expect(pg!.sql).toContain("ILIKE")
+    expect(enforcerForActionRaw(schema, "list", sqliteDialect)).toBe(sqlite)
+  })
+
+  it.effect("returns dateDiff in day, hour, and minute units", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(`CREATE TABLE events (id TEXT, start TEXT, finish TEXT)`)
+      yield* sql.unsafe(
+        `INSERT INTO events VALUES ('e1', '2026-01-01T00:00:00.000Z', '2026-01-02T06:00:00.000Z')`
+      )
+
+      const ctx: CompileCtx = {
+        tableAlias: "t",
+        nextParam: () => "@p0",
+        params: {},
+        columnOfField: (field) => field,
+        collectionSchemas: {}
+      }
+      const run = (unit: "day" | "hour" | "minute") => {
+        const expression = compileOperandRaw(
+          Rule.dateDiff(Rule.field("finish"), Rule.field("start"), unit),
+          ctx,
+          sqliteDialect
+        )
+        return sql
+          .unsafe<{ value: number }>(`SELECT ${expression} AS value FROM events t`)
+          .pipe(Effect.map((rows) => rows[0]!.value))
+      }
+
+      expect(yield* run("day")).toBe(1.25)
+      expect(yield* run("hour")).toBe(30)
+      expect(yield* run("minute")).toBe(1800)
+    }).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))))
 })

@@ -3,7 +3,7 @@ import { filterNodeToWhereClause } from "@gettersethya/mira-client"
 import { Context, Effect, Layer, Option, Schedule, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { Dialect, type DialectType } from "@/dialect/dialect.js"
+import { Dialect, rewritePlaceholders, type DialectType } from "@/dialect/dialect.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 
 import { LogsCollection, SpansCollection } from "./collections.js"
@@ -57,11 +57,6 @@ const asNumber = (value: unknown): number => Number(value ?? 0)
 
 const mapStoreError = (operation: string, cause: unknown) =>
   new TelemetryStoreError({ operation, cause })
-
-const rewritePlaceholders = (statement: string, dialect: DialectType): string => {
-  let index = 0
-  return statement.replace(/\?/g, () => dialect.placeholder(++index))
-}
 
 const run = <A extends object>(
   sql: SqlClient.SqlClient,

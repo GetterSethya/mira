@@ -30,8 +30,7 @@ const sent: Array<EmailMessage> = []
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const repoWithSql = RepositoryLive.pipe(
-  Layer.provide(sqliteLayer),
-  Layer.provide(NodeCryptoLayer)
+  Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect)))
 )
 
 const FileStorageTest = Layer.succeed(

@@ -16,7 +16,7 @@ compiled row-level rule references, preventing a cached row from leaking across 
 - `CollectionCache` — `Context.Service` tag exposing `getRecord`, `putRecord`, `invalidateRecord`, `getList`, `putList`, `nukeListsFor` [collection-cache.ts:CollectionCache]
 - `makeCollectionCacheLayer(config)` — builds the cache layer from `CollectionCacheConfigValues` [collection-cache.ts:makeCollectionCacheLayer]
 - `makeCachedCollectionServiceLayer(allCollections, config?)` — cached `CollectionService` layer; wires the uncached service and the cache together [cached-collection.ts:makeCachedCollectionServiceLayer]
-- `buildCtxCacheTag(collection, action, ctx)` — derives the authorization-scoped suffix of a list/view cache key [ctx-key.ts:buildCtxCacheTag]
+- `buildCtxCacheTag(collection, action, ctx, dialect)` — derives the authorization-scoped suffix of a list/view cache key [ctx-key.ts:buildCtxCacheTag]
 - `CacheEntry<A>` (type) — `{ value, insertedAt, expiresAt }` stored per key [types.ts:CacheEntry]
 - `CollectionCacheConfigValues` (type) — `recordTtlMs`, `listTtlMs`, `maxRecords`, `maxLists` [types.ts:CollectionCacheConfigValues]
 - Barrel re-exports the above real symbols: `makeCachedCollectionServiceLayer`, `CollectionCache`, `makeCollectionCacheLayer`, `buildCtxCacheTag`, and the two types [index.ts:makeCachedCollectionServiceLayer] [index.ts:CollectionCache] [index.ts:buildCtxCacheTag] [index.ts:CollectionCacheConfigValues]
@@ -49,3 +49,8 @@ compiled row-level rule references, preventing a cached row from leaking across 
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+## Dialect boundary (issue #45)
+
+- `buildCtxCacheTag(collection, action, ctx, dialect)` requires the active rule-SQL dialect [ctx-key.ts:buildCtxCacheTag].
+- `makeCachedCollectionServiceLayer` yields `Dialect` and passes it to every cache-tag call. The layer already declared `Dialect` as a requirement [cached-collection.ts:makeCachedCollectionServiceLayer].
+- The result cache key itself does not include a dialect identity. The app has one active dialect per process; a future multi-database process must add a dialect token [cached-collection.ts:stableListKey].

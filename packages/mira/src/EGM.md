@@ -116,3 +116,8 @@ to `crypto/node.ts`, `http/auth-node.ts`, and `http/server-factory-node.ts`, agg
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+## Dialect boundary (issue #45)
+
+- `Dialect` owns identifier quoting, rule SQL rendering, placeholder translation, and delete-result strategy. `Repository` requires it and no longer assumes `.sql`-quoted identifiers [dialect/dialect.ts:DialectType] [repository/repository.ts:RepositoryLive].
+- `CollectionService`, file serving, auth session lookup, and cache key building all pass the active dialect into rule compilation and predicate helpers [collection-service/collection-service.ts:compileRule] [http/auth.ts:authenticateSession] [cache/ctx-key.ts:buildCtxCacheTag].
+- `Dialect`, `sqliteDialect`, `DialectType`, `RuleSqlDialect`, `FieldValueType`, `Quote`, and `TimestampUnit` are exported from the Node and Bun package entries so external layers can satisfy `RepositoryLive` [index.ts:Dialect] [index.bun.ts:Dialect].
