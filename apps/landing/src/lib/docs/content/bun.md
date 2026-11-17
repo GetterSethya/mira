@@ -1,14 +1,14 @@
-Run the same app on Bun with native filesystem, HTTP, SQLite, hashing, and images. The platform preset swaps runtime services; your collection definitions and builder chain stay as they are.
+Run the same app on Bun with native filesystem, HTTP, SQLite, hashing, and images. The platform preset swaps runtime services. Your collection definitions and builder chain stay as they are.
 
-This page assumes the builder from [server](../server/); only the platform and database presets change.
+This page assumes the builder from [server](../server/). Only the platform and database presets change.
 
 ## Requirements
 
-Bun **1.3.14 or newer**. `Bun.Image` landed in 1.3.14 and backs the native thumbnail path; `BunPlatform` checks `Bun.version` when the layer builds and fails with a clear error on older runtimes. The tested baseline is 1.4.2.
+Bun **1.3.14 or newer**. `Bun.Image` landed in 1.3.14 and backs the native thumbnail path. `BunPlatform` checks `Bun.version` when the layer builds and fails with a clear error on older runtimes. The tested baseline is 1.4.2.
 
 ## Quick start
 
-Install the same packages you would on Node. `@gettersethya/mira` includes the Bun presets; there is no separate package.
+Install the same packages you would on Node. `@gettersethya/mira` includes the Bun presets. There is no separate package.
 
 ```install
 bun add @gettersethya/mira effect@4.0.0
@@ -39,10 +39,10 @@ Run it with `bun run src/index.ts`. `BunPlatform.runMain` hands the effect to `B
 
 | Import | Runtime |
 |---|---|
-| `@gettersethya/mira/bun` | Explicit Bun entry; use this for TypeScript. |
+| `@gettersethya/mira/bun` | Explicit Bun entry. Use this for TypeScript. |
 | `@gettersethya/mira` | Resolves the `bun` export condition under Bun and the Node entry everywhere else. |
 
-The root condition is a convenience. Bun resolves `bun` before `default`; Node and bundlers that do not know the condition keep the Node entry. TypeScript only sees the Bun declarations from the root when `moduleResolution` is `bundler` and `customConditions` includes `bun`; otherwise import `@gettersethya/mira/bun` for the Bun types.
+The root condition is a convenience. Bun resolves `bun` before `default`. Node and bundlers that do not know the condition keep the Node entry. TypeScript only sees the Bun declarations from the root when `moduleResolution` is `bundler` and `customConditions` includes `bun`. Otherwise import `@gettersethya/mira/bun` for the Bun types.
 
 ## What is native and what is reused
 
@@ -76,7 +76,7 @@ Bun 1.4.2 implements the APIs these layers need. The native layers are selected 
 
 `BunAuthServiceLayer` hashes new passwords with `Bun.password` using OWASP-recommended Argon2id parameters (19 MiB, 2 iterations). Verification auto-detects the encoded algorithm. Rows that start with `scrypt$` are verified with the shared async scrypt verifier, so a Node-created database moves to Bun without resetting passwords.
 
-New Bun passwords are stored as `$argon2id$v=19$...`; the Node platform continues to write the `scrypt$<salt>$<hash>` format.
+New Bun passwords are stored as `$argon2id$v=19$...`. The Node platform continues to write the `scrypt$<salt>$<hash>` format.
 
 A successful login also upgrades a legacy `scrypt$...` row to Argon2id on Bun. The upgrade is best-effort: if hashing or the write fails, the login still succeeds with the old row. `BunPortablePlatform` opts out of Argon2id, so it does not rehash.
 
@@ -96,9 +96,9 @@ Password login consumes two budgets before the user lookup: 100 attempts per IP 
 
 `ThumbnailServiceBunLive` uses `Bun.Image` for `contain` (`WxHb`) and `fill` (`WxHf`) specs. The work runs off the JavaScript thread and is encoded back to the input MIME type (JPEG quality 80). `Bun.Image` does not expose a centre-crop operation, so `cover` (`WxH`, the default) uses Photon. A native `Bun.Image` failure also falls back to Photon rather than failing the request.
 
-Before either backend decodes pixels, a platform-neutral PNG/JPEG/WebP header parser enforces a 64-megapixel budget, including an independent `width * height` check. A compressed image bomb is rejected before allocation. On supported Bun the native path also passes `maxPixels` to `Bun.Image.metadata()`; the Photon path (Node and the Bun `cover`/fallback) uses the header parser.
+Before either backend decodes pixels, a platform-neutral PNG/JPEG/WebP header parser enforces a 64-megapixel budget, including an independent `width * height` check. A compressed image bomb is rejected before allocation. On supported Bun the native path also passes `maxPixels` to `Bun.Image.metadata()`. The Photon path (Node and the Bun `cover`/fallback) uses the header parser.
 
-Use `makeThumbnailServiceBunLive({ maxPixels, allowPhotonFallback })` for a different Bun budget or for a strict no-fallback layer; `allowPhotonFallback: false` is how the smoke proves the native path actually ran. The Node/Photon layer has the same knob: `makeThumbnailServicePhotonLive({ maxPixels })`.
+Use `makeThumbnailServiceBunLive({ maxPixels, allowPhotonFallback })` for a different Bun budget or for a strict no-fallback layer. `allowPhotonFallback: false` is how the smoke proves the native path actually ran. The Node/Photon layer has the same knob: `makeThumbnailServicePhotonLive({ maxPixels })`.
 
 ### UUIDs
 
@@ -136,20 +136,20 @@ The tested set is Bun `1.4.2`, `effect@4.0.0`, `@effect/platform-bun@4.0.0`, `@e
 
 The repository includes:
 
-- `apps/example-bun/src/index.ts` — a Bun app with `Posts` and the dashboard plugin.
-- `apps/example-bun/src/smoke.ts` — boots the real layer graph on an ephemeral SQLite file, runs migrations, exercises GET/POST collection routes, checks the dashboard status route, sends a real SMTP message through an in-process server, round-trips a file through local storage, verifies the native hash vectors, Argon2id hashing, legacy scrypt verification and rehash eligibility, UUIDv7, native contain/fill thumbnails with Photon disabled, and the pixel-budget guard, checks the rate-limit store, and proves port fallback by occupying the first port.
+- `apps/example-bun/src/index.ts`: a Bun app with `Posts` and the dashboard plugin.
+- `apps/example-bun/src/smoke.ts`: boots the real layer graph on an ephemeral SQLite file, runs migrations, exercises GET/POST collection routes, checks the dashboard status route, sends a real SMTP message through an in-process server, round-trips a file through local storage, verifies the native hash vectors, Argon2id hashing, legacy scrypt verification and rehash eligibility, UUIDv7, native contain/fill thumbnails with Photon disabled, and the pixel-budget guard, checks the rate-limit store, and proves port fallback by occupying the first port.
 
 ```bash
 bun run apps/example-bun/src/index.ts
 bun run apps/example-bun/src/smoke.ts
 ```
 
-The smoke is the runtime proof. It does not replace the Node test suite; run `pnpm -r test` for the shared behavior.
+The smoke is the runtime proof. It does not replace the Node test suite. Run `pnpm -r test` for the shared behavior.
 
 ## What is not covered
 
 - Deno, Postgres, and MySQL.
-- Bun versions older than `1.3.14`; `BunPlatform` fails fast on them.
+- Bun versions older than `1.3.14`. `BunPlatform` fails fast on them.
 - A Bun-native SMTP client. `nodemailer` uses Bun's native `node:net` and TLS implementation.
 - Native `cover` thumbnails. `Bun.Image` has no centre-crop operation yet, so `cover` uses Photon.
 - Automatic Bun → Node password portability. Use `BunPortablePlatform` if you need it.

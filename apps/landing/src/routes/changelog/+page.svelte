@@ -7,7 +7,7 @@
 </script>
 
 <svelte:head>
-  <title>Changelog — Mira</title>
+  <title>Changelog | Mira</title>
   <meta
     name="description"
     content="Every Mira release, generated from the project changelog on GitHub."

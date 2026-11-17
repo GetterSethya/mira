@@ -1,4 +1,6 @@
 @import "@fontsource-variable/geist-mono";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 
 :root {
   color-scheme: light;
@@ -124,10 +126,18 @@ html[data-theme='dark'] {
 }
 
 html {
+  background: var(--bg);
   -webkit-text-size-adjust: 100%;
   scroll-behavior: smooth;
   scroll-padding-top: 88px;
   scrollbar-gutter: stable;
+}
+
+.nav,
+.benchmarks,
+.footer,
+.notice {
+  font-feature-settings: 'zero' 0, 'ss09' 1;
 }
 
 body {
@@ -291,6 +301,76 @@ button {
   text-decoration: none;
 }
 
+/* Scroll-aware edge fade, adapted from shadcn scroll-fade. */
+@property --scroll-fade-t {
+  syntax: '<length-percentage>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-b {
+  syntax: '<length-percentage>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes scroll-fade-reveal-t {
+  from {
+    --scroll-fade-t: 0px;
+  }
+  to {
+    --scroll-fade-t: var(--_scroll-fade-size-t);
+  }
+}
+
+@keyframes scroll-fade-reveal-b {
+  from {
+    --scroll-fade-b: var(--_scroll-fade-size-b);
+  }
+  to {
+    --scroll-fade-b: 0px;
+  }
+}
+
+.scroll-fade {
+  --_scroll-fade-size-t: min(12%, 40px);
+  --_scroll-fade-size-b: min(12%, 40px);
+  --scroll-fade-reveal: 96px;
+  --scroll-fade-block: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--scroll-fade-t, 0px),
+    #000 calc(100% - var(--scroll-fade-b, 0px)),
+    transparent 100%
+  );
+  -webkit-mask-image: var(--scroll-fade-block);
+  mask-image: var(--scroll-fade-block);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+@supports (animation-timeline: scroll()) {
+  .scroll-fade {
+    animation:
+      scroll-fade-reveal-t 1ms ease-in-out,
+      scroll-fade-reveal-b 1ms ease-in-out;
+    animation-timeline:
+      scroll(self y),
+      scroll(self y);
+    animation-range:
+      0 var(--scroll-fade-reveal),
+      calc(100% - var(--scroll-fade-reveal)) 100%;
+    animation-fill-mode: both;
+  }
+}
+
+@supports not (animation-timeline: scroll()) {
+  .scroll-fade {
+    --scroll-fade-t: var(--_scroll-fade-size-t);
+    --scroll-fade-b: var(--_scroll-fade-size-b);
+  }
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -371,4 +451,24 @@ button {
 
 .skip:focus {
   top: 12px;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes bar-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }

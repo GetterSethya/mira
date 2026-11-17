@@ -13,12 +13,12 @@
 </script>
 
 <svelte:head>
-  <title>Mira — a backend you define and run</title>
+  <title>Mira: a backend you define and run</title>
   <meta
     name="description"
     content="Collection definitions in TypeScript become a REST API with auth, rules, uploads, cursor pagination and a typed client. Self-hosted, on Effect v4."
   />
-  <meta property="og:title" content="Mira — a backend you define and run" />
+  <meta property="og:title" content="Mira: a backend you define and run" />
   <meta
     property="og:description"
     content="Collections in TypeScript. REST API, auth, uploads and rules out. One server you run, on Effect v4."

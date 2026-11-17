@@ -5,6 +5,25 @@ export type QuickstartSample = {
   code: string;
 };
 
+export type QuickstartGroup = {
+  id: 'server' | 'client';
+  label: string;
+  keys: ReadonlyArray<string>;
+};
+
+export const quickstartGroups: ReadonlyArray<QuickstartGroup> = [
+  {
+    id: 'server',
+    label: 'server',
+    keys: ['collections', 'feed', 'rules', 'hooks', 'server']
+  },
+  {
+    id: 'client',
+    label: 'client',
+    keys: ['client', 'react', 'svelte', 'vue']
+  }
+];
+
 export const quickstartSamples: ReadonlyArray<QuickstartSample> = [
   {
     key: 'install',
@@ -307,7 +326,7 @@ export const quickstartSamples: ReadonlyArray<QuickstartSample> = [
     label: 'rest.sh',
     lang: 'bash',
     code: [
-      '# Login with an auth collection — returns { token, record }',
+      '# Login with an auth collection: returns { token, record }',
       'curl -s http://localhost:3000/api/collections/users/auth-with-password \\',
       '  -H "Content-Type: application/json" \\',
       `  -d '{"email":"ada@example.com","password":"correct horse battery"}'`,

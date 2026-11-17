@@ -12,7 +12,7 @@
       index: '02',
       domain: 'rules',
       title: 'Rules on every request',
-      body: 'Rules compile to a SQL WHERE clause and run on every call. A missing rule denies ordinary callers; plugin admin collections are exempt.'
+      body: 'Rules compile to a SQL WHERE clause and run on every call. A missing rule denies ordinary callers. Plugin admin collections are exempt.'
     },
     {
       index: '03',
@@ -36,7 +36,7 @@
       index: '06',
       domain: 'storage',
       title: 'SQLite, or your bucket',
-      body: 'The builder ships SQLite and local-disk presets; SQLite is the only database backend. An S3-compatible bucket drops in without touching a collection.'
+      body: 'The builder ships SQLite and local-disk presets. SQLite is the only database backend. An S3-compatible bucket drops in without touching a collection.'
     }
   ];
 </script>
@@ -45,7 +45,7 @@
   <div class="container">
     <div class="section-head" use:reveal>
       <p class="eyebrow">What it replaces</p>
-      <h2>Write collections in TypeScript; the API follows.</h2>
+      <h2>Write collections in TypeScript. The API follows.</h2>
       <p class="lede">
         For a solo developer or small team: each collection yields its table, routes and
         types, replacing the router, auth and upload code you would write.

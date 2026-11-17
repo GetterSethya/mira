@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
+  import { page } from '$app/state';
 
   let visible = $state(false);
+  const hiddenRoute = $derived(page.url.pathname.startsWith('/benchmarks'));
 
   function scrollToTop() {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -20,7 +22,7 @@
   });
 </script>
 
-{#if visible}
+{#if visible && !hiddenRoute}
   <button
     class="scroll-top"
     type="button"

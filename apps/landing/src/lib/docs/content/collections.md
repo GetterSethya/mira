@@ -4,7 +4,7 @@ Declare a collection once in TypeScript and Mira derives the table, the routes, 
 
 ### Base collections
 
-`BaseCollection.define(name, fields)` returns a `BaseCollectionBuilder` for a physical table with full create, read, update, and delete support. Use it for the records your app owns. You supply only your own fields; `id` and `seqId` are rejected in the field map because the system set is injected.
+`BaseCollection.define(name, fields)` returns a `BaseCollectionBuilder` for a physical table with full create, read, update, and delete support. Use it for the records your app owns. You supply only your own fields. `id` and `seqId` are rejected in the field map because the system set is injected.
 
 ```ts
 import { BaseCollection, Field } from "@gettersethya/mira"
@@ -17,7 +17,7 @@ const Posts = BaseCollection.define("posts", {
 
 ### Auth collections
 
-`AuthCollection.define(name, extraFields)` adds `email`, `emailVerified`, and a hidden, write-only `password` to the schema, plus a unique index on `email`. Use one when records sign in. Only extra fields are yours, and every system field name is rejected in `extraFields`. Auth collections are base collections at runtime, so full CRUD, rules, and indexes apply; see [auth](../auth/) for the credential lifecycle.
+`AuthCollection.define(name, extraFields)` adds `email`, `emailVerified`, and a hidden, write-only `password` to the schema, plus a unique index on `email`. Use one when records sign in. Only extra fields are yours, and every system field name is rejected in `extraFields`. Auth collections are base collections at runtime, so full CRUD, rules, and indexes apply. See [auth](../auth/) for the credential lifecycle.
 
 ### View collections
 
@@ -25,11 +25,11 @@ const Posts = BaseCollection.define("posts", {
 
 ## Where definitions and rules live
 
-Keep collection definitions in a module that both the server and the client import, and keep rules in a module that only the server imports. A definition carries only data — names, fields, options — so a frontend can import it to type its client calls. `defineRule` ships in `@gettersethya/mira`, which is Node-only and must never reach a browser bundle.
+Keep collection definitions in a module that both the server and the client import, and keep rules in a module that only the server imports. A definition carries only data (names, fields, options), so a frontend can import it to type its client calls. `defineRule` ships in `@gettersethya/mira`, which is Node-only and must never reach a browser bundle.
 
 ## Fields
 
-`Field.*` builders return a `FieldDef`; every builder except `Field.seqId` also exposes `.view()`, which marks a field a view query produces rather than a table column.
+`Field.*` builders return a `FieldDef`. Every builder except `Field.seqId` also exposes `.view()`, which marks a field a view query produces rather than a table column.
 
 | Builder | Value | Kind-specific options |
 |---|---|---|
@@ -38,9 +38,9 @@ Keep collection definitions in a module that both the server and the client impo
 | `Field.number` | number | `min`, `max` |
 | `Field.integer` | integer | `min`, `max` |
 | `Field.boolean` | boolean | `default` |
-| `Field.date` | string | none; stored as provided (not parsed as a date) |
-| `Field.email` | email string | none; format validated |
-| `Field.json` | arbitrary JSON | none; serialized by the server |
+| `Field.date` | string | none. Stored as provided (not parsed as a date) |
+| `Field.email` | email string | none. Format validated |
+| `Field.json` | arbitrary JSON | none. Serialized by the server |
 | `Field.file` | filename string | `maxSize`, `mimeTypes`, `protected` |
 | `Field.relation` | target record value | `field` (defaults to `"id"`) |
 | `Field.seqId` | integer | system-managed, no `.view()` |
@@ -68,7 +68,7 @@ export const Posts = BaseCollection.define("posts", {
 }).indexes((I) => [I.on("status"), I.unique("author", "slug")])
 ```
 
-Use `Bytes.fromKB`, `fromMB`, `fromGB`, or `fromTB` for `maxSize`; they resolve to plain byte numbers. A file field stores the filename only, with the bytes in your configured storage backend. `protected: true` requires a short-lived file token when the file is served; see the [HTTP API page](../http-api/) for the file routes.
+Use `Bytes.fromKB`, `fromMB`, `fromGB`, or `fromTB` for `maxSize`. They resolve to plain byte numbers. A file field stores the filename only, with the bytes in your configured storage backend. `protected: true` requires a short-lived file token when the file is served. See the [HTTP API page](../http-api/) for the file routes.
 
 ## Indexes
 
@@ -79,13 +79,13 @@ slug: Field.text({ unique: true }),
 author: Field.relation(Users, { indexed: true }),
 ```
 
-Collection-level indexes use the typed `I` callback, which accepts only field names that exist on the collection; the complete definition above ends with `.indexes((I) => [I.on("status"), I.unique("author", "slug")])`.
+Collection-level indexes use the typed `I` callback, which accepts only field names that exist on the collection. The complete definition above ends with `.indexes((I) => [I.on("status"), I.unique("author", "slug")])`.
 
-`Index.on(...fields)` makes a non-unique index and `Index.unique(...fields)` makes a unique one; composite column order matters. The flags and the callback both end up in the same serialized index list, so `unique` and `indexed` never appear on a property. Auth collections already carry a unique index on `email`, and view collections have no indexes.
+`Index.on(...fields)` makes a non-unique index and `Index.unique(...fields)` makes a unique one. Composite column order matters. The flags and the callback both end up in the same serialized index list, so `unique` and `indexed` never appear on a property. Auth collections already carry a unique index on `email`, and view collections have no indexes.
 
 ## Relations
 
-`Field.relation(Target, { field })` stores another collection's field value, defaulting to the target's `id`. Only the target collection name and target field are serialized; the collection object itself is a compile-time phantom used to type `expand` results. Relation values are validated as strings on write, and `expand` joins the target record at read time, subject to the target's `view` rule.
+`Field.relation(Target, { field })` stores another collection's field value, defaulting to the target's `id`. Only the target collection name and target field are serialized. The collection object itself is a compile-time phantom used to type `expand` results. Relation values are validated as strings on write, and `expand` joins the target record at read time, subject to the target's `view` rule.
 
 ```ts
 author: Field.relation(Users),                    // stores users.id
@@ -94,28 +94,28 @@ ownerEmail: Field.relation(Users, { field: "email" }),
 
 ## System fields
 
-Base and auth collections gain `id`, `seqId`, `created`, and `updated`; all four carry `x-generated`, so the server rejects them in create and update payloads. `seqId` is the cursor column: hidden from responses, and monotonic. View collections inherit none of them; their values come from the query.
+Base and auth collections gain `id`, `seqId`, `created`, and `updated`. All four carry `x-generated`, so the server rejects them in create and update payloads. `seqId` is the cursor column: hidden from responses, and monotonic. View collections inherit none of them. Their values come from the query.
 
 ## What gets serialized
 
-Serialization adds the annotations for you; you never write `x-*` keys yourself. The internal serialized schema uses these `x-*` properties:
+Serialization adds the annotations for you. You never write `x-*` keys yourself. The internal serialized schema uses these `x-*` properties:
 
-- `x-collection-kind` — `"base"`, `"auth"`, or `"view"`.
-- `x-system` and `x-generated` — server-managed fields.
-- `x-hidden` — stripped from non-admin responses (auth `password`).
-- `x-view-only` — a field produced by a view query rather than a physical column.
-- `x-kind` — per-field discriminator such as `"json"`, `"date"`, `"file"`, `"relation"`, `"literalText"`, `"seqId"`, `"password"`.
-- `x-literal` — allowed values for `literalText`.
-- `x-collection` / `x-field` — relation target and target field.
-- `x-maxSize` / `x-mimeTypes` / `x-protected` — file constraints.
-- `x-indexes` — normalized unique and non-unique indexes; `unique` and `indexed` never appear as property flags.
-- `x-view-query` — the raw SQL for a view collection.
+- `x-collection-kind`: `"base"`, `"auth"`, or `"view"`.
+- `x-system` and `x-generated`: server-managed fields.
+- `x-hidden`: stripped from non-admin responses (auth `password`).
+- `x-view-only`: a field produced by a view query rather than a physical column.
+- `x-kind`: per-field discriminator such as `"json"`, `"date"`, `"file"`, `"relation"`, `"literalText"`, `"seqId"`, `"password"`.
+- `x-literal`: allowed values for `literalText`.
+- `x-collection` / `x-field`: relation target and target field.
+- `x-maxSize` / `x-mimeTypes` / `x-protected`: file constraints.
+- `x-indexes`: normalized unique and non-unique indexes. `unique` and `indexed` never appear as property flags.
+- `x-view-query`: the raw SQL for a view collection.
 
 `GET /api/_schema` is admin-gated and returns a normalized view of each collection (top-level `kind`, `fields`, `indexes`, `rules`, `viewQuery`), so do not assume the raw `x-*` names appear there unchanged. Inspect the endpoint's response instead.
 
 ## View collections
 
-A view collection requires `id` and `seqId` in its field map, both declared with `.view()`; `define()` throws if either is missing or declared without it. List the exact columns your query returns.
+A view collection requires `id` and `seqId` in its field map, both declared with `.view()`. `define()` throws if either is missing or declared without it. List the exact columns your query returns.
 
 ```ts
 import { Field, ViewCollection } from "@gettersethya/mira"
@@ -134,7 +134,7 @@ const PublishedPosts = ViewCollection.define(
 )
 ```
 
-Because `seqId` drives cursor pagination, the query must return a monotonic integer per row. `id` must be unique. Filters, sort, select, and expand work; create, update, and delete return `405`.
+Because `seqId` drives cursor pagination, the query must return a monotonic integer per row. `id` must be unique. Filters, sort, select, and expand work. Create, update, and delete return `405`.
 
 ## Common mistakes
 

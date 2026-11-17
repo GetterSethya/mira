@@ -10,7 +10,7 @@
     {
       index: '02',
       title: 'Build the app',
-      body: 'Mira.builder() requires platform, database, storage and collections; rules, crons, telemetry and CORS are optional. A missing step fails at compile time.'
+      body: 'Mira.builder() requires platform, database, storage and collections. Rules, crons, telemetry and CORS are optional. A missing step fails at compile time.'
     },
     {
       index: '03',

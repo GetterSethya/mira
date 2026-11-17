@@ -1,4 +1,4 @@
-Write one `defineRule` binding per collection and name who may list, read, create, update, and delete each row. A rule is a per-action expression that the server compiles into a SQL `WHERE` fragment and evaluates on every request against the authenticated user, the request parameters, and the row being read or written. A collection with no rule for an action denies ordinary callers — nothing is open by default.
+Write one `defineRule` binding per collection and name who may list, read, create, update, and delete each row. A rule is a per-action expression that the server compiles into a SQL `WHERE` fragment and evaluates on every request against the authenticated user, the request parameters, and the row being read or written. A collection with no rule for an action denies ordinary callers. Nothing is open by default.
 
 ## Attach rules
 
@@ -41,16 +41,16 @@ Mira.builder()
   .rules([usersRules, postsRules])
 ```
 
-The builder also needs `.platform()`, `.database()`, and `.storage()` before `.build()`; they are omitted here to keep the rule wiring visible. The [getting-started page](../getting-started/) shows the full required chain.
+The builder also needs `.platform()`, `.database()`, and `.storage()` before `.build()`. They are omitted here to keep the rule wiring visible. The [getting-started page](../getting-started/) shows the full required chain.
 
-The bindings are merged into the collection schemas at build time and carried on the schema as `x-rules`. The builder rejects a second binding for the same collection and throws when a binding names a collection that is not in `.collections([...])`. Any action you omit stays closed. The rules above give every reader the public list, the published-or-own view, and owner-only writes; `usersRules` additionally relies on open signup, which the [auth](../auth/) page covers in full.
+The bindings are merged into the collection schemas at build time and carried on the schema as `x-rules`. The builder rejects a second binding for the same collection and throws when a binding names a collection that is not in `.collections([...])`. Any action you omit stays closed. The rules above give every reader the public list, the published-or-own view, and owner-only writes. `usersRules` additionally relies on open signup, which the [auth](../auth/) page covers in full.
 
 ## Actions
 
 | Action | Rule evaluated against | Result when the rule fails |
 | --- | --- | --- |
-| `list` | every row being read | a missing rule is 403; a false rule omits the row |
-| `view` | the row with the requested id | a missing rule is 403; a false rule is 404 |
+| `list` | every row being read | a missing rule is 403. A false rule omits the row |
+| `view` | the row with the requested id | a missing rule is 403. A false rule is 404 |
 | `create` | the validated payload | 403 |
 | `update` | the stored row (request-body operands see the merged patch) | 403 |
 | `delete` | the stored row | 403 |
@@ -60,48 +60,48 @@ The bindings are merged into the collection schemas at build time and carried on
 
 `manage` is auth-only. Base collections type it as `never` and view collections expose only `list`/`view`, so declaring it anywhere else is a compile error.
 
-It is additive: it never grants create or update on its own — the base rule still decides whether the request is allowed — and it has no effect on list, view, or delete. On create it is evaluated against the payload with `emailVerified` forced to `false`, so the field it guards cannot satisfy the rule; on update it is evaluated against the stored row. What a matching manager may then write is on [auth](../auth/).
+It is additive: it never grants create or update on its own. The base rule still decides whether the request is allowed, and it has no effect on list, view, or delete. On create it is evaluated against the payload with `emailVerified` forced to `false`, so the field it guards cannot satisfy the rule. On update it is evaluated against the stored row. What a matching manager may then write is on [auth](../auth/).
 
 ## Operands
 
-`R` is a `RuleBuilder` narrowed to the collection: `R.field()` accepts only declared field names and types each comparison to the field. Base collections also expose `id`, `seqId`, `created`, and `updated`; auth collections add `email`, `emailVerified`, and `selfId()`.
+`R` is a `RuleBuilder` narrowed to the collection: `R.field()` accepts only declared field names and types each comparison to the field. Base collections also expose `id`, `seqId`, `created`, and `updated`. Auth collections add `email`, `emailVerified`, and `selfId()`.
 
 ### Record operands
 
-- `R.field("status")` — a record column, chainable with `.eq`, `.neq`, `.gt`, `.gte`, `.lt`, `.lte`, `.in`, `.startsWith`, `.contains`. Comparisons take an operand, so wrap raw values in `R.literal`. `startsWith` and `contains` compile to `LIKE` with a concatenated `%` pattern.
-- `R.literal(value)` — a bound value; every literal becomes a SQL parameter and is never interpolated into SQL.
-- `R.subquery(Comments, "post").where((Q) => Q.field("author").eq(R.authId(Users)))` — an `IN (SELECT …)` operand; the callback is scoped to the target collection's fields. (Assume a `Comments` collection exists.)
+- `R.field("status")`: a record column, chainable with `.eq`, `.neq`, `.gt`, `.gte`, `.lt`, `.lte`, `.in`, `.startsWith`, `.contains`. Comparisons take an operand, so wrap raw values in `R.literal`. `startsWith` and `contains` compile to `LIKE` with a concatenated `%` pattern.
+- `R.literal(value)`: a bound value. Every literal becomes a SQL parameter and is never interpolated into SQL.
+- `R.subquery(Comments, "post").where((Q) => Q.field("author").eq(R.authId(Users)))`: an `IN (SELECT …)` operand. The callback is scoped to the target collection's fields. (Assume a `Comments` collection exists.)
 
 ### Auth operands
 
-- `R.authId(Users)` — the authenticated user's `id`. The collection argument is a type/field reference, not a check that the session came from that collection; pair it with `R.authCollection()` when the app has more than one auth collection.
-- `R.auth(Users, "emailVerified")` — a field from the authenticated user's record. The same collection caveat applies.
-- `R.authCollection()` — the collection name of the authenticated user.
-- `R.selfId()` — `authId` for the collection the rule belongs to; available only inside auth-collection rules. See [auth](../auth/) for the session it reads.
+- `R.authId(Users)`: the authenticated user's `id`. The collection argument is a type/field reference, not a check that the session came from that collection. Pair it with `R.authCollection()` when the app has more than one auth collection.
+- `R.auth(Users, "emailVerified")`: a field from the authenticated user's record. The same collection caveat applies.
+- `R.authCollection()`: the collection name of the authenticated user.
+- `R.selfId()`: `authId` for the collection the rule belongs to. Available only inside auth-collection rules. See [auth](../auth/) for the session it reads.
 
 ### Request operands
 
-- `R.request("header" | "query" | "body", key)` — a request value. `body` is meaningful only for create and update; in list, view, and delete rules it resolves to `null` and never matches.
+- `R.request("header" | "query" | "body", key)`: a request value. `body` is meaningful only for create and update. In list, view, and delete rules it resolves to `null` and never matches.
 
 ### Time operands
 
-- `R.now()`, `R.dateAdd(operand, -30, "day")`, `R.dateDiff(left, right, "day")` — timestamp operands.
+- `R.now()`, `R.dateAdd(operand, -30, "day")`, `R.dateDiff(left, right, "day")`: timestamp operands.
 
 ### Combinators
 
-- `R.public()` — always true; compiles to `1 = 1`.
-- `R.and(...)`, `R.or(...)`, `R.not(...)` — boolean combinators; sub-expressions are parenthesised so precedence is explicit.
+- `R.public()`: always true. Compiles to `1 = 1`.
+- `R.and(...)`, `R.or(...)`, `R.not(...)`: boolean combinators. Sub-expressions are parenthesised so precedence is explicit.
 
 ## Evaluation order
 
 A rule is looked up by action, compiled, and then bound in this order:
 
-1. `list` compiles to a `WHERE` clause ANDed with your filter and cursor; the sort is applied to the rows that survive. A missing rule is 403; a rule that evaluates false omits the row rather than rejecting the page.
-2. `view` ANDs the rule with `t.id = ?`. A missing rule is 403; a false rule returns 404, so an invisible record is indistinguishable from a missing one.
+1. `list` compiles to a `WHERE` clause ANDed with your filter and cursor. The sort is applied to the rows that survive. A missing rule is 403. A rule that evaluates false omits the row rather than rejecting the page.
+2. `view` ANDs the rule with `t.id = ?`. A missing rule is 403. A false rule returns 404, so an invisible record is indistinguishable from a missing one.
 3. `create` evaluates the rule against the validated payload with `SELECT 1 WHERE …` before inserting.
-4. `update` checks the stored row by id before writing; `R.request("body", …)` sees the merged patch, not the stored row.
+4. `update` checks the stored row by id before writing. `R.request("body", …)` sees the merged patch, not the stored row.
 5. `delete` checks the stored row by id.
-6. `manage` is evaluated together with `create` and `update` on auth collections; it never replaces the base action rule.
+6. `manage` is evaluated together with `create` and `update` on auth collections. It never replaces the base action rule.
 
 The missing-rule check for update and delete runs before any row is loaded, so a closed action cannot leak existence. A rule that references the authenticated user fails closed with 403 when the request has no session. A body reference in a list, view, or delete rule can never match, and the server logs one warning per collection and action at startup.
 
@@ -113,7 +113,7 @@ WHERE ((t.status = ?) OR (t.author = ?)) AND (t.id = ?)
 
 ## Admin bypass
 
-**Admin bypass is a plugin concern.** `ctx.admin` skips rule compilation entirely — validation still applies. It is granted only when the presented token belongs to a collection a plugin declared as an admin collection; the dashboard's `_superadmin` is the built-in example. An app with no such plugin has an empty admin set and no bypass at all. Adding ordinary app collections to that list would disable their rules, so don't.
+**Admin bypass is a plugin concern.** `ctx.admin` skips rule compilation entirely. Validation still applies. It is granted only when the presented token belongs to a collection a plugin declared as an admin collection. The dashboard's `_superadmin` is the built-in example. An app with no such plugin has an empty admin set and no bypass at all. Adding ordinary app collections to that list would disable their rules, so don't.
 
 ## Common mistakes
 

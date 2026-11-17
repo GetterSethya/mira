@@ -11,7 +11,7 @@
   <div class="container inner">
     <div class="copy" use:reveal>
       <p class="eyebrow">TypeScript on Effect v4</p>
-      <h1>A backend you define and&nbsp;run.</h1>
+      <h1>A backend you define <span class="nowrap">and run.</span></h1>
       <p class="lede">
         Mira is a TypeScript backend you host: collections in code, and routes, auth,
         uploads and rules built from them.
@@ -31,7 +31,7 @@
   </div>
 
   <div class="container meta">
-    <span>fig. 01 — abstract dither field</span>
+    <span>fig. 01: abstract dither field</span>
     <span>8×8 bayer · 1-bit</span>
   </div>
 </section>
@@ -105,6 +105,10 @@
     color: var(--hero-fg);
     font-size: clamp(40px, 5.6vw, 76px);
     letter-spacing: -0.045em;
+  }
+
+  .nowrap {
+    white-space: nowrap;
   }
 
   .lede {

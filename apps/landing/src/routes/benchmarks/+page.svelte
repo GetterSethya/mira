@@ -2,15 +2,19 @@
   import Nav from '$lib/components/Nav.svelte';
   import NoticeBar from '$lib/components/NoticeBar.svelte';
   import Footer from '$lib/components/Footer.svelte';
+  import BenchmarkMetricRow from '$lib/components/BenchmarkMetricRow.svelte';
   import benchmarks from '$lib/benchmarks.json';
 
-  const { results, environment, method, generatedAt } = benchmarks;
+  const { results, environment, method } = benchmarks;
 
   const node = results.node;
   const bun = results.bun;
 
   const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
-  const decimal = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+  const decimal = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  });
 
   const formatRate = (value: number) => `${number.format(value)} req/s`;
   const formatMs = (value: number) => `${decimal.format(value)} ms`;
@@ -22,27 +26,16 @@
       day: 'numeric'
     });
 
-  if (
-    node.runs.length !== bun.runs.length ||
-    node.runs.length !== method.runs
-  ) {
+  if (node.runs.length !== bun.runs.length || node.runs.length !== method.runs) {
     throw new Error('Benchmark JSON has mismatched run counts');
   }
-
-  const startup = node.startupMs / bun.startupMs;
-  const startupFaster = startup - 1;
-  const create = bun.create.throughput / node.create.throughput;
-  const list = bun.list.throughput / node.list.throughput;
-  const listCached = bun.listCached.throughput / node.listCached.throughput;
-  const p50 = 1 - bun.list.p50 / node.list.p50;
-  const cachedP50 = 1 - bun.listCached.p50 / node.listCached.p50;
 
   const values = (
     runs: ReadonlyArray<{
       startupMs: number;
-      create: { throughput: number; p50: number; p95: number };
-      list: { throughput: number; p50: number; p95: number };
-      listCached: { throughput: number; p50: number; p95: number };
+      create: { throughput: number; p50: number; p95: number; p99: number };
+      list: { throughput: number; p50: number; p95: number; p99: number };
+      listCached: { throughput: number; p50: number; p95: number; p99: number };
     }>,
     pick: (run: (typeof node.runs)[number]) => number
   ) => runs.map(pick);
@@ -52,36 +45,95 @@
     max: Math.max(...values)
   });
 
-  const formatRange = (
-    values: ReadonlyArray<number>,
-    format: (value: number) => string
-  ) => `${format(range(values).min)}–${format(range(values).max)}`;
+  const formatRange = (values: ReadonlyArray<number>, format: (value: number) => string) =>
+    `${format(range(values).min)}-${format(range(values).max)}`;
 
-  const overlaps = (a: ReadonlyArray<number>, b: ReadonlyArray<number>) => {
-    const left = range(a);
-    const right = range(b);
-    return left.max >= right.min && right.max >= left.min;
+  type Runtime = 'node' | 'bun';
+  type MetricGroup = 'speed' | 'latency';
+
+  type MetricRow = {
+    id: string;
+    group: MetricGroup;
+    label: string;
+    short: string;
+    note: string;
+    node: number;
+    bun: number;
+    lowerIsBetter: boolean;
+    nodeText: string;
+    bunText: string;
+    nodeRange: string;
+    bunRange: string;
+    delta: string;
+    winner: Runtime;
+    nodeBar: number;
+    bunBar: number;
   };
 
-  const bunWins = (
-    nodeValues: ReadonlyArray<number>,
-    bunValues: ReadonlyArray<number>,
-    lowerIsBetter: boolean
-  ) =>
-    nodeValues.reduce((wins, value, index) => {
-      const bunValue = bunValues[index];
-      if (bunValue === undefined) return wins;
-      const better = lowerIsBetter ? bunValue < value : bunValue > value;
-      return wins + (better ? 1 : 0);
-    }, 0);
+  const winnerOf = (nodeValue: number, bunValue: number, lowerIsBetter: boolean): Runtime => {
+    if (lowerIsBetter) return bunValue <= nodeValue ? 'bun' : 'node';
+    return bunValue >= nodeValue ? 'bun' : 'node';
+  };
 
-  const verdict = (overlaps: boolean, wins: number) => {
-    if (wins === method.runs && !overlaps) return 'Bun, clean separation';
-    if (wins === method.runs) return 'Bun, consistent direction (magnitude uncertain)';
-    if (wins === 0 && !overlaps) return 'Node, clean separation';
-    if (wins === 0) return 'Node, consistent direction (magnitude uncertain)';
-    if (overlaps) return `mixed (${wins}/${method.runs} Bun), ranges overlap`;
-    return `mixed (${wins}/${method.runs} Bun), ranges separated`;
+  const deltaOf = (
+    nodeValue: number,
+    bunValue: number,
+    winner: Runtime,
+    lowerIsBetter: boolean,
+    kind: 'ratio' | 'percent'
+  ) => {
+    const winnerValue = winner === 'bun' ? bunValue : nodeValue;
+    const loserValue = winner === 'bun' ? nodeValue : bunValue;
+    const name = winner === 'bun' ? 'Bun' : 'Node';
+
+    if (kind === 'percent') {
+      return `${name} ${Math.round((1 - winnerValue / loserValue) * 100)}% lower`;
+    }
+
+    const factor = lowerIsBetter ? loserValue / winnerValue : winnerValue / loserValue;
+    return `${name} ${decimal.format(factor)}×${lowerIsBetter ? ' faster startup' : ' throughput'}`;
+  };
+
+  const barWidth = (value: number, best: number, lowerIsBetter: boolean) =>
+    lowerIsBetter ? (best / value) * 100 : (value / best) * 100;
+
+  const makeRow = (spec: {
+    id: string;
+    group: MetricGroup;
+    label: string;
+    short: string;
+    note: string;
+    node: number;
+    bun: number;
+    lowerIsBetter: boolean;
+    format: (value: number) => string;
+    nodeRange: string;
+    bunRange: string;
+    deltaKind: 'ratio' | 'percent';
+  }): MetricRow => {
+    const winner = winnerOf(spec.node, spec.bun, spec.lowerIsBetter);
+    const best = spec.lowerIsBetter
+      ? Math.min(spec.node, spec.bun)
+      : Math.max(spec.node, spec.bun);
+
+    return {
+      id: spec.id,
+      group: spec.group,
+      label: spec.label,
+      short: spec.short,
+      note: spec.note,
+      node: spec.node,
+      bun: spec.bun,
+      lowerIsBetter: spec.lowerIsBetter,
+      nodeText: spec.format(spec.node),
+      bunText: spec.format(spec.bun),
+      nodeRange: spec.nodeRange,
+      bunRange: spec.bunRange,
+      delta: deltaOf(spec.node, spec.bun, winner, spec.lowerIsBetter, spec.deltaKind),
+      winner,
+      nodeBar: barWidth(spec.node, best, spec.lowerIsBetter),
+      bunBar: barWidth(spec.bun, best, spec.lowerIsBetter)
+    };
   };
 
   const nodeStartup = values(node.runs, (run) => run.startupMs);
@@ -92,815 +144,463 @@
   const bunList = values(bun.runs, (run) => run.list.throughput);
   const nodeListCached = values(node.runs, (run) => run.listCached.throughput);
   const bunListCached = values(bun.runs, (run) => run.listCached.throughput);
-  const nodeCreateP95 = values(node.runs, (run) => run.create.p95);
-  const bunCreateP95 = values(bun.runs, (run) => run.create.p95);
   const nodeListP50 = values(node.runs, (run) => run.list.p50);
   const bunListP50 = values(bun.runs, (run) => run.list.p50);
-  const nodeListP95 = values(node.runs, (run) => run.list.p95);
-  const bunListP95 = values(bun.runs, (run) => run.list.p95);
   const nodeListCachedP50 = values(node.runs, (run) => run.listCached.p50);
   const bunListCachedP50 = values(bun.runs, (run) => run.listCached.p50);
-  const nodeListCachedP95 = values(node.runs, (run) => run.listCached.p95);
-  const bunListCachedP95 = values(bun.runs, (run) => run.listCached.p95);
 
-  const createWins = bunWins(nodeCreate, bunCreate, false);
-  const listWins = bunWins(nodeList, bunList, false);
-  const listCachedWins = bunWins(nodeListCached, bunListCached, false);
-  const p50Wins = bunWins(nodeListP50, bunListP50, true);
-  const cachedP50Wins = bunWins(nodeListCachedP50, bunListCachedP50, true);
-
-  const summary = [
-    {
-      label: 'Cold start · native TypeScript',
-      node: `${formatMs(node.startupMs)} (${formatRange(nodeStartup, (v) => decimal.format(v))} ms)`,
-      bun: `${formatMs(bun.startupMs)} (${formatRange(bunStartup, (v) => decimal.format(v))} ms)`,
-      delta: startupFaster > 0
-        ? `Bun ${decimal.format(startupFaster)}× faster`
-        : `Node ${decimal.format(-startupFaster)}× faster`,
-      note: 'Node 24 strips types at startup; Bun runs TypeScript natively. The bracket is spawn to first 200.'
-    },
-    {
-      label: 'Create throughput',
-      node: `${formatRate(node.create.throughput)} (${formatRange(nodeCreate, (v) => number.format(v))} req/s)`,
-      bun: `${formatRate(bun.create.throughput)} (${formatRange(bunCreate, (v) => number.format(v))} req/s)`,
-      delta: overlaps(nodeCreate, bunCreate)
-        ? `mixed (${createWins}/${method.runs} Bun)`
-        : `Bun ${decimal.format(create)}× Node`,
-      note: overlaps(nodeCreate, bunCreate)
-        ? 'Overlapping ranges mean the create gap is not separable at this sample size.'
-        : `Bun faster in ${createWins}/${method.runs} pairs; ranges separated.`
-    },
-    {
-      label: 'List throughput (uncached)',
-      node: `${formatRate(node.list.throughput)} (${formatRange(nodeList, (v) => number.format(v))} req/s)`,
-      bun: `${formatRate(bun.list.throughput)} (${formatRange(bunList, (v) => number.format(v))} req/s)`,
-      delta: overlaps(nodeList, bunList)
-        ? `mixed (${listWins}/${method.runs} Bun)`
-        : `Bun ${decimal.format(list)}× Node`,
-      note: 'Unique filter per request bypasses the in-memory list cache.'
-    },
-    {
-      label: 'List throughput (cached)',
-      node: `${formatRate(node.listCached.throughput)} (${formatRange(nodeListCached, (v) => number.format(v))} req/s)`,
-      bun: `${formatRate(bun.listCached.throughput)} (${formatRange(bunListCached, (v) => number.format(v))} req/s)`,
-      delta: overlaps(nodeListCached, bunListCached)
-        ? `mixed (${listCachedWins}/${method.runs} Bun)`
-        : `Bun ${decimal.format(listCached)}× Node`,
-      note: 'Same URL repeated after a warm-up, so the in-memory list cache serves every measured request.'
-    },
-    {
-      label: 'List p50 latency (uncached)',
-      node: `${formatMs(node.list.p50)} (${formatRange(nodeListP50, (v) => decimal.format(v))} ms)`,
-      bun: `${formatMs(bun.list.p50)} (${formatRange(bunListP50, (v) => decimal.format(v))} ms)`,
-      delta: overlaps(nodeListP50, bunListP50)
-        ? `mixed (${p50Wins}/${method.runs} Bun)`
-        : `Bun ${Math.round(p50 * 100)}% lower`,
-      note: 'Median of the five per-run p50s. At 50 in flight it includes queue time, not service time.'
-    },
-    {
-      label: 'List p50 latency (cached)',
-      node: `${formatMs(node.listCached.p50)} (${formatRange(nodeListCachedP50, (v) => decimal.format(v))} ms)`,
-      bun: `${formatMs(bun.listCached.p50)} (${formatRange(bunListCachedP50, (v) => decimal.format(v))} ms)`,
-      delta: overlaps(nodeListCachedP50, bunListCachedP50)
-        ? `mixed (${cachedP50Wins}/${method.runs} Bun)`
-        : `Bun ${Math.round(cachedP50 * 100)}% lower`,
-      note: 'Cache-hit path; same URL repeated after warm-up.'
-    }
-  ];
-
-  const throughput = [
-    {
+  const metricRows: ReadonlyArray<MetricRow> = [
+    makeRow({
+      id: 'startup',
+      group: 'speed',
+      label: 'Cold start',
+      short: 'Cold start',
+      note: 'spawn to first HTTP 200',
+      node: node.startupMs,
+      bun: bun.startupMs,
+      lowerIsBetter: true,
+      format: formatMs,
+      nodeRange: formatRange(nodeStartup, (value) => decimal.format(value)),
+      bunRange: formatRange(bunStartup, (value) => decimal.format(value)),
+      deltaKind: 'ratio'
+    }),
+    makeRow({
+      id: 'create',
+      group: 'speed',
       label: 'Create',
-      detail: `${method.createRequests} measured writes after ${method.seedRecords} seed writes, concurrency ${method.concurrency}`,
+      short: 'Create',
+      note: '500 writes, coalesced',
       node: node.create.throughput,
-      bun: bun.create.throughput
-    },
-    {
-      label: 'List (uncached)',
-      detail: `${method.listRequests.toLocaleString('en-US')} unique-filter first-page reads, limit ${method.responseLimit}, concurrency ${method.concurrency}`,
+      bun: bun.create.throughput,
+      lowerIsBetter: false,
+      format: formatRate,
+      nodeRange: formatRange(nodeCreate, (value) => number.format(value)),
+      bunRange: formatRange(bunCreate, (value) => number.format(value)),
+      deltaKind: 'ratio'
+    }),
+    makeRow({
+      id: 'list',
+      group: 'speed',
+      label: 'List, uncached',
+      short: 'List',
+      note: 'unique filter per request',
       node: node.list.throughput,
-      bun: bun.list.throughput
-    },
-    {
-      label: 'List (cached)',
-      detail: `${method.listRequests.toLocaleString('en-US')} repeated-URL first-page reads after warm-up, limit ${method.responseLimit}, concurrency ${method.concurrency}`,
+      bun: bun.list.throughput,
+      lowerIsBetter: false,
+      format: formatRate,
+      nodeRange: formatRange(nodeList, (value) => number.format(value)),
+      bunRange: formatRange(bunList, (value) => number.format(value)),
+      deltaKind: 'ratio'
+    }),
+    makeRow({
+      id: 'list-cached',
+      group: 'speed',
+      label: 'List, cached',
+      short: 'Cached list',
+      note: 'same URL after warm-up',
       node: node.listCached.throughput,
-      bun: bun.listCached.throughput
-    }
+      bun: bun.listCached.throughput,
+      lowerIsBetter: false,
+      format: formatRate,
+      nodeRange: formatRange(nodeListCached, (value) => number.format(value)),
+      bunRange: formatRange(bunListCached, (value) => number.format(value)),
+      deltaKind: 'ratio'
+    }),
+    makeRow({
+      id: 'p50',
+      group: 'latency',
+      label: 'List p50, uncached',
+      short: 'List p50',
+      note: 'median of five p50s',
+      node: node.list.p50,
+      bun: bun.list.p50,
+      lowerIsBetter: true,
+      format: formatMs,
+      nodeRange: formatRange(nodeListP50, (value) => decimal.format(value)),
+      bunRange: formatRange(bunListP50, (value) => decimal.format(value)),
+      deltaKind: 'percent'
+    }),
+    makeRow({
+      id: 'p50-cached',
+      group: 'latency',
+      label: 'List p50, cached',
+      short: 'Cached p50',
+      note: 'cache hit',
+      node: node.listCached.p50,
+      bun: bun.listCached.p50,
+      lowerIsBetter: true,
+      format: formatMs,
+      nodeRange: formatRange(nodeListCachedP50, (value) => decimal.format(value)),
+      bunRange: formatRange(bunListCachedP50, (value) => decimal.format(value)),
+      deltaKind: 'percent'
+    })
   ];
 
-  const latency = [
+  type Filter = 'all' | MetricGroup;
+  let filter = $state<Filter>('all');
+
+  const orderedRows = [
+    ...metricRows.filter((row) => row.id !== 'startup'),
+    ...metricRows.filter((row) => row.id === 'startup')
+  ];
+  const visibleRows = $derived(
+    filter === 'all' ? orderedRows : orderedRows.filter((row) => row.group === filter)
+  );
+  const speedRows = $derived(visibleRows.filter((row) => row.group === 'speed'));
+  const latencyMetricRows = $derived(visibleRows.filter((row) => row.group === 'latency'));
+
+  type LatencyRow = {
+    label: string;
+    node: number;
+    bun: number;
+    winner: Runtime;
+    nodeText: string;
+    bunText: string;
+    delta: string;
+    shortDelta: string;
+  };
+
+  const latencyRows: ReadonlyArray<LatencyRow> = [
     { label: 'Create p50', node: node.create.p50, bun: bun.create.p50 },
     { label: 'Create p95', node: node.create.p95, bun: bun.create.p95 },
     { label: 'Create p99', node: node.create.p99, bun: bun.create.p99 },
-    { label: 'List p50 (uncached)', node: node.list.p50, bun: bun.list.p50 },
-    { label: 'List p95 (uncached)', node: node.list.p95, bun: bun.list.p95 },
-    { label: 'List p99 (uncached)', node: node.list.p99, bun: bun.list.p99 },
-    { label: 'List p50 (cached)', node: node.listCached.p50, bun: bun.listCached.p50 },
-    { label: 'List p95 (cached)', node: node.listCached.p95, bun: bun.listCached.p95 },
-    { label: 'List p99 (cached)', node: node.listCached.p99, bun: bun.listCached.p99 }
-  ];
+    { label: 'List p50', node: node.list.p50, bun: bun.list.p50 },
+    { label: 'List p95', node: node.list.p95, bun: bun.list.p95 },
+    { label: 'List p99', node: node.list.p99, bun: bun.list.p99 },
+    { label: 'Cached p50', node: node.listCached.p50, bun: bun.listCached.p50 },
+    { label: 'Cached p95', node: node.listCached.p95, bun: bun.listCached.p95 },
+    { label: 'Cached p99', node: node.listCached.p99, bun: bun.listCached.p99 }
+  ].map((row) => {
+    const winner = winnerOf(row.node, row.bun, true);
+    const winnerValue = winner === 'bun' ? row.bun : row.node;
+    const loserValue = winner === 'bun' ? row.node : row.bun;
+    return {
+      ...row,
+      winner,
+      nodeText: formatMs(row.node),
+      bunText: formatMs(row.bun),
+      delta: `${winner === 'bun' ? 'Bun' : 'Node'} ${Math.round((1 - winnerValue / loserValue) * 100)}% lower`,
+      shortDelta: `${winner === 'bun' ? 'Bun' : 'Node'} ${Math.round((1 - winnerValue / loserValue) * 100)}%`
+    };
+  });
 
-  const spread = [
-    {
-      label: 'Cold start',
-      node: `${formatRange(nodeStartup, (v) => decimal.format(v))} ms`,
-      bun: `${formatRange(bunStartup, (v) => decimal.format(v))} ms`,
-      overlaps: overlaps(nodeStartup, bunStartup),
-      wins: bunWins(nodeStartup, bunStartup, true)
-    },
-    {
-      label: 'Create throughput',
-      node: `${formatRange(nodeCreate, (v) => number.format(v))} req/s`,
-      bun: `${formatRange(bunCreate, (v) => number.format(v))} req/s`,
-      overlaps: overlaps(nodeCreate, bunCreate),
-      wins: bunWins(nodeCreate, bunCreate, false)
-    },
-    {
-      label: 'Create p95',
-      node: `${formatRange(nodeCreateP95, (v) => decimal.format(v))} ms`,
-      bun: `${formatRange(bunCreateP95, (v) => decimal.format(v))} ms`,
-      overlaps: overlaps(nodeCreateP95, bunCreateP95),
-      wins: bunWins(nodeCreateP95, bunCreateP95, true)
-    },
-    {
-      label: 'List throughput (uncached)',
-      node: `${formatRange(nodeList, (v) => number.format(v))} req/s`,
-      bun: `${formatRange(bunList, (v) => number.format(v))} req/s`,
-      overlaps: overlaps(nodeList, bunList),
-      wins: bunWins(nodeList, bunList, false)
-    },
-    {
-      label: 'List throughput (cached)',
-      node: `${formatRange(nodeListCached, (v) => number.format(v))} req/s`,
-      bun: `${formatRange(bunListCached, (v) => number.format(v))} req/s`,
-      overlaps: overlaps(nodeListCached, bunListCached),
-      wins: bunWins(nodeListCached, bunListCached, false)
-    },
-    {
-      label: 'List p50 (uncached)',
-      node: `${formatRange(nodeListP50, (v) => decimal.format(v))} ms`,
-      bun: `${formatRange(bunListP50, (v) => decimal.format(v))} ms`,
-      overlaps: overlaps(nodeListP50, bunListP50),
-      wins: bunWins(nodeListP50, bunListP50, true)
-    },
-    {
-      label: 'List p95 (uncached)',
-      node: `${formatRange(nodeListP95, (v) => decimal.format(v))} ms`,
-      bun: `${formatRange(bunListP95, (v) => decimal.format(v))} ms`,
-      overlaps: overlaps(nodeListP95, bunListP95),
-      wins: bunWins(nodeListP95, bunListP95, true)
-    },
-    {
-      label: 'List p50 (cached)',
-      node: `${formatRange(nodeListCachedP50, (v) => decimal.format(v))} ms`,
-      bun: `${formatRange(bunListCachedP50, (v) => decimal.format(v))} ms`,
-      overlaps: overlaps(nodeListCachedP50, bunListCachedP50),
-      wins: bunWins(nodeListCachedP50, bunListCachedP50, true)
-    },
-    {
-      label: 'List p95 (cached)',
-      node: `${formatRange(nodeListCachedP95, (v) => decimal.format(v))} ms`,
-      bun: `${formatRange(bunListCachedP95, (v) => decimal.format(v))} ms`,
-      overlaps: overlaps(nodeListCachedP95, bunListCachedP95),
-      wins: bunWins(nodeListCachedP95, bunListCachedP95, true)
-    }
-  ];
+  const latencyGroups = ['Create', 'List', 'Cached'].map((label) => ({
+    label,
+    rows: latencyRows.filter((row) => row.label.startsWith(label))
+  }));
 
-  const maxThroughput = Math.max(
-    ...throughput.flatMap((metric) => [metric.node, metric.bun])
-  );
+  const facts = [
+    { label: 'Runs', value: `${method.runs} interleaved pairs` },
+    { label: 'Records', value: `${method.seedRecords} seed + ${method.createRequests} creates` },
+    {
+      label: 'List load',
+      value: `${number.format(method.listRequests)} unique + ${number.format(method.listRequests)} repeated`
+    },
+    { label: 'Concurrency', value: `${method.concurrency} in flight` },
+    { label: 'Host', value: `${environment.cores} threads · ~${environment.memoryGb} GB RAM` },
+    { label: 'List cache', value: `${method.cache.listTtlMs / 1000} s TTL` },
+    { label: 'Response limit', value: `${method.responseLimit} rows` },
+    { label: 'Load generator', value: 'Node script' },
+    { label: 'Create batching', value: 'enabled · 0 ms · 100 max' },
+    { label: 'Telemetry', value: method.telemetry },
+    {
+      label: 'Node loader',
+      value: method.nodeLoader === 'native' ? 'native type stripping' : 'tsx loader'
+    },
+    { label: 'Bun loader', value: 'native' }
+  ] as const;
+
+  const cpu = environment.cpu.trim().replace(' with Radeon Graphics', '');
 </script>
 
 <svelte:head>
-  <title>Benchmarks — Node vs Bun — Mira</title>
+  <title>Node vs Bun benchmarks | Mira</title>
   <meta
     name="description"
-    content="A single-machine HTTP benchmark of the same Mira app on Node and Bun, with startup, create, uncached list, cached list and latency results plus run-to-run spread."
+    content="A single-machine Mira benchmark: the same TypeScript app and SQLite collection on Node 24 and Bun 1.4, with startup, create, list, cache and latency ranges."
   />
 </svelte:head>
 
-<a class="skip" href="#main">Skip to content</a>
+<a
+  class="sr-only [font-family:var(--font-mono)] focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-[100] focus:rounded-[var(--radius-sm)] focus:bg-[var(--ink)] focus:px-4 focus:py-2.5 focus:text-[14px] focus:text-[color:var(--bg)]!"
+  href="#main">Skip to content</a
+>
 
-<div class="top-stack">
+<div class="sticky top-0 z-40">
   <NoticeBar />
   <Nav />
 </div>
 
-<main id="main" class="benchmarks">
-  <div class="container">
-    <header class="hero">
-      <p class="eyebrow">Benchmarks</p>
-      <h1>Node vs Bun.<br />Same app, different runtime.</h1>
-      <p class="lede">
-        One Mira app, one SQLite-backed <code>posts</code> collection, one HTTP load
-        generator. The server code is identical; the platform preset changes the runtime,
-        HTTP server, TypeScript loader and SQLite driver. {method.runs} interleaved runs per
-        runtime; medians and run ranges below.
+<main
+  id="main"
+  class="mx-auto w-full max-w-[1200px] px-[var(--gutter)] pb-24 pt-14 [font-family:var(--font-mono)] text-[16px] leading-[1.6] text-[var(--fg)] max-sm:pt-10"
+>
+  <header class="pt-6">
+    <div class="animate-[rise_520ms_var(--ease)_both] motion-reduce:animate-none">
+      <h1
+        class="max-w-[12ch] text-[clamp(44px,6.2vw,78px)] font-semibold leading-[1.02] tracking-[-0.045em] text-[var(--ink)] max-sm:text-[44px]"
+      >
+        Node vs Bun, measured.
+      </h1>
+    </div>
+    <div
+      class="mt-10 grid items-start gap-8 animate-[rise_520ms_80ms_var(--ease)_both] motion-reduce:animate-none lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-16"
+    >
+      <p class="max-w-[52ch] text-[18px] leading-[1.6] text-[var(--fg)]">
+        One Mira app, one SQLite collection, one load generator. Five interleaved pairs. Every metric is
+        compared on its own.
       </p>
-      <p class="stamp">
-        Measured {formatDate(generatedAt)} · {environment.os} · {environment.cpu.trim()} · Node
-        {environment.node} · Bun {environment.bun}
-      </p>
-    </header>
+      <div class="lg:pt-1">
+        <p
+          class="flex flex-col gap-0.5 text-[14px] leading-[1.7] text-[var(--muted)] sm:flex-row sm:flex-wrap sm:gap-x-3"
+        >
+          <span>{cpu}</span>
+          <span>Node {environment.node}</span>
+          <span>Bun {environment.bun}</span>
+        </p>
+        <div class="mt-7 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-5">
+          <a
+            class="inline-flex min-h-11 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--ink)] px-[18px] text-[14px] font-medium text-[color:var(--bg)]! no-underline transition-opacity hover:opacity-85"
+            href="#result">See the numbers</a
+          >
+          <a
+            class="text-[14px] font-medium text-[var(--ink)]! underline underline-offset-4"
+            href="#method">Run it yourself</a
+          >
+        </div>
+      </div>
+    </div>
+  </header>
 
-    <section class="summary" aria-label="Summary">
-      {#each summary as item}
-        <article class="summary-card">
-          <p class="summary-label">{item.label}</p>
-          <p class="summary-delta">{item.delta}</p>
-          <dl>
-            <div>
-              <dt>Node</dt>
-              <dd>{item.node}</dd>
-            </div>
-            <div class="bun">
-              <dt>Bun</dt>
-              <dd>{item.bun}</dd>
-            </div>
-          </dl>
-          <p class="summary-note">{item.note}</p>
-        </article>
-      {/each}
-    </section>
-    <p class="summary-footnote">
-      “Ranges overlap” means the best run on one runtime is not clearly separated from the
-      worst run on the other; treat that metric as inconclusive.
-    </p>
-
-    <section class="section throughput-section">
-      <div class="section-head">
-        <p class="eyebrow">Throughput</p>
-        <h2>Requests per second, higher is better.</h2>
-        <p class="lede">
-          The same generated REST routes and rule compiler run on both sides. The create
-          benchmark includes validation, the public create rule, a WAL write and a list-cache
-          invalidation. The uncached list benchmark sends a unique title filter per request so
-          Mira's in-memory list cache cannot serve it. It is an unsorted first page: the query
-          returns 30 rows, so the table size above 30 does not affect its cost; each miss still
-          writes the page back to the cache. The cached list benchmark repeats one URL after a
-          warm-up, so every measured read is served by the in-memory list cache.
+  <section id="result" class="mt-24 scroll-mt-28">
+    <div class="mb-7 flex flex-col items-start justify-between gap-5 lg:flex-row lg:items-end lg:gap-8">
+      <div>
+        <h2 class="animate-[rise_520ms_var(--ease)_both] text-[clamp(28px,3.4vw,42px)] font-semibold leading-[1.05] tracking-[-0.035em] text-[var(--ink)] motion-reduce:animate-none">
+          The result.
+        </h2>
+        <p class="mt-2.5 max-w-[62ch] text-[18px] leading-[1.6] text-[var(--fg)]">
+          Values are medians of five interleaved pairs. Ranges are min-max. The table shows four headline metrics and two p50s. All six rows are separated. A full bar is the faster result.
+        </p>
+        <p class="mt-2 text-[14px] text-[var(--muted)]">
+          Separation is descriptive. Five pairs are not a significance claim.
         </p>
       </div>
-
-      <div class="bars">
-        {#each throughput as metric}
-          <div class="bar-group">
-            <div class="bar-head">
-              <div>
-                <h3>{metric.label}</h3>
-                <p>{metric.detail}</p>
-              </div>
-              <span class="bar-scale">max {formatRate(maxThroughput)}</span>
-            </div>
-            <div class="bar-row">
-              <span class="bar-name">Node</span>
-              <div class="bar-track">
-                <span
-                  class="bar-fill node"
-                  style:width={`${(metric.node / maxThroughput) * 100}%`}
-                ></span>
-              </div>
-              <span class="bar-value">{formatRate(metric.node)}</span>
-            </div>
-            <div class="bar-row">
-              <span class="bar-name">Bun</span>
-              <div class="bar-track">
-                <span
-                  class="bar-fill bun"
-                  style:width={`${(metric.bun / maxThroughput) * 100}%`}
-                ></span>
-              </div>
-              <span class="bar-value">{formatRate(metric.bun)}</span>
-            </div>
-          </div>
-        {/each}
+      <div class="inline-flex flex-none gap-0.5 rounded-[var(--radius-sm)] bg-[var(--surface)] p-[3px]" role="group" aria-label="Filter metrics">
+        <button
+          type="button"
+          class="min-h-[34px] rounded-[4px] border-0 px-3 text-[14px] font-medium transition-colors {filter ===
+          'all'
+            ? 'bg-[var(--code-bg)] text-[var(--ink)]!'
+            : 'bg-transparent text-[var(--muted)]! hover:text-[var(--ink)]!'}"
+          aria-pressed={filter === 'all'}
+          onclick={() => (filter = 'all')}>All rows</button
+        >
+        <button
+          type="button"
+          class="min-h-[34px] rounded-[4px] border-0 px-3 text-[14px] font-medium transition-colors {filter ===
+          'speed'
+            ? 'bg-[var(--code-bg)] text-[var(--ink)]!'
+            : 'bg-transparent text-[var(--muted)]! hover:text-[var(--ink)]!'}"
+          aria-pressed={filter === 'speed'}
+          onclick={() => (filter = 'speed')}>Speed</button
+        >
+        <button
+          type="button"
+          class="min-h-[34px] rounded-[4px] border-0 px-3 text-[14px] font-medium transition-colors {filter ===
+          'latency'
+            ? 'bg-[var(--code-bg)] text-[var(--ink)]!'
+            : 'bg-transparent text-[var(--muted)]! hover:text-[var(--ink)]!'}"
+          aria-pressed={filter === 'latency'}
+          onclick={() => (filter = 'latency')}>p50s</button
+        >
       </div>
-    </section>
+    </div>
 
-    <section class="section">
-      <div class="section-head">
-        <p class="eyebrow">Latency</p>
-        <h2>Percentiles, lower is better.</h2>
-        <p class="lede">
-          Each figure is measured with 50 requests in flight, so it includes time waiting for a
-          worker slot: this is load-conditioned system latency, not single-request service time.
-          The table shows the median of the five per-run p50/p95/p99 values; the spread table
-          below shows the run-to-run range and paired wins.
-        </p>
-      </div>
+    <div class="rounded-[var(--radius-md)] bg-[var(--surface)] px-6 py-2 max-sm:px-4">
+      {#if speedRows.length > 0}
+        <div data-ui>
+          {#each speedRows as row, index (row.id)}
+            <BenchmarkMetricRow {row} {index} />
+          {/each}
+        </div>
+      {/if}
+      {#if latencyMetricRows.length > 0}
+        <div
+          class="border-[var(--border)] {speedRows.length > 0 ? 'border-t' : ''}"
+          data-ui
+        >
+          {#each latencyMetricRows as row, index (row.id)}
+            <BenchmarkMetricRow {row} {index} />
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </section>
 
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex — scrollable region; keyboard focus is intentional -->
-      <div class="table-wrap" tabindex="0" role="region" aria-label="Latency medians">
-        <table>
-          <caption class="sr-only">Median latency per metric for Node and Bun</caption>
+  <section id="latency" class="mt-24 scroll-mt-28">
+    <div class="mb-7">
+      <h2 class="animate-[rise_520ms_var(--ease)_both] text-[clamp(28px,3.4vw,42px)] font-semibold leading-[1.05] tracking-[-0.035em] text-[var(--ink)] motion-reduce:animate-none">
+        Latency.
+      </h2>
+      <p class="mt-2.5 max-w-[62ch] text-[18px] leading-[1.6] text-[var(--fg)]">
+        Lower is better. Medians of five interleaved pairs. Per-run ranges are in the raw JSON.
+        Some percentile ranges overlap. Read those medians as direction, not separation. Fifty
+        requests in flight, so each row includes queue time, not single-request service time.
+      </p>
+    </div>
+
+    <div class="rounded-[var(--radius-md)] bg-[var(--surface)] px-4 py-2 max-sm:px-2" data-ui>
+      <div class="hidden sm:block">
+        <table class="w-full border-collapse text-[14px]">
+          <caption class="sr-only">Latency percentiles for Node and Bun</caption>
           <thead>
             <tr>
-              <th scope="col">Metric</th>
-              <th scope="col">Node median</th>
-              <th scope="col">Bun median</th>
+              <th class="border-b border-[var(--border)] px-2 py-3 text-left text-[14px] font-medium text-[var(--muted)]" scope="col">Metric</th>
+              <th class="border-b border-[var(--border)] px-2 py-3 text-left text-[14px] font-medium text-[var(--muted)]" scope="col">Node</th>
+              <th class="border-b border-[var(--border)] px-2 py-3 text-left text-[14px] font-medium text-[var(--muted)]" scope="col">Bun</th>
+              <th class="border-b border-[var(--border)] px-2 py-3 text-right text-[14px] font-medium text-[var(--muted)]" scope="col">Gap</th>
             </tr>
           </thead>
           <tbody>
-            {#each latency as row}
+            {#each latencyRows as row (row.label)}
               <tr>
-                <th scope="row">{row.label}</th>
-                <td>{formatMs(row.node)}</td>
-                <td>{formatMs(row.bun)}</td>
+                <th class="border-b border-[var(--border)] px-2 py-3 text-left font-medium text-[var(--fg)] tabular-nums" scope="row">{row.label}</th>
+                <td
+                  class="border-b border-[var(--border)] px-2 py-3 text-left tabular-nums {row.winner ===
+                  'node'
+                    ? 'font-medium text-[var(--success)]'
+                    : 'text-[var(--fg)]'}">{row.nodeText}</td
+                >
+                <td
+                  class="border-b border-[var(--border)] px-2 py-3 text-left tabular-nums {row.winner ===
+                  'bun'
+                    ? 'font-medium text-[var(--success)]'
+                    : 'text-[var(--fg)]'}">{row.bunText}</td
+                >
+                <td class="border-b border-[var(--border)] px-2 py-3 text-right text-[var(--muted)]">{row.delta}</td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
 
-      <div class="spread-wrap">
-        <h3>Run-to-run spread</h3>
-        <p>
-          Minimum to maximum across the {method.runs} runs. “Bun wins” counts interleaved
-          pairs where Bun was faster (higher throughput or lower latency); runs are paired by
-          index. A clean separation means the ranges do not touch. Consistent direction with
-          overlapping ranges means every pair favoured Bun but one outlier widened the range.
-        </p>
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex — scrollable region; keyboard focus is intentional -->
-        <div class="table-wrap" tabindex="0" role="region" aria-label="Run-to-run spread">
-          <table>
-            <caption class="sr-only">Minimum and maximum values, Bun wins and verdict per metric</caption>
-            <thead>
-              <tr>
-                <th scope="col">Metric</th>
-                <th scope="col">Node range</th>
-                <th scope="col">Bun range</th>
-                <th scope="col">Bun wins</th>
-                <th scope="col">Verdict</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each spread as row}
-                <tr>
-                  <th scope="row">{row.label}</th>
-                  <td>{row.node}</td>
-                  <td>{row.bun}</td>
-                  <td>{row.wins}/{method.runs}</td>
-                  <td class:inconclusive={row.overlaps}>
-                    {verdict(row.overlaps, row.wins)}
-                  </td>
-                </tr>
+      <div class="sm:hidden">
+        {#each latencyGroups as group (group.label)}
+          <div class="border-b border-[var(--border)] py-3 last:border-b-0">
+            <p class="text-[14px] font-medium text-[var(--ink)]">{group.label}</p>
+            <div
+              class="mt-1 grid grid-cols-[32px_1fr_1fr_auto] items-baseline gap-x-3 gap-y-1 text-[13px]"
+            >
+              <span></span>
+              <span class="text-right text-[var(--muted)]">Node</span>
+              <span class="text-right text-[var(--muted)]">Bun</span>
+              <span class="border-l border-[var(--border)] pl-3 text-right text-[var(--muted)]">Gap</span>
+              {#each group.rows as row}
+                <span class="text-[var(--muted)]">{row.label.slice(group.label.length + 1)}</span>
+                <span
+                  class="text-right tabular-nums {row.winner === 'node'
+                    ? 'font-medium text-[var(--success)]'
+                    : 'text-[var(--fg)]'}">{row.nodeText}</span
+                >
+                <span
+                  class="text-right tabular-nums {row.winner === 'bun'
+                    ? 'font-medium text-[var(--success)]'
+                    : 'text-[var(--fg)]'}">{row.bunText}</span
+                >
+                <span class="border-l border-[var(--border)] pl-3 text-right text-[var(--muted)]">· {row.shortDelta}</span>
               {/each}
-            </tbody>
-          </table>
+            </div>
+          </div>
+        {/each}
+      </div>
+    </div>
+  </section>
+
+  <section id="method" class="mt-24 scroll-mt-28">
+    <div class="mb-7">
+      <h2 class="animate-[rise_520ms_var(--ease)_both] text-[clamp(28px,3.4vw,42px)] font-semibold leading-[1.05] tracking-[-0.035em] text-[var(--ink)] motion-reduce:animate-none">
+        The method.
+      </h2>
+      <p class="mt-2.5 max-w-[62ch] text-[18px] leading-[1.6] text-[var(--fg)]">
+        One machine, one app, five interleaved pairs. Both runtimes use the same Mira code,
+        collections, rules and HTTP router. The difference is the runtime stack: platform preset,
+        SQLite driver and TypeScript loader.
+      </p>
+    </div>
+
+    <dl class="grid grid-cols-1 gap-x-12 border-y border-[var(--border)] lg:grid-cols-2" data-ui>
+      {#each facts as fact}
+        <div class="flex items-baseline justify-between gap-5 border-b border-[var(--border)] py-2.5">
+          <dt class="shrink-0 whitespace-nowrap text-[14px] text-[var(--muted)]">{fact.label}</dt>
+          <dd class="text-right text-[14px] text-[var(--fg)]">{fact.value}</dd>
         </div>
-      </div>
-    </section>
+      {/each}
+    </dl>
 
-    <section class="section">
-      <div class="section-head">
-        <p class="eyebrow">Method</p>
-        <h2>What is being measured.</h2>
-      </div>
+    <p class="mt-4 text-[14px] text-[var(--muted)]">
+      Run it yourself:
+      <code class="rounded-[3px] bg-[var(--code-bg)] px-1 py-px [font-family:var(--font-mono)] text-[0.92em] text-[var(--code-fg)]">pnpm benchmark:platforms</code>
+    </p>
 
-      <div class="method-grid">
-        <dl class="facts">
-          <div><dt>Runs</dt><dd>{method.runs} alternating pairs, median shown</dd></div>
-          <div><dt>Records</dt><dd>{method.seedRecords} seed + {method.createRequests} measured creates ({number.format(method.records)} rows)</dd></div>
-          <div><dt>List load</dt><dd>{number.format(method.listRequests)} uncached (unique-filter) + {number.format(method.listRequests)} cached (repeated-URL) requests</dd></div>
-          <div><dt>List cache</dt><dd>{method.cache.enabled ? `enabled (${method.cache.listTtlMs} ms TTL)` : 'disabled'}</dd></div>
-          <div><dt>Concurrency</dt><dd>{method.concurrency} measured; {method.seedConcurrency} seed / {method.warmupConcurrency} warm-up</dd></div>
-          <div><dt>Request body</dt><dd>{method.payloadBytes}-byte <code>body</code> field on create</dd></div>
-          <div><dt>Create batching</dt><dd>{method.batchMutation.create.enabled ? `enabled (${method.batchMutation.create.windowMs} ms window, max ${method.batchMutation.create.maxBatchSize})` : 'disabled'}</dd></div>
-          <div><dt>List response</dt><dd>limit {method.responseLimit} rows</dd></div>
-          <div><dt>Host</dt><dd>{environment.cores} threads · ~{environment.memoryGb} GB RAM</dd></div>
-          <div><dt>Node TS</dt><dd>{method.nodeLoader === 'native' ? 'native type stripping' : 'tsx loader'}</dd></div>
-          <div><dt>Bun TS</dt><dd>native loader</dd></div>
-          <div><dt>Client</dt><dd>Same Node fetch process for both servers</dd></div>
-        </dl>
+    <p class="mt-5 max-w-[68ch] text-[16px] leading-[1.6] text-[var(--fg)]">
+      <strong class="font-semibold">Not measured:</strong> auth, uploads, updates/deletes, relations/expand,
+      pagination past page one, memory, multi-core scaling, other concurrency, other machines,
+      other operating systems, client saturation, and a compiled Node bundle.
+    </p>
 
-        <div class="caveats">
-          <p>
-            This is a directional, single-machine comparison, not a universal claim. Both
-            servers run the same Mira code, collections, rules, migrations and HTTP router.
-            Console telemetry is disabled on both so span export does not compete with the
-            request. Both run the TypeScript server directly: Node 24 strips types at startup,
-            Bun uses its native loader. Bun uses Bun's native HTTP server, SQLite driver and
-            runtime. Node uses <code>node:http</code>, <code>node:sqlite</code> and the Node
-            platform preset. A compiled Node bundle would be a different experiment.
-          </p>
-          <p>
-            Database files are fresh for every run, so startup includes migration. Each Node
-            and Bun run is interleaved (Node, Bun, Node, Bun…) and the uncached list requests use a
-            unique title filter so the in-memory list cache cannot serve them; each miss still
-            writes the page back to the cache, so the number includes that write. The cached
-            list repeats one URL after a warm-up and measures the cache-hit path. Five paired
-            runs can reach a two-sided sign-test floor of p = 0.0625; this is not a
-            significance claim. One concurrency point is not a capacity curve. The load
-            generator is a small Node script with no external benchmark binary. Run it
-            yourself:
-          </p>
-          <pre><code>pnpm benchmark:platforms</code></pre>
-          <p class="not-measured">
-            <strong>Not measured:</strong> auth and password hashing, uploads, updates/deletes,
-            relations and <code>expand</code>, pagination past the first page, memory,
-            multi-core scaling, any concurrency other than {method.concurrency}, any other
-            machine, and a compiled Node bundle. Create writes are durable and I/O-bound, which
-            makes create the noisiest metric.
-          </p>
-          <p class="source">
-            <a
-              href="https://github.com/GetterSethya/mira/tree/main/apps/benchmarks"
-              target="_blank"
-              rel="noreferrer">Methodology and source</a
-            >
-            ·
-            <a
-              href="https://github.com/GetterSethya/mira/blob/main/apps/landing/src/lib/benchmarks.json"
-              target="_blank"
-              rel="noreferrer">Raw per-run results</a
-            >
-            · Links point at the latest main; the raw file changes when the benchmark is rerun.
-          </p>
-        </div>
+    <details class="mt-7 max-w-[68ch]">
+      <summary class="cursor-pointer text-[16px] font-medium text-[var(--ink)]"
+        >Full method, caveats and source</summary
+      >
+      <div class="mt-4 text-[16px] leading-[1.65] text-[var(--fg)] [&>p+p]:mt-3.5">
+        <p>
+          This is a directional, single-machine comparison, not a universal claim. Both servers
+          run the same Mira code. Console telemetry is off on both. Node 24 strips types at
+          startup. Bun uses its native loader. Bun uses its native HTTP server, SQLite driver and
+          runtime. Node uses
+          <code class="rounded-[3px] bg-[var(--code-bg)] px-1 py-px [font-family:var(--font-mono)] text-[0.92em] text-[var(--code-fg)]"
+            >node:http</code
+          >,
+          <code class="rounded-[3px] bg-[var(--code-bg)] px-1 py-px [font-family:var(--font-mono)] text-[0.92em] text-[var(--code-fg)]"
+            >node:sqlite</code
+          >
+          (under active development in Node 24) and the Node platform preset. A compiled Node bundle would be a different experiment.
+          The load generator is a small Node script. No external benchmark binary is used. It
+          runs on the same machine and was not separately benchmarked for saturation.
+        </p>
+        <p>
+          Database files are fresh for every run, so startup includes migration. Startup ends at
+          the first successful
+          <code class="rounded-[3px] bg-[var(--code-bg)] px-1 py-px [font-family:var(--font-mono)] text-[0.92em] text-[var(--code-fg)]"
+            >GET /api/collections/posts?limit=1</code
+          >
+          (HTTP 200). Runs alternate Node-first and Bun-first (Node, Bun, Bun, Node…). Create batching is enabled
+          with a 0 ms window and a 100-write cap. Concurrent single-record writes coalesce into a
+          SQL batch, bounded by the 50 requests in flight. Five interleaved pairs can reach a
+          two-sided sign-test
+          floor of p = 0.0625. This is not a significance claim. One concurrency point is not a
+          capacity curve. Create writes are durable and I/O-bound, which makes create the noisiest
+          metric.
+        </p>
+        <p class="text-[14px] text-[var(--muted)]">
+          <a
+            class="text-[var(--ink)]! underline underline-offset-2"
+            href="https://github.com/GetterSethya/mira/tree/main/apps/benchmarks"
+            target="_blank"
+            rel="noreferrer">Methodology and source</a
+          >
+          ·
+          <a
+            class="text-[var(--ink)]! underline underline-offset-2"
+            href="https://github.com/GetterSethya/mira/blob/main/apps/landing/src/lib/benchmarks.json"
+            target="_blank"
+            rel="noreferrer">Raw per-run results</a
+          >
+          · Links point at the latest main. The raw file changes when the benchmark is rerun.
+        </p>
       </div>
-    </section>
-  </div>
+    </details>
+  </section>
 </main>
 
 <Footer />
-
-<style>
-  .top-stack {
-    position: sticky;
-    top: 0;
-    z-index: 40;
-  }
-
-  .benchmarks {
-    padding: 72px 0 96px;
-  }
-
-  .hero {
-    max-width: 860px;
-    margin-bottom: 48px;
-  }
-
-  .hero h1 {
-    margin: 12px 0 20px;
-    font-size: clamp(40px, 6.2vw, 72px);
-    font-weight: 500;
-    letter-spacing: var(--tracking-tight);
-    line-height: var(--leading-tight);
-  }
-
-  .hero .lede {
-    max-width: 72ch;
-  }
-
-  code {
-    padding: 2px 5px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--code-bg);
-    color: var(--code-fg);
-    font-family: var(--font-mono);
-    font-size: 0.92em;
-  }
-
-  .stamp {
-    margin-top: 22px;
-    color: var(--muted);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.02em;
-    line-height: 1.7;
-  }
-
-  .summary {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 1px;
-    margin-bottom: 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--border);
-    overflow: hidden;
-  }
-
-  .summary-card {
-    padding: 20px;
-    background: var(--surface);
-  }
-
-  .summary-label {
-    color: var(--muted);
-    font-size: var(--text-2xs);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
-  .summary-delta {
-    margin-top: 8px;
-    color: var(--ink);
-    font-size: var(--text-xl);
-    font-weight: 500;
-    letter-spacing: var(--tracking-tight);
-  }
-
-  .summary-card dl {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 16px;
-  }
-
-  .summary-card dl div {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    font-size: var(--text-xs);
-  }
-
-  .summary-card dt {
-    color: var(--muted);
-  }
-
-  .summary-card dd {
-    margin: 0;
-    color: var(--fg);
-    font-variant-numeric: tabular-nums;
-    overflow-wrap: anywhere;
-  }
-
-  .summary-card .bun dd {
-    color: var(--ink);
-    font-weight: 500;
-  }
-
-  .summary-note {
-    margin-top: 12px;
-    color: var(--muted);
-    font-size: var(--text-2xs);
-    line-height: 1.5;
-  }
-
-  .summary-footnote {
-    margin-bottom: 8px;
-    color: var(--muted);
-    font-size: var(--text-xs);
-    line-height: 1.6;
-  }
-
-  .throughput-section {
-    padding-top: clamp(56px, 7vw, 88px);
-  }
-
-  .bars {
-    display: flex;
-    flex-direction: column;
-    gap: 28px;
-    margin-top: 36px;
-  }
-
-  .bar-group {
-    padding: 22px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--surface);
-  }
-
-  .bar-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 20px;
-    margin-bottom: 18px;
-  }
-
-  .bar-head h3 {
-    font-size: var(--text-lg);
-  }
-
-  .bar-head p {
-    margin-top: 4px;
-    color: var(--muted);
-    font-size: var(--text-xs);
-  }
-
-  .bar-scale {
-    color: var(--muted);
-    font-size: var(--text-2xs);
-    white-space: nowrap;
-  }
-
-  .bar-row {
-    display: grid;
-    grid-template-columns: 42px minmax(0, 1fr) 96px;
-    align-items: center;
-    gap: 12px;
-    min-height: 34px;
-  }
-
-  .bar-name {
-    color: var(--muted);
-    font-size: var(--text-xs);
-  }
-
-  .bar-track {
-    height: 12px;
-    border-radius: 3px;
-    background: var(--code-bg);
-    overflow: hidden;
-  }
-
-  .bar-fill {
-    display: block;
-    height: 100%;
-    border-radius: 3px;
-    transform-origin: left;
-  }
-
-  .bar-fill.node {
-    background: var(--border-strong);
-  }
-
-  .bar-fill.bun {
-    background: var(--ink);
-  }
-
-  .bar-value {
-    color: var(--fg);
-    font-size: var(--text-xs);
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-  }
-
-  .table-wrap {
-    margin-top: 32px;
-    overflow-x: auto;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--text-sm);
-  }
-
-  th,
-  td {
-    padding: 12px 16px;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-  }
-
-  thead th {
-    color: var(--muted);
-    font-size: var(--text-2xs);
-    font-weight: 500;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    background: var(--surface);
-  }
-
-  tbody th {
-    font-weight: 400;
-    color: var(--fg);
-  }
-
-  tbody td {
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-
-  tbody tr:last-child th,
-  tbody tr:last-child td {
-    border-bottom: 0;
-  }
-
-  .spread-wrap {
-    margin-top: 40px;
-  }
-
-  .spread-wrap h3 {
-    font-size: var(--text-lg);
-  }
-
-  .spread-wrap > p {
-    max-width: 64ch;
-    margin-top: 6px;
-    color: var(--muted);
-    font-size: var(--text-xs);
-    line-height: 1.7;
-  }
-
-  .spread-wrap .table-wrap {
-    margin-top: 18px;
-  }
-
-  td.inconclusive {
-    color: var(--muted);
-    font-style: italic;
-  }
-
-  table {
-    min-width: 620px;
-  }
-
-  .method-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-    gap: 32px;
-    margin-top: 32px;
-  }
-
-  .facts {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    margin: 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .facts div {
-    display: flex;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .facts dt {
-    color: var(--muted);
-    font-size: var(--text-xs);
-  }
-
-  .facts dd {
-    margin: 0;
-    color: var(--fg);
-    font-size: var(--text-xs);
-    text-align: right;
-  }
-
-  .caveats {
-    color: var(--muted);
-    font-size: var(--text-sm);
-    line-height: 1.7;
-  }
-
-  .caveats p + p {
-    margin-top: 14px;
-  }
-
-  .caveats code {
-    font-size: 0.9em;
-  }
-
-  .caveats pre {
-    margin: 16px 0;
-    padding: 14px 16px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--code-bg);
-    color: var(--code-fg);
-    overflow-x: auto;
-  }
-
-  .source a {
-    color: var(--ink);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-
-  @media (max-width: 900px) {
-    .summary {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .method-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  @media (max-width: 639px) {
-    .benchmarks {
-      padding-top: 48px;
-    }
-
-    .summary {
-      grid-template-columns: 1fr;
-    }
-
-    .bar-row {
-      grid-template-columns: 38px minmax(0, 1fr);
-    }
-
-    .bar-value {
-      grid-column: 2;
-      text-align: left;
-      margin-top: -6px;
-    }
-
-    .bar-head {
-      flex-direction: column;
-      gap: 8px;
-    }
-  }
-</style>

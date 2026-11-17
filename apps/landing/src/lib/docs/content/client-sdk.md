@@ -7,7 +7,7 @@ pnpm add @gettersethya/mira-client effect@^4
 pnpm add @gettersethya/mira-tanstack-adapter   # optional
 ```
 
-`effect` is a peer dependency of the client package, so install it explicitly. The TanStack adapter is optional; the client works without it.
+`effect` is a peer dependency of the client package, so install it explicitly. The TanStack adapter is optional. The client works without it.
 
 ```ts
 import { createMiraClient } from "@gettersethya/mira-client"
@@ -18,7 +18,7 @@ const client = createMiraClient("http://localhost:8080")
 
 `createMiraClient(baseUrl)` prefixes every request with the base URL. The default is `"/"` for a same-origin browser app. Pass `{ type: "server" }` when you run it in SSR or a server process and want to manage the JWT yourself.
 
-`Posts` and `Users` are the definitions from your shared collections module; [collections](../collections/) shows them.
+`Posts` and `Users` are the definitions from your shared collections module. [Collections](../collections/) shows them.
 
 ## Attach collections
 
@@ -28,7 +28,7 @@ const client = createMiraClient("http://localhost:8080")
 const posts = client.collection(Posts)
 ```
 
-`withCollections(map)` creates several accessors at once. The base client returned by `createMiraClient` also exposes `auth`, `telemetry`, and `collection`; `withCollections` adds the per-collection accessors:
+`withCollections(map)` creates several accessors at once. The base client returned by `createMiraClient` also exposes `auth`, `telemetry`, and `collection`. `withCollections` adds the per-collection accessors:
 
 ```ts
 const mira = createMiraClient("/").withCollections({
@@ -65,13 +65,13 @@ const one = mira.posts.getOne("abc123").toEffect()
 
 `.raw()` supplies the fetch-based HTTP client and rejects with the unwrapped `MiraError`, which carries `status`, `body`, and `retryAfterSeconds` when the server supplied one. `.toEffect()` leaves the `HttpClient` requirement to you, so you can provide a test client or a different transport.
 
-Use `isRateLimited(error)` or `error.status === 429` to detect a backoff response. A generic retry schedule does not retry `429`; honor `error.retryAfterSeconds` instead. `error.rateLimitScope` says whether the request, a cooldown, or the mail budget blocked; `error.restart` is true for `too_many_attempts`, meaning the client must request a new code. Email mutations are not idempotent, so do not retry a reset or OTP request without user intent.
+Use `isRateLimited(error)` or `error.status === 429` to detect a backoff response. A generic retry schedule does not retry `429`. Honor `error.retryAfterSeconds` instead. `error.rateLimitScope` says whether the request, a cooldown, or the mail budget blocked. `error.restart` is true for `too_many_attempts`, meaning the client must request a new code. Email mutations are not idempotent, so do not retry a reset or OTP request without user intent.
 
-`getFirstOrNone` requires a filter and forces `limit: 1`. `getFullList` fetches pages at a default page size of `1000` and returns the flat array; it is a convenience method, not an unbounded export.
+`getFirstOrNone` requires a filter and forces `limit: 1`. `getFullList` fetches pages at a default page size of `1000` and returns the flat array. It is a convenience method, not an unbounded export.
 
 ## Query options
 
-`getList` accepts `filter`, `sort`, `order`, `cursor`, `limit`, `select`, `expand`, and `retryOptions`. The filter is a **callback** that receives the typed builder, not a prebuilt node. The `cursor` value is whatever the previous page returned as `nextCursor`, and the client sends it as the `after` parameter. Sorted pagination is supported for non-nullable sort fields; nullable sorted cursors and cursors whose row was deleted return a `422` validation error.
+`getList` accepts `filter`, `sort`, `order`, `cursor`, `limit`, `select`, `expand`, and `retryOptions`. The filter is a **callback** that receives the typed builder, not a prebuilt node. The `cursor` value is whatever the previous page returned as `nextCursor`, and the client sends it as the `after` parameter. Sorted pagination is supported for non-nullable sort fields. Nullable sorted cursors and cursors whose row was deleted return a `422` validation error.
 
 ```ts
 let cursor: number | null = null
@@ -124,7 +124,7 @@ Multipart drops `null` and `undefined` values, so clear other fields with a sepa
 
 ## Auth collections
 
-Auth collections are the only kind that expose `authWithPassword`, `register`, and `me` at runtime; the typed `CollectionClient` requires them for `K = "auth"` and omits them from the required surface for base/view collections.
+Auth collections are the only kind that expose `authWithPassword`, `register`, and `me` at runtime. The typed `CollectionClient` requires them for `K = "auth"` and omits them from the required surface for base/view collections.
 
 ```ts
 const result = await mira.users.authWithPassword().raw({
@@ -148,13 +148,13 @@ const user = await mira.users.register().raw({
 })
 ```
 
-`authWithPassword()` returns either `{ token, record }` or `{ otpRequired: true, challengeId, expiresAt }`. `register()` does not log the user in; call `authWithPassword()` afterwards. It wraps the collection's create endpoint, so open signup requires the collection's `create` rule to allow it.
+`authWithPassword()` returns either `{ token, record }` or `{ otpRequired: true, challengeId, expiresAt }`. `register()` does not log the user in. Call `authWithPassword()` afterwards. It wraps the collection's create endpoint, so open signup requires the collection's `create` rule to allow it.
 
 If the verification mail is blocked, `register()` returns the record with `verificationDeferred: true` and, for a rate limit, `verificationRetryAfterSeconds` instead of `emailVerification`. `me()` unwraps the `{ collection, record }` envelope and rejects with a 401 `MiraError` if the token belongs to another collection.
 
 Email flows add `authConfig()`, `requestPasswordReset()`, `resetPassword()`, `requestEmailVerification()`, `verifyEmail()`, `requestEmailChange()`, `confirmEmailChange()`, `requestPasswordlessLogin()`, `loginWithPasswordlessOtp()`, `verifyLoginOtp()`, and `resendLoginOtp()`. They are required only for auth collections and are enriched by the TanStack adapter like every other mutation or query.
 
-`requestEmailChange()` takes `{ newEmail, oldPassword }`; `confirmEmailChange()` takes `{ token }` and clears the local session after the server invalidates every token for that user. Request methods can reject with a `429` `MiraError`; read `retryAfterSeconds` before retrying. The [email page](../email/) lists the routes, payloads, and limits.
+`requestEmailChange()` takes `{ newEmail, oldPassword }`. `confirmEmailChange()` takes `{ token }` and clears the local session after the server invalidates every token for that user. Request methods can reject with a `429` `MiraError`. Read `retryAfterSeconds` before retrying. The [email page](../email/) lists the routes, payloads, and limits.
 
 ### Browser sessions
 
@@ -185,7 +185,7 @@ See [Auth collections and sessions](../auth/) for credential rules and the sessi
 
 ## TanStack adapter
 
-The adapter package produces plain `{ queryKey, queryFn }` and `{ mutationFn }` objects; it has no TanStack runtime dependency, so React, Solid, and Svelte bindings all consume the same adapter.
+The adapter package produces plain `{ queryKey, queryFn }` and `{ mutationFn }` objects. It has no TanStack runtime dependency, so React, Solid, and Svelte bindings all consume the same adapter.
 
 ```ts
 import { collectionAdapter } from "@gettersethya/mira-tanstack-adapter"
