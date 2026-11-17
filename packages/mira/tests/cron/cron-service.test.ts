@@ -7,6 +7,8 @@ import { expect } from "vitest"
 import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
 import type { CronDef } from "@/cron/types.js"
 import { CronNotFoundError } from "@/cron/types.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 
 // Handlers are Effect.void stubs — R = never, but cron state persistence requires SqlClient
@@ -15,7 +17,8 @@ type StubCronDef = CronDef<never>
 function makeUnitLayer(defs: ReadonlyArray<StubCronDef>) {
   return makeCronServiceLayer(defs).pipe(
     Layer.provide(makeHookServiceLayer([])),
-    Layer.provide(SqliteClient.layer({ filename: ":memory:" }))
+    Layer.provide(SqliteClient.layer({ filename: ":memory:" })),
+    Layer.provide(Layer.succeed(Dialect, sqliteDialect))
   )
 }
 

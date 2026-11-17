@@ -103,7 +103,7 @@ const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pi
   Layer.provide(NodeAuthServiceLayer)
 )
 
-const tokenStoreLayer = TokenStoreLive.pipe(Layer.provide(sqliteLayer))
+const tokenStoreLayer = TokenStoreLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, DialectTest)))
 
 const testLayer = Layer.mergeAll(
   collectionServiceWithDeps,

@@ -16,14 +16,14 @@ persisted. `types.ts` holds `CronDef`, the hook context shapes and `CronState`;
 ### `cron-service.ts`
 
 - `CronService` — `Context.Service` tag with `getAll(): Effect<ReadonlyArray<CronState>>` and `runNow(name): Effect<void, CronNotFoundError>`. [cron-service.ts:CronService]
-- `makeCronServiceLayer(defs)` — `Layer.effect` that validates names, loads persisted state, seeds the `Ref`, forks one scheduled fiber per definition, and returns the service. Generic over the handler requirement `R`. [cron-service.ts:makeCronServiceLayer]
+- `makeCronServiceLayer(defs)` — `Layer.effect` that validates names, ensures `_config` through the shared bootstrap when definitions exist, loads persisted state, seeds the `Ref`, forks one scheduled fiber per definition, and returns the service. With zero definitions it skips the database load and returns an empty service. Generic over the handler requirement `R`. [cron-service.ts:makeCronServiceLayer]
 
 ### `persistence.ts`
 
 - `CRON_STATE_CONFIG_KEY` — the `_config` key `"cron_state"`. [persistence.ts:CRON_STATE_CONFIG_KEY]
 - `PersistedCronState` (type) — record of cron name → persisted entry; derived from `PersistedCronStateSchema`. [persistence.ts:PersistedCronState]
-- `loadPersistedCronState(sql)` — ensures `_config` exists, reads the blob, and decodes it (falling back to `{}` on decode failure). [persistence.ts:loadPersistedCronState]
-- `savePersistedCronState(sql, states)` — serializes all states and upserts the blob (`INSERT OR REPLACE`), swallowing failures as warnings. [persistence.ts:savePersistedCronState]
+- `loadPersistedCronState(sql)` — reads the blob and decodes it (falling back to `{}` on decode failure). It does not create `_config`; the cron layer ensures it through the shared bootstrap. [persistence.ts:loadPersistedCronState]
+- `savePersistedCronState(sql, states)` — serializes all states and upserts the blob with parameterized `INSERT ... ON CONFLICT (key) DO UPDATE`, swallowing failures as warnings. [persistence.ts:savePersistedCronState]
 
 ### `types.ts`
 
@@ -54,18 +54,18 @@ No subdirectories.
 - `runNow` on an unknown name fails with `CronNotFoundError` and performs no work. [cron-service.ts:CronService]
 - The error branch extracts `Cause.findErrorOption` first, otherwise the first die-defect, records it as `lastError`, logs `[cron] error in "<name>"`, fires `runCronError`/`runCronFinished`, then re-fails with the original cause. [cron-service.ts:executeAndTrack]
 - Hook order per tick is `runCronStart` → `runCronExecute` → (detached) run → `runCronSuccess`/`runCronError` + `runCronFinished`; the pre stages may rewrite the context, and only `scheduledAt` is consumed downstream (state keys come from `def.name`). [cron-service.ts:runOneTick]
-- `loadPersistedCronState` creates `_config` if absent and returns `{}` (after a `logWarning`) when the stored JSON fails to decode. [persistence.ts:loadPersistedCronState]
+- `loadPersistedCronState` returns `{}` (after a `logWarning`) when the stored JSON fails to decode. `_config` creation is owned by the cron bootstrap and `AppConfigLive`, not by the load. [persistence.ts:loadPersistedCronState]
 - Persistence write failures are downgraded to `Effect.logWarning` and never propagate into the run. [persistence.ts:savePersistedCronState]
 - `lastError` is round-tripped as `String(error)` / `null`, so stored errors are textual, not structured values. [persistence.ts:savePersistedCronState]
-- `SqlClient` is a hard layer dependency (state storage), and `HookService` is resolved once at layer construction. [cron-service.ts:makeCronServiceLayer]
+- `SqlClient` and `Dialect` are hard layer dependencies (state storage and `_config` bootstrap), and `HookService` is resolved once at layer construction. [cron-service.ts:makeCronServiceLayer]
 - `getAll` returns a plain array snapshot of the `Ref` contents, in HashMap iteration order. [cron-service.ts:CronService]
 
 ## Side Effects
 
 - Forks scoped repeating fibers per definition — timers driven by `def.schedule`; they live as long as the layer scope. [cron-service.ts:makeCronServiceLayer]
 - Forks detached fibers for each run and for cron observers, so `runNow` returns before the handler finishes. [cron-service.ts:CronService] [cron-service.ts:runOneTick]
-- Reads and writes the `_config` table in the main application database (`SELECT … WHERE key = …`, `INSERT OR REPLACE`). [persistence.ts:loadPersistedCronState] [persistence.ts:savePersistedCronState]
-- Creates the `_config` table via DDL on load. [persistence.ts:loadPersistedCronState]
+- Reads and writes the `_config` table in the main application database (`SELECT ... WHERE key = ...`, `INSERT ... ON CONFLICT (key) DO UPDATE`). [persistence.ts:loadPersistedCronState] [persistence.ts:savePersistedCronState]
+- Ensures `_config` exists through the shared bootstrap before the first load when cron definitions exist. [cron-service.ts:makeCronServiceLayer]
 - Emits `Effect.log` on handler failure and `Effect.logWarning` on decode/persist failure. [cron-service.ts:executeAndTrack] [persistence.ts:savePersistedCronState]
 - Emits tracing spans `cron.execute`, `cron.server <name>`, `cron.persistence.load`, and `cron.persistence.save`. [cron-service.ts:executeAndTrack] [persistence.ts:loadPersistedCronState]
 - No filesystem or network access of its own; handlers may perform any I/O.

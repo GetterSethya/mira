@@ -28,8 +28,12 @@ import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { applyRulesToCollections, defineRule, Mira } from "@/app/index.js"
+import { AuthChallengeStore } from "@/auth/index.js"
+import { AppConfig } from "@/config/index.js"
 import { LibsqlDatabase } from "@/databases/libsql.js"
+import { TokenStore } from "@/http/token-store.js"
 import { makeCollectionRouter } from "@/http/router.js"
+import { RateLimitStore } from "@/rate-limit/index.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { LocalFileStorage } from "@/storage/local-preset.js"
@@ -399,6 +403,53 @@ describeE2E("libSQL remote sqld", () => {
       ])
       const deleted = yield* store.deleteOlderThan(recent)
       expect(deleted.logs).toBeGreaterThanOrEqual(1)
+    }).pipe(Effect.provide(app.buildServiceLayer()), Effect.scoped)
+
+    await Effect.runPromise(closeEffect(program))
+  }, 60_000)
+
+  it("boots internal auth, session, rate-limit, and config stores", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mira-libsql-e2e-stores-"))
+    const app = Mira.builder()
+      .platform(NodePlatform)
+      .database(LibsqlDatabase({ url }))
+      .storage(LocalFileStorage({ directory: join(dir, "uploads") }))
+      .collections([Posts])
+      .build()
+
+    const program = Effect.gen(function* () {
+      yield* waitForServer
+      const now = Date.now()
+
+      const config = yield* AppConfig
+      expect(config.appName).toBe("mira")
+
+      const tokens = yield* TokenStore
+      yield* tokens.revoke(`e2e-jti-${now}`, now + 60_000)
+      expect(yield* tokens.isRevoked(`e2e-jti-${now}`)).toBe(true)
+
+      const challenges = yield* AuthChallengeStore
+      yield* challenges.create({
+        id: `e2e-challenge-${now}`,
+        collection: "e2e_posts",
+        userId: "e2e-user",
+        purpose: "login_otp",
+        tokenHash: `e2e-hash-${now}`,
+        expiresAt: now + 60_000,
+        consumedAt: null,
+        attempts: 0,
+        createdAt: now,
+        newEmail: null
+      })
+      expect(
+        yield* challenges.findByTokenHash("e2e_posts", "login_otp", `e2e-hash-${now}`)
+      ).toBeDefined()
+
+      const limits = yield* RateLimitStore
+      const result = yield* limits.increment([
+        { bucket: `e2e-bucket-${now}`, limit: 2, cost: 1, expiresAt: now + 60_000 }
+      ])
+      expect(result).toEqual({ ok: true, counts: [1] })
     }).pipe(Effect.provide(app.buildServiceLayer()), Effect.scoped)
 
     await Effect.runPromise(closeEffect(program))

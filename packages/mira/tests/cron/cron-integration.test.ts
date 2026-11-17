@@ -6,6 +6,8 @@ import { MiraPlugin } from "@/app/plugin.js"
 import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
 import type { CronDef } from "@/cron/types.js"
 import { CronNotFoundError } from "@/cron/types.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 
 type StubDef = CronDef<never>
@@ -21,7 +23,8 @@ function makeLayer(builderDefs: ReadonlyArray<StubDef>, plugins: ReadonlyArray<M
   ]
   return makeCronServiceLayer(allDefs).pipe(
     Layer.provide(makeHookServiceLayer(plugins)),
-    Layer.provide(SqliteClient.layer({ filename: ":memory:" }))
+    Layer.provide(SqliteClient.layer({ filename: ":memory:" })),
+    Layer.provide(Layer.succeed(Dialect, sqliteDialect))
   )
 }
 

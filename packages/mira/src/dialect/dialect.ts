@@ -55,6 +55,34 @@ export type TelemetryDialectHooks = {
   readonly isDuplicateKey: (error: unknown) => boolean
 }
 
+/** Capabilities the internal auth, session, rate-limit, and cron stores need. */
+export type StoreSqlCapabilities = {
+  /**
+   * Returns a complete SQL query with one row when the column exists and zero
+   * rows when it does not. The caller executes it with `sql.unsafe(query)` and
+   * checks the row count.
+   */
+  readonly columnExistsSql: (table: string, column: string) => string
+  /** Whether a failed SQL statement is safe to retry by the caller. */
+  readonly isRetryable: (error: unknown) => boolean
+  /**
+   * Optional transaction-local lock timeout for request-path write
+   * transactions. SQLite omits it. PostgreSQL uses
+   * `SET LOCAL lock_timeout = '2s'`.
+   */
+  readonly transactionLockTimeoutSql?: string
+} & (
+  | {
+      /** The DDL runs outside a transaction, matching SQLite and libSQL today. */
+      readonly bootstrapMode: "plain"
+    }
+  | {
+      /** The DDL runs inside one transaction after these statements. */
+      readonly bootstrapMode: "transaction"
+      readonly bootstrapSql: ReadonlyArray<string>
+    }
+)
+
 /** SQL for a whole plan, plus statements that must run even when the plan fails. */
 export type TranslatedPlan = {
   /** Statements to run inside the migration transaction, in order. */
@@ -131,6 +159,8 @@ export type DialectType = {
     record: Readonly<Record<string, unknown>>,
     conflictKeys: ReadonlyArray<string>
   ) => string
+  /** Capabilities used by the internal SQL stores. */
+  readonly store: StoreSqlCapabilities
   /** Optional telemetry connection and error-classification hooks. */
   readonly telemetry?: TelemetryDialectHooks
 }

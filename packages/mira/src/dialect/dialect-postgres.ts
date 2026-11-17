@@ -1,6 +1,7 @@
 import type { TimestampUnit } from "@gettersethya/mira-client"
 
-import type { FieldValueType, Quote, RuleSqlDialect } from "./dialect.js"
+import type { FieldValueType, Quote, RuleSqlDialect, StoreSqlCapabilities } from "./dialect.js"
+import { retryableByCauseCode } from "./dialect.js"
 
 const quote: Quote = (name) => `"${name.replaceAll('"', '""')}"`
 
@@ -41,4 +42,26 @@ export const postgresRuleSql: RuleSqlDialect = {
       ? `${left} ILIKE (${right} || '%')`
       : `${left} ILIKE ('%' || ${right} || '%')`,
   castValue
+}
+
+const quoteLiteral = (value: string) => `'${value.replaceAll("'", "''")}'`
+
+/**
+ * Store capability for the future PostgreSQL dialect. It is intentionally a
+ * capability object, not a full `DialectType`; #29 composes it.
+ */
+export const postgresStoreSql: StoreSqlCapabilities = {
+  bootstrapMode: "transaction",
+  bootstrapSql: [
+    "SET LOCAL lock_timeout = '5s'",
+    "SELECT pg_advisory_xact_lock(hashtextextended('mira.system-tables', 0))"
+  ],
+  columnExistsSql: (table, column) =>
+    `SELECT 1 AS present FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = ${quoteLiteral(table)}
+       AND column_name = ${quoteLiteral(column)}
+     LIMIT 1`,
+  isRetryable: retryableByCauseCode(["40001", "40P01", "55P03"]),
+  transactionLockTimeoutSql: "SET LOCAL lock_timeout = '2s'"
 }

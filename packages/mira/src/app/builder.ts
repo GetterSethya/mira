@@ -68,7 +68,7 @@ function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraApp
  *
  * Required steps (order does not matter):
  * 1. `.platform(p)` — choose Node, Bun, etc.
- * 2. `.database(d)` — choose SQLite, etc.
+ * 2. `.database(d)` — choose a database preset.
  * 3. `.storage(s)` — choose LocalFileStorage, S3, etc.
  * 4. `.collections(c)` — provide collection definitions
  *
@@ -194,7 +194,7 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    * Set an optional rate-limit store plus email and password-login policy
    * overrides.
    *
-   * The default store is SQLite. A custom store layer must be self-contained
+   * The default store is the SQL-backed store. A custom store layer must be self-contained
    * (`Layer<RateLimitStore, never, never>`). `emailPolicies` overrides
    * `defaultEmailRateLimitPolicies`; `authPolicies` overrides the fail-closed
    * password-login limits.
@@ -249,7 +249,7 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    * .batchMutation({ windowMs: 2, create: {}, update: {} })
    * ```
    *
-   * Concurrent single mutations are merged into one SQLite transaction: create
+   * Concurrent single mutations are merged into one transaction: create
    * prepares validation/rules/hashing in the request fiber; update/delete read
    * the stored row, check rules and credentials inside the batch transaction.
    * This reduces commit/fsync count under `synchronous=FULL`, with no reliable

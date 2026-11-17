@@ -1,7 +1,7 @@
 import type { TimestampUnit } from "@gettersethya/mira-client"
 import { Effect } from "effect"
 
-import type { TranslatePlanContext } from "./dialect.js"
+import type { StoreSqlCapabilities, TranslatePlanContext } from "./dialect.js"
 import { errorHasCode, translateStep } from "./dialect.js"
 import type { DialectType } from "./dialect.js"
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
@@ -265,6 +265,15 @@ const caseInsensitiveLikeSql = (
     ? `${left} LIKE (${right} || '%')`
     : `${left} LIKE ('%' || ${right} || '%')`
 
+const sqliteColumnExistsSql = (table: string, column: string) =>
+  `SELECT 1 AS present FROM pragma_table_info(${quoteLiteral(table)}) WHERE name = ${quoteLiteral(column)} LIMIT 1`
+
+export const sqliteStoreSql: StoreSqlCapabilities = {
+  bootstrapMode: "plain",
+  columnExistsSql: sqliteColumnExistsSql,
+  isRetryable: isSqliteBusy
+}
+
 export const sqliteDialect: DialectType = {
   storesBooleanAsInteger: true,
   // SQLite 3.35+ supports DELETE ... RETURNING on both the Node and Bun drivers.
@@ -281,6 +290,7 @@ export const sqliteDialect: DialectType = {
   indexName: indexNameOf,
   placeholder: () => "?",
   upsert: upsertSql,
+  store: sqliteStoreSql,
   telemetry: {
     setup: [
       "PRAGMA journal_mode = WAL",

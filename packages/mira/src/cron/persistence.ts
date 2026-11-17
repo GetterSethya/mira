@@ -22,8 +22,6 @@ const ConfigRowSchema = Schema.Struct({ value: Schema.String })
 export function loadPersistedCronState(sql: SqlClient.SqlClient) {
   return Effect.gen(function* () {
     const emptyState: PersistedCronState = {}
-    // DDL — sql.unsafe is fine for CREATE TABLE
-    yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
 
     const rows = yield* SqlSchema.findAll({
       Request: Schema.String,
@@ -61,7 +59,10 @@ export function savePersistedCronState(sql: SqlClient.SqlClient, states: HashMap
       }
     }
     const json = yield* Schema.encodeEffect(Schema.fromJsonString(PersistedCronStateSchema))(blob)
-    yield* sql`INSERT OR REPLACE INTO ${sql("_config")} ${sql.insert({ key: CRON_STATE_CONFIG_KEY, value: json })}`
+    yield* sql`
+      INSERT INTO ${sql("_config")} ${sql.insert({ key: CRON_STATE_CONFIG_KEY, value: json })}
+      ON CONFLICT (key) DO UPDATE SET value = excluded.value
+    `
   }).pipe(
     Effect.withSpan("cron.persistence.save", {
       kind: "client",

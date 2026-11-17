@@ -59,8 +59,9 @@ export * from "./rate-limit/index.js"
 export {
   RateLimiterLive,
   RateLimitKeySecretLive,
+  SqlRateLimitStoreLive,
   SqliteRateLimitStoreLive
-} from "./rate-limit/sqlite.js"
+} from "./rate-limit/sql.js"
 export * from "./email/index.js"
 export {
   AuthChallengeStore,

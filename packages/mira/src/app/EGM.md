@@ -51,7 +51,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - Cron names must be globally unique across config and plugin crons; boot dies on duplicates: `[app.ts:assertUniqueCronNames]`
 - Auto-migration runs during layer initialization (before requests) and dies on failure: `[app.ts:MiraApp.buildServiceLayer]`
 - Plugin layers are provided after the mid layer, so they may depend on `AppConfig`, `Repository`, and platform services: `[app.ts:MiraApp.buildServiceLayer]`
-- The mid layer includes the rate-limit store, limiter, key secret, and email policy config. The default store is SQLite; `.rateLimits({ store, emailPolicies })` overrides it. `hookedEmail` is given the same `mid` output so it sees the SQLite `RateLimiter`, not the in-memory default: `[app.ts:MiraApp.buildServiceLayer]`
+- The mid layer includes the rate-limit store, limiter, key secret, and email policy config. The default store is the SQL-backed `SqlRateLimitStoreLive`; `.rateLimits({ store, emailPolicies })` overrides it. `hookedEmail` is given the same `mid` output so it sees the SQL `RateLimiter`, not the in-memory default: `[app.ts:MiraApp.buildServiceLayer]`
 - Collection service layer stack is hook → cached → base; cron fibers are scoped to the service layer: `[app.ts:MiraApp.buildServiceLayer]`
 - `buildLayer` route list is built-in collection routes first, then plugin routes; a function-form plugin `routes` is resolved with the final deduped collection list: `[app.ts:MiraApp.buildLayer]`
 - Middleware order is IP annotation wrapping CORS (`ipAnnotationMiddleware(makeCorsMiddleware(cors)(effect))`): `[app.ts:MiraApp.buildLayer]`
@@ -63,8 +63,8 @@ Turns collection definitions plus platform/database/storage presets into a runna
 ## Side Effects
 
 - SQL DDL/DML: auto-migration applies the schema plan on boot (`Migrator.migrate`): `[app.ts:MiraApp.buildServiceLayer]`
-- SQL: `TokenStoreLive` creates/uses `_revoked_tokens` and `_auth_generations` tables: `[app.ts:MiraApp.buildServiceLayer]`
-- SQL: `SqliteRateLimitStoreLive` creates/uses `_rate_limits` and prunes expired buckets: `[app.ts:MiraApp.buildServiceLayer]`
+- SQL: `TokenStoreLive` creates/uses `_revoked_tokens` and `_auth_generations` tables through the shared bootstrap: `[app.ts:MiraApp.buildServiceLayer]`
+- SQL: `SqlRateLimitStoreLive` creates/uses `_rate_limits` and prunes expired buckets: `[app.ts:MiraApp.buildServiceLayer]`
 - Network: binds an HTTP server, retrying ports on `EADDRINUSE` via `makePortRetryServerLayer`: `[app.ts:MiraApp.buildLayer]`
 - Filesystem: storage preset is wired in the foundation layer (uploads/reads/deletes): `[app.ts:MiraApp.buildServiceLayer]`
 - Filesystem: the platform's optional `thumbnailLayer` (default lazy `ThumbnailServicePhotonLive` from `thumbnail/lazy.ts`, Bun supplies `ThumbnailServiceBunLive`) is part of the foundation layer. The default layer imports Photon only when built, and the builder picks `ThumbnailServiceNoopLive` instead when no collection declares a file field: `[app.ts:MiraApp.buildServiceLayer]`

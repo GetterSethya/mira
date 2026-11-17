@@ -3,12 +3,15 @@ import { describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { expect } from "vitest"
 
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { RateLimitStore } from "@/rate-limit/index.js"
-import { SqliteRateLimitStoreLive } from "@/rate-limit/sqlite.js"
+import { SqlRateLimitStoreLive } from "@/rate-limit/sql.js"
 import type { RateLimitEntry } from "@/rate-limit/index.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const storeLayer = SqliteRateLimitStoreLive.pipe(Layer.provide(sqliteLayer))
+const dialectLayer = Layer.succeed(Dialect, sqliteDialect)
+const storeLayer = SqlRateLimitStoreLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, dialectLayer)))
 
 const entry = (bucket: string, limit: number, expiresAt = 1_000): RateLimitEntry => ({
   bucket,
@@ -26,6 +29,21 @@ describe("SQLite rate-limit store", () => {
       expect(blocked).toEqual({ ok: false, blockedIndices: [1], counts: [1, 1] })
       const a = yield* store.increment([entry("a", 2)])
       expect(a).toEqual({ ok: true, counts: [2] })
+    }).pipe(Effect.provide(storeLayer))
+  )
+
+  it.effect("returns complete blocked indices and pre-state counts, and leaves blocked entries unwritten", () =>
+    Effect.gen(function* () {
+      const store = yield* RateLimitStore
+      yield* store.increment([entry("a", 2), entry("b", 2), entry("c", 2)])
+      const blocked = yield* store.increment([entry("a", 1), entry("b", 2), entry("c", 1)])
+      expect(blocked).toEqual({
+        ok: false,
+        blockedIndices: [0, 2],
+        counts: [1, 1, 1]
+      })
+      const b = yield* store.increment([entry("b", 2)])
+      expect(b).toEqual({ ok: true, counts: [2] })
     }).pipe(Effect.provide(storeLayer))
   )
 

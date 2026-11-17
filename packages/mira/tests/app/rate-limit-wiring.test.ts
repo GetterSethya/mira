@@ -39,7 +39,7 @@ const fakeEmail: EmailServiceShape = {
 }
 
 describe("app rate-limit wiring", () => {
-  it.effect("uses the SQLite store for EmailService.send by default", () => {
+  it.effect("uses the SQL-backed store for EmailService.send by default", () => {
     const dir = mkdtempSync(join(tmpdir(), "mira-rate-wiring-"))
     const dbPath = join(dir, "data.db")
     const storageDir = join(dir, "uploads")

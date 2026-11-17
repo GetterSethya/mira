@@ -48,7 +48,7 @@ const RETRYABLE_CODES = [
  * error. Use the structured `isRetryable` flag first, then the nested network
  * codes the driver leaves in the cause. No message-substring matching is used.
  */
-const isLibsqlRetryable = (error: unknown) => {
+export const isLibsqlRetryable = (error: unknown) => {
   if (isSqlError(error) && error.isRetryable) return true
   return errorHasCode(error, RETRYABLE_CODES)
 }
@@ -62,13 +62,21 @@ const isLibsqlRetryable = (error: unknown) => {
 export function libsqlDialect(mode: LibsqlConnectionMode): DialectType {
   if (mode === "local") return sqliteDialect
 
+  const remoteClassifiers = {
+    isRetryable: isLibsqlRetryable,
+    isDuplicateKey: isSqliteUniqueViolation
+  }
+
   return {
     ...sqliteDialect,
+    store: {
+      ...sqliteDialect.store,
+      isRetryable: remoteClassifiers.isRetryable
+    },
     telemetry: {
       setup: [],
       cleanup: [],
-      isRetryable: isLibsqlRetryable,
-      isDuplicateKey: isSqliteUniqueViolation
+      ...remoteClassifiers
     }
   }
 }

@@ -58,7 +58,7 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `HttpServerFactory` — service tag whose `makeLayer(port)` builds the platform server layer: `[server-factory.ts:HttpServerFactory]`
 - `NodeHttpServerFactoryLayer` — Node implementation: `[server-factory-node.ts:NodeHttpServerFactoryLayer]`
 - `TokenStore` — `Context.Reference` with an in-memory default: `[token-store.ts:TokenStore]`
-- `TokenStoreLive` — SQLite-backed durable implementation: `[token-store.ts:TokenStoreLive]`
+- `TokenStoreLive` — SQL-backed durable implementation: `[token-store.ts:TokenStoreLive]`
 - `inMemoryTokenStore`, `TokenStoreShape` (type): `[token-store.ts:inMemoryTokenStore]`
 - `makeSchemaRoute(collections)` — returns `name`, `kind`, `fields`, `required`, `indexes`, `rules`, `ruleSummary`, `auth`, `viewQuery` per collection: `[schema.ts:makeSchemaRoute]`
 - `schemaSnapshot(collections)` — the pure payload builder used by the route (tests inspect it without a server): `[schema.ts:schemaSnapshot]`
@@ -116,7 +116,7 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 
 - HTTP: binds a server (port retry) and answers every route above: `[router.ts:makeCollectionRouter]`
 - HTTP: writes/clears the `mira_token` cookie and signs JWTs: `[auth.ts:signJwt]`
-- SQL: `TokenStoreLive` creates `_revoked_tokens` (+ expiry index) and `_auth_generations` and reads/writes both: `[token-store.ts:TokenStoreLive]`
+- SQL: `TokenStoreLive` creates `_revoked_tokens` (+ expiry index) and `_auth_generations` through the shared store bootstrap, uses `BIGINT` expiry, and reads/writes both. Logout revocation uses parameterized `ON CONFLICT (jti) DO NOTHING`: `[token-store.ts:TokenStoreLive]`
 - SQL: auth login and session checks read the auth collection row via `Repository.viewFilter`: `[auth.ts:authenticateSession]`
 - SQL: telemetry routes query the `logs` and `spans` tables: `[telemetry-routes.ts:telemetryLogsRoute]`
 - SQL: file serving reads record rows to locate the file field and enforce the view rule: `[file-serve.ts:serveFile]`

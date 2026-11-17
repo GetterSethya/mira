@@ -2,7 +2,10 @@ import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { SqlClient, SqlSchema } from "effect/sql"
 
 import { CryptoService } from "@/crypto/crypto.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { withStoreBootstrap } from "@/dialect/store-sql.js"
 
+import { CONFIG_TABLE_DDL } from "./config-sql.js"
 import type { AppConfigShape, S3Config } from "./types.js"
 
 const ConfigRowSchema = Schema.Struct({
@@ -50,45 +53,58 @@ export const AppConfigLive = Layer.effect(
   AppConfig,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    const dialect = yield* Dialect
 
-    // DDL — sql.unsafe is fine for CREATE TABLE
-    yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+    yield* withStoreBootstrap(sql, dialect.store, (tx) =>
+      tx.unsafe(CONFIG_TABLE_DDL).pipe(Effect.asVoid)
+    )
 
-    const rows = yield* SqlSchema.findAll({
-      Request: Schema.Void,
-      Result: ConfigRowSchema,
-      execute: () => sql`SELECT key, value FROM ${sql("_config")}`
-    })(undefined)
+    const readConfig = () =>
+      SqlSchema.findAll({
+        Request: Schema.Void,
+        Result: ConfigRowSchema,
+        execute: () => sql`SELECT key, value FROM ${sql("_config")}`
+      })(undefined)
 
-    const stored = new Map(rows.map((r) => [r.key, r.value]))
+    const insertIfAbsent = (key: string, value: string) =>
+      sql`
+        INSERT INTO ${sql("_config")} ${sql.insert({ key, value })}
+        ON CONFLICT (key) DO NOTHING
+      `.pipe(Effect.asVoid)
 
-    const seed = (key: string, defaultValue: string) =>
-      Effect.gen(function* () {
-        const existing = stored.get(key)
-        if (existing !== undefined) return existing
-        yield* sql`INSERT INTO ${sql("_config")} ${sql.insert({ key, value: defaultValue })}`
-        return defaultValue
-      })
+    yield* insertIfAbsent("app_name", "mira")
+    yield* insertIfAbsent("port", "8080")
+    yield* insertIfAbsent("use_s3", "false")
+    yield* insertIfAbsent("log_retention_days", "30")
 
-    const appName = yield* seed("app_name", "mira")
-    const port = Number(yield* seed("port", "8080"))
-    const applicationUrl = yield* seed("application_url", `http://localhost:${port}`)
+    const beforeSecret = new Map((yield* readConfig()).map((row) => [row.key, row.value]))
+    if (beforeSecret.get("jwt_secret") === undefined) {
+      const cryptoSvc = yield* CryptoService
+      const candidate = Buffer.from(yield* cryptoSvc.randomBytes(48)).toString("hex")
+      const inserted = yield* sql`
+        INSERT INTO ${sql("_config")} ${sql.insert({ key: "jwt_secret", value: candidate })}
+        ON CONFLICT (key) DO NOTHING
+        RETURNING key
+      `
+      if (inserted.length > 0) {
+        yield* Effect.logInfo("jwt_secret generated and persisted to _config table.")
+      }
+    }
 
-    // Generated once on first boot, persisted so tokens survive restarts
-    const existingSecret = stored.get("jwt_secret")
-    const jwtSecretStr =
-      existingSecret !== undefined
-        ? existingSecret
-        : yield* Effect.gen(function* () {
-            const cryptoSvc = yield* CryptoService
-            const generated = Buffer.from(yield* cryptoSvc.randomBytes(48)).toString("hex")
-            yield* sql`INSERT INTO ${sql("_config")} ${sql.insert({ key: "jwt_secret", value: generated })}`
-            yield* Effect.logInfo("jwt_secret generated and persisted to _config table.")
-            return generated
-          })
+    const afterSecret = new Map((yield* readConfig()).map((row) => [row.key, row.value]))
+    const storedPort = Number(afterSecret.get("port") ?? "8080")
+    if (afterSecret.get("application_url") === undefined) {
+      yield* insertIfAbsent("application_url", `http://localhost:${storedPort}`)
+    }
+
+    const stored = new Map((yield* readConfig()).map((row) => [row.key, row.value]))
+    const appName = stored.get("app_name") ?? "mira"
+    const port = Number(stored.get("port") ?? "8080")
+    const applicationUrl = stored.get("application_url") ?? `http://localhost:${port}`
+    const jwtSecretStr = stored.get("jwt_secret") ?? ""
     const jwtSecret = Redacted.make(jwtSecretStr)
 
-    const useS3 = (yield* seed("use_s3", "false")) === "true"
+    const useS3 = (stored.get("use_s3") ?? "false") === "true"
 
     const s3Config: Option.Option<S3Config> = (() => {
       if (!useS3) return Option.none()
@@ -120,7 +136,7 @@ export const AppConfigLive = Layer.effect(
       )
     }
 
-    const logRetentionDays = Number(yield* seed("log_retention_days", "30"))
+    const logRetentionDays = Number(stored.get("log_retention_days") ?? "30")
 
     let boundPort = port
     let boundUrl = applicationUrl
