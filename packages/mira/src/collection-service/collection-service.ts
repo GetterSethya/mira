@@ -352,7 +352,7 @@ function compileRule(
 ) {
   const result =
     mode === "param"
-      ? payloadEnforcerForAction(collection.schema, action as "create", dialect)
+      ? payloadEnforcerForAction(collection.schema, "create", dialect)
       : enforcerForAction(collection.schema, action, dialect)
   if (result === null) {
     return Effect.fail(new ForbiddenError({ collection: collection.name, action }))

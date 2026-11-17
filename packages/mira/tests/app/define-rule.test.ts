@@ -131,10 +131,6 @@ describe("defineRule", () => {
   })
 
   it("base collection rejects the auth-only `manage` rule", () => {
-    // `manage` is auth-collections-only. On a base collection the callback's
-    // return type is `BaseRuleMap`, whose `manage` key is `never`, so supplying
-    // it is a compile error. `@ts-expect-error` fails the build if it stops
-    // erroring, guarding the regression.
     // @ts-expect-error `manage` is not allowed on base collections
     defineRule(Posts, (R) => ({
       list: R.public(),
@@ -148,14 +144,19 @@ describe("applyRulesToCollections", () => {
   it("merges rules into matching collection schema", () => {
     const rb = defineRule(Posts, (R) => ({ list: R.public() }))
     const [merged] = applyRulesToCollections([Posts], [rb])
-    expect(merged.schema["x-rules"]).toBeDefined()
-    expect(merged.schema["x-rules"]!.list).toEqual({ op: "public" })
+    if (merged === undefined) throw new Error("Expected a merged collection")
+    const rules = merged.schema["x-rules"]
+    if (rules === undefined) throw new Error("Expected x-rules on the merged collection")
+    expect(rules).toBeDefined()
+    expect(rules.list).toEqual({ op: "public" })
   })
 
   it("collection without RuleBinding has no x-rules", () => {
     const merged = applyRulesToCollections([Posts, Users], [])
-    expect(merged[0]!.schema).not.toHaveProperty("x-rules")
-    expect(merged[1]!.schema).not.toHaveProperty("x-rules")
+    const [first, second] = merged
+    if (first === undefined || second === undefined) throw new Error("Expected two merged collections")
+    expect(first.schema).not.toHaveProperty("x-rules")
+    expect(second.schema).not.toHaveProperty("x-rules")
   })
 
   it("no rules array at all — all collections have no x-rules", () => {
@@ -176,7 +177,7 @@ describe("applyRulesToCollections", () => {
   it("returns a new array with original collections unmodified", () => {
     const rb = defineRule(Posts, (R) => ({ list: R.public() }))
     const merged = applyRulesToCollections([Posts], [rb])
-    expect(merged).not.toBe([Posts] as any)
+    expect(merged).not.toBe([Posts])
     expect(Posts.schema).not.toHaveProperty("x-rules")
   })
 })

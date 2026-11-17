@@ -8,6 +8,8 @@ import type { RequestCtx } from "@/collection-service/context.js"
 import { ValidationError } from "@/collection-service/errors.js"
 import type { SortOrder } from "@/repository/types.js"
 
+const FilterJsonSchema = Schema.fromJsonString(Schema.Unknown)
+
 export function parseFilterParam(
   query: RequestCtx["query"],
   schema: CollectionSchema,
@@ -17,10 +19,15 @@ export function parseFilterParam(
   if (raw === null) return Effect.succeed(null)
 
   return Effect.gen(function* () {
-    const parsed = yield* Effect.try({
-      try: () => JSON.parse(raw),
-      catch: () => new ValidationError({ collection: collectionName, issues: ["filter: invalid JSON"] })
-    })
+    const parsed = yield* Schema.decodeUnknownEffect(FilterJsonSchema)(raw).pipe(
+      Effect.mapError(
+        () =>
+          new ValidationError({
+            collection: collectionName,
+            issues: ["filter: invalid JSON"]
+          })
+      )
+    )
 
     const decoded = yield* Schema.decodeUnknownEffect(FilterNodeSchema)(parsed).pipe(
       Effect.mapError((e) =>

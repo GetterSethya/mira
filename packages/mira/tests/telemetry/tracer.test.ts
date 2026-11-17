@@ -55,8 +55,11 @@ describe("makeConsoleTracer", () => {
       const outer = all.find((s) => s.name === "outer")
       expect(inner).toBeDefined()
       expect(outer).toBeDefined()
-      expect(inner!.traceId).toBe(outer!.traceId)
-      expect(inner!.parentSpanId).toBe(outer!.spanId)
+      if (inner === undefined || outer === undefined) {
+        throw new Error("expected both nested spans to be recorded")
+      }
+      expect(inner.traceId).toBe(outer.traceId)
+      expect(inner.parentSpanId).toBe(outer.spanId)
     })
   )
 

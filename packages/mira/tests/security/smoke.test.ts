@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
 import { assert } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 import { get, login, makeSecurityLayer, seedUser, serveRouter, setupTables } from "./_harness.js"
 
@@ -21,7 +21,10 @@ describe("security harness smoke", () => {
       const token = yield* login("smoke@example.com", "pw123")
       const meRes = yield* get("/api/auth/me", token)
       assert.strictEqual(meRes.status, 200)
-      const me = (yield* meRes.json) as Record<string, unknown>
+      const meJson = yield* meRes.json
+      const me = yield* Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.Unknown))(meJson).pipe(
+        Effect.orDie
+      )
       assert.strictEqual(me["collection"], "users")
     }).pipe(Effect.provide(layer))
   )

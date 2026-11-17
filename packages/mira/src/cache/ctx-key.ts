@@ -22,7 +22,7 @@ const ABSENT = "\\N"
  * backslash is escaped FIRST so the escape sequences introduced for the other
  * characters are unambiguous.
  */
-function encodeScalar(value: string): string {
+function encodeScalar(value: string) {
   return value
     .replaceAll("\\", "\\\\")
     .replaceAll(NUL, "\\0")

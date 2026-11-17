@@ -157,7 +157,15 @@ export function makeFileFields<F extends FieldsMap>(
   execute: ExecuteFn,
   cacheRef: MutableRef.MutableRef<Map<string, { token: string; expiresAt: number }>>,
   makeClientHandler: <T>(effect: Effect.Effect<T, MiraError, HttpClient.HttpClient>) => ClientHandler<T>
-): CollectionFileFields<F> {
+): CollectionFileFields<F>
+export function makeFileFields(
+  collection: AnyCollectionDef,
+  schema: AnyCollectionDef["schema"],
+  baseUrl: string,
+  execute: ExecuteFn,
+  cacheRef: MutableRef.MutableRef<Map<string, { token: string; expiresAt: number }>>,
+  makeClientHandler: <T>(effect: Effect.Effect<T, MiraError, HttpClient.HttpClient>) => ClientHandler<T>
+): unknown {
   const result: Record<string, unknown> = {}
   const getFileToken = makeGetFileToken(execute, cacheRef)
 
@@ -192,5 +200,5 @@ export function makeFileFields<F extends FieldsMap>(
     }
   }
 
-  return result as CollectionFileFields<F>
+  return result
 }

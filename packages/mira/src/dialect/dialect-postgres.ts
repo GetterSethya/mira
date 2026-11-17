@@ -13,7 +13,7 @@ const timestampAdd = (
   expr: string,
   amount: number,
   unit: TimestampUnit
-): string =>
+) =>
   `to_char(((${expr})::timestamptz + interval '${amount} ${unit}') AT TIME ZONE 'UTC', ${isoFormat})`
 
 const timestampDiff = (

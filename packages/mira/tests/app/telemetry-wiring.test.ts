@@ -19,6 +19,13 @@ import {
   TelemetryStore
 } from "@/telemetry/store.js"
 
+function closeEffect<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> {
+  // The built app layer is closed at runtime; the test graph widens R through
+  // plugin/cron config, so this helper restores the closed run type.
+  // oxlint-disable-next-line typescript/consistent-type-assertions
+  return effect as Effect.Effect<A, E, never>
+}
+
 const Posts = BaseCollection.define("posts", {
   title: Field.text({ required: true })
 })
@@ -77,7 +84,7 @@ describe("telemetry app wiring", () => {
       Effect.ensuring(Effect.sync(() => rmSync(dir, { recursive: true, force: true })))
     )
 
-    await Effect.runPromise(program as Effect.Effect<void, never, never>)
+    await Effect.runPromise(closeEffect(program))
   }, 20_000)
 
   it("skips dedicated telemetry DDL when the database is a replica", async () => {
@@ -116,7 +123,7 @@ describe("telemetry app wiring", () => {
       Effect.ensuring(Effect.sync(() => rmSync(dir, { recursive: true, force: true })))
     )
 
-    await Effect.runPromise(program as Effect.Effect<void, never, never>)
+    await Effect.runPromise(closeEffect(program))
   }, 20_000)
 
   it("keeps a non-SQL TelemetryStore in the built app context", async () => {
@@ -158,7 +165,7 @@ describe("telemetry app wiring", () => {
       Effect.ensuring(Effect.sync(() => rmSync(dir, { recursive: true, force: true })))
     )
 
-    await Effect.runPromise(program as Effect.Effect<void, never, never>)
+    await Effect.runPromise(closeEffect(program))
   }, 20_000)
 
   it("writes shared telemetry into the application database without changing pragmas", async () => {
@@ -197,6 +204,6 @@ describe("telemetry app wiring", () => {
       Effect.ensuring(Effect.sync(() => rmSync(dir, { recursive: true, force: true })))
     )
 
-    await Effect.runPromise(program as Effect.Effect<void, never, never>)
+    await Effect.runPromise(closeEffect(program))
   }, 20_000)
 })

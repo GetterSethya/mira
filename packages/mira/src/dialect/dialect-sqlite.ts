@@ -43,7 +43,7 @@ const quoteLiteral = (value: unknown) => {
 
 const isSqliteBusy = (error: unknown) => errorHasCode(error, ["SQLITE_BUSY", "SQLITE_LOCKED"])
 
-const isSqliteUniqueViolation = (error: unknown) =>
+export const isSqliteUniqueViolation = (error: unknown) =>
   errorHasCode(error, [
     "SQLITE_CONSTRAINT_PRIMARYKEY",
     "SQLITE_CONSTRAINT_UNIQUE",
@@ -95,9 +95,9 @@ function columnSql(col: ColumnDef, syntheticDefault = false) {
   if (col.default !== undefined) {
     parts.push(`DEFAULT ${quoteLiteral(col.default)}`)
   } else if (syntheticDefault) {
-    // Match ADD COLUMN: a new NOT NULL column without a default needs a value
-    // for rows that already exist. The fallback is not part of the collection
-    // schema, but the physical table must accept the copy.
+    // A new NOT NULL column without a default needs a value for existing rows,
+    // matching ADD COLUMN. The fallback is not part of the collection schema, but
+    // the physical table must accept the copy.
     parts.push(`DEFAULT ${quoteLiteral(col.type === "text" ? "" : 0)}`)
   }
   if (col.primaryKey) parts.push("PRIMARY KEY")
@@ -139,7 +139,8 @@ function validateUniqueChanges(
 
       for (const index of shapes.desired.indexes) {
         if (!index.unique || index.fields.length !== 1) continue
-        const field = index.fields[0]!
+        const field = index.fields[0]
+        if (field === undefined) continue
 
         if (step.kind === "addColumn" && step.column.name === field && !storedNames.has(field)) {
           return yield* Effect.fail(

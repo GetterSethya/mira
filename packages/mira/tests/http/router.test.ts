@@ -25,7 +25,7 @@ import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
-import { makeRateLimitTestLayer, rateLimitTestLayer } from "../_rate-limit.js"
+import { makeRateLimitTestLayer, rateLimitTestLayer } from "@tests/_rate-limit.js"
 
 // ---------------------------------------------------------------------------
 // Collection definitions
@@ -193,6 +193,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+function isRecordArray(value: unknown): value is Array<Record<string, unknown>> {
+  return Array.isArray(value) && value.every(isRecord)
+}
+
+function isRecordMap(value: unknown): value is Record<string, Record<string, unknown>> {
+  return isRecord(value) && Object.values(value).every(isRecord)
+}
+
+function jsonRecord(body: unknown): Effect.Effect<Record<string, unknown>> {
+  if (!isRecord(body)) return Effect.die("expected JSON object response")
+  return Effect.succeed(body)
+}
+
+function jsonRecordArray(body: unknown): Effect.Effect<Array<Record<string, unknown>>> {
+  if (!isRecordArray(body)) return Effect.die("expected JSON array of objects")
+  return Effect.succeed(body)
+}
+
+function stringField(record: Record<string, unknown>, key: string): Effect.Effect<string> {
+  const value = record[key]
+  if (typeof value !== "string") return Effect.die(`expected string field: ${key}`)
+  return Effect.succeed(value)
+}
+
+function recordField(
+  record: Record<string, unknown>,
+  key: string
+): Effect.Effect<Record<string, unknown>> {
+  return jsonRecord(record[key])
+}
+
+function recordMapField(
+  record: Record<string, unknown>,
+  key: string
+): Effect.Effect<Record<string, Record<string, unknown>>> {
+  const value = record[key]
+  if (!isRecordMap(value)) return Effect.die(`expected object-of-objects field: ${key}`)
+  return Effect.succeed(value)
+}
+
 function tokenFromLogin(body: unknown) {
   if (!isRecord(body)) return Effect.die("expected JSON object login response")
   const token: unknown = body["token"]
@@ -226,10 +266,9 @@ describe("makeCollectionRouter", () => {
       yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
       const res = yield* HttpClient.get("/api/collections/posts")
       assert.strictEqual(res.status, 200)
-      const body = yield* res.json
-      assert.ok(typeof body === "object" && body !== null)
-      const items = (body as { items: Array<unknown> }).items
-      assert.ok(Array.isArray(items))
+      const body = yield* jsonRecord(yield* res.json)
+      const items: unknown = body["items"]
+      if (!Array.isArray(items)) return yield* Effect.die("expected items array")
       assert.strictEqual(items.length, 0)
     }).pipe(Effect.provide(testLayer))
   )
@@ -333,11 +372,10 @@ describe("makeCollectionRouter", () => {
         )
       )
       assert.strictEqual(res.status, 201)
-      const body = yield* res.json
-      const record = body as Record<string, unknown>
-      assert.strictEqual(record["title"], "Hello World")
-      assert.strictEqual(record["content"], "body text")
-      assert.ok(typeof record["id"] === "string")
+      const body = yield* jsonRecord(yield* res.json)
+      assert.strictEqual(body["title"], "Hello World")
+      assert.strictEqual(body["content"], "body text")
+      assert.ok(typeof body["id"] === "string")
     }).pipe(Effect.provide(testLayer))
   )
 
@@ -364,11 +402,11 @@ describe("makeCollectionRouter", () => {
         )
       )
       assert.strictEqual(createRes.status, 201)
-      const created = (yield* createRes.json) as Record<string, unknown>
-      const id = created["id"] as string
+      const created = yield* jsonRecord(yield* createRes.json)
+      const id = yield* stringField(created, "id")
       const res = yield* HttpClient.get(`/api/collections/posts/${id}`)
       assert.strictEqual(res.status, 200)
-      const body = (yield* res.json) as Record<string, unknown>
+      const body = yield* jsonRecord(yield* res.json)
       assert.strictEqual(body["id"], id)
       assert.strictEqual(body["title"], "Test Post")
     }).pipe(Effect.provide(testLayer))
@@ -392,15 +430,15 @@ describe("makeCollectionRouter", () => {
           HttpClientRequest.bodyJsonUnsafe({ title: "Original" })
         )
       )
-      const created = (yield* createRes.json) as Record<string, unknown>
-      const id = created["id"] as string
+      const created = yield* jsonRecord(yield* createRes.json)
+      const id = yield* stringField(created, "id")
       const res = yield* HttpClient.execute(
         HttpClientRequest.patch(`/api/collections/posts/${id}`).pipe(
           HttpClientRequest.bodyJsonUnsafe({ title: "Updated" })
         )
       )
       assert.strictEqual(res.status, 200)
-      const body = (yield* res.json) as Record<string, unknown>
+      const body = yield* jsonRecord(yield* res.json)
       assert.strictEqual(body["title"], "Updated")
     }).pipe(Effect.provide(testLayer))
   )
@@ -414,8 +452,8 @@ describe("makeCollectionRouter", () => {
           HttpClientRequest.bodyJsonUnsafe({ title: "To Delete" })
         )
       )
-      const created = (yield* createRes.json) as Record<string, unknown>
-      const id = created["id"] as string
+      const created = yield* jsonRecord(yield* createRes.json)
+      const id = yield* stringField(created, "id")
       const res = yield* HttpClient.execute(HttpClientRequest.delete(`/api/collections/posts/${id}`))
       assert.strictEqual(res.status, 204)
       const text = yield* res.text
@@ -443,10 +481,10 @@ describe("makeCollectionRouter", () => {
         )
       )
       assert.strictEqual(res.status, 200)
-      const body = (yield* res.json) as Record<string, unknown>
+      const body = yield* jsonRecord(yield* res.json)
       assert.ok(typeof body["token"] === "string" && body["token"].length > 0)
       assert.ok(typeof body["record"] === "object" && body["record"] !== null)
-      const user = body["record"] as Record<string, unknown>
+      const user = yield* recordField(body, "record")
       assert.strictEqual(user["email"], "alice@example.com")
       assert.ok(!("password" in user), "password must not appear in auth response")
     }).pipe(Effect.provide(testLayer))
@@ -586,8 +624,8 @@ describe("makeCollectionRouter", () => {
         )
       )
       assert.strictEqual(loginRes.status, 200)
-      const loginBody = (yield* loginRes.json) as Record<string, unknown>
-      const token = loginBody["token"] as string
+      const loginBody = yield* jsonRecord(yield* loginRes.json)
+      const token = yield* stringField(loginBody, "token")
       // Authenticated request — router resolves the auth context from the JWT
       const authedRes = yield* HttpClient.get("/api/collections/posts", {
         headers: { Authorization: `Bearer ${token}` }
@@ -671,10 +709,10 @@ describe("makeCollectionRouter", () => {
         headers: { Cookie: `mira_token=${cookieToken}` }
       })
       assert.strictEqual(res.status, 200)
-      const body = (yield* res.json) as Record<string, unknown>
+      const body = yield* jsonRecord(yield* res.json)
       assert.strictEqual(body["collection"], "users")
       assert.ok(typeof body["record"] === "object" && body["record"] !== null)
-      const record = body["record"] as Record<string, unknown>
+      const record = yield* recordField(body, "record")
       assert.strictEqual(record["email"], "meuser@example.com")
       assert.strictEqual(record["emailVerified"], false, "emailVerified must be decoded to a boolean, not 0/1")
       assert.ok(!("password" in record), "password must not appear in /api/auth/me response")
@@ -700,7 +738,7 @@ describe("makeCollectionRouter", () => {
         )
       )
       assert.strictEqual(createRes.status, 201)
-      const created = (yield* createRes.json) as Record<string, unknown>
+      const created = yield* jsonRecord(yield* createRes.json)
       assert.ok(!("password" in created), "password must not be returned in create response")
 
       // If the password were stored verbatim, login would still succeed — so this
@@ -729,16 +767,17 @@ describe("makeCollectionRouter", () => {
           HttpClientRequest.bodyJsonUnsafe({ email: "schemaadmin@example.com", password: "secret" })
         )
       )
-      const token = ((yield* loginRes.json) as Record<string, unknown>)["token"] as string
+      const loginBody = yield* jsonRecord(yield* loginRes.json)
+      const token = yield* stringField(loginBody, "token")
 
       const res = yield* HttpClient.get("/api/_schema", {
         headers: { Authorization: `Bearer ${token}` }
       })
       assert.strictEqual(res.status, 200)
-      const body = (yield* res.json) as Array<Record<string, unknown>>
+      const body = yield* jsonRecordArray(yield* res.json)
       const users = body.find((s) => s["name"] === "users")
-      assert.ok(users !== undefined)
-      const fields = users["fields"] as Record<string, Record<string, unknown>>
+      if (users === undefined) return yield* Effect.die("expected users collection schema")
+      const fields = yield* recordMapField(users, "fields")
       assert.strictEqual(fields["password"]?.["x-kind"], "password")
       assert.strictEqual(fields["password"]?.["x-hidden"], true)
       assert.strictEqual(fields["id"]?.["x-generated"], true)

@@ -10,6 +10,7 @@ import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
 import {
   type TelemetryLogEntry,
   type TelemetrySpanEntry,
+  type TelemetryStoreShape,
   TelemetryStore,
   TelemetryStoreError
 } from "@/telemetry/store.js"
@@ -67,13 +68,21 @@ const count = (table: string) =>
     return Number(rows[0]?.count ?? 0)
   })
 
+const requireRead = (store: TelemetryStoreShape) => {
+  if (store.read === null) {
+    throw new Error("expected the SQL telemetry store to expose reads")
+  }
+  return store.read
+}
+
 describe("SqlTelemetryStore", () => {
   it.effect("appends and reads logs without changing the public shape", () =>
     Effect.gen(function* () {
       const store = yield* TelemetryStore
+      const read = requireRead(store)
       yield* store.appendLogs([log("one", "first"), log("two", "second")])
 
-      const page = yield* store.read!.listLogs({
+      const page = yield* read.listLogs({
         limit: 10,
         after: null,
         filter: null,
@@ -101,6 +110,7 @@ describe("SqlTelemetryStore", () => {
   it.effect("deletes only rows older than the cutoff and returns actual counts", () =>
     Effect.gen(function* () {
       const store = yield* TelemetryStore
+      const read = requireRead(store)
       const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
       const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -111,7 +121,7 @@ describe("SqlTelemetryStore", () => {
       expect(deleted.logs).toBe(1)
       expect(deleted.spans).toBe(1)
 
-      const logs = yield* store.read!.listLogs({
+      const logs = yield* read.listLogs({
         limit: 10,
         after: null,
         filter: null,
@@ -139,13 +149,14 @@ describe("SqlTelemetryStore", () => {
   it.effect("preserves log filters and cursors", () =>
     Effect.gen(function* () {
       const store = yield* TelemetryStore
+      const read = requireRead(store)
       yield* store.appendLogs([
         { ...log("a"), level: "INFO" },
         { ...log("b"), level: "ERROR" },
         { ...log("c"), level: "ERROR" }
       ])
 
-      const filtered = yield* store.read!.listLogs({
+      const filtered = yield* read.listLogs({
         limit: 1,
         after: null,
         filter: { op: "eq", field: "level", value: "ERROR" },
@@ -156,7 +167,7 @@ describe("SqlTelemetryStore", () => {
       expect(filtered.items[0]?.level).toBe("ERROR")
       expect(typeof filtered.nextCursor).toBe("number")
 
-      const next = yield* store.read!.listLogs({
+      const next = yield* read.listLogs({
         limit: 1,
         after: filtered.nextCursor,
         filter: { op: "eq", field: "level", value: "ERROR" },
@@ -170,13 +181,14 @@ describe("SqlTelemetryStore", () => {
   it.effect("groups spans by trace and keeps seqId out of the public row", () =>
     Effect.gen(function* () {
       const store = yield* TelemetryStore
+      const read = requireRead(store)
       yield* store.appendSpans([
         span("a1", "trace-a"),
         span("a2", "trace-a"),
         span("b1", "trace-b")
       ])
 
-      const page = yield* store.read!.listSpans({
+      const page = yield* read.listSpans({
         limit: 10,
         after: null,
         filter: null,
@@ -187,7 +199,7 @@ describe("SqlTelemetryStore", () => {
       expect(page.items).toHaveLength(3)
       expect(page.items.every((row) => !("seqId" in row))).toBe(true)
 
-      const trace = yield* store.read!.listSpans({
+      const trace = yield* read.listSpans({
         limit: 10,
         after: null,
         filter: null,

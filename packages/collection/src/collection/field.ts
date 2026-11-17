@@ -40,12 +40,17 @@ function withView<D extends FieldDef>(def: D): D & { view(): D & { viewOnly: tru
   return Object.assign({}, def, { view })
 }
 
+/** Narrows a relation def with its compile-time-only target phantom, with no runtime effect. */
+function addRelationTarget<C extends AnyCollectionDef>(
+  _def: FieldDef & { kind: "relation" }
+): asserts _def is FieldDef & { kind: "relation"; _target: C } {}
+
 // Generic field builder — K is the kind literal, O is the caller's opts (preserving required: false, etc.)
 function makeField<K extends FieldKind, O extends BaseFieldOptions>(
   kind: K,
   opts?: O
 ): FieldDef & { kind: K } & O & { view(): FieldDef & { kind: K } & O & { viewOnly: true } } {
-  const def = { _tag: "FieldDef" as const, kind, ...opts } as FieldDef & { kind: K } & O
+  const def: FieldDef & { kind: K } & O = Object.assign({ _tag: "FieldDef" as const, kind }, opts)
   return withView(def)
 }
 
@@ -102,14 +107,10 @@ export const Field = {
   literalText: <const L extends ReadonlyArray<string>, O extends Omit<BaseFieldOptions, "default"> & { default?: L[number] }>(
     opts: { literal: L } & O & { error?: (kind: LiteralTextConstraintKind) => string | undefined }
   ) => {
-    const { literal, ...rest } = opts as { literal: L } & O
-    const def = {
-      _tag: "FieldDef" as const,
-      kind: "literalText" as const,
-      literal,
-      _literal: literal,
-      ...rest
-    } as FieldDef & { kind: "literalText"; literal: L; _literal: L } & O
+    const def: FieldDef & { kind: "literalText"; literal: L; _literal: L } & O = Object.assign(
+      { _tag: "FieldDef" as const, kind: "literalText" as const, _literal: opts.literal },
+      opts
+    )
     return withView(def)
   },
 
@@ -254,14 +255,13 @@ export const Field = {
     opts?: O & { field?: (keyof C["fields"] & string) | "id" | "created" | "updated"; error?: (kind: SimpleConstraintKind) => string | undefined }
   ) => {
     const targetField = opts?.field ?? "id"
-    const { field: _field, ...fieldOpts } = (opts ?? {}) as { field?: string } & O
-    const def = {
-      _tag: "FieldDef" as const,
-      kind: "relation" as const,
-      targetCollection: collection.name,
-      targetField,
-      ...fieldOpts
-    } as FieldDef & { kind: "relation"; _target: C } & O
+    const fieldOpts = Object.assign({}, opts)
+    delete fieldOpts.field
+    const def: FieldDef & { kind: "relation" } & O = Object.assign(
+      { _tag: "FieldDef" as const, kind: "relation" as const, targetCollection: collection.name, targetField },
+      fieldOpts
+    )
+    addRelationTarget<C>(def)
     return withView(def)
   }
 }

@@ -160,6 +160,9 @@ export function rewritePlaceholders(
   )
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
 /**
  * Finds a `code` or `errno` value inside an error shape, including nested
  * `cause`/`reason` fields. Useful for driver-neutral retry and duplicate
@@ -172,17 +175,16 @@ export function errorHasCode(error: unknown, codes: ReadonlyArray<string | numbe
 
   while (stack.length > 0) {
     const value = stack.pop()
-    if (value === null || typeof value !== "object" || seen.has(value)) continue
+    if (!isRecord(value) || seen.has(value)) continue
     seen.add(value)
 
-    const record = value as Record<string, unknown>
     for (const key of ["code", "errno", "errstr"] as const) {
-      const candidate = record[key]
+      const candidate = value[key]
       if (candidate !== undefined && wanted.has(String(candidate))) return true
     }
 
     for (const key of ["reason", "cause", "error", "details"] as const) {
-      const nested = record[key]
+      const nested = value[key]
       if (nested !== undefined) stack.push(nested)
     }
   }

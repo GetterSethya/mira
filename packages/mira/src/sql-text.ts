@@ -13,7 +13,7 @@
  * - single-quoted strings (`'text'`), with `''` as an escaped quote
  */
 
-const isQuote = (char: string): boolean =>
+const isQuote = (char: string) =>
   char === '"' || char === "`" || char === "'"
 
 /**
@@ -22,7 +22,7 @@ const isQuote = (char: string): boolean =>
  * an escaped character inside the same region.
  */
 function skipQuoted(statement: string, start: number): number {
-  const quote = statement[start]!
+  const quote = statement.charAt(start)
   let index = start + 1
 
   while (index < statement.length) {
@@ -56,7 +56,7 @@ export function transformSqlCode(
   let index = 0
 
   while (index < statement.length) {
-    const char = statement[index]!
+    const char = statement.charAt(index)
     if (!isQuote(char)) {
       index++
       continue
@@ -82,7 +82,7 @@ export function forEachSqlCode(
   let index = 0
 
   while (index < statement.length) {
-    const char = statement[index]!
+    const char = statement.charAt(index)
     if (!isQuote(char)) {
       index++
       continue

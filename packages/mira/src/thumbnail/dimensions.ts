@@ -124,8 +124,8 @@ const readWebp = (view: DataView, bytes: Uint8Array): ImageDimensions | null => 
   const chunk = ascii(bytes, 12, 4)
   if (chunk === "VP8X") {
     if (bytes.length < 30) return null
-    const width = 1 + (bytes[24]! | (bytes[25]! << 8) | (bytes[26]! << 16))
-    const height = 1 + (bytes[27]! | (bytes[28]! << 8) | (bytes[29]! << 16))
+    const width = 1 + (view.getUint16(24, true) | (view.getUint8(26) << 16))
+    const height = 1 + (view.getUint16(27, true) | (view.getUint8(29) << 16))
     return { width, height, format: "webp" }
   }
 

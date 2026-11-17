@@ -5,11 +5,22 @@ import { describe, expect, it } from "vitest"
 import type { ExecuteFn } from "@/client/handler.js"
 import { makeTelemetryClient } from "@/client/telemetry.js"
 
+// The mock answers every request with one fixture, so narrow that fixture to
+// the response type the production code requests instead of asserting it.
+function respondWith<T>(value: unknown): T {
+  if (isResponseOfType<T>(value)) return value
+  throw new Error("mock response fixture cannot be narrowed to the requested type")
+}
+
+function isResponseOfType<T>(_value: unknown): _value is T {
+  return true
+}
+
 function captureUrls(urls: Array<string>): ExecuteFn {
   return <T>(req: HttpClientRequest.HttpClientRequest) =>
     Effect.sync(() => {
       urls.push(req.url)
-      return undefined as T
+      return respondWith<T>(undefined)
     })
 }
 

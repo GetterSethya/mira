@@ -16,7 +16,7 @@ function makeLayer(builderDefs: ReadonlyArray<StubDef>, plugins: ReadonlyArray<M
     ...builderDefs,
     ...plugins.flatMap((p): ReadonlyArray<StubDef> => {
       const crons = p.crons
-      return crons !== undefined ? (crons as ReadonlyArray<StubDef>) : []
+      return crons !== undefined ? crons : []
     })
   ]
   return makeCronServiceLayer(allDefs).pipe(
@@ -113,8 +113,10 @@ describe("CronService integration", () => {
         const failure = Cause.findErrorOption(result.cause)
         assert.isTrue(Option.isSome(failure))
         if (Option.isSome(failure)) {
-          assert.ok(failure.value instanceof CronNotFoundError)
-          assert.strictEqual((failure.value as CronNotFoundError).name, "not-registered")
+          const value = failure.value
+          assert.ok(value instanceof CronNotFoundError)
+          if (!(value instanceof CronNotFoundError)) throw new Error("expected CronNotFoundError")
+          assert.strictEqual(value.name, "not-registered")
         }
       }
     }).pipe(

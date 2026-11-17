@@ -175,6 +175,7 @@ export const MiraPlugin = {
     return instance
   },
 
+  // oxlint-disable-next-line typescript/no-explicit-any
   isMiraPlugin: (ext: unknown): ext is MiraPlugin<any> => {
     if (typeof ext !== "object" || ext === null) return false
     if (!("_tag" in ext)) return false

@@ -32,14 +32,13 @@ function makeBaseBuilder<F extends FieldsMap>(
   fields: F,
   indexesCb?: IndexCb<F>
 ): BaseCollectionBuilder<F> {
-  type AF = (keyof F & string) | BaseSystemField
   let _schema: (CollectionSchema & { "x-collection-kind": "base" }) | undefined
   return {
     name,
     fields,
     get schema(): CollectionSchema & { "x-collection-kind": "base" } {
       if (_schema === undefined) {
-        const indexes = indexesCb?.(Index as IndexBuilder<AF>)
+        const indexes = indexesCb?.(Index)
         _schema = toJSONSchema(
           "base",
           name,
@@ -47,7 +46,7 @@ function makeBaseBuilder<F extends FieldsMap>(
           indexes !== undefined ? { indexes } : {}
         )
       }
-      return _schema!
+      return _schema
     },
     indexes: (cb) => makeBaseBuilder(name, fields, cb)
   }

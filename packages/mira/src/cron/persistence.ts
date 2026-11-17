@@ -21,6 +21,7 @@ const ConfigRowSchema = Schema.Struct({ value: Schema.String })
 
 export function loadPersistedCronState(sql: SqlClient.SqlClient) {
   return Effect.gen(function* () {
+    const emptyState: PersistedCronState = {}
     // DDL — sql.unsafe is fine for CREATE TABLE
     yield* sql.unsafe(`CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
 
@@ -31,12 +32,12 @@ export function loadPersistedCronState(sql: SqlClient.SqlClient) {
     })(CRON_STATE_CONFIG_KEY)
 
     const row = rows[0]
-    if (row === undefined) return {} as PersistedCronState
+    if (row === undefined) return emptyState
 
     return yield* Schema.decodeEffect(Schema.fromJsonString(PersistedCronStateSchema))(row.value).pipe(
       Effect.catch((e) =>
         Effect.logWarning(`[cron] failed to decode persisted cron_state, starting fresh: ${String(e)}`).pipe(
-          Effect.as({} as PersistedCronState)
+          Effect.as(emptyState)
         )
       )
     )

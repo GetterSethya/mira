@@ -13,8 +13,8 @@ import {
 
 function crc32(buf: Uint8Array): number {
   let crc = 0xffffffff
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i]!
+  for (const byte of buf) {
+    crc ^= byte
     for (let j = 0; j < 8; j++) {
       crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
     }

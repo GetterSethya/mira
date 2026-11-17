@@ -8,6 +8,16 @@ import { makeCollectionClient } from "@/client/collection.js"
 import { MiraError } from "@/client/errors.js"
 import type { ExecuteFn } from "@/client/handler.js"
 
+/*
+ * Adapts a concrete mock value to the unconstrained success type `T` that
+ * `ExecuteFn` promises. The overload keeps the runtime value intact while
+ * presenting its static type as `never`, which is assignable to every `T`.
+ */
+function mockResponse(value: unknown): never
+function mockResponse(value: unknown): unknown {
+  return value
+}
+
 const TestCollection: AnyCollectionDef = {
   name: "tasks",
   fields: {
@@ -57,36 +67,36 @@ const FileCollection: AnyCollectionDef = {
 function makeTestExecute(
   captured: Array<{ method: string; url: string }>
 ): ExecuteFn {
-  return <T>(req: HttpClientRequest.HttpClientRequest) =>
+  return (req: HttpClientRequest.HttpClientRequest) =>
     Effect.sync(() => {
       captured.push({
         method: req.method,
         url: req.url
       })
       if (req.method === "DELETE") {
-        return undefined as T
+        return mockResponse(undefined)
       }
       if (req.url.includes("auth-with-password")) {
-        return { token: "test-token", record: { id: "1", created: "", updated: "", name: "Test" } } as T
+        return mockResponse({ token: "test-token", record: { id: "1", created: "", updated: "", name: "Test" } })
       }
       if (req.method === "GET" && !req.url.includes("/1")) {
-        return { items: [], nextCursor: null } as T
+        return mockResponse({ items: [], nextCursor: null })
       }
-      return { id: "1", created: "", updated: "" } as T
+      return mockResponse({ id: "1", created: "", updated: "" })
     })
 }
 
 function makeBodyCapturingExecute(
   captured: Array<{ method: string; url: string; bodyIsFormData: boolean }>
 ): ExecuteFn {
-  return <T>(req: HttpClientRequest.HttpClientRequest) =>
+  return (req: HttpClientRequest.HttpClientRequest) =>
     Effect.sync(() => {
       captured.push({
         method: req.method,
         url: req.url,
         bodyIsFormData: req.body._tag === "FormData"
       })
-      return { id: "1", created: "", updated: "", label: "x", attachment: "x.png" } as T
+      return mockResponse({ id: "1", created: "", updated: "", label: "x", attachment: "x.png" })
     })
 }
 
@@ -203,15 +213,15 @@ describe("CollectionClient", () => {
 
   it("createMany → POST /bulk and unwraps the records envelope", async () => {
     const captured: Array<{ method: string; url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
         captured.push({ method: req.method, url: req.url })
-        return {
+        return mockResponse({
           records: [
             { id: "1", created: "", updated: "", title: "A" },
             { id: "2", created: "", updated: "", title: "B" }
           ]
-        } as T
+        })
       })
     const client = makeCollectionClient({
       collectionName: "tasks",
@@ -234,15 +244,15 @@ describe("CollectionClient", () => {
 
   it("updateMany → PATCH /bulk and unwraps the records envelope", async () => {
     const captured: Array<{ method: string; url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
         captured.push({ method: req.method, url: req.url })
-        return {
+        return mockResponse({
           records: [
             { id: "1", created: "", updated: "", title: "A2" },
             { id: "2", created: "", updated: "", title: "B2" }
           ]
-        } as T
+        })
       })
     const client = makeCollectionClient({
       collectionName: "tasks",
@@ -266,10 +276,10 @@ describe("CollectionClient", () => {
 
   it("deleteMany → DELETE /bulk and unwraps the ids envelope", async () => {
     const captured: Array<{ method: string; url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
         captured.push({ method: req.method, url: req.url })
-        return { ids: ["a", "b"] } as T
+        return mockResponse({ ids: ["a", "b"] })
       })
     const client = makeCollectionClient({
       collectionName: "tasks",
@@ -441,10 +451,10 @@ describe("CollectionClient", () => {
 
   it("me → GET /api/auth/me and unwraps the envelope to the record", async () => {
     const captured: Array<{ method: string; url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
         captured.push({ method: req.method, url: req.url })
-        return { collection: "users", record: { id: "1", created: "", updated: "", name: "Budi" } } as T
+        return mockResponse({ collection: "users", record: { id: "1", created: "", updated: "", name: "Budi" } })
       })
     const client = makeCollectionClient({
       collectionName: "users",
@@ -467,8 +477,8 @@ describe("CollectionClient", () => {
   })
 
   it("me → rejects with 401 MiraError when the token belongs to another collection", async () => {
-    const execute: ExecuteFn = <T>(_req: HttpClientRequest.HttpClientRequest) =>
-      Effect.succeed({ collection: "_superadmin", record: { id: "1", created: "", updated: "" } } as T)
+    const execute: ExecuteFn = (_req: HttpClientRequest.HttpClientRequest) =>
+      Effect.succeed(mockResponse({ collection: "_superadmin", record: { id: "1", created: "", updated: "" } }))
     const client = makeCollectionClient({
       collectionName: "users",
       schema: AuthCollectionDef.schema,
@@ -581,8 +591,8 @@ describe("getFirstOrNone", () => {
 
   it("returns Option.Some when an item matches the filter", async () => {
     const record = { id: "1", seqId: 1, created: "", updated: "", title: "Hello", completed: false }
-    const execute: ExecuteFn = <T>() =>
-      Effect.succeed({ items: [record], nextCursor: null } as T)
+    const execute: ExecuteFn = () =>
+      Effect.succeed(mockResponse({ items: [record], nextCursor: null }))
 
     const result = await makeClient(execute)
       .getFirstOrNone(f => f.field("completed").eq(false))
@@ -593,8 +603,8 @@ describe("getFirstOrNone", () => {
   })
 
   it("returns Option.None when no item matches", async () => {
-    const execute: ExecuteFn = <T>() =>
-      Effect.succeed({ items: [], nextCursor: null } as T)
+    const execute: ExecuteFn = () =>
+      Effect.succeed(mockResponse({ items: [], nextCursor: null }))
 
     const result = await makeClient(execute)
       .getFirstOrNone(f => f.field("completed").eq(true))
@@ -605,9 +615,9 @@ describe("getFirstOrNone", () => {
 
   it("always sends limit=1 regardless of other options", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute)
@@ -619,9 +629,9 @@ describe("getFirstOrNone", () => {
 
   it("sends filter in query string", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute)
@@ -633,9 +643,9 @@ describe("getFirstOrNone", () => {
 
   it("passes sort and order options through", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute)
@@ -664,9 +674,9 @@ describe("getFullList", () => {
 
   it("defaults to limit=1000", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute).getFullList().raw()
@@ -675,9 +685,9 @@ describe("getFullList", () => {
 
   it("custom limit overrides default", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute).getFullList({ limit: 500 }).raw()
@@ -690,8 +700,8 @@ describe("getFullList", () => {
       { id: "1", seqId: 1, created: "", updated: "", title: "A", completed: false },
       { id: "2", seqId: 2, created: "", updated: "", title: "B", completed: true },
     ]
-    const execute: ExecuteFn = <T>() =>
-      Effect.succeed({ items: records, nextCursor: null } as T)
+    const execute: ExecuteFn = () =>
+      Effect.succeed(mockResponse({ items: records, nextCursor: null }))
 
     const result = await makeClient(execute).getFullList().raw()
     expect(result).toEqual(records)
@@ -699,9 +709,9 @@ describe("getFullList", () => {
 
   it("never sends a cursor param", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute).getFullList().raw()
@@ -710,9 +720,9 @@ describe("getFullList", () => {
 
   it("passes filter, sort, and order through", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute)
@@ -728,16 +738,16 @@ describe("getFullList", () => {
 describe("retryOptions", () => {
   function makeRetryExecute(failCount: number): { execute: ExecuteFn; callsMade: () => number } {
     let count = 0
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) =>
       Effect.gen(function* () {
         count++
         if (count <= failCount) {
           return yield* Effect.fail(new MiraError({ status: 503, body: "unavailable" }))
         }
-        if (req.method === "DELETE") return undefined as T
-        if (req.url.includes("auth-with-password")) return { token: "tok", record: { id: "u1" } } as T
-        if (req.method === "GET" && !req.url.includes("/1")) return { items: [], nextCursor: null } as T
-        return { id: "1", created: "", updated: "" } as T
+        if (req.method === "DELETE") return mockResponse(undefined)
+        if (req.url.includes("auth-with-password")) return mockResponse({ token: "tok", record: { id: "u1" } })
+        if (req.method === "GET" && !req.url.includes("/1")) return mockResponse({ items: [], nextCursor: null })
+        return mockResponse({ id: "1", created: "", updated: "" })
       })
     return { execute, callsMade: () => count }
   }
@@ -891,9 +901,9 @@ describe("literalText field — filter builder", () => {
 
   it("filter builder eq on literalText compiles correctly", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute).getList({
@@ -905,9 +915,9 @@ describe("literalText field — filter builder", () => {
 
   it("filter builder in on literalText compiles correctly", async () => {
     const captured: Array<{ url: string }> = []
-    const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) => {
+    const execute: ExecuteFn = (req: HttpClientRequest.HttpClientRequest) => {
       captured.push({ url: req.url })
-      return Effect.succeed({ items: [], nextCursor: null } as T)
+      return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
     await makeClient(execute).getList({

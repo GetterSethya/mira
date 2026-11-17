@@ -27,8 +27,8 @@ export const Mira = {
   builder: () => new MiraBuilder(),
 }
 
-export type { MigrateOptions } from "../migrator/types.js"
-export type { MiraCacheConfig } from "../cache/types.js"
+export type { MigrateOptions } from "@/migrator/types.js"
+export type { MiraCacheConfig } from "@/cache/types.js"
 export type {
   MiraBatchMutationConfig,
   MiraBatchOperationConfig

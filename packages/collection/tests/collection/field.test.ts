@@ -99,8 +99,10 @@ describe("Field.literalText", () => {
       error: (k) => k === "literal" ? "invalid role" : undefined
     })
     expect(typeof f.error).toBe("function")
-    expect(f.error!("literal")).toBe("invalid role")
-    expect(f.error!("type")).toBeUndefined()
+    const error = f.error
+    if (error === undefined) throw new Error("expected error callback")
+    expect(error("literal")).toBe("invalid role")
+    expect(error("type")).toBeUndefined()
   })
 })
 
@@ -159,7 +161,7 @@ describe("Field.view()", () => {
 
   it("Field.seqId does not expose .view()", () => {
     const f = Field.seqId()
-    expect((f as any).view).toBeUndefined()
+    expect(Reflect.get(f, "view")).toBeUndefined()
     expect(f.viewOnly).toBeUndefined()
   })
 

@@ -28,6 +28,7 @@ const SpanAttributesSchema = Schema.fromJsonString(
   Schema.Record(Schema.String, SPAN_ATTRIBUTE_VALUE)
 )
 const parseAttributes = Schema.decodeUnknownEffect(SpanAttributesSchema)
+const encodeAttributes = Schema.encodeSync(SpanAttributesSchema)
 
 const decodeAttributes = (raw: string) =>
   parseAttributes(raw).pipe(
@@ -53,7 +54,9 @@ type RawSpanRow = {
   readonly created: string
 }
 
-const asNumber = (value: unknown): number => Number(value ?? 0)
+const asNumber = (value: unknown) => Number(value ?? 0)
+
+const asSpanStatus = (value: string): "ok" | "error" => (value === "error" ? "error" : "ok")
 
 const mapStoreError = (operation: string, cause: unknown) =>
   new TelemetryStoreError({ operation, cause })
@@ -74,7 +77,7 @@ const retryPredicate = (dialect: DialectType) =>
 const inList = (values: ReadonlyArray<unknown>) =>
   values.length === 0 ? "NULL" : values.map(() => "?").join(", ")
 
-const appendRows = <A extends { readonly id: string }>(
+const appendRows = <A extends { readonly id: string } & Record<string, unknown>>(
   sql: SqlClient.SqlClient,
   dialect: DialectType,
   table: string,
@@ -85,7 +88,7 @@ const appendRows = <A extends { readonly id: string }>(
     if (rows.length === 0) return
 
     const insert = (values: ReadonlyArray<A>) =>
-      sql`INSERT INTO ${sql(table)} ${sql.insert(values as ReadonlyArray<Record<string, unknown>>)}`.pipe(
+      sql`INSERT INTO ${sql(table)} ${sql.insert(values)}`.pipe(
         Effect.asVoid
       )
 
@@ -156,7 +159,7 @@ const mapSpanEntry = (
   durationMs: entry.durationMs,
   status: entry.status,
   error: entry.error,
-  attributes: JSON.stringify(entry.attributes),
+  attributes: encodeAttributes(entry.attributes),
   created: entry.created,
   updated: entry.updated
 })
@@ -171,7 +174,7 @@ const parseSpanRow = (raw: RawSpanRow): Effect.Effect<TelemetrySpanRow> =>
       parentSpanId: raw.parentSpanId,
       kind: raw.kind,
       durationMs: asNumber(raw.durationMs),
-      status: raw.status as "ok" | "error",
+      status: asSpanStatus(raw.status),
       error: raw.error,
       attributes,
       created: raw.created
@@ -242,8 +245,7 @@ const makeRead = (
         ...row,
         seqId: asNumber(row.seqId)
       }))
-      const nextCursor =
-        hasMore && items.length > 0 ? items[items.length - 1]!.seqId : null
+      const nextCursor = hasMore ? (items.at(-1)?.seqId ?? null) : null
 
       return {
         items,
@@ -292,8 +294,9 @@ const makeRead = (
         const hasMore = raw.length > query.limit
         const selected = hasMore ? raw.slice(0, query.limit) : raw
         const items = yield* Effect.forEach(selected, parseSpanRow, { concurrency: "unbounded" })
+        const lastSelected = selected.at(-1)
         const nextCursor =
-          hasMore && selected.length > 0 ? asNumber(selected[selected.length - 1]!.seqId) : null
+          hasMore && lastSelected !== undefined ? asNumber(lastSelected.seqId) : null
 
         return {
           items,
@@ -319,8 +322,9 @@ const makeRead = (
 
       const hasMore = traceRows.length > query.limit
       const paged = hasMore ? traceRows.slice(0, query.limit) : traceRows
+      const lastPaged = paged.at(-1)
       const nextCursor =
-        hasMore && paged.length > 0 ? asNumber(paged[paged.length - 1]!.maxSeqId) : null
+        hasMore && lastPaged !== undefined ? asNumber(lastPaged.maxSeqId) : null
       const total = asNumber(totalRows[0]?.cnt)
 
       if (paged.length === 0) {

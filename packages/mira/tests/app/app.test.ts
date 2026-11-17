@@ -17,7 +17,7 @@ import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { LocalFileStorage } from "@/storage/index.js"
@@ -115,7 +115,7 @@ describe("MiraApp integration", () => {
       assert.strictEqual(res.status, 200)
       const body = yield* res.json
       assert.ok(typeof body === "object" && body !== null && "items" in body)
-      const items = (body as { items: Array<unknown> }).items
+      const items = body.items
       assert.ok(Array.isArray(items))
       assert.strictEqual(items.length, 0)
     }).pipe(Effect.provide(testLayer)),
@@ -133,8 +133,8 @@ describe("MiraApp integration", () => {
       assert.strictEqual(res.status, 201)
       const body = yield* res.json
       assert.ok(typeof body === "object" && body !== null && "title" in body)
-      assert.strictEqual((body as { title: string }).title, "hello")
-      assert.ok("id" in body && typeof (body as { id: string }).id === "string")
+      assert.strictEqual(body.title, "hello")
+      assert.ok("id" in body && typeof body.id === "string")
     }).pipe(Effect.provide(testLayer)),
   )
 
@@ -151,7 +151,8 @@ describe("MiraApp integration", () => {
       assert.strictEqual(res.status, 200)
       const body = yield* res.json
       assert.ok(typeof body === "object" && body !== null && "items" in body)
-      const items = (body as { items: Array<unknown> }).items
+      const items = body.items
+      assert.ok(Array.isArray(items))
       assert.strictEqual(items.length, 1)
     }).pipe(Effect.provide(testLayer)),
   )
@@ -167,12 +168,13 @@ describe("MiraApp integration", () => {
       )
       const created = yield* createRes.json
       assert.ok(typeof created === "object" && created !== null && "id" in created)
-      const id = (created as { id: string }).id
+      const id = created.id
+      if (typeof id !== "string") throw new Error("Expected a string id")
       const res = yield* HttpClient.get(`/api/collections/posts/${id}`)
       assert.strictEqual(res.status, 200)
       const body = yield* res.json
       assert.ok(typeof body === "object" && body !== null && "title" in body)
-      assert.strictEqual((body as { title: string }).title, "find me")
+      assert.strictEqual(body.title, "find me")
     }).pipe(Effect.provide(testLayer)),
   )
 

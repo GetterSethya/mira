@@ -30,12 +30,20 @@ function sqlError(message: string): SqlError.SqlError {
   return new SqlError.SqlError({ reason: new SqlError.UnknownError({ cause: undefined, message }) })
 }
 
+function isCollectionSchema(value: unknown): value is CollectionSchema {
+  return typeof value === "object" && value !== null && "properties" in value
+}
+
 function decodeStoredSchema(json: string) {
   return Schema.decodeUnknownEffect(parseJsonSchema)(json).pipe(
     Effect.mapError(
       (e: Schema.SchemaError) => sqlError(`Invalid stored schema: ${e.message}`)
     ),
-    Effect.map((v) => v as CollectionSchema)
+    Effect.flatMap((v) =>
+      isCollectionSchema(v)
+        ? Effect.succeed(v)
+        : Effect.fail(sqlError("Invalid stored schema: missing properties"))
+    )
   )
 }
 
@@ -261,14 +269,14 @@ function migrateImplWith(
         yield* runStatements(sql, statements)
         yield* sql`INSERT INTO ${sql(migrationsTable)} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
 
-        for (const { name } of schemas) {
+        for (const [name, schemaJson] of schemaJsonByName) {
           yield* Effect.logDebug(`Writing schema for ${name}`)
           yield* sql.unsafe(
             dialect.upsert(
               schemaTable,
               {
                 name,
-                schema: schemaJsonByName.get(name)!,
+                schema: schemaJson,
                 updated_at: new Date().toJSON()
               },
               ["name"]

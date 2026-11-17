@@ -1,10 +1,13 @@
 import type { CollectionSchema, JsonSchemaProperty } from "@gettersethya/mira-client"
+import { Schema } from "effect"
 
 import type { ColumnDef, IndexShape, MigrationPlan, MigrationStep, NamedSchema } from "./types.js"
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+
 function jsonKeysDiffer(a: unknown, b: unknown) {
   if (a === b) return false
-  return JSON.stringify(a) !== JSON.stringify(b)
+  return encodeJson(a) !== encodeJson(b)
 }
 
 /** Maps a JSON Schema property to the appropriate SQL column type. */

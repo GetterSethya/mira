@@ -80,7 +80,7 @@ export function filterNodeToWhereClause(
   return compileNode(node, schema, collectionName, options)
 }
 
-function isScalar(value: unknown): boolean {
+function isScalar(value: unknown) {
   return value === null || typeof value === "string" || typeof value === "number"
 }
 

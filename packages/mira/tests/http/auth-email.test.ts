@@ -21,7 +21,7 @@ import { makeCollectionRouter } from "@/http/router.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
 
 const UsersDef = AuthCollection.define(
   "users",

@@ -61,10 +61,10 @@ describe("migrator", () => {
       const rows = yield* sql`SELECT name, schema FROM _collections`
       expect(rows.length).toBe(1)
       expect(rows[0].name).toBe("base")
-      const parsed = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(rows[0].schema).pipe(
-        Effect.map((v) => v as CollectionSchema)
-      )
-      expect(parsed.properties.title).toEqual({ type: "string" })
+      const parsed = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Struct({ properties: Schema.Record(Schema.String, Schema.Unknown) }))
+      )(rows[0].schema).pipe(Effect.orDie)
+      expect(parsed.properties["title"]).toEqual({ type: "string" })
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("no-op when schemas match", () =>

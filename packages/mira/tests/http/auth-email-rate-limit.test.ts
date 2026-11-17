@@ -1,5 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
+import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { Effect, Layer, Option, Redacted } from "effect"
 import { Headers } from "effect/http"
 import { SqlClient } from "effect/sql"
@@ -92,7 +93,7 @@ const withLimits = (overrides: Partial<EmailRateLimitPolicies>): EmailRateLimitP
 })
 
 const makeLayer = (policies: EmailRateLimitPolicies) => {
-  const collectionService = makeCollectionServiceLayer([users as any]).pipe(
+  const collectionService = makeCollectionServiceLayer([users]).pipe(
     Layer.provide(repoWithSql),
     Layer.provide(FileStorageTest),
     Layer.provide(sqliteLayer),
@@ -114,7 +115,7 @@ const makeLayer = (policies: EmailRateLimitPolicies) => {
   )
 }
 
-const users = {
+const users: AnyCollectionDef = {
   name: "users",
   fields: { email: { _tag: "FieldDef", kind: "email" } },
   schema: {
@@ -131,7 +132,7 @@ const users = {
     required: [],
     "x-collection-kind": "auth"
   }
-} as const
+}
 
 const setup = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -162,7 +163,9 @@ const loadUser = Effect.gen(function* () {
   const rows = yield* repo.viewFilter("users", {
     where: { sql: "t.email = ?", params: ["user@example.com"] }
   })
-  return rows[0]!
+  const user = rows[0]
+  if (user === undefined) return yield* Effect.die("expected a user row")
+  return user
 })
 
 describe("auth email request rate limits", () => {
@@ -175,10 +178,10 @@ describe("auth email request rate limits", () => {
       )
       yield* Effect.gen(function* () {
         yield* setup
-        const first = yield* requestPasswordReset(users as any, "user@example.com", "1.2.3.4").pipe(
+        const first = yield* requestPasswordReset(users, "user@example.com", "1.2.3.4").pipe(
           Effect.exit
         )
-        const second = yield* requestPasswordReset(users as any, "user@example.com", "1.2.3.4").pipe(
+        const second = yield* requestPasswordReset(users, "user@example.com", "1.2.3.4").pipe(
           Effect.exit
         )
         expect(first._tag).toBe("Success")
@@ -196,21 +199,21 @@ describe("auth email request rate limits", () => {
       )
       yield* Effect.gen(function* () {
         yield* setup
-        const known = yield* requestPasswordReset(users as any, "user@example.com", "1.2.3.4").pipe(
+        const known = yield* requestPasswordReset(users, "user@example.com", "1.2.3.4").pipe(
           Effect.exit
         )
         const knownAgain = yield* requestPasswordReset(
-          users as any,
+          users,
           "user@example.com",
           "1.2.3.4"
         ).pipe(Effect.exit)
         const unknown = yield* requestPasswordReset(
-          users as any,
+          users,
           "nobody@example.com",
           "1.2.3.4"
         ).pipe(Effect.exit)
         const unknownAgain = yield* requestPasswordReset(
-          users as any,
+          users,
           "nobody@example.com",
           "1.2.3.4"
         ).pipe(Effect.exit)
@@ -231,9 +234,9 @@ describe("auth email request rate limits", () => {
       )
       yield* Effect.gen(function* () {
         yield* setup
-        yield* requestPasswordReset(users as any, "user@example.com", "1.2.3.4")
+        yield* requestPasswordReset(users, "user@example.com", "1.2.3.4")
         const user = yield* loadUser
-        const otp = yield* issueLoginOtp(users as any, user, "1.2.3.4", "user@example.com").pipe(
+        const otp = yield* issueLoginOtp(users, user, "1.2.3.4", "user@example.com").pipe(
           Effect.exit
         )
         expect(otp._tag).toBe("Success")
@@ -250,10 +253,10 @@ describe("auth email request rate limits", () => {
       )
       yield* Effect.gen(function* () {
         yield* setup
-        const first = yield* requestPasswordReset(users as any, "user@example.com", null).pipe(
+        const first = yield* requestPasswordReset(users, "user@example.com", null).pipe(
           Effect.exit
         )
-        const second = yield* requestPasswordReset(users as any, "user@example.com", null).pipe(
+        const second = yield* requestPasswordReset(users, "user@example.com", null).pipe(
           Effect.exit
         )
         expect(first._tag).toBe("Success")

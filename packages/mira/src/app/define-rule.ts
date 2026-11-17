@@ -29,9 +29,28 @@ export type ViewRuleMap = {
   view?: RuleMap["view"]
 }
 
+type AuthRuleBuilder<F extends FieldsMap> = RuleBuilder<F & AuthSystemFieldDefs> & {
+  selfId(): FieldOperand<string, string>
+}
+
+type RuleMapResult = RuleMap | ViewRuleMap | BaseRuleMap
+// oxlint-disable-next-line typescript/no-explicit-any
+type AnyRuleCallback = (R: any) => any
+
+function collectRuleMap(result: RuleMapResult): RuleMap {
+  const map: RuleMap = {}
+  if (result.list !== undefined) map.list = result.list
+  if (result.view !== undefined) map.view = result.view
+  if ("create" in result && result.create !== undefined) map.create = result.create
+  if ("update" in result && result.update !== undefined) map.update = result.update
+  if ("delete" in result && result.delete !== undefined) map.delete = result.delete
+  if ("manage" in result && result.manage !== undefined) map.manage = result.manage
+  return map
+}
+
 export function defineRule<F extends FieldsMap>(
   collection: { name: string; fields: F; schema: { "x-collection-kind": "auth" } },
-  cb: (R: RuleBuilder<F & AuthSystemFieldDefs> & { selfId(): FieldOperand<any, string> }) => RuleMap
+  cb: (R: AuthRuleBuilder<F>) => RuleMap
 ): RuleBinding
 
 export function defineRule<F extends FieldsMap>(
@@ -46,47 +65,25 @@ export function defineRule<F extends FieldsMap>(
 
 export function defineRule<F extends FieldsMap>(
   collection: { name: string; fields: F; schema: { "x-collection-kind": string } },
-  cb: (R: any) => any
+  cb: AnyRuleCallback
 ): RuleBinding {
   const kind = collection.schema["x-collection-kind"]
 
   if (kind === "auth") {
-    const authBuilder = {
+    const authBuilder: AuthRuleBuilder<F> = {
       ...makeRuleBuilder<F & AuthSystemFieldDefs>(),
-      selfId(): FieldOperand<any, string> {
-        return toChainable<any, string>({ kind: "authId", collection: collection.name })
+      selfId(): FieldOperand<string, string> {
+        return toChainable<string, string>({ kind: "authId", collection: collection.name })
       }
     }
-    const result = cb(authBuilder)
-    const ruleMap: RuleMap = {
-      ...(result.list !== undefined ? { list: result.list } : {}),
-      ...(result.view !== undefined ? { view: result.view } : {}),
-      ...(result.create !== undefined ? { create: result.create } : {}),
-      ...(result.update !== undefined ? { update: result.update } : {}),
-      ...(result.delete !== undefined ? { delete: result.delete } : {}),
-      ...(result.manage !== undefined ? { manage: result.manage } : {}),
-    }
-    return { _tag: "RuleBinding", collectionName: collection.name, ruleMap }
+    return { _tag: "RuleBinding", collectionName: collection.name, ruleMap: collectRuleMap(cb(authBuilder)) }
   }
 
   if (kind === "view") {
     const viewBuilder = makeRuleBuilder<F>()
-    const result = cb(viewBuilder)
-    const ruleMap: RuleMap = {
-      ...(result.list !== undefined ? { list: result.list } : {}),
-      ...(result.view !== undefined ? { view: result.view } : {}),
-    }
-    return { _tag: "RuleBinding", collectionName: collection.name, ruleMap }
+    return { _tag: "RuleBinding", collectionName: collection.name, ruleMap: collectRuleMap(cb(viewBuilder)) }
   }
 
   const baseBuilder = makeRuleBuilder<F & BaseSystemFieldDefs>()
-  const result = cb(baseBuilder)
-  const ruleMap: RuleMap = {
-    ...(result.list !== undefined ? { list: result.list } : {}),
-    ...(result.view !== undefined ? { view: result.view } : {}),
-    ...(result.create !== undefined ? { create: result.create } : {}),
-    ...(result.update !== undefined ? { update: result.update } : {}),
-    ...(result.delete !== undefined ? { delete: result.delete } : {}),
-  }
-  return { _tag: "RuleBinding", collectionName: collection.name, ruleMap }
+  return { _tag: "RuleBinding", collectionName: collection.name, ruleMap: collectRuleMap(cb(baseBuilder)) }
 }

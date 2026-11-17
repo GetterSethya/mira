@@ -1,5 +1,6 @@
+import { FilterNodeSchema } from "@gettersethya/mira-client"
 import { describe, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
@@ -9,6 +10,22 @@ import { SqliteDatabase } from "@/databases/sqlite.js"
 import { telemetryLogsRoute, telemetrySpansRoute } from "@/http/telemetry-routes.js"
 import { makeTelemetryLayerForClient } from "@/telemetry/core.js"
 import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
+
+const JsonRecord = Schema.Record(Schema.String, Schema.Unknown)
+
+const LogsBody = Schema.Struct({
+  logs: Schema.Array(JsonRecord),
+  total: Schema.Number,
+  nextCursor: Schema.NullOr(Schema.Number)
+})
+
+const SpansBody = Schema.Struct({
+  spans: Schema.Array(JsonRecord),
+  total: Schema.Number,
+  nextCursor: Schema.NullOr(Schema.Number)
+})
+
+const encodeFilter = Schema.encodeSync(Schema.fromJsonString(FilterNodeSchema))
 
 // ---------------------------------------------------------------------------
 // Layers
@@ -49,8 +66,16 @@ function runSpansRoute(url: string) {
   )
 }
 
-function getBody(res: HttpServerResponse.HttpServerResponse) {
-  return Effect.promise(() => HttpServerResponse.toWeb(res).json() as Promise<unknown>)
+function getBody<A>(
+  res: HttpServerResponse.HttpServerResponse,
+  schema: Schema.Schema<A>
+): Effect.Effect<A, Schema.SchemaError, never> {
+  // The route test intentionally decodes arbitrary response JSON; the runtime
+  // graph is closed, but Schema's generic widens the environment.
+  // oxlint-disable-next-line typescript/consistent-type-assertions
+  return Effect.promise(() => HttpServerResponse.toWeb(res).json()).pipe(
+    Effect.flatMap((body: unknown) => Schema.decodeUnknownEffect(schema)(body))
+  ) as Effect.Effect<A, Schema.SchemaError, never>
 }
 
 // ---------------------------------------------------------------------------
@@ -61,7 +86,7 @@ describe("telemetryLogsRoute", () => {
   it.effect("returns disabled when TelemetryStore absent", () =>
     Effect.gen(function* () {
       const res = yield* runLogsRoute("http://localhost/_telemetry/logs")
-      const body = yield* getBody(res)
+      const body = yield* getBody(res, LogsBody)
       expect(body).toMatchObject({ logs: [], total: 0 })
     })
   )
@@ -72,12 +97,12 @@ describe("telemetryLogsRoute", () => {
       yield* Effect.promise(drainMicrotasks)
 
       const res = yield* runLogsRoute("http://localhost/_telemetry/logs")
-      const body = yield* getBody(res)
+      const body = yield* getBody(res, LogsBody)
 
       expect(body).toMatchObject({ total: expect.any(Number) })
-      const { logs } = body as { logs: Array<unknown> }
+      const { logs } = body
       expect(logs.length).toBeGreaterThan(0)
-      const log = (logs as Array<Record<string, unknown>>).find((l) => l["message"] === "test")
+      const log = logs.find((l) => l["message"] === "test")
       expect(log).toBeDefined()
       expect(log?.["level"]).toBe("INFO")
       expect(typeof log?.["created"]).toBe("string")
@@ -93,16 +118,16 @@ describe("telemetryLogsRoute", () => {
       yield* Effect.promise(drainMicrotasks)
 
       const res = yield* runLogsRoute("http://localhost/_telemetry/logs?limit=2")
-      const body = yield* getBody(res)
+      const body = yield* getBody(res, LogsBody)
 
-      const { logs, nextCursor, total } = body as { logs: Array<unknown>; total: number; nextCursor: number | null }
+      const { logs, nextCursor, total } = body
       expect(logs.length).toBe(2)
       expect(total).toBeGreaterThanOrEqual(5)
       expect(typeof nextCursor).toBe("number")
 
       const res2 = yield* runLogsRoute(`http://localhost/_telemetry/logs?limit=2&after=${nextCursor}`)
-      const body2 = yield* getBody(res2)
-      const { logs: logs2 } = body2 as { logs: Array<unknown> }
+      const body2 = yield* getBody(res2, LogsBody)
+      const { logs: logs2 } = body2
       expect(logs2.length).toBe(2)
     }).pipe(Effect.provide(makeRouteLayer()))
   )
@@ -113,11 +138,11 @@ describe("telemetryLogsRoute", () => {
       yield* Effect.logError("error-msg")
       yield* Effect.promise(drainMicrotasks)
 
-      const filter = JSON.stringify({ op: "eq", field: "level", value: "ERROR" })
+      const filter = encodeFilter({ op: "eq", field: "level", value: "ERROR" })
       const res = yield* runLogsRoute(`http://localhost/_telemetry/logs?filter=${encodeURIComponent(filter)}`)
-      const body = yield* getBody(res)
+      const body = yield* getBody(res, LogsBody)
 
-      const { logs } = body as { logs: Array<Record<string, unknown>> }
+      const { logs } = body
       expect(logs.length).toBeGreaterThan(0)
       for (const log of logs) {
         expect(log["level"]).toBe("ERROR")
@@ -140,9 +165,9 @@ describe("telemetrySpansRoute", () => {
       yield* Effect.promise(drainMicrotasks)
 
       const res = yield* runSpansRoute("http://localhost/_telemetry/spans")
-      const body = yield* getBody(res)
+      const body = yield* getBody(res, SpansBody)
 
-      const { spans } = body as { spans: Array<Record<string, unknown>> }
+      const { spans } = body
       expect(spans.length).toBeGreaterThan(0)
       const span = spans.find((s) => s["name"] === "my-span")
       expect(span).toBeDefined()
@@ -166,9 +191,9 @@ describe("telemetrySpansRoute", () => {
       if (rows[0] !== undefined) capturedTraceId = rows[0].traceId
 
       const res = yield* runSpansRoute(`http://localhost/_telemetry/spans?traceId=${encodeURIComponent(capturedTraceId)}`)
-      const body = yield* getBody(res)
+      const body = yield* getBody(res, SpansBody)
 
-      const { spans } = body as { spans: Array<Record<string, unknown>> }
+      const { spans } = body
       expect(spans.length).toBeGreaterThanOrEqual(2)
     }).pipe(Effect.provide(makeRouteLayer()))
   )
@@ -179,11 +204,11 @@ describe("telemetrySpansRoute", () => {
       yield* Effect.fail("boom").pipe(Effect.withSpan("error-span"), Effect.ignore)
       yield* Effect.promise(drainMicrotasks)
 
-      const filter = JSON.stringify({ op: "eq", field: "status", value: "error" })
+      const filter = encodeFilter({ op: "eq", field: "status", value: "error" })
       const res = yield* runSpansRoute(`http://localhost/_telemetry/spans?filter=${encodeURIComponent(filter)}`)
-      const body = yield* getBody(res)
+      const body = yield* getBody(res, SpansBody)
 
-      const { spans } = body as { spans: Array<Record<string, unknown>> }
+      const { spans } = body
       expect(spans.length).toBeGreaterThan(0)
       for (const span of spans) {
         expect(span["status"]).toBe("error")
@@ -206,15 +231,15 @@ describe("telemetrySpansRoute", () => {
       yield* Effect.promise(drainMicrotasks)
 
       const res = yield* runSpansRoute("http://localhost/_telemetry/spans?limit=2")
-      const body = yield* getBody(res)
-      const { nextCursor, spans, total } = body as { spans: Array<unknown>; total: number; nextCursor: number | null }
+      const body = yield* getBody(res, SpansBody)
+      const { nextCursor, spans, total } = body
       expect(spans.length).toBe(2)
       expect(total).toBeGreaterThanOrEqual(3)
       expect(typeof nextCursor).toBe("number")
 
       const res2 = yield* runSpansRoute(`http://localhost/_telemetry/spans?limit=2&after=${nextCursor}`)
-      const body2 = yield* getBody(res2)
-      const { spans: spans2 } = body2 as { spans: Array<unknown> }
+      const body2 = yield* getBody(res2, SpansBody)
+      const { spans: spans2 } = body2
       expect(spans2.length).toBeGreaterThanOrEqual(1)
     }).pipe(Effect.provide(makeRouteLayer()))
   )

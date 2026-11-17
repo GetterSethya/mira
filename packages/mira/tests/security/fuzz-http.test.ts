@@ -10,7 +10,7 @@ import { HttpClient, HttpClientRequest } from "effect/http"
 
 import { signJwt } from "@/http/auth.js"
 
-import { login, makeSecurityLayer, postJson, seedPost, seedUser, serveRouter, setupTables } from "./_harness.js"
+import { login, makeSecurityLayer, postJson, seedPost, seedUser, serveRouter, setupTables, toJsonText } from "./_harness.js"
 
 const layer = makeSecurityLayer()
 
@@ -75,12 +75,12 @@ const INTERNAL_MARKERS = [
   "/src/",
 ]
 
-function leakedInternals(text: string): boolean {
+function leakedInternals(text: string) {
   return INTERNAL_MARKERS.some((m) => text.includes(m))
 }
 
 // deep nested `not` filter, built iteratively so we never blow our own stack
-function nestedNotFilter(depth: number): string {
+function nestedNotFilter(depth: number) {
   return '{"op":"not","node":'.repeat(depth) + '{"op":"eq","field":"title","value":"x"}' + "}".repeat(depth)
 }
 
@@ -88,8 +88,8 @@ async function signHs256(secret: string, payload: Record<string, unknown>): Prom
   const enc = new TextEncoder()
   const b64Text = (data: string) => Buffer.from(data, "utf8").toString("base64url")
   const b64Bytes = (data: Uint8Array) => Buffer.from(data).toString("base64url")
-  const header = b64Text(JSON.stringify({ alg: "HS256", typ: "JWT" }))
-  const body = b64Text(JSON.stringify(payload))
+  const header = b64Text(toJsonText({ alg: "HS256", typ: "JWT" }))
+  const body = b64Text(toJsonText(payload))
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode(`${header}.${body}`))
   return `${header}.${body}.${b64Bytes(new Uint8Array(sig))}`
@@ -428,12 +428,12 @@ describe("fuzz-secure: malformed bodies", () => {
       const shapes = ["[]", '"x"', "123", "null", "{}", "{bad", ""]
       for (const s of shapes) {
         const unauth = yield* rawPost("/api/files/token", s)
-        yield* logCase(`files/token unauth body=${JSON.stringify(s)}`, unauth)
+        yield* logCase(`files/token unauth body=${toJsonText(s)}`, unauth)
         assert.ok(unauth.status < 500)
         assert.isFalse(leakedInternals(unauth.text))
 
         const create = yield* rawPost("/api/collections/posts", s)
-        yield* logCase(`create posts body=${JSON.stringify(s)}`, create)
+        yield* logCase(`create posts body=${toJsonText(s)}`, create)
         assert.ok(create.status < 500, `create body=${s} => ${create.status}`)
         assert.isFalse(leakedInternals(create.text))
       }

@@ -6,8 +6,15 @@ import { BunAuthServiceLayer } from "@/http/auth-bun.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { hashScryptPassword } from "@/http/password-scrypt.js"
 
-const hasBunPassword =
-  typeof (globalThis as { Bun?: { password?: { hash?: unknown } } }).Bun?.password?.hash === "function"
+function bunPasswordAvailable(): boolean {
+  const bun: unknown = Reflect.get(globalThis, "Bun")
+  if (typeof bun !== "object" || bun === null) return false
+  const password: unknown = Reflect.get(bun, "password")
+  if (typeof password !== "object" || password === null) return false
+  return typeof Reflect.get(password, "hash") === "function"
+}
+
+const hasBunPassword = bunPasswordAvailable()
 
 const ARGON2ID_HASH =
   "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaHZhbHVl"

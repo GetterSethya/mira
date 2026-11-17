@@ -37,8 +37,15 @@ type BunCryptoHasherConstructor = new (
   key?: string | ArrayBufferView
 ) => BunCryptoHasherInstance
 
-const bunCryptoHasher = (): BunCryptoHasherConstructor | undefined =>
-  (globalThis as { Bun?: { CryptoHasher?: BunCryptoHasherConstructor } }).Bun?.CryptoHasher
+const isCryptoHasherConstructor = (value: unknown): value is BunCryptoHasherConstructor =>
+  typeof value === "function"
+
+const bunCryptoHasher = (): BunCryptoHasherConstructor | undefined => {
+  const bun: unknown = Reflect.get(globalThis, "Bun")
+  if (typeof bun !== "object" || bun === null) return undefined
+  const CryptoHasher: unknown = Reflect.get(bun, "CryptoHasher")
+  return isCryptoHasherConstructor(CryptoHasher) ? CryptoHasher : undefined
+}
 
 const nativeDigest = (key: string | undefined, value: string): Uint8Array => {
   const Hasher = bunCryptoHasher()

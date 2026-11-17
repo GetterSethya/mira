@@ -51,7 +51,7 @@ function toExecuteEffect<T>(
   )
 }
 
-function hasFileOrBlob(input: object): boolean {
+function hasFileOrBlob(input: object) {
   return Object.values(input).some((v) => v instanceof Blob)
 }
 

@@ -215,7 +215,8 @@ describe("integration: .view() with :memory: SQLite", () => {
           updated: "2026-01-01"
         })}`
 
-        const viewQuery = PublishedPosts.schema["x-view-query"]!
+        const viewQuery = PublishedPosts.schema["x-view-query"]
+        if (viewQuery === undefined) throw new Error("expected PublishedPosts to declare x-view-query")
         yield* sql.unsafe(`CREATE VIEW published_posts AS ${viewQuery}`)
 
         const rows = yield* sql<{

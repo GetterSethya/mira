@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Cause, Data, Effect, Exit, Layer, Option, Result } from "effect"
+import { Cause, Data, Effect, Exit, Layer, Option, Predicate, Result } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -26,6 +26,11 @@ const precheckLayer = Layer.mergeAll(RepositoryLive.pipe(Layer.provide(precheckI
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function requireString(value: unknown): string {
+  if (!Predicate.isString(value)) throw new Error("Expected a string value")
+  return value
 }
 
 const setupTable = Effect.gen(function* () {
@@ -62,7 +67,7 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const result = yield* repo.create("posts", { title: "Hi" })
-        expect((result.id as string).length).toBe(15)
+        expect(requireString(result.id).length).toBe(15)
       }).pipe(Effect.provide(testLayer)))
 
     it.effect("created and updated are valid ISO date strings", () =>
@@ -70,8 +75,8 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const result = yield* repo.create("posts", { title: "Hi" })
-        expect(new Date(result.created as string).toISOString()).toBe(result.created)
-        expect(new Date(result.updated as string).toISOString()).toBe(result.updated)
+        expect(new Date(requireString(result.created)).toISOString()).toBe(result.created)
+        expect(new Date(requireString(result.updated)).toISOString()).toBe(result.updated)
       }).pipe(Effect.provide(testLayer)))
   })
 
@@ -81,7 +86,7 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const created = yield* repo.create("posts", { title: "Test" })
-        const result = yield* repo.view("posts", created.id as string)
+        const result = yield* repo.view("posts", requireString(created.id))
         expect(Option.isSome(result)).toBe(true)
       }).pipe(Effect.provide(testLayer)))
 
@@ -98,7 +103,7 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const created = yield* repo.create("posts", { title: "Match me" })
-        const result = yield* repo.view("posts", created.id as string)
+        const result = yield* repo.view("posts", requireString(created.id))
         const row = Option.getOrThrow(result)
         expect(row.id).toBe(created.id)
         expect(row.title).toBe("Match me")
@@ -112,7 +117,7 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const created = yield* repo.create("posts", { title: "Old" })
-        const result = yield* repo.update("posts", created.id as string, { title: "New" })
+        const result = yield* repo.update("posts", requireString(created.id), { title: "New" })
         expect(Option.isSome(result)).toBe(true)
         expect(Option.getOrThrow(result).title).toBe("New")
       }).pipe(Effect.provide(testLayer)))
@@ -122,8 +127,8 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const created = yield* repo.create("posts", { title: "Keep", authorId: "user1" })
-        yield* repo.update("posts", created.id as string, { title: "Changed" })
-        const result = yield* repo.view("posts", created.id as string)
+        yield* repo.update("posts", requireString(created.id), { title: "Changed" })
+        const result = yield* repo.view("posts", requireString(created.id))
         const row = Option.getOrThrow(result)
         expect(row.title).toBe("Changed")
         expect(row.authorId).toBe("user1")
@@ -137,7 +142,7 @@ describe("repository", () => {
 
         yield* Effect.sleep(5)
 
-        const result = yield* repo.update("posts", created.id as string, { title: "Time2" })
+        const result = yield* repo.update("posts", requireString(created.id), { title: "Time2" })
         const row = Option.getOrThrow(result)
         expect(row.created).toBe(created.created)
         expect(row.updated).not.toBe(created.updated)
@@ -156,7 +161,7 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const created = yield* repo.create("posts", { title: "Guard" })
-        const result = yield* repo.update("posts", created.id as string, {
+        const result = yield* repo.update("posts", requireString(created.id), {
           title: "Guard2",
           id: "fakeid1234567",
           created: "1970-01-01T00:00:00.000Z"
@@ -355,7 +360,7 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const created = yield* repo.create("posts", { title: "Gone" })
-        const result = yield* repo.delete("posts", created.id as string)
+        const result = yield* repo.delete("posts", requireString(created.id))
         expect(Option.isSome(result)).toBe(true)
       }).pipe(Effect.provide(testLayer)))
 
@@ -364,8 +369,8 @@ describe("repository", () => {
         yield* setupTable
         const repo = yield* Repository
         const created = yield* repo.create("posts", { title: "Gone" })
-        yield* repo.delete("posts", created.id as string)
-        const result = yield* repo.view("posts", created.id as string)
+        yield* repo.delete("posts", requireString(created.id))
+        const result = yield* repo.view("posts", requireString(created.id))
         expect(Option.isNone(result)).toBe(true)
       }).pipe(Effect.provide(testLayer)))
 
@@ -388,9 +393,9 @@ describe("repository", () => {
           return yield* Effect.die(new RepositoryMethodMissing({ method: "deleteExisting" }))
         }
         const created = yield* repo.create("posts", { title: "Fast gone" })
-        const result = yield* deleteExisting("posts", created.id as string)
+        const result = yield* deleteExisting("posts", requireString(created.id))
         expect(Option.isSome(result)).toBe(true)
-        expect(Option.isNone(yield* repo.view("posts", created.id as string))).toBe(true)
+        expect(Option.isNone(yield* repo.view("posts", requireString(created.id)))).toBe(true)
       }).pipe(Effect.provide(testLayer)))
 
     it.effect("returns Option.none for an unknown id", () =>
@@ -414,9 +419,9 @@ describe("repository", () => {
           return yield* Effect.die(new RepositoryMethodMissing({ method: "deleteExisting" }))
         }
         const created = yield* repo.create("posts", { title: "Precheck gone" })
-        const result = yield* deleteExisting("posts", created.id as string)
+        const result = yield* deleteExisting("posts", requireString(created.id))
         expect(Option.isSome(result)).toBe(true)
-        expect(Option.isNone(yield* deleteExisting("posts", created.id as string))).toBe(true)
+        expect(Option.isNone(yield* deleteExisting("posts", requireString(created.id)))).toBe(true)
       }).pipe(Effect.provide(precheckLayer)))
   })
 

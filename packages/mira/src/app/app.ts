@@ -49,7 +49,12 @@ import type { MiraAppConfig } from "./builder.js"
 import type { RuleBinding } from "./define-rule.js"
 import type { MiraPlugin } from "./plugin.js"
 
-function assertUniqueCronNames(defs: ReadonlyArray<CronDef<any>>) {
+// oxlint-disable-next-line typescript/no-explicit-any
+type AnyCronDef = CronDef<any>
+// oxlint-disable-next-line typescript/no-explicit-any
+type AnyMiraPlugin = MiraPlugin<any>
+
+function assertUniqueCronNames(defs: ReadonlyArray<AnyCronDef>) {
   const seen = new Set<string>()
   for (const def of defs) {
     if (seen.has(def.name)) {
@@ -171,7 +176,7 @@ export interface ServeOptions {
  */
 export class MiraApp<R = never, Telemetry = never> {
   readonly #config: MiraAppConfig<Telemetry>
-  readonly #extras: Array<MiraPlugin<any>>
+  readonly #extras: Array<AnyMiraPlugin>
   constructor(config: MiraAppConfig<Telemetry>) {
     this.#config = config
     this.#extras = []
@@ -183,7 +188,7 @@ export class MiraApp<R = never, Telemetry = never> {
   }
 
   /** @internal for tests only */
-  _getExtras(): ReadonlyArray<MiraPlugin<any>> {
+  _getExtras(): ReadonlyArray<AnyMiraPlugin> {
     return this.#extras
   }
 
@@ -203,7 +208,7 @@ export class MiraApp<R = never, Telemetry = never> {
    * @example
    * app.extend(MiraDashboard).serve()
    */
-  extend(plugin: MiraPlugin<any>): MiraApp<R, Telemetry> {
+  extend(plugin: AnyMiraPlugin): MiraApp<R, Telemetry> {
     this.#extras.push(plugin)
     return this
   }
@@ -224,11 +229,11 @@ export class MiraApp<R = never, Telemetry = never> {
     return [...byName.values()]
   }
 
-  #getAllPlugins(): ReadonlyArray<MiraPlugin<any>> {
+  #getAllPlugins(): ReadonlyArray<AnyMiraPlugin> {
     return this.#extras
   }
 
-  #getAllCrons(): ReadonlyArray<CronDef<any>> {
+  #getAllCrons(): ReadonlyArray<AnyCronDef> {
     return [...this.#config.crons, ...this.#extras.flatMap((p) => p.crons ?? [])]
   }
 
@@ -260,7 +265,7 @@ export class MiraApp<R = never, Telemetry = never> {
     assertUniqueCronNames(allCronDefs)
     assertValidEmailTemplateCollections(allCollections, this.#config.emailTemplates ?? {})
 
-    const pluginLayers = allPlugins.filter((p) => p.layer !== undefined).map((p) => p.layer!)
+    const pluginLayers = allPlugins.flatMap((p) => (p.layer === undefined ? [] : [p.layer]))
 
     const extrasLayer = pluginLayers.length > 0 ? pluginLayers.reduce((acc, l) => Layer.merge(acc, l)) : Layer.empty
 
@@ -462,10 +467,15 @@ export class MiraApp<R = never, Telemetry = never> {
         const bootstrapLayer = Layer.effectDiscard(hookService.runBootstrap())
         yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))
         yield* hookService.runServe()
-    }) as Effect.Effect<never, never, never>
+    })
+
+    // The app graph closes its requirements and errors before runMain; the
+    // assertion keeps the public serve effect closed.
+    // oxlint-disable-next-line typescript/consistent-type-assertions
+    const closedEffect = appEffect as Effect.Effect<never, never, never>
 
     this.#config.platform.runMain(
-      options?.disableTracing === true ? Effect.withTracerEnabled(false)(appEffect) : appEffect
+      options?.disableTracing === true ? Effect.withTracerEnabled(false)(closedEffect) : closedEffect
     )
   }
 }

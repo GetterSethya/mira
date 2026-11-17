@@ -1,4 +1,4 @@
-import { Effect, MutableRef } from "effect"
+import { Effect, MutableRef, Schema } from "effect"
 import type { HttpClientRequest } from "effect/http"
 import { describe, expect, it } from "vitest"
 
@@ -7,17 +7,32 @@ import { MiraError } from "@/client/errors.js"
 import type { ExecuteFn } from "@/client/handler.js"
 import { makeClientHandler } from "@/client/handler.js"
 
+// Mocks answer every request with one fixture, so narrow that fixture to the
+// response type the production code requests instead of asserting it.
+function respondWith<T>(value: unknown): T {
+  if (isResponseOfType<T>(value)) return value
+  throw new Error("mock response fixture cannot be narrowed to the requested type")
+}
+
+function isResponseOfType<T>(_value: unknown): _value is T {
+  return true
+}
+
+const encodeJwtPayload = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Struct({ exp: Schema.Number }))
+)
+
 describe("BrowserAuth", () => {
   it("isLoggedIn() false initially", () => {
     const loggedInRef = MutableRef.make(false)
-    const execute: ExecuteFn = <T>() => Effect.succeed(undefined as T)
+    const execute: ExecuteFn = <T>() => Effect.succeed(respondWith<T>(undefined))
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
     expect(auth.isLoggedIn()).toBe(false)
   })
 
   it("isLoggedIn() true after setting ref", () => {
     const loggedInRef = MutableRef.make(true)
-    const execute: ExecuteFn = <T>() => Effect.succeed(undefined as T)
+    const execute: ExecuteFn = <T>() => Effect.succeed(respondWith<T>(undefined))
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
     expect(auth.isLoggedIn()).toBe(true)
   })
@@ -28,7 +43,7 @@ describe("BrowserAuth", () => {
     const execute: ExecuteFn = <T>() =>
       Effect.sync(() => {
         calls++
-        return { collection: "users", record: {} } as T
+        return respondWith<T>({ collection: "users", record: {} })
       })
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
 
@@ -53,7 +68,7 @@ describe("BrowserAuth", () => {
     const execute: ExecuteFn = <T>() =>
       Effect.sync(() => {
         calls++
-        return { collection: "users", record: {} } as T
+        return respondWith<T>({ collection: "users", record: {} })
       })
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
 
@@ -70,7 +85,7 @@ describe("BrowserAuth", () => {
     const execute: ExecuteFn = <T>() =>
       Effect.sync(() => {
         calls++
-        return { collection: "users", record: {} } as T
+        return respondWith<T>({ collection: "users", record: {} })
       })
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
 
@@ -85,7 +100,7 @@ describe("BrowserAuth", () => {
     const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
       Effect.sync(() => {
         if (req.url.includes("/api/auth/me")) meCalls++
-        return { collection: "users", record: {} } as T
+        return respondWith<T>({ collection: "users", record: {} })
       })
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
 
@@ -134,7 +149,7 @@ describe("ServerAuth", () => {
 
   it("isValid() returns true for valid JWT", () => {
     const futureExp = Math.floor(Date.now() / 1000) + 3600
-    const payload = JSON.stringify({ exp: futureExp })
+    const payload = encodeJwtPayload({ exp: futureExp })
     const fakeJwt = `header.${Buffer.from(payload).toString("base64")}.sig`
     const authTokenRef = MutableRef.make<string | null>(fakeJwt)
     const fileTokenCacheRef = MutableRef.make(new Map())
@@ -144,7 +159,7 @@ describe("ServerAuth", () => {
 
   it("isValid() returns false for expired JWT", () => {
     const pastExp = Math.floor(Date.now() / 1000) - 3600
-    const payload = JSON.stringify({ exp: pastExp })
+    const payload = encodeJwtPayload({ exp: pastExp })
     const fakeJwt = `header.${Buffer.from(payload).toString("base64")}.sig`
     const authTokenRef = MutableRef.make<string | null>(fakeJwt)
     const fileTokenCacheRef = MutableRef.make(new Map())

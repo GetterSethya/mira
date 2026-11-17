@@ -38,6 +38,7 @@ export interface MiraAppConfig<Telemetry = never> {
   email: MiraEmail
   collections: ReadonlyArray<AnyCollectionDef>
   rules?: ReadonlyArray<RuleBinding>
+  // oxlint-disable-next-line typescript/no-explicit-any
   crons: ReadonlyArray<CronDef<any>>
   telemetry: Layer.Layer<Telemetry, never, PlatformServices | DatabaseServices>
   cors: CorsConfig
@@ -48,6 +49,7 @@ export interface MiraAppConfig<Telemetry = never> {
   emailTemplates?: EmailTemplatesConfig
 }
 
+// oxlint-disable-next-line typescript/no-explicit-any
 function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraAppConfig<any> {
   return (
     config.platform !== undefined &&
@@ -97,13 +99,16 @@ function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraApp
  * @see Mira.builder — entry point
  */
 export class MiraBuilder<Has extends string = never, R = never, Telemetry = never> {
+  // oxlint-disable-next-line typescript/no-explicit-any
   readonly #config: Partial<MiraAppConfig<any>>
 
+  // oxlint-disable-next-line typescript/no-explicit-any
   constructor(config: Partial<MiraAppConfig<any>> = {}) {
     this.#config = config
   }
 
   /** @internal for tests only */
+  // oxlint-disable-next-line typescript/no-explicit-any
   _getPartialConfig(): Partial<MiraAppConfig<any>> {
     return this.#config
   }

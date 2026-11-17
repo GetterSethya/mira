@@ -1,5 +1,5 @@
 import type { Effect } from "effect"
-import { MutableRef } from "effect"
+import { MutableRef, Schema } from "effect"
 import type { HttpClient } from "effect/http"
 import { HttpClientRequest as HCR } from "effect/http"
 
@@ -135,9 +135,9 @@ export function makeBrowserAuth(
       MutableRef.set(loggedInRef, false)
       // Pin the session memo to a resolved `false` rather than `null`. The logout
       // POST is fire-and-forget, so the cookie may still be valid for a moment;
-      // if a guard re-ran `ensureSession()` in that window it would get a `200`
-      // and re-authenticate, bouncing the user back to the protected route.
-      // A pinned `false` short-circuits every check until the next login, which
+      // rerunning `ensureSession()` from a guard in that window would get a `200`
+      // and re-authenticate, bouncing the user back to the protected route. A
+      // pinned `false` short-circuits every check until the next login, which
       // resets the memo (see `authWithPassword`).
       MutableRef.set(sessionMemoRef, Promise.resolve(false))
       const effect = execute<void>(HCR.post("/api/auth/logout"))
@@ -146,13 +146,17 @@ export function makeBrowserAuth(
   }
 }
 
+const JwtExpiryPayload = Schema.Struct({ exp: Schema.optional(Schema.Number) })
+const decodeJwtExpiryPayload = Schema.decodeUnknownSync(Schema.fromJsonString(JwtExpiryPayload))
+
 function decodeJwtExp(token: string): number | null {
   try {
     const parts = token.split(".")
     if (parts.length !== 3) return null
-    const payload = JSON.parse(globalThis.atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")))
-    if (typeof payload.exp === "number") return payload.exp
-    return null
+    const payload = decodeJwtExpiryPayload(
+      globalThis.atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))
+    )
+    return payload.exp ?? null
   } catch {
     return null
   }

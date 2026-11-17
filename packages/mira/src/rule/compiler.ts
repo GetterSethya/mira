@@ -148,7 +148,7 @@ export function compile(node: ExprNode, ctx: CompileCtx, dialect: RuleSqlDialect
       return comparison("<=", node.left, node.right, ctx, dialect)
     case "in": {
       if (node.right.kind === "literal" && Array.isArray(node.right.value)) {
-        const items = node.right.value as Array<unknown>
+        const items: Array<unknown> = node.right.value
         if (items.length === 0) return "1 = 0"
         const firstType = literalType(items[0])
         const hint =

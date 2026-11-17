@@ -29,7 +29,7 @@ import {
   GLOBAL_MAX_UPLOAD_BYTES
 } from "@/http/files.js"
 import { makeCollectionRouter } from "@/http/router.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, makeFileStorageLayer } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"

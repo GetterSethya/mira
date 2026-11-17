@@ -105,7 +105,7 @@ export const RepositoryLive = Layer.effect(
       Effect.gen(function* () {
         const rendered = renderView(quote, table, id)
         const rows = yield* run<RepoRecord>(rendered.sql, rendered.params)
-        return rows.length > 0 ? Option.some(rows[0]!) : Option.none()
+        return Option.fromNullishOr(rows[0])
       })
 
     return Repository.of({

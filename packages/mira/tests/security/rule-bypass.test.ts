@@ -14,7 +14,8 @@ import {
   seedProfile,
   seedUser,
   serveRouter,
-  setupTables
+  setupTables,
+  toJsonText
 } from "./_harness.js"
 
 const buildCtxCacheTag = (
@@ -50,7 +51,7 @@ function pretty(value: unknown): string {
 /** Build a `filter=` query-string fragment from a plain object. */
 function filterQuery(url: string, node: unknown): string {
   const sep = url.includes("?") ? "&" : "?"
-  return `${url}${sep}filter=${encodeURIComponent(JSON.stringify(node))}`
+  return `${url}${sep}filter=${encodeURIComponent(toJsonText(node))}`
 }
 
 /** Find the item in a decoded list body whose `id` equals `id`. */
@@ -73,7 +74,7 @@ function firstItem(body: unknown): unknown {
 }
 
 /** True when a request was rejected by the API (any 4xx). */
-function isRejected(status: number): boolean {
+function isRejected(status: number) {
   return status >= 400 && status < 500
 }
 

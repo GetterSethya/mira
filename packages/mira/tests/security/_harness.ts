@@ -23,12 +23,16 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { hashPassword } from "@/http/auth.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
-import { rateLimitTestLayer } from "../_rate-limit.js"
+import { rateLimitTestLayer } from "@tests/_rate-limit.js"
 import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound, makeFileStorageLayer } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
 
 export const JWT_SECRET = "security-audit-secret"
+
+/** Compact JSON text for evidence logs, encoded through the Schema JSON boundary. */
+export const toJsonText = (value: unknown) =>
+  value === undefined ? "undefined" : Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(value)
 
 // ---------------------------------------------------------------------------
 // Collections

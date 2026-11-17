@@ -45,7 +45,7 @@ function mimeFromKey(key: string): string {
  * only a plain filename when it contains no separator, parent reference (`..`)
  * or NUL byte.
  */
-function isSafeFilenameSegment(filename: string): boolean {
+function isSafeFilenameSegment(filename: string) {
   return (
     filename.length > 0 &&
     !filename.includes("/") &&
