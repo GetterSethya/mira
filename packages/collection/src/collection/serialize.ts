@@ -91,7 +91,7 @@ export function toJSONSchema<K extends "base" | "auth" | "view">(
     type: "object",
     properties: {
       ...(kind !== "view" ? { id: ID_PROPERTY, seqId: SEQID_PROPERTY } : {}),
-      ...(options.systemFields ?? {}),
+      ...options.systemFields,
       ...properties,
       ...(kind !== "view" ? { created: CREATED_PROPERTY, updated: UPDATED_PROPERTY } : {})
     },

@@ -2,7 +2,7 @@ import type { TimestampUnit } from "@gettersethya/mira-client"
 import { Context, Effect, Option } from "effect"
 
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
-import type { ColumnDef, IndexShape, MigrationStep, TableShapes } from "@/migrator/types.js"
+import type { ColumnDef, MigrationStep, TableShapes } from "@/migrator/types.js"
 import { transformSqlCode } from "@/sql-text.js"
 
 /** Wraps an identifier in the dialect's quoting characters. */

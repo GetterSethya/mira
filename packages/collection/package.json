@@ -23,7 +23,7 @@
     "build": "node scripts/clean-dist.ts && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/check-exports.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\""
+    "lint": "oxlint -c ../../.oxlintrc.json src tests"
   },
   "peerDependencies": {
     "effect": "^4.0.0"

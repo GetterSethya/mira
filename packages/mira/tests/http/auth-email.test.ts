@@ -176,8 +176,6 @@ const responseBody = <S extends Schema.Constraint>(schema: S) => (res: HttpClien
   res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
 
 const ChallengeResponse = Schema.Struct({ challengeId: Schema.String })
-const MessageResponse = Schema.Struct({ message: Schema.String })
-const ErrorResponse = Schema.Struct({ error: Schema.String })
 const TokenResponse = Schema.Struct({
   token: Schema.String,
   record: Schema.Record(Schema.String, Schema.Unknown)

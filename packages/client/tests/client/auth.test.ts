@@ -39,7 +39,7 @@ describe("BrowserAuth", () => {
 
   it("refresh() returns false and clears the flag when the check fails", async () => {
     const loggedInRef = MutableRef.make(true)
-    const execute: ExecuteFn = <T>() =>
+    const execute: ExecuteFn = () =>
       Effect.fail(new MiraError({ status: 401, body: "unauthorized" }))
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
 

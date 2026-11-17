@@ -30,7 +30,7 @@ import {
 } from "@/http/files.js"
 import { makeCollectionRouter } from "@/http/router.js"
 import { rateLimitTestLayer } from "../_rate-limit.js"
-import { Repository, RepositoryLive } from "@/repository/repository.js"
+import { RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, makeFileStorageLayer } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
 

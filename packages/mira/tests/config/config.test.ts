@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer, Option, Redacted } from "effect"
+import { Effect, Layer, Option, Redacted } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 

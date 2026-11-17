@@ -17,7 +17,7 @@ import {
 } from "@/repository/sql.js"
 import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
-import type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord, SortOrder } from "./types.js"
+import type { CursorResult, ExpandDef, FilterOptions, ListOptions, RepoRecord } from "./types.js"
 import type { AccessPredicate, AccessRow } from "./types.js"
 
 /** The dialect could not decode its own DELETE result shape. */

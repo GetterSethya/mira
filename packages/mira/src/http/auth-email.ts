@@ -50,8 +50,7 @@ import {
   RateLimitKeySecret,
   RateLimiter,
   RateLimitedError,
-  rateLimitKey,
-  RateLimitUnavailableError
+  rateLimitKey
 } from "@/rate-limit/index.js"
 import type { RateLimitRequest } from "@/rate-limit/index.js"
 import type { AuthCollectionEmailOptions } from "@gettersethya/mira-client"

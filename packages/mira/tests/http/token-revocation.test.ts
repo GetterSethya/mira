@@ -233,7 +233,6 @@ describe("TokenStore durability", () => {
   it.effect("an expired jti is not reported as revoked", () =>
     Effect.gen(function* () {
       yield* setupTables
-      const sql = yield* SqlClient.SqlClient
       const ctx = yield* Effect.scoped(Layer.build(Layer.fresh(TokenStoreLive)))
       const store = Context.get(ctx, TokenStore)
 

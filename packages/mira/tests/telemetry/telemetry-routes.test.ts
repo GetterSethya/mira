@@ -1,4 +1,3 @@
-import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"

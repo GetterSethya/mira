@@ -33,7 +33,6 @@ import type {
   SelectableKeys,
   UpdateInput,
   VerifyEmailInput,
-  VerifyEmailRequestInput,
   VerifyEmailResult,
   WithSelect
 } from "./types.js"

@@ -272,12 +272,6 @@ const waitForAdmitted = (count: number) =>
     yield* waitFor("admitted", count, stats.snapshot.pipe(Effect.map((snapshot) => snapshot.admitted)))
   })
 
-const waitForDefects = (count: number) =>
-  Effect.gen(function* () {
-    const stats = yield* BatchMutationStats
-    yield* waitFor("defects", count, stats.snapshot.pipe(Effect.map((snapshot) => snapshot.consecutiveDefects)))
-  })
-
 /**
  * Deferreds are completed before stats are recorded (a committed request must
  * not depend on a counter), so a test that reads counters right after a create
