@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 
 import type { TranslatePlanContext } from "./dialect.js"
-import { translateStep } from "./dialect.js"
+import { errorHasCode, translateStep } from "./dialect.js"
 import type { DialectType } from "./dialect.js"
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
 import type { ColumnDef, IndexShape, MigrationStep, TableShape, TableShapes } from "@/migrator/types.js"
@@ -38,6 +38,34 @@ const quoteLiteral = (value: unknown) => {
   if (typeof value === "boolean") return value ? "1" : "0"
   if (typeof value === "number") return String(value)
   return `'${String(value).replace(/'/g, "''")}'`
+}
+
+const isSqliteBusy = (error: unknown) => errorHasCode(error, ["SQLITE_BUSY", "SQLITE_LOCKED"])
+
+const isSqliteUniqueViolation = (error: unknown) =>
+  errorHasCode(error, [
+    "SQLITE_CONSTRAINT_PRIMARYKEY",
+    "SQLITE_CONSTRAINT_UNIQUE",
+    1555,
+    2067
+  ])
+
+const upsertSql = (
+  table: string,
+  record: Readonly<Record<string, unknown>>,
+  conflictKeys: ReadonlyArray<string>
+) => {
+  const keys = Object.keys(record)
+  const columns = keys.map(quote).join(", ")
+  const values = keys.map((key) => quoteLiteral(record[key])).join(", ")
+  const updates = keys
+    .filter((key) => !conflictKeys.includes(key))
+    .map((key) => `${quote(key)} = excluded.${quote(key)}`)
+    .join(", ")
+  const conflict = conflictKeys.map(quote).join(", ")
+  return `INSERT INTO ${quote(table)} (${columns}) VALUES (${values}) ON CONFLICT (${conflict}) ${
+    updates.length > 0 ? `DO UPDATE SET ${updates}` : "DO NOTHING"
+  }`
 }
 
 const nativeTypeOf = (col: ColumnDef) => {
@@ -141,6 +169,18 @@ export const sqliteDialect: DialectType = {
   quoteLiteral,
   nativeType: nativeTypeOf,
   indexName: indexNameOf,
+  placeholder: () => "?",
+  upsert: upsertSql,
+  telemetry: {
+    setup: [
+      "PRAGMA journal_mode = WAL",
+      "PRAGMA synchronous = NORMAL",
+      "PRAGMA busy_timeout = 5000"
+    ],
+    cleanup: ["PRAGMA wal_checkpoint(TRUNCATE)"],
+    isRetryable: isSqliteBusy,
+    isDuplicateKey: isSqliteUniqueViolation
+  },
 
   translatePlan: (steps, ctx) =>
     Effect.gen(function* () {

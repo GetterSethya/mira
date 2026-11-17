@@ -1,4 +1,3 @@
-import { SqliteClient } from "@effect/sql-sqlite-bun"
 import {
   BaseCollection,
   BunPlatform,
@@ -6,7 +5,7 @@ import {
   defineRule,
   Field,
   LocalFileStorage,
-  makeSqliteTelemetryLayer,
+  makeTelemetryLayer,
   Mira
 } from "@gettersethya/mira"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
@@ -32,8 +31,13 @@ Mira.builder()
   .collections([Posts])
   .rules([postsRules])
   .telemetry(
-    makeSqliteTelemetryLayer({
-      sqlLayer: SqliteClient.layer({ filename: Bun.env["LOG_DB_PATH"] ?? "./bun-logs.db" })
+    makeTelemetryLayer({
+      storage: {
+        mode: "dedicated",
+        database: BunSqliteDatabase({
+          filename: Bun.env["LOG_DB_PATH"] ?? "./bun-logs.db"
+        })
+      }
     })
   )
   .build()

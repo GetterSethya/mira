@@ -74,6 +74,17 @@ export type MigrateOptions = {
   allowDestructive?: boolean
   /** Numeric log verbosity: 0=none, 1=error, 2=warn, 3=info (default), 4=debug. */
   logLevel?: number
+  /**
+   * Table holding the stored collection schemas. Defaults to `_collections`.
+   * Shared telemetry uses `_telemetry_collections` so the app migrator cannot
+   * see or drop telemetry collections.
+   */
+  schemaTable?: string
+  /**
+   * Table holding applied migrations. Defaults to `_migrations`.
+   * Shared telemetry uses `_telemetry_migrations`.
+   */
+  migrationsTable?: string
 }
 
 /** Maps a numeric log level to an Effect `LogLevel`. Defaults to `Info` for unknown values. */

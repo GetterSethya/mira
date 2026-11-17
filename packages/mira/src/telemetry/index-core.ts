@@ -6,7 +6,6 @@ import type { ConsolePrintOptions } from "./types.js"
 
 export type { LogLine } from "./logger.js"
 export { ConsoleLoggerLayer, formatPrettyLog, makeConsoleLoggerLayer, makeStructuredLogger } from "./logger.js"
-export { TelemetrySqlClient } from "./telemetry-sql-client.js"
 export type { CompletedSpan } from "./tracer.js"
 export { ConsoleTracerLayer, formatPrettySpan, makeConsoleTracer, makeConsoleTracerLayer } from "./tracer.js"
 export type { ConsolePrintOptions } from "./types.js"

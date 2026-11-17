@@ -1,4 +1,4 @@
-export { Migrator, MigratorLive, SYSTEM_TABLE_STEPS } from "./migrator.js"
+export { Migrator, MigratorLive, SYSTEM_TABLE_STEPS, systemTableSteps } from "./migrator.js"
 export { computePlan, diffSchemas, propertyToColumnType, schemaToColumns } from "./schema-diff.js"
 export type { ColumnDef, ColumnType, MigrateOptions, MigrationPlan, MigrationStep, NamedSchema } from "./types.js"
 export { toEffectLogLevel } from "./types.js"

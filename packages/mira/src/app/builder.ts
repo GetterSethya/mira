@@ -14,6 +14,7 @@ import { ConsoleTelemetryLayer } from "@/telemetry/index-core.js"
 import { MiraApp } from "./app.js"
 import type { RuleBinding } from "./define-rule.js"
 import type {
+  DatabaseServices,
   MiraDatabase,
   MiraEmail,
   MiraPlatform,
@@ -38,7 +39,7 @@ export interface MiraAppConfig<Telemetry = never> {
   collections: ReadonlyArray<AnyCollectionDef>
   rules?: ReadonlyArray<RuleBinding>
   crons: ReadonlyArray<CronDef<any>>
-  telemetry: Layer.Layer<Telemetry, never, PlatformServices>
+  telemetry: Layer.Layer<Telemetry, never, PlatformServices | DatabaseServices>
   cors: CorsConfig
   migrations?: MigrateOptions
   rateLimits?: MiraRateLimits
@@ -309,10 +310,13 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    * Defaults to `ConsoleTelemetryLayer` (prints JSON trace lines to stdout),
    * or `makeConsoleTelemetryLayer({ pretty: true })` for Chalk-colored output.
    *
-   * @param l - A Layer providing telemetry services (may require platform services)
+   * @param l - A Layer providing telemetry services (may require platform or
+   *            application database services)
    * @returns A new builder with "telemetry" added to the phantom type
    */
-  telemetry<T2>(l: Layer.Layer<T2, never, PlatformServices>): MiraBuilder<Has | "telemetry", R, T2> {
+  telemetry<T2>(
+    l: Layer.Layer<T2, never, PlatformServices | DatabaseServices>
+  ): MiraBuilder<Has | "telemetry", R, T2> {
     return new MiraBuilder({ ...this.#config, telemetry: l })
   }
 

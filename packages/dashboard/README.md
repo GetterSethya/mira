@@ -47,7 +47,7 @@ Open that URL to create the first superadmin account. Once registered, subsequen
 
 - **Collection browser** — list, create, edit, and delete records with a record editor
 - **Connect sheet** — per-collection SDK snippets, raw `fetch`/`curl` calls, and a generated `mira.generated.ts` TypeScript file
-- **Logs and span viewer** — works best with `makeSqliteTelemetryLayer` from `@gettersethya/mira`
+- **Logs and span viewer** — works best with `makeTelemetryLayer` from `@gettersethya/mira`
 - **App config** — edit app name/URL/port/log retention; view the live storage and email backends read-only
 - **Superadmin management** — create, list, and delete superadmin accounts
 - **Cron job monitoring** — list all registered cron jobs with their current status and trigger manual runs

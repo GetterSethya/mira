@@ -6,24 +6,25 @@ import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { NodeCryptoLayer } from "@/crypto/index.js"
+import { SqliteDatabase } from "@/databases/sqlite.js"
 import { telemetryLogsRoute, telemetrySpansRoute } from "@/http/telemetry-routes.js"
-import { makeSqliteTelemetryLayerForClient } from "@/telemetry/sqlite-logger.js"
-import { TelemetrySqlClient } from "@/telemetry/telemetry-sql-client.js"
+import { makeTelemetryLayerForClient } from "@/telemetry/core.js"
+import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
 
 // ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
 function makeRouteLayer() {
-  const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
+  const database = SqliteDatabase({ filename: ":memory:" })
+  const store = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(
+    Layer.provide(database.layer)
+  )
 
-  const telemetryClientLayer = Layer.effect(TelemetrySqlClient, SqlClient.SqlClient)
-
-  return Layer.mergeAll(
-    makeSqliteTelemetryLayerForClient().pipe(Layer.provide(NodeCryptoLayer)),
-    telemetryClientLayer
-  ).pipe(
-    Layer.provideMerge(sqliteLayer)
+  return makeTelemetryLayerForClient().pipe(
+    Layer.provideMerge(store),
+    Layer.provideMerge(database.layer),
+    Layer.provide(NodeCryptoLayer)
   )
 }
 
@@ -58,7 +59,7 @@ function getBody(res: HttpServerResponse.HttpServerResponse) {
 // ---------------------------------------------------------------------------
 
 describe("telemetryLogsRoute", () => {
-  it.effect("returns empty when TelemetrySqlClient absent", () =>
+  it.effect("returns disabled when TelemetryStore absent", () =>
     Effect.gen(function* () {
       const res = yield* runLogsRoute("http://localhost/_telemetry/logs")
       const body = yield* getBody(res)
