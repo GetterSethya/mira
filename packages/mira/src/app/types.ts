@@ -62,6 +62,13 @@ export interface MiraPlatform {
  */
 export interface MiraDatabase {
   layer: Layer.Layer<DatabaseServices>
+  /**
+   * Whether the app should run auto-migration during layer construction.
+   * Defaults to true. Database presets that point at an embedded replica set
+   * this to false so DDL is never sent to a replica; the operator migrates the
+   * primary and syncs before starting the app.
+   */
+  readonly migrateAtStartup?: boolean
 }
 
 /**

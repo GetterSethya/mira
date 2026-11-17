@@ -103,7 +103,35 @@ Every field accepts a plain value or an Effect `Config`, resolved once at build,
 
 The `_config` table also carries `use_s3` and `s3_*` legacy keys, but the current storage layer is activated by `.storage(S3CompatibleStorage(...))`, not by those rows. Use the builder call as the source of truth. Do not assume setting `use_s3` swaps the backend. An incomplete `use_s3=true` row logs a warning and yields no S3 config instead of crashing boot.
 
-SQLite is the only database backend today. `SqliteDatabase({ filename })` wires the `SqlClient` and `sqliteDialect`. Use `":memory:"` in tests. Booleans are stored as `0`/`1` because the dialect declares it, not because the collection service hardcodes it.
+SQLite and libSQL are the database backends today. `SqliteDatabase({ filename })` wires the Node SQLite client and `sqliteDialect`; `BunSqliteDatabase({ filename })` does the same on Bun. Use `":memory:"` in tests. Booleans are stored as `0`/`1` because the dialect declares it, not because the collection service hardcodes it.
+
+`LibsqlDatabase` runs libSQL on Node. `TursoDatabase` is an alias:
+
+```ts
+import { LibsqlDatabase, TursoDatabase } from "@gettersethya/mira"
+import { Redacted } from "effect"
+
+// local file
+LibsqlDatabase({ url: "file:./mira.db" })
+
+// remote Turso or sqld
+LibsqlDatabase({
+  url: "libsql://your-db.turso.io",
+  authToken: Redacted.make(process.env.TURSO_AUTH_TOKEN!)
+})
+
+// embedded replica
+LibsqlDatabase({
+  url: "file:./replica.db",
+  syncUrl: "libsql://your-db.turso.io",
+  authToken: Redacted.make(process.env.TURSO_AUTH_TOKEN!),
+  syncInterval: 60
+})
+```
+
+Local libSQL applies WAL, an optional `synchronous` mode, `busy_timeout=5000`, and `foreign_keys=OFF`. Remote libSQL applies no writable pragmas; sqld rejects them. A remote URL with `synchronous`, a remote URL with `syncUrl`, or a plain local URL with `authToken` fails at construction. `syncUrl` sets `migrateAtStartup: false`, so migrate the primary, sync the replica, then start the app. Mira does not call `sync()` and does not claim read-your-writes across a replica.
+
+The libSQL driver is loaded only when the preset is built, so importing `@gettersethya/mira` does not load the native addon. `@libsql/client` ships platform-native binaries. The preset is available on Node and Bun; the Bun entry exports the same names. The tested set is Node 24, Bun 1.4.2, `@effect/sql-libsql` 4.0.0, `@libsql/client` 0.18.0, local SQLite 3.45.1, and sqld `v0.24.33` (SQLite 3.47.0).
 
 ## Email transport
 
@@ -124,7 +152,9 @@ The desired schema is diffed against `_collections`. The whole plan is rendered 
 
 `allowDestructive` gates data-losing work: dropped tables and columns always qualify, and an `alterColumn` qualifies only on a type change or `nullable → NOT NULL`. Nullability relaxation and default changes are safe. With the flag off the whole plan is skipped and each destructive step is logged. Removed collections drop only with the flag on.
 
-SQLite cannot `ALTER COLUMN`, so the dialect rebuilds any table targeted by a column change: scratch table, `INSERT … SELECT`, `sqlite_sequence` transfer, `DROP`, `RENAME`, then index recreation. When a column becomes `NOT NULL` and has a default, existing rows are copied through `COALESCE(column, default)`. `PRAGMA legacy_alter_table = ON` is emitted before the rebuild and `OFF` runs as cleanup on both commit and rollback paths. Step order is global: drop views, drop indexes, table changes, create indexes, create views.
+SQLite cannot `ALTER COLUMN`, so the dialect rebuilds any table targeted by a column change: create a scratch table, copy rows, move the `sqlite_sequence` high-water mark, drop the original, create the desired original, copy back, restore the sequence, drop the scratch, then recreate indexes. When a column becomes `NOT NULL` and has a default, existing rows are copied through `COALESCE(column, default)`. A new `NOT NULL` column without a default gets the same synthetic `DEFAULT ''`/`0` as `ADD COLUMN`. No `PRAGMA legacy_alter_table` is emitted, so the same rebuild works on local SQLite and remote libSQL. Views that reference surviving columns keep working. A new column, a nullable-to-`NOT NULL` default, or a type change on a single-field unique index is rejected before any table copy.
+
+Migrations run through `sql.withTransaction`, so the plan statements, the `_migrations` row, and the `_collections` upserts commit or roll back together. `plan` and `status` still bootstrap the system tables and therefore need write permission on first use. Step order is global: drop views, drop indexes, table changes, create indexes, create views. For remote databases, run migrations on one instance or as a deploy step; Mira does not add a distributed migration lock.
 
 ## Telemetry
 
@@ -148,6 +178,8 @@ import { makeTelemetryLayer, SqliteDatabase } from "@gettersethya/mira"
 On Bun, use `BunSqliteDatabase` from `@gettersethya/mira/bun` and keep the same shape. Both entries export `makeTelemetryLayer`, `TelemetryLoggerConfig`, `TelemetryStore`, and `logCleanupCronDef`.
 
 Dedicated mode applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` at construction, then migrates `logs` and `spans`. Both tables index `created`, so retention scans do not read the whole table. The admin telemetry routes read through `TelemetryStore`. Set `flushBatchSize` to batch rows per store call; the default of one preserves current behavior.
+
+For libSQL, pass `LibsqlDatabase` as the dedicated preset. Local `file:` telemetry reuses the SQLite WAL and checkpoint hooks. Remote libSQL skips setup and cleanup because sqld rejects writable pragmas. Each unbatched row is a network round trip, so remote deployments should set `flushBatchSize: 100` and `flushInterval: "1 second"`. A `syncUrl` replica sets `migrateAtStartup` to false; migrate the telemetry tables on the primary and sync first. Shared telemetry on a replica needs `{ mode: "shared", migrate: false }`.
 
 Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-entry queue, each drained by a scoped fiber, so span and record completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports log rows dropped because the bounded queue was full. `logConsole` echoes to stdout. `pretty` affects only that echo, never the stored rows.
 

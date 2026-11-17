@@ -23,6 +23,7 @@ to `crypto/node.ts`, `http/auth-node.ts`, and `http/server-factory-node.ts`, agg
   collection/client types from one package — `[index.ts:CollectionService]`,
   `[../package.json:dependencies]`.
 - App and presets: `Mira`, `MiraApp`, `MiraBuilder`, `defineRule`, `SqliteDatabase`,
+  `LibsqlDatabase`, `TursoDatabase`,
   `NodePlatform`, `NodePlatformLayer`, `LocalFileStorage`, `S3CompatibleStorage` —
   `[app/index.ts:Mira]`, `[databases/sqlite.ts:SqliteDatabase]`,
   `[platforms/node.ts:NodePlatform]`, `[storage/local-preset.ts:LocalFileStorage]`.
@@ -57,7 +58,7 @@ to `crypto/node.ts`, `http/auth-node.ts`, and `http/server-factory-node.ts`, agg
 - [config](./config/EGM.md) — `_config`-backed `AppConfig`, JWT secret, S3 settings.
 - [cron](./cron/EGM.md) — scheduled jobs, run-now, persisted last-run state.
 - [crypto](./crypto/EGM.md) — `CryptoService` and the Node implementation.
-- [databases](./databases/EGM.md) — `SqliteDatabase` preset and `MiraDatabase` shape.
+- [databases](./databases/EGM.md) - `SqliteDatabase`, `LibsqlDatabase`, and `MiraDatabase` shape.
 - [dialect](./dialect/EGM.md) — SQL dialect contract, plan translation, SQLite rebuild/DDL.
 - [hooks](./hooks/EGM.md) — plugin hook dispatch and the hook collection-service decorator.
 - [http](./http/EGM.md) — REST routes, auth/session tokens, files, schema, telemetry, CORS, port retry.

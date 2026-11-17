@@ -14,7 +14,7 @@ bring the database up to date. The components are deliberately layered:
 3. `migrator.ts` owns the lifecycle: it bootstraps the `_collections` and
    `_migrations` system tables, reads stored schemas, computes a plan, renders the
    entire plan through the active dialect, and applies it inside a transaction.
-   Rendering and validation happen **before** `BEGIN`, so an impossible plan never
+   Rendering and validation happen **before** the transaction opens, so an impossible plan never
    reaches the driver.
 
 The stored schema in `_collections` is the source of truth for "what exists"; the
@@ -51,9 +51,9 @@ desired schema passed by the app is "what should exist". The migrator only write
 - Stored schemas are decoded from JSON with Effect Schema; a corrupt stored row surfaces as `SqlError` naming `Invalid stored schema` rather than throwing [migrator.ts:decodeStoredSchema]
 - A plan with zero steps returns early and logs "nothing to migrate" — `_collections` is not rewritten [migrator.ts:migrateImplWith]
 - When `plan.destructive` is true and `allowDestructive` is falsy, the entire plan is skipped (all-or-nothing, never partially applied) and each destructive step is logged [migrator.ts:migrateImplWith]
-- `_migrations` insert and `COMMIT` happen inside the same transaction; a `SqlError` triggers `ROLLBACK` and is re-failed [migrator.ts:migrateImplWith]
+- `_migrations` insert, the `_collections` upsert, and the plan statements run inside one `sql.withTransaction`; a failure rolls all of them back [migrator.ts:migrateImplWith]
 - Cleanup statements run through `Effect.ensuring`, so they execute on both the committed and rolled-back path; cleanup failures are logged with `Effect.logWarning` and never propagated [migrator.ts:runCleanup]
-- `_collections` upsert (INSERT OR REPLACE) happens only **after** the transaction scope completes, and only for a plan that was not skipped [migrator.ts:migrateImplWith]
+- The `_collections` upsert happens inside the transaction, after the `_migrations` insert, and only for a plan that was not skipped [migrator.ts:migrateImplWith]
 - Steps are ordered globally by `STEP_PRIORITY` — `dropView` → `dropIndex` → table changes → `createIndex` → `createView` — so plan ordering never depends on collection declaration order [schema-diff.ts:STEP_PRIORITY]
 - A column is considered changed when its `type`, `nullable`, or `default` differs; such a change emits a single `alterColumn` carrying both `from` and `to` [schema-diff.ts:diffSchemas]
 - `x-system` columns present in stored but absent from desired are never dropped [schema-diff.ts:diffSchemas]
@@ -68,12 +68,12 @@ desired schema passed by the app is "what should exist". The migrator only write
 ## Side Effects
 
 - Executes each rendered DDL statement with `sql.unsafe`, logging `SQL:` at debug and the failing statement at error [migrator.ts:runStatements]
-- Emits `BEGIN TRANSACTION`, `COMMIT` and `ROLLBACK` against the SQL connection [migrator.ts:migrateImplWith]
+- Uses `sql.withTransaction`; the migrator no longer issues raw `BEGIN`, `COMMIT`, or `ROLLBACK` statements [migrator.ts:migrateImplWith]
 - Inserts a row into `_migrations` (`id`, `name`, `steps` JSON, `applied_at`) per applied plan [migrator.ts:migrateImplWith]
-- Upserts every desired schema into `_collections` (`name`, `schema` JSON, `updated_at`) after a successful apply [migrator.ts:migrateImplWith]
+- Upserts every desired schema into `_collections` (`name`, `schema` JSON, `updated_at`) inside the same transaction [migrator.ts:migrateImplWith]
 - Reads `SELECT name, schema FROM _collections` in `migrate`, `plan` and `status` [migrator.ts:migrateImplWith], [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
 - `plan` and `status` are read-only with respect to collections but still execute `createSystemTable` DDL, so they mutate the database schema on first use [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
-- Runs dialect-declared cleanup statements (e.g. SQLite `PRAGMA legacy_alter_table = OFF`) after the transaction [migrator.ts:runCleanup]
+- Runs dialect-declared cleanup statements after the transaction; SQLite now returns an empty cleanup list [migrator.ts:runCleanup]
 - Writes structured log lines at debug/info/warn/error through `Effect.log*` [migrator.ts:migrateImplWith]
 
 ## Verification

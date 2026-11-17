@@ -110,6 +110,22 @@ Use `makeThumbnailServiceBunLive({ maxPixels, allowPhotonFallback })` for a diff
 
 `SqliteDatabase` is also exported from the Bun entry as an alias for `BunSqliteDatabase`, so code that follows the Node docs keeps working after switching imports.
 
+libSQL works on Bun too. The Bun entry exports `LibsqlDatabase` and `TursoDatabase`, and the root import resolves to it under Bun:
+
+```typescript
+import { BunPlatform, LibsqlDatabase, LocalFileStorage, Mira } from "@gettersethya/mira/bun"
+
+Mira.builder()
+  .platform(BunPlatform)
+  .database(LibsqlDatabase({ url: "file:./bun-data.db" }))
+  .storage(LocalFileStorage({ directory: "./bun-uploads" }))
+  .collections([Posts])
+  .build()
+  .serve()
+```
+
+The local preset applies WAL, `foreign_keys=OFF`, `busy_timeout=5000`, and an optional `synchronous` mode. Remote libSQL skips writable pragmas. `TursoDatabase` is an alias. The Bun smoke covers a local libSQL file and the Docker sqld job covers a remote Bun connection.
+
 ## Telemetry
 
 Console telemetry is the default and has no SQLite dependency. To persist logs and spans under Bun, use a Bun database preset for dedicated telemetry:

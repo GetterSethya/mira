@@ -9,6 +9,50 @@ permissions:
   contents: read
 
 jobs:
+  libsql-e2e:
+    name: libSQL sqld e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      sqld:
+        image: ghcr.io/tursodatabase/libsql-server:v0.24.33
+        ports:
+          - 8080:8080
+    env:
+      MIRA_LIBSQL_E2E: "1"
+      MIRA_LIBSQL_URL: "http://127.0.0.1:8080"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Run sqld e2e
+        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/libsql-sqld.e2e.test.ts
+
+      - name: Bun remote libSQL smoke
+        run: pnpm --filter mira-example-bun libsql:smoke
+
   bun-smoke:
     name: Bun smoke
     runs-on: ubuntu-latest
@@ -57,6 +101,9 @@ jobs:
 
       - name: Bun smoke
         run: bun run apps/example-bun/src/smoke.ts
+
+      - name: Bun libSQL local smoke
+        run: pnpm --filter mira-example-bun libsql:smoke
 
       - name: Bun example boot
         run: |

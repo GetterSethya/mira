@@ -46,23 +46,30 @@ describe("sqliteDialect.translatePlan", () => {
         context(stored, desired)
       )
 
-      expect(statements[0]).toBe("PRAGMA legacy_alter_table = ON")
-      expect(statements[1]).toBe('DROP TABLE IF EXISTS "_mira_rebuild_todos"')
-      expect(statements[2]).toContain('CREATE TABLE "_mira_rebuild_todos"')
-      expect(statements[2]).toContain('"category" TEXT')
-      expect(statements[2]).not.toContain('"category" TEXT NOT NULL')
-      expect(statements[2]).toContain('"seqId" INTEGER PRIMARY KEY AUTOINCREMENT')
-      expect(statements[3]).toBe(
+      expect(statements[0]).toContain('CREATE TABLE "_mira_rebuild_todos"')
+      expect(statements[0]).toContain('"category" TEXT')
+      expect(statements[0]).not.toContain('"category" TEXT NOT NULL')
+      expect(statements[0]).toContain('"seqId" INTEGER PRIMARY KEY AUTOINCREMENT')
+      expect(statements[1]).toBe(
         'INSERT INTO "_mira_rebuild_todos" ("seqId", "id", "title", "category") SELECT "seqId", "id", "title", "category" FROM "todos"'
       )
-      expect(statements[4]).toBe('DELETE FROM "sqlite_sequence" WHERE "name" = \'_mira_rebuild_todos\'')
-      expect(statements[5]).toBe(
+      expect(statements[2]).toBe('DELETE FROM "sqlite_sequence" WHERE "name" = \'_mira_rebuild_todos\'')
+      expect(statements[3]).toBe(
         'UPDATE "sqlite_sequence" SET "name" = \'_mira_rebuild_todos\' WHERE "name" = \'todos\''
       )
-      expect(statements[6]).toBe('DROP TABLE "todos"')
-      expect(statements[7]).toBe('ALTER TABLE "_mira_rebuild_todos" RENAME TO "todos"')
-      expect(statements[8]).toBe('CREATE INDEX "idx_todos_category" ON "todos" ("category")')
-      expect(cleanup).toEqual(["PRAGMA legacy_alter_table = OFF"])
+      expect(statements[4]).toBe('DROP TABLE "todos"')
+      expect(statements[5]).toContain('CREATE TABLE "todos"')
+      expect(statements[5]).toContain('"category" TEXT')
+      expect(statements[6]).toBe(
+        'INSERT INTO "todos" ("seqId", "id", "title", "category") SELECT "seqId", "id", "title", "category" FROM "_mira_rebuild_todos"'
+      )
+      expect(statements[7]).toBe('DELETE FROM "sqlite_sequence" WHERE "name" = \'todos\'')
+      expect(statements[8]).toBe(
+        'UPDATE "sqlite_sequence" SET "name" = \'todos\' WHERE "name" = \'_mira_rebuild_todos\''
+      )
+      expect(statements[9]).toBe('DROP TABLE "_mira_rebuild_todos"')
+      expect(statements[10]).toBe('CREATE INDEX "idx_todos_category" ON "todos" ("category")')
+      expect(cleanup).toEqual([])
 
       // Every rendered statement must contain SQL: a comment-only one cannot be prepared.
       for (const statement of statements) {
@@ -153,4 +160,76 @@ describe("sqliteDialect.translatePlan", () => {
   it("has no standalone rendering for alterColumn — the rebuild owns it", () => {
     expect(sqliteDialect.translate(relaxCategory)).toEqual([])
   })
+
+  it.effect("adds the same synthetic default as ADD COLUMN for a new NOT NULL column", () =>
+    Effect.gen(function* () {
+      const extra: ColumnDef = { name: "extra", type: "text", nullable: false }
+      const stored = shape([seqId, id, title, category])
+      const desired = shape([seqId, id, title, category, extra])
+      const steps: Array<MigrationStep> = [
+        { kind: "addColumn", table: "todos", column: extra },
+        relaxCategory
+      ]
+
+      const { statements } = yield* sqliteDialect.translatePlan(steps, context(stored, desired))
+      const creates = statements.filter((statement) => statement.startsWith('CREATE TABLE "'))
+
+      expect(creates).toHaveLength(2)
+      for (const statement of creates) {
+        expect(statement).toContain('"extra" TEXT NOT NULL DEFAULT \'\'')
+      }
+      expect(statements.some((statement) => statement.includes("DROP TABLE IF EXISTS"))).toBe(false)
+    }))
+
+  it.effect("rejects a new column that is the only field of a unique index", () =>
+    Effect.gen(function* () {
+      const extra: ColumnDef = { name: "code", type: "text", nullable: false }
+      const stored = shape([seqId, id, title, category])
+      const desired = shape([seqId, id, title, category, extra], [
+        { fields: ["code"], unique: true }
+      ])
+      const steps: Array<MigrationStep> = [
+        { kind: "addColumn", table: "todos", column: extra },
+        { kind: "createIndex", table: "todos", fields: ["code"], unique: true }
+      ]
+
+      const error = yield* sqliteDialect
+        .translatePlan(steps, context(stored, desired))
+        .pipe(Effect.flip)
+      expect(error._tag).toBe("UnsupportedMigrationStepError")
+      expect(error.detail).toContain("unique index")
+    }))
+
+  it.effect("allows a new column in a composite unique index", () =>
+    Effect.gen(function* () {
+      const extra: ColumnDef = { name: "code", type: "text", nullable: false }
+      const stored = shape([seqId, id, title, category])
+      const desired = shape([seqId, id, title, category, extra], [
+        { fields: ["code", "title"], unique: true }
+      ])
+      const steps: Array<MigrationStep> = [
+        { kind: "addColumn", table: "todos", column: extra },
+        { kind: "createIndex", table: "todos", fields: ["code", "title"], unique: true }
+      ]
+
+      const { statements } = yield* sqliteDialect.translatePlan(steps, context(stored, desired))
+      expect(statements.some((statement) => statement.includes("CREATE UNIQUE INDEX"))).toBe(true)
+    }))
+
+  it.effect("rejects a type change on a single-field unique column", () =>
+    Effect.gen(function* () {
+      const storedCode: ColumnDef = { name: "title", type: "text", nullable: false }
+      const desiredCode: ColumnDef = { name: "title", type: "integer", nullable: false }
+      const stored = shape([seqId, id, storedCode, category], [{ fields: ["title"], unique: true }])
+      const desired = shape([seqId, id, desiredCode, category], [{ fields: ["title"], unique: true }])
+      const steps: Array<MigrationStep> = [
+        { kind: "alterColumn", table: "todos", from: storedCode, to: desiredCode }
+      ]
+
+      const error = yield* sqliteDialect
+        .translatePlan(steps, context(stored, desired))
+        .pipe(Effect.flip)
+      expect(error._tag).toBe("UnsupportedMigrationStepError")
+      expect(error.detail).toContain("unique index")
+    }))
 })

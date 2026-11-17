@@ -1,5 +1,5 @@
 import type { CollectionSchema } from "@gettersethya/mira-client"
-import { Context, Effect, Layer, References, Schema } from "effect"
+import { Cause, Context, Effect, Layer, References, Schema } from "effect"
 import { SqlClient, SqlError } from "effect/sql"
 
 import type { DialectType, TranslatePlanContext } from "@/dialect/dialect.js"
@@ -244,44 +244,48 @@ function migrateImplWith(
 
     const { statements, cleanup } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
 
-    const transaction = Effect.gen(function* () {
-      yield* Effect.logDebug("Starting transaction")
-      yield* sql`BEGIN TRANSACTION`
-
-      yield* Effect.catch(
-        Effect.gen(function* () {
-          const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
-            Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
-          )
-          yield* Effect.logDebug(`Steps: ${stepsJson}`)
-          yield* runStatements(sql, statements)
-          const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-          const migrationName = schemas.map((s) => s.name).join(", ")
-          yield* sql`INSERT INTO ${sql(migrationsTable)} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
-          yield* sql`COMMIT`
-        }),
-        (e: SqlError.SqlError) =>
-          Effect.gen(function* () {
-            yield* sql`ROLLBACK`
-            yield* Effect.logError(`Migration failed: ${String(e)}`)
-            return yield* e
-          })
-      )
-    })
-
-    yield* transaction.pipe(Effect.ensuring(runCleanup(sql, cleanup)))
-
+    const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
+      Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
+    )
+    const schemaJsonByName = new Map<string, string>()
     for (const { name, schema } of schemas) {
-      yield* Effect.logDebug(`Writing schema for ${name}`)
-      const schemaJson = yield* encodeStoredSchema(schema)
-      yield* sql.unsafe(
-        dialect.upsert(
-          schemaTable,
-          { name, schema: schemaJson, updated_at: new Date().toJSON() },
-          ["name"]
-        )
-      )
+      schemaJsonByName.set(name, yield* encodeStoredSchema(schema))
     }
+    const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const migrationName = schemas.map((s) => s.name).join(", ")
+
+    const transaction = sql.withTransaction(
+      Effect.gen(function* () {
+        yield* Effect.logDebug("Starting migration transaction")
+        yield* Effect.logDebug(`Steps: ${stepsJson}`)
+        yield* runStatements(sql, statements)
+        yield* sql`INSERT INTO ${sql(migrationsTable)} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
+
+        for (const { name } of schemas) {
+          yield* Effect.logDebug(`Writing schema for ${name}`)
+          yield* sql.unsafe(
+            dialect.upsert(
+              schemaTable,
+              {
+                name,
+                schema: schemaJsonByName.get(name)!,
+                updated_at: new Date().toJSON()
+              },
+              ["name"]
+            )
+          )
+        }
+      })
+    ).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError(`Migration failed: ${Cause.pretty(cause)}`).pipe(
+          Effect.andThen(Effect.failCause(cause))
+        )
+      ),
+      Effect.ensuring(runCleanup(sql, cleanup))
+    )
+
+    yield* transaction
     yield* Effect.logInfo(`Migration complete — ${schemas.length} collections migrated`)
   })
 }

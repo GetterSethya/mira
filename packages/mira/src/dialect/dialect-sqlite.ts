@@ -16,7 +16,7 @@ import type { ColumnDef, IndexShape, MigrationStep, TableShape, TableShapes } fr
  *   every column and index change of an affected table into one rebuild.
  */
 
-/** Prefix of the scratch table a rebuild copies into before swapping it in. */
+/** Prefix of the scratch table a rebuild copies into before recreating the original. */
 const REBUILD_PREFIX = "_mira_rebuild_"
 
 /**
@@ -84,20 +84,32 @@ const nativeTypeOf = (col: ColumnDef) => {
 const indexNameOf = (table: string, fields: Array<string>) => `idx_${table}_${fields.join("_")}`
 
 /** One column definition. Shared by `createTable`, `createSystemTable` and a rebuild's scratch table. */
-function columnSql(col: ColumnDef) {
+function columnSql(col: ColumnDef, syntheticDefault = false) {
   if (col.autoIncrement) {
     return `${quote(col.name)} INTEGER PRIMARY KEY AUTOINCREMENT`
   }
   const parts = [quote(col.name), nativeTypeOf(col)]
   if (!col.nullable) parts.push("NOT NULL")
   if (col.unique) parts.push("UNIQUE")
-  if (col.default !== undefined) parts.push(`DEFAULT ${quoteLiteral(col.default)}`)
+  if (col.default !== undefined) {
+    parts.push(`DEFAULT ${quoteLiteral(col.default)}`)
+  } else if (syntheticDefault) {
+    // Match ADD COLUMN: a new NOT NULL column without a default needs a value
+    // for rows that already exist. The fallback is not part of the collection
+    // schema, but the physical table must accept the copy.
+    parts.push(`DEFAULT ${quoteLiteral(col.type === "text" ? "" : 0)}`)
+  }
   if (col.primaryKey) parts.push("PRIMARY KEY")
   return parts.join(" ")
 }
 
-function createTableSql(table: string, columns: Array<ColumnDef>, ifNotExists = false) {
-  const cols = columns.map(columnSql)
+function createTableSql(
+  table: string,
+  columns: Array<ColumnDef>,
+  ifNotExists = false,
+  syntheticDefaults: ReadonlySet<string> = new Set()
+) {
+  const cols = columns.map((column) => columnSql(column, syntheticDefaults.has(column.name)))
   return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${quote(table)} (\n  ${cols.join(",\n  ")}\n)`
 }
 
@@ -108,19 +120,78 @@ function createIndexSql(table: string, index: IndexShape) {
 }
 
 /**
- * SQLite's procedure for changing a table's shape: create a scratch table with the
- * desired columns, copy the rows across, drop the original, rename the scratch table
- * into its place, then recreate the indexes.
+ * Rejects a unique-index change that would collapse existing rows before the
+ * rebuild starts. Only single-field unique indexes are rejected: a composite
+ * index may still be unique through its other fields, and the transaction rolls
+ * the index creation back if it is not.
+ */
+function validateUniqueChanges(
+  steps: ReadonlyArray<MigrationStep>,
+  ctx: TranslatePlanContext
+): Effect.Effect<void, UnsupportedMigrationStepError> {
+  return Effect.gen(function* () {
+    for (const step of steps) {
+      if (step.kind !== "addColumn" && step.kind !== "alterColumn") continue
+      const shapes = ctx.tables.get(step.table)
+      if (shapes === undefined || shapes.stored === null) continue
+      const storedNames = new Set(shapes.stored.columns.map((column) => column.name))
+
+      for (const index of shapes.desired.indexes) {
+        if (!index.unique || index.fields.length !== 1) continue
+        const field = index.fields[0]!
+
+        if (step.kind === "addColumn" && step.column.name === field && !storedNames.has(field)) {
+          return yield* Effect.fail(
+            new UnsupportedMigrationStepError({
+              step: step.kind,
+              detail: `adding "${step.column.name}" to "${step.table}" cannot satisfy the single-field unique index "${indexNameOf(step.table, index.fields)}" because every existing row would receive the same value`
+            })
+          )
+        }
+
+        if (step.kind === "alterColumn" && step.to.name === field) {
+          if (step.from.type !== step.to.type) {
+            return yield* Effect.fail(
+              new UnsupportedMigrationStepError({
+                step: step.kind,
+                detail: `changing the type of "${step.table}"."${field}" can collapse values in the single-field unique index "${indexNameOf(step.table, index.fields)}"`
+              })
+            )
+          }
+          if (step.from.nullable && !step.to.nullable && step.to.default !== undefined) {
+            return yield* Effect.fail(
+              new UnsupportedMigrationStepError({
+                step: step.kind,
+                detail: `making "${step.table}"."${field}" NOT NULL with a default can collapse NULL rows into one value in the single-field unique index "${indexNameOf(step.table, index.fields)}"`
+              })
+            )
+          }
+        }
+      }
+    }
+  })
+}
+
+/**
+ * SQLite's procedure for changing a table's shape.
+ *
+ * The table is recreated in place instead of renamed: remote libSQL rejects the
+ * legacy-alter pragma and cannot rename a table while a view references it. The
+ * drop/create/copy order is the same on every SQLite-family connection, so there
+ * is one rebuild path to test.
  */
 function rebuildStatements(table: string, desired: TableShape, stored: TableShape): Array<string> {
   const scratch = `${REBUILD_PREFIX}${table}`
   const previous = new Map(stored.columns.map((c) => [c.name, c]))
   const copied = desired.columns.filter((c) => previous.has(c.name))
+  const storedNames = new Set(previous.keys())
+  const syntheticDefaults = new Set(
+    desired.columns
+      .filter((c) => !storedNames.has(c.name) && !c.nullable && c.default === undefined)
+      .map((c) => c.name)
+  )
 
-  const statements = [
-    `DROP TABLE IF EXISTS ${quote(scratch)}`,
-    createTableSql(scratch, desired.columns)
-  ]
+  const statements = [createTableSql(scratch, desired.columns, false, syntheticDefaults)]
 
   if (copied.length > 0) {
     const columns = copied.map((c) => quote(c.name)).join(", ")
@@ -139,9 +210,9 @@ function rebuildStatements(table: string, desired: TableShape, stored: TableShap
   }
 
   if (desired.columns.some((c) => c.autoIncrement === true)) {
-    // Dropping a table deletes its `sqlite_sequence` row, which would let the rebuild
-    // hand out ids that were already used. Move the row onto the scratch table first
-    // so the rename carries the high-water mark over.
+    // Dropping the original deletes its `sqlite_sequence` row, which would let the
+    // new table hand out ids that were already used. Move the high-water mark onto
+    // the scratch table, then move it back before the scratch is dropped.
     statements.push(
       `DELETE FROM "sqlite_sequence" WHERE "name" = ${quoteLiteral(scratch)}`,
       `UPDATE "sqlite_sequence" SET "name" = ${quoteLiteral(scratch)} WHERE "name" = ${quoteLiteral(table)}`
@@ -150,8 +221,22 @@ function rebuildStatements(table: string, desired: TableShape, stored: TableShap
 
   statements.push(
     `DROP TABLE ${quote(table)}`,
-    `ALTER TABLE ${quote(scratch)} RENAME TO ${quote(table)}`
+    createTableSql(table, desired.columns, false, syntheticDefaults)
   )
+
+  if (copied.length > 0) {
+    const columns = desired.columns.map((c) => quote(c.name)).join(", ")
+    statements.push(`INSERT INTO ${quote(table)} (${columns}) SELECT ${columns} FROM ${quote(scratch)}`)
+  }
+
+  if (desired.columns.some((c) => c.autoIncrement === true)) {
+    statements.push(
+      `DELETE FROM "sqlite_sequence" WHERE "name" = ${quoteLiteral(table)}`,
+      `UPDATE "sqlite_sequence" SET "name" = ${quoteLiteral(table)} WHERE "name" = ${quoteLiteral(scratch)}`
+    )
+  }
+
+  statements.push(`DROP TABLE ${quote(scratch)}`)
 
   for (const index of desired.indexes) {
     statements.push(createIndexSql(table, index))
@@ -184,6 +269,8 @@ export const sqliteDialect: DialectType = {
 
   translatePlan: (steps, ctx) =>
     Effect.gen(function* () {
+      yield* validateUniqueChanges(steps, ctx)
+
       const rebuilds = new Map<string, TableShapes>()
       for (const step of steps) {
         if (step.kind !== "alterColumn") continue
@@ -200,14 +287,6 @@ export const sqliteDialect: DialectType = {
       }
 
       const statements: Array<string> = []
-      if (rebuilds.size > 0) {
-        // Renaming a table makes SQLite ≥ 3.25 re-parse every view and trigger, so a
-        // view that still references the table being swapped out fails the rename.
-        // Legacy behaviour skips that pass; the migrator turns it back off once the
-        // transaction is over, including when the transaction fails.
-        statements.push("PRAGMA legacy_alter_table = ON")
-      }
-
       const rebuilt = new Set<string>()
       for (const step of steps) {
         const table = "table" in step ? step.table : null
@@ -231,7 +310,7 @@ export const sqliteDialect: DialectType = {
 
       return {
         statements,
-        cleanup: rebuilt.size > 0 ? ["PRAGMA legacy_alter_table = OFF"] : []
+        cleanup: []
       }
     }),
 

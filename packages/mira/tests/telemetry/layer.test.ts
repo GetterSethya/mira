@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { describe, it } from "@effect/vitest"
-import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect, vi } from "vitest"
 
@@ -19,16 +19,20 @@ import {
   TelemetryStore
 } from "@/telemetry/store.js"
 
-function makeLayer(logConsole = false, options: { flushBatchSize?: number } = {}) {
+function makeLayer(
+  logConsole = false,
+  options: { flushBatchSize?: number; flushInterval?: Duration.Input } = {}
+) {
   const database = SqliteDatabase({ filename: ":memory:" })
   const store = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(
     Layer.provide(database.layer)
   )
 
-  const config =
-    options.flushBatchSize === undefined
-      ? { logConsole }
-      : { logConsole, flushBatchSize: options.flushBatchSize }
+  const config = {
+    logConsole,
+    ...(options.flushBatchSize === undefined ? {} : { flushBatchSize: options.flushBatchSize }),
+    ...(options.flushInterval === undefined ? {} : { flushInterval: options.flushInterval })
+  }
 
   return makeTelemetryLayerForClient(config).pipe(
     Layer.provideMerge(store),
@@ -201,6 +205,25 @@ describe("makeTelemetryLayerForClient", () => {
       expect(Number(rows[0]?.count ?? 0)).toBe(25)
     }).pipe(Effect.provide(makeLayer(false, { flushBatchSize: 10 })))
   )
+
+  it("flushes a partial SQL batch after flushInterval", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.logInfo("interval-sql")
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 300)))
+
+        const rows = yield* queryLogs<{ message: string }>(
+          "SELECT message FROM logs WHERE message = 'interval-sql'"
+        )
+        expect(rows).toHaveLength(1)
+      }).pipe(
+        Effect.provide(
+          makeLayer(false, { flushBatchSize: 100, flushInterval: "50 millis" })
+        ),
+        Effect.scoped
+      )
+    )
+  })
 })
 
 describe("logCleanupCronDef", () => {

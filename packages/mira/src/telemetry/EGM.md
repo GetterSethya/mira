@@ -50,9 +50,9 @@ its module graph.
 
 ### `layer.ts`
 
-- `TelemetryDatabase` — a preset layer providing both `SqlClient` and `Dialect`.
-- `TelemetryStorageConfig` — dedicated (with a preset and optional
-  `manageConnection`) or shared.
+- `TelemetryDatabase` - a preset layer providing both `SqlClient` and `Dialect`, plus optional `migrateAtStartup` (default true).
+- `TelemetryStorageConfig` - dedicated (with a preset and optional
+  `manageConnection`) or shared (with optional `migrate`, default true).
 - `TelemetryLoggerConfig` — core config plus storage.
 - `makeTelemetryLayer(config)` — composes the store and core with
   `Layer.provideMerge`, so `TelemetryStore` stays in the output.
@@ -106,6 +106,19 @@ its module graph.
   `Dialect`; it does not require the app-bound `Migrator`.
 - `logCleanupCronDef` contains no SQL or PRAGMA. It logs actual deleted counts
   and completes on `TelemetryStoreError`.
+- Dedicated libSQL on a local `file:` reuses the SQLite setup and checkpoint.
+  Remote libSQL uses `setup: []` and `cleanup: []`; sqld rejects writable
+  pragmas. Retention still uses `DELETE ... RETURNING`.
+- A libSQL `syncUrl` preset sets `TelemetryDatabase.migrateAtStartup` and
+  `MiraDatabase.migrateAtStartup` to false. `makeTelemetryLayer` passes the flag
+  to the SQL store, so dedicated telemetry does not create tables on a replica.
+  Shared telemetry accepts `{ mode: "shared", migrate: false }` for the same
+  reason.
+- `makeSqlTelemetryStoreLayer` accepts `migrate?: boolean`. False skips table
+  creation but keeps append/read/retention; a missing table surfaces as a store
+  error on first use.
+- For remote libSQL, set `flushBatchSize` and `flushInterval`; each unbatched
+  row is one network round trip. The store is otherwise unchanged.
 
 ## Side Effects
 

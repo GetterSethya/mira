@@ -37,11 +37,35 @@ export const applySynchronousMode = (sql: SqlClient.SqlClient, mode: SqliteSynch
 export const applyJournalMode = (sql: SqlClient.SqlClient) =>
   sql`PRAGMA journal_mode = WAL`
 
+/**
+ * Sets the connection-level foreign-key enforcement flag. SQLite's pragma does
+ * not accept bound parameters, so the flag is spliced in with `sql.literal`
+ * from a boolean.
+ */
+export const applyForeignKeys = (sql: SqlClient.SqlClient, enabled: boolean) =>
+  sql`PRAGMA foreign_keys = ${sql.literal(enabled ? "ON" : "OFF")}`
+
+/**
+ * Sets the connection-level busy timeout in milliseconds. SQLite's pragma does
+ * not accept bound parameters, so the value is spliced in with `sql.literal`
+ * from a caller-provided number.
+ */
+export const applyBusyTimeout = (sql: SqlClient.SqlClient, milliseconds: number) =>
+  sql`PRAGMA busy_timeout = ${sql.literal(String(milliseconds))}`
+
 export interface SqlitePragmaOptions {
   /**
    * Durability mode. Omitted leaves the driver default (`FULL`) in place.
    */
   readonly synchronous?: SqliteSynchronousMode | undefined
+  /**
+   * Foreign-key enforcement. Omitted leaves the driver default in place.
+   */
+  readonly foreignKeys?: boolean | undefined
+  /**
+   * Busy timeout in milliseconds. Omitted leaves the driver default in place.
+   */
+  readonly busyTimeout?: number | undefined
 }
 
 /**
@@ -49,7 +73,9 @@ export interface SqlitePragmaOptions {
  * has been opened and before the layer is handed to the app:
  *
  * 1. `PRAGMA journal_mode = WAL`
- * 2. `PRAGMA synchronous = ...` when configured
+ * 2. `PRAGMA foreign_keys = ...` when configured
+ * 3. `PRAGMA busy_timeout = ...` when configured
+ * 4. `PRAGMA synchronous = ...` when configured
  *
  * The pragmas are per-connection, so they are applied through the `SqlClient`
  * produced by the driver layer itself (not a fresh connection). Layer
@@ -62,6 +88,12 @@ export const applySqlitePragmas = (
 ) =>
   Effect.gen(function* () {
     yield* applyJournalMode(sql)
+    if (options.foreignKeys !== undefined) {
+      yield* applyForeignKeys(sql, options.foreignKeys)
+    }
+    if (options.busyTimeout !== undefined) {
+      yield* applyBusyTimeout(sql, options.busyTimeout)
+    }
     if (options.synchronous !== undefined) {
       yield* applySynchronousMode(sql, options.synchronous)
     }
