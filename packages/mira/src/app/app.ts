@@ -275,9 +275,17 @@ export class MiraApp<R = never, Telemetry = never> {
     )
     const thumbnailLayer =
       platform.thumbnailLayer ?? (hasFileFields ? ThumbnailServicePhotonLive : ThumbnailServiceNoopLive)
-    const foundation = Layer.mergeAll(database.layer, storage.layer, thumbnailLayer, telemetry).pipe(
-      Layer.provideMerge(platform.layer)
-    )
+    // Shared-mode telemetry reuses the application `SqlClient` and `Dialect`.
+    // Providing the database layer here only satisfies that requirement; it does
+    // not hide `TelemetryStore`, because the telemetry layer uses
+    // `Layer.provideMerge` internally.
+    const telemetryLayer = telemetry.pipe(Layer.provide(database.layer))
+    const foundation = Layer.mergeAll(
+      database.layer,
+      storage.layer,
+      thumbnailLayer,
+      telemetryLayer
+    ).pipe(Layer.provideMerge(platform.layer))
 
     // Rate limiting: the store is the swap point. The default is SQLite.
     const appConfigLayer = AppConfigLive

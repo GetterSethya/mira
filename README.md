@@ -135,8 +135,11 @@ Mira.builder()
   .collections([Users, Posts])                                      // required — your collections
   .rules([userRules, postRules])                                    // optional — server-side access rules
   .crons([/* CronDef definitions */])                               // optional — cron jobs
-  .telemetry(makeSqliteTelemetryLayer({                             // optional — SQLite telemetry
-    sqlLayer: SqliteClient.layer({ filename: "mira-logs.db" }),     //   caller-supplied driver, dedicated DB
+  .telemetry(makeTelemetryLayer({                             // optional — SQLite telemetry
+    storage: {
+      mode: "dedicated",
+      database: SqliteDatabase({ filename: "mira-logs.db" }),
+    },
   }))
   .cors({ allowedOrigins: ["https://app.example.com"] })            // optional — CORS (defaults to permissive *)
   .build()                                                          // produces MiraApp
@@ -154,7 +157,7 @@ Mira.builder()
 | `.collections(c)` | yes | Array of collection definitions. |
 | `.rules(r)` | no | Array of `RuleBinding` from `defineRule(collection, cb)`. Collections without rules deny all actions. |
 | `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
-| `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). `makeSqliteTelemetryLayer({ sqlLayer })` persists logs and spans to a dedicated SQLite database; supply the driver layer, e.g. `SqliteClient.layer({ filename: "mira-logs.db" })` from `@effect/sql-sqlite-node` or `@effect/sql-sqlite-bun`. |
+| `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). `makeTelemetryLayer({ storage })` persists logs and spans through `TelemetryStore`. Use dedicated storage with a database preset, or shared storage to reuse the application database. |
 | `.cors(c)` | no | CORS config. Defaults to permissive (`*`), so a separately-hosted frontend works with zero config. |
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
 | `.extend(plugin)` | — | Called on `MiraApp` after `.build()`. Registers a `MiraPlugin`. |
@@ -1216,7 +1219,7 @@ The `@gettersethya/mira-dashboard` package is a ready-made plugin that adds an a
 
 - Collection browser with record list, create, edit, and delete
 - Per-collection **Connect** sheet: SDK snippets, raw `fetch`/`curl` calls, and a generated `mira.generated.ts`
-- Logs and span viewer (works best with `makeSqliteTelemetryLayer`)
+- Logs and span viewer (works best with `makeTelemetryLayer`)
 - App config display
 - Superadmin account management
 - Cron job listing and manual run trigger
@@ -1286,41 +1289,43 @@ import { makeConsoleTelemetryLayer } from "@gettersethya/mira"
 [trace] collection.list client 3.20ms ok posts cache.hit=true
 ```
 
-To persist logs and spans to a SQLite database instead, use `makeSqliteTelemetryLayer`. Mira does not open the database for you: pass a `SqlClient` layer for a **dedicated telemetry database**. The caller owns the driver, so the same API works on Node and Bun.
+To persist logs and spans, use `makeTelemetryLayer`. It writes through the `TelemetryStore` boundary. Dedicated storage opens a separate database from a full database preset; shared storage reuses the application `SqlClient` and `Dialect` when a second connection is impossible.
 
 ```typescript
 import {
   LocalFileStorage,
-  makeSqliteTelemetryLayer,
+  makeTelemetryLayer,
   Mira,
   NodePlatform,
   SqliteDatabase,
 } from "@gettersethya/mira"
-import { SqliteClient } from "@effect/sql-sqlite-node"
 
 const app = Mira.builder()
   .platform(NodePlatform)
   .database(SqliteDatabase({ filename: "mira.db" }))
   .storage(LocalFileStorage({ directory: "./uploads" }))
   .collections([Users, Posts])
-  .telemetry(makeSqliteTelemetryLayer({
-    sqlLayer:   SqliteClient.layer({ filename: "mira-logs.db" }), // dedicated telemetry DB
-    logConsole: true,                                             // also print to stdout (default: false)
-    pretty:     true,                                             // colorize the console output (default: false)
+  .telemetry(makeTelemetryLayer({
+    storage: {
+      mode: "dedicated",
+      database: SqliteDatabase({ filename: "mira-logs.db" }),
+    },
+    logConsole: true,
+    pretty: true,
   }))
   .build()
 ```
 
-On Bun, import `SqliteClient` from `@effect/sql-sqlite-bun` instead and keep the rest identical. Both the Node entry and `@gettersethya/mira/bun` export `makeSqliteTelemetryLayer`, `SqliteLoggerConfig`, `TelemetrySqlClient`, and `logCleanupCronDef`.
+On Bun, use `BunSqliteDatabase` from `@gettersethya/mira/bun` as the dedicated preset. Both entries export `makeTelemetryLayer`, `makeTelemetryLayerForClient`, `TelemetryStore`, `makeSqlTelemetryStoreLayer`, and `logCleanupCronDef`.
 
-The layer applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` during construction, then migrates two collections into that database:
+Dedicated mode applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` during construction, then migrates two collections into that database. Set `manageConnection: false` to keep a preset's explicit `synchronous` setting.
 
 - **`logs`** — structured log entries from `Effect.log()`. Fields: `seqId`, `level`, `message`, `traceId?`, `spanId?`, `created`, `updated`.
 - **`spans`** — completed Effect spans. Fields: `seqId`, `name`, `traceId`, `spanId`, `parentSpanId?`, `kind`, `durationMs`, `status`, `error?`, `attributes`, `created`, `updated`.
 
-Both tables index `created` for retention scans. Completed spans are offered to an unbounded queue and log rows to a bounded queue (10,000 entries) drained by scoped fibers, so record and span completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports any log rows dropped because the bounded queue was full. The database connection is also provided as `TelemetrySqlClient` for the admin telemetry routes. `logConsole` echoes to stdout and `pretty` affects only that echo.
+Both tables index `created` for retention scans. Completed spans are offered to an unbounded queue and log rows to a bounded queue (10,000 entries) drained by scoped fibers, so record and span completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports lost rows. The store is visible to the admin telemetry routes through `TelemetryStore`. `logConsole` echoes to stdout and `pretty` affects only that echo. Set `flushBatchSize` to batch rows per store call; the default of one preserves today's behavior.
 
-`logCleanupCronDef` is a daily `0 0 * * *` job. It deletes rows older than `AppConfig.logRetentionDays` in batches of 1,000 using the `created` index, then runs `PRAGMA wal_checkpoint(TRUNCATE)` and logs a warning when the checkpoint is busy. Add it to `.crons([...])`. The handler requires `TelemetrySqlClient`, so it only works with `makeSqliteTelemetryLayer`; the default console telemetry does not provide that client. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
+`logCleanupCronDef` is a daily `0 0 * * *` job. It deletes rows older than `AppConfig.logRetentionDays` in batches of 1,000 through `TelemetryStore.deleteOlderThan`, then runs the dialect's cleanup hook (the SQLite checkpoint) and logs the deleted counts. Add it to `.crons([...])`. The default console telemetry does not provide a store, so the cron only works with `makeTelemetryLayer` or a custom `TelemetryStore`. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
 
 The telemetry endpoints (`GET /api/_telemetry/logs` and `GET /api/_telemetry/spans`) require a session from a plugin-declared admin collection and support cursor-based pagination via `?after=<seqId>&limit=<n>`. Logs return `{ logs, total, limit, nextCursor }`; spans return `{ spans, total, limit, nextCursor }`. Spans also accept `traceId`, and a bad telemetry filter is a `400`, not a `422`. The dashboard's log/span viewer uses these routes for continuous pagination.
 

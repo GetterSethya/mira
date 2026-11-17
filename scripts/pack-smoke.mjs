@@ -105,7 +105,7 @@ try {
   )
   run("bun", ["add", ...tarballs, "effect@4.0.0", "@effect/sql-sqlite-bun@4.0.0"], bunTemp, false)
   const bunExportCheck =
-    "if (!m.BunPlatform) throw new Error('Bun entry missing BunPlatform'); if (!m.BunPortablePlatform) throw new Error('Bun entry missing BunPortablePlatform'); if (!m.BunCryptoLayer) throw new Error('Bun entry missing BunCryptoLayer'); if (!m.BunAuthServiceLayer) throw new Error('Bun entry missing BunAuthServiceLayer'); if (!m.ThumbnailServiceBunLive) throw new Error('Bun entry missing ThumbnailServiceBunLive'); if (typeof m.makeSqliteTelemetryLayer !== 'function') throw new Error('Bun entry missing makeSqliteTelemetryLayer'); if (!m.TelemetrySqlClient) throw new Error('Bun entry missing TelemetrySqlClient'); if (!m.logCleanupCronDef) throw new Error('Bun entry missing logCleanupCronDef')"
+    "if (!m.BunPlatform) throw new Error('Bun entry missing BunPlatform'); if (!m.BunPortablePlatform) throw new Error('Bun entry missing BunPortablePlatform'); if (!m.BunCryptoLayer) throw new Error('Bun entry missing BunCryptoLayer'); if (!m.BunAuthServiceLayer) throw new Error('Bun entry missing BunAuthServiceLayer'); if (!m.ThumbnailServiceBunLive) throw new Error('Bun entry missing ThumbnailServiceBunLive'); if (typeof m.makeTelemetryLayer !== 'function') throw new Error('Bun entry missing makeTelemetryLayer'); if (!m.TelemetryStore) throw new Error('Bun entry missing TelemetryStore'); if (!m.TelemetryStoreError) throw new Error('Bun entry missing TelemetryStoreError'); if (!m.TelemetryDuplicateEntryError) throw new Error('Bun entry missing TelemetryDuplicateEntryError'); if (typeof m.makeSqlTelemetryStoreLayer !== 'function') throw new Error('Bun entry missing makeSqlTelemetryStoreLayer'); if (!m.logCleanupCronDef) throw new Error('Bun entry missing logCleanupCronDef')"
   run(
     bunExecutable(),
     ["-e", `import('@gettersethya/mira').then((m) => { ${bunExportCheck} })`],
@@ -133,9 +133,9 @@ try {
   writeFileSync(
     join(bunTemp, "telemetry-chunk-entry.ts"),
     [
-      'import { makeSqliteTelemetryLayer, TelemetrySqlClient } from "@gettersethya/mira/bun"',
+      'import { makeTelemetryLayer, TelemetryStore } from "@gettersethya/mira/bun"',
       'import { SqliteClient } from "@effect/sql-sqlite-bun"',
-      "console.log(makeSqliteTelemetryLayer, TelemetrySqlClient, SqliteClient)",
+      "console.log(makeTelemetryLayer, TelemetryStore, SqliteClient)",
       ""
     ].join("\n")
   )

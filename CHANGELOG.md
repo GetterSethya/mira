@@ -15,6 +15,33 @@ published by CI.
 
 ## [Unreleased]
 
+### Changed
+
+- **Telemetry now sits behind a `TelemetryStore` boundary.** `makeTelemetryLayer`
+  supports dedicated storage (a full database preset with both `SqlClient` and
+  `Dialect`) and shared storage (the application database). The SQL-free core
+  owns queueing, batching, drain, and shutdown; `SqlTelemetryStore` owns appends,
+  retention, reads, and migrations. `flushBatchSize` and `flushInterval` are
+  available without changing the default one-row behavior. Telemetry migration
+  metadata is isolated in shared mode with `_telemetry_collections` and
+  `_telemetry_migrations`; dedicated databases keep `_collections` and
+  `_migrations`, so existing telemetry files upgrade without table re-creation.
+- **Dialect telemetry hooks.** `DialectType` now supplies placeholders, a
+  portable upsert for the migrator, and optional setup, cleanup, retry, and
+  duplicate-key hooks. SQLite keeps its PRAGMAs and busy/unique classifiers in
+  `dialect-sqlite.ts`; the telemetry core never branches on a dialect name.
+- **Telemetry responses and schemas are unchanged.** The span response still
+  omits `seqId`; the filtered span cursor is fixed internally. Logs keep their
+  existing fields and response shape.
+
+### Removed
+
+- **Breaking: telemetry API rename.** `makeSqliteTelemetryLayer` is now
+  `makeTelemetryLayer`, `makeSqliteTelemetryLayerForClient` is now
+  `makeTelemetryLayerForClient`, and `SqliteLoggerConfig` is now
+  `TelemetryLoggerConfig`. `TelemetrySqlClient` is removed; use
+  `TelemetryStore`. There are no compatibility aliases.
+
 ### Added
 
 - **Landing benchmark page and header rebuild.** The shared nav is now four

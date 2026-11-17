@@ -25,6 +25,27 @@ export type TranslatePlanContext = {
   tables: ReadonlyMap<string, TableShapes>
 }
 
+/**
+ * Optional telemetry capability supplied by a dialect.
+ *
+ * The SQL telemetry store reads these hooks; the SQL-free telemetry core never
+ * imports `Dialect` and never branches on a dialect name.
+ */
+export type TelemetryDialectHooks = {
+  /** Statements that configure a connection the store owns. */
+  readonly setup: ReadonlyArray<string>
+  /** Statements that run after retention cleanup on a connection the store owns. */
+  readonly cleanup: ReadonlyArray<string>
+  /** Whether a failed setup or migration should be retried. */
+  readonly isRetryable: (error: unknown) => boolean
+  /**
+   * Whether an append failed because the row id already exists. A retry of a
+   * committed batch then treats the single duplicate row as success instead of
+   * losing it or duplicating the other rows.
+   */
+  readonly isDuplicateKey: (error: unknown) => boolean
+}
+
 /** SQL for a whole plan, plus statements that must run even when the plan fails. */
 export type TranslatedPlan = {
   /** Statements to run inside the migration transaction, in order. */
@@ -69,6 +90,61 @@ export type DialectType = {
   storesBooleanAsInteger: boolean
   /** How `DELETE` reports whether it removed a row. */
   deleteResult: DeleteResultStrategy
+  /**
+   * Numbered placeholder for a statement parameter. SQLite and MySQL return
+   * `"?"`; PostgreSQL returns `"$" + index`.
+   */
+  placeholder: (index: number) => string
+  /**
+   * Portable upsert used by the migrator for schema metadata. SQLite and
+   * PostgreSQL use `ON CONFLICT`; MySQL uses `ON DUPLICATE KEY UPDATE`.
+   *
+   * Every identifier goes through {@link quoteIdentifier} and every value
+   * through {@link quoteLiteral}. Schema JSON can contain quotes and
+   * backslashes.
+   */
+  upsert: (
+    table: string,
+    record: Readonly<Record<string, unknown>>,
+    conflictKeys: ReadonlyArray<string>
+  ) => string
+  /** Optional telemetry connection and error-classification hooks. */
+  readonly telemetry?: TelemetryDialectHooks
+}
+
+/**
+ * Finds a `code` or `errno` value inside an error shape, including nested
+ * `cause`/`reason` fields. Useful for driver-neutral retry and duplicate
+ * predicates without importing a driver.
+ */
+export function errorHasCode(error: unknown, codes: ReadonlyArray<string | number>): boolean {
+  const wanted = new Set(codes.map(String))
+  const seen = new Set<unknown>()
+  const stack: Array<unknown> = [error]
+
+  while (stack.length > 0) {
+    const value = stack.pop()
+    if (value === null || typeof value !== "object" || seen.has(value)) continue
+    seen.add(value)
+
+    const record = value as Record<string, unknown>
+    for (const key of ["code", "errno", "errstr"] as const) {
+      const candidate = record[key]
+      if (candidate !== undefined && wanted.has(String(candidate))) return true
+    }
+
+    for (const key of ["reason", "cause", "error", "details"] as const) {
+      const nested = record[key]
+      if (nested !== undefined) stack.push(nested)
+    }
+  }
+
+  return false
+}
+
+/** Builds a retry predicate from one or more driver error codes. */
+export function retryableByCauseCode(codes: ReadonlyArray<string | number>) {
+  return (error: unknown) => errorHasCode(error, codes)
 }
 
 /**

@@ -194,4 +194,18 @@ describe("filterNodeToWhereClause", () => {
       expect(Result.isFailure(result)).toBe(true)
       expect(Result.isFailure(result) && result.failure._tag === "ValidationError").toBe(true)
     }).pipe(Effect.runPromise))
+
+  it("uses a dialect quote function and keeps ? placeholders", () =>
+    Effect.gen(function* () {
+      const node: FilterNode = {
+        op: "and",
+        left: { op: "eq", field: "title", value: "ok" },
+        right: { op: "in", field: "age", values: [18, 65] }
+      }
+      const result = yield* filterNodeToWhereClause(node, testSchema, "testCollection", {
+        quoteIdentifier: (field) => `\`${field}\``
+      })
+      expect(result.sql).toBe('(t.`title` = ?) AND (t.`age` IN (?, ?))')
+      expect(result.params).toEqual(["ok", 18, 65])
+    }).pipe(Effect.runPromise))
 })

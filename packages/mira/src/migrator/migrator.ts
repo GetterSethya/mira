@@ -60,19 +60,32 @@ const migrationsColumns: Array<ColumnDef> = [
   { name: "applied_at", type: "text", nullable: false }
 ]
 
-/** DDL steps to bootstrap the `_collections` and `_migrations` system tables on first run. */
-export const SYSTEM_TABLE_STEPS: Array<MigrationStep> = [
-  {
-    kind: "createSystemTable",
-    table: "_collections",
-    columns: collectionsColumns
-  },
-  {
-    kind: "createSystemTable",
-    table: "_migrations",
-    columns: migrationsColumns
-  }
-]
+/** DDL steps to bootstrap the collection and migration metadata tables. */
+export function systemTableSteps(
+  schemaTable = "_collections",
+  migrationsTable = "_migrations"
+): Array<MigrationStep> {
+  return [
+    {
+      kind: "createSystemTable",
+      table: schemaTable,
+      columns: collectionsColumns
+    },
+    {
+      kind: "createSystemTable",
+      table: migrationsTable,
+      columns: migrationsColumns
+    }
+  ]
+}
+
+/** Default DDL steps for the app's `_collections` and `_migrations` tables. */
+export const SYSTEM_TABLE_STEPS: Array<MigrationStep> = systemTableSteps()
+
+const metadataFor = (options?: MigrateOptions) => ({
+  schemaTable: options?.schemaTable ?? "_collections",
+  migrationsTable: options?.migrationsTable ?? "_migrations"
+})
 
 /**
  * Effect `Context.Tag` for the migration service.
@@ -89,7 +102,8 @@ export class Migrator extends Context.Service<
     readonly migrate: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<void, MigrationError>
     readonly plan: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<MigrationPlan, MigrationError>
     readonly status: (
-      schemas: Array<NamedSchema>
+      schemas: Array<NamedSchema>,
+      options?: MigrateOptions
     ) => Effect.Effect<Array<{ name: string; status: "current" | "ahead" | "behind" }>, SqlError.SqlError>
   }
 >()("Migrator") {}
@@ -184,15 +198,18 @@ function migrateImplWith(
   schemas: Array<NamedSchema>,
   options?: MigrateOptions
 ) {
+  const { schemaTable, migrationsTable } = metadataFor(options)
   return Effect.gen(function* () {
     yield* Effect.logDebug("Creating system tables if not exist")
     yield* runStatements(
       sql,
-      SYSTEM_TABLE_STEPS.flatMap((step) => dialect.translate(step))
+      systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
     )
 
     yield* Effect.logInfo(`Migrating ${schemas.length} collections...`)
-    const storedRows = yield* sql<{ name: string; schema: string }>`SELECT name, schema FROM _collections`
+    const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
+      `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
+    )
     const storedRecord: Record<string, CollectionSchema> = {}
     for (const row of storedRows) {
       storedRecord[row.name] = yield* decodeStoredSchema(row.schema)
@@ -240,7 +257,7 @@ function migrateImplWith(
           yield* runStatements(sql, statements)
           const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
           const migrationName = schemas.map((s) => s.name).join(", ")
-          yield* sql`INSERT INTO ${sql("_migrations")} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
+          yield* sql`INSERT INTO ${sql(migrationsTable)} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
           yield* sql`COMMIT`
         }),
         (e: SqlError.SqlError) =>
@@ -257,7 +274,13 @@ function migrateImplWith(
     for (const { name, schema } of schemas) {
       yield* Effect.logDebug(`Writing schema for ${name}`)
       const schemaJson = yield* encodeStoredSchema(schema)
-      yield* sql`INSERT OR REPLACE INTO ${sql("_collections")} ${sql.insert({ name, schema: schemaJson, updated_at: new Date().toJSON() })}`
+      yield* sql.unsafe(
+        dialect.upsert(
+          schemaTable,
+          { name, schema: schemaJson, updated_at: new Date().toJSON() },
+          ["name"]
+        )
+      )
     }
     yield* Effect.logInfo(`Migration complete — ${schemas.length} collections migrated`)
   })
@@ -269,16 +292,18 @@ function planImplWith(
   schemas: Array<NamedSchema>,
   options?: MigrateOptions
 ) {
+  const { schemaTable, migrationsTable } = metadataFor(options)
   return Effect.gen(function* () {
     yield* Effect.logDebug("Computing migration plan (dry run)")
 
-    for (const step of SYSTEM_TABLE_STEPS) {
-      for (const stmt of dialect.translate(step)) {
-        yield* sql.unsafe(stmt)
-      }
-    }
+    yield* runStatements(
+      sql,
+      systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
+    )
 
-    const storedRows = yield* sql<{ name: string; schema: string }>`SELECT name, schema FROM _collections`
+    const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
+      `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
+    )
     const storedRecord: Record<string, CollectionSchema> = {}
     for (const row of storedRows) {
       storedRecord[row.name] = yield* decodeStoredSchema(row.schema)
@@ -297,17 +322,24 @@ function planImplWith(
   })
 }
 
-function statusImplWith(sql: SqlClient.SqlClient, dialect: DialectType, schemas: Array<NamedSchema>) {
+function statusImplWith(
+  sql: SqlClient.SqlClient,
+  dialect: DialectType,
+  schemas: Array<NamedSchema>,
+  options?: MigrateOptions
+) {
+  const { schemaTable, migrationsTable } = metadataFor(options)
   return Effect.gen(function* () {
     yield* Effect.logDebug("Checking migration status")
 
-    for (const step of SYSTEM_TABLE_STEPS) {
-      for (const stmt of dialect.translate(step)) {
-        yield* sql.unsafe(stmt)
-      }
-    }
+    yield* runStatements(
+      sql,
+      systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
+    )
 
-    const storedRows = yield* sql<{ name: string; schema: string }>`SELECT name, schema FROM _collections`
+    const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
+      `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
+    )
     const parsedEntries: Array<[string, CollectionSchema]> = []
     for (const r of storedRows) {
       parsedEntries.push([r.name, yield* decodeStoredSchema(r.schema)])
@@ -367,7 +399,8 @@ export const MigratorLive = Layer.effect(
         const level = toEffectLogLevel(options?.logLevel)
         return planImplWith(sql, dialect, schemas, options).pipe(Effect.provideService(References.MinimumLogLevel, level))
       },
-      status: (schemas: Array<NamedSchema>) => statusImplWith(sql, dialect, schemas)
+      status: (schemas: Array<NamedSchema>, options?: MigrateOptions) =>
+        statusImplWith(sql, dialect, schemas, options)
     }
   })
 )
