@@ -1,4 +1,5 @@
-import { Effect, Layer, Redacted, Stream } from "effect"
+import type { Redacted } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { Files as FilesClient } from "files-sdk"
 import type { FilesService } from "files-sdk/effect"
 import { make as makeFilesService } from "files-sdk/effect"

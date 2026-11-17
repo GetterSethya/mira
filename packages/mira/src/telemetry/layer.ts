@@ -1,6 +1,6 @@
 import { Layer } from "effect"
 import { Effect, Schedule } from "effect"
-import { SqlClient } from "effect/sql"
+import type { SqlClient } from "effect/sql"
 
 import type { DatabaseServices } from "@/app/types.js"
 import { AppConfig } from "@/config/index.js"

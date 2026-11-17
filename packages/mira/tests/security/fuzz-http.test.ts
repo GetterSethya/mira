@@ -5,7 +5,8 @@ import { join } from "node:path"
 import { describe, it } from "@effect/vitest"
 import { assert } from "@effect/vitest"
 import { Cause, Effect, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
+import type { HttpClientResponse } from "effect/http"
+import { HttpClient, HttpClientRequest } from "effect/http"
 
 import { signJwt } from "@/http/auth.js"
 

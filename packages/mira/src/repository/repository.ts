@@ -43,7 +43,7 @@ export class Repository extends Context.Service<
     viewWithAccess?: (
       table: string,
       id: string,
-      predicates: readonly [AccessPredicate, ...AccessPredicate[]]
+      predicates: readonly [AccessPredicate, ...Array<AccessPredicate>]
     ) => Effect.Effect<Option.Option<AccessRow>, SqlError.SqlError>
     /** Optional fast path: DELETE without the preceding existence SELECT. */
     deleteExisting?: (table: string, id: string) => Effect.Effect<Option.Option<void>, SqlError.SqlError>

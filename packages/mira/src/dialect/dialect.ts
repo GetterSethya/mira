@@ -1,5 +1,6 @@
 import type { TimestampUnit } from "@gettersethya/mira-client"
-import { Context, Effect, Option } from "effect"
+import type { Option } from "effect"
+import { Context, Effect } from "effect"
 
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
 import type { ColumnDef, MigrationStep, TableShapes } from "@/migrator/types.js"

@@ -1,4 +1,5 @@
-import { Effect, MutableRef } from "effect"
+import type { Effect } from "effect"
+import { MutableRef } from "effect"
 import type { HttpClient } from "effect/http"
 import { HttpClientRequest as HCR } from "effect/http"
 

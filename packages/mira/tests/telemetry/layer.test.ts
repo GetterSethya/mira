@@ -3,7 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { describe, it } from "@effect/vitest"
-import { Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
+import type { Duration } from "effect"
+import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect, vi } from "vitest"
 

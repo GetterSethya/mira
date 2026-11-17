@@ -205,7 +205,7 @@ describeE2E("libSQL remote sqld", () => {
         )
       )
       expect(bulk.status).toBe(201)
-      expect((yield* json<{ records: unknown[] }>(bulk)).records).toHaveLength(2)
+      expect((yield* json<{ records: Array<unknown> }>(bulk)).records).toHaveLength(2)
 
       const denied = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/e2e_locked").pipe(

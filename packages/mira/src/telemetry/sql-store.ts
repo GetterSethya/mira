@@ -1,4 +1,4 @@
-import type { FilterNode } from "@gettersethya/mira-client"
+import type { FilterNode, ValidationError } from "@gettersethya/mira-client"
 import { filterNodeToWhereClause } from "@gettersethya/mira-client"
 import { Context, Effect, Layer, Option, Schedule, Schema } from "effect"
 import { SqlClient } from "effect/sql"
@@ -188,7 +188,7 @@ const filterParts = (
   schema: typeof LogsCollection.schema | typeof SpansCollection.schema,
   collection: string,
   dialect: DialectType
-): Effect.Effect<QueryParts, import("@gettersethya/mira-client").ValidationError> =>
+): Effect.Effect<QueryParts, ValidationError> =>
   Effect.gen(function* () {
     if (filter === null) return { where: "", params: [] }
     const compiled = yield* filterNodeToWhereClause(filter, schema, collection, {

@@ -127,7 +127,7 @@ export function renderViewWithAccess(
   quote: Quote,
   table: string,
   id: string,
-  predicates: readonly [AccessPredicate, ...AccessPredicate[]]
+  predicates: readonly [AccessPredicate, ...Array<AccessPredicate>]
 ): Rendered {
   const select = buildSelect(quote, undefined, undefined)
   const params: Array<unknown> = []

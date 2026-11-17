@@ -29,18 +29,18 @@ import {
 } from "@/auth/index.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import type { RequestCtx } from "@/collection-service/context.js"
-import { AppConfig } from "@/config/index.js"
-import { CryptoService } from "@/crypto/index.js"
 import { fieldEqualsClause } from "@/collection-service/where.js"
+import { AppConfig } from "@/config/index.js"
+import type { CryptoService } from "@/crypto/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import {
   EmailNotConfiguredError,
-  EmailSendError,
   EmailService,
   EmailTemplates
 } from "@/email/index.js"
 import type {
   EmailMessage,
+  EmailSendError,
   EmailSendOptions,
   EmailServiceShape
 } from "@/email/index.js"
@@ -56,7 +56,8 @@ import type { RateLimitRequest } from "@/rate-limit/index.js"
 import type { AuthCollectionEmailOptions } from "@gettersethya/mira-client"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
-import { AuthError, AuthService, mintSession, verifyPassword } from "./auth.js"
+import type { AuthService } from "./auth.js"
+import { AuthError, mintSession, verifyPassword } from "./auth.js"
 import { consumeLoginRequestLimits } from "./auth-rate-limit.js"
 import { TokenStore } from "./token-store.js"
 

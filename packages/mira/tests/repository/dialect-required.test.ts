@@ -6,7 +6,8 @@ import { expect } from "vitest"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
-import { Repository, RepositoryLive } from "@/repository/repository.js"
+import type { Repository } from "@/repository/repository.js"
+import { RepositoryLive } from "@/repository/repository.js"
 
 const infra = Layer.mergeAll(
   SqliteClient.layer({ filename: ":memory:" }),

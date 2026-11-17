@@ -4,8 +4,8 @@ import type { HttpRouter} from "effect/http";
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 
 import { AppConfig } from "@/config/index.js"
-import { Dialect } from "@/dialect/dialect.js"
-import { Repository } from "@/repository/repository.js"
+import type { Dialect } from "@/dialect/dialect.js"
+import type { Repository } from "@/repository/repository.js"
 
 import { authenticateSession, signFileToken } from "./auth.js"
 

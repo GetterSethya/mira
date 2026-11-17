@@ -243,7 +243,7 @@ describe("libSQL app and HTTP behavior", () => {
 
       const empty = yield* HttpClient.get("/api/collections/posts")
       expect(empty.status).toBe(200)
-      expect((yield* json<{ items: unknown[] }>(empty)).items).toEqual([])
+      expect((yield* json<{ items: Array<unknown> }>(empty)).items).toEqual([])
 
       const created = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/posts").pipe(
@@ -310,7 +310,7 @@ describe("libSQL app and HTTP behavior", () => {
         )
       )
       expect(bulk.status).toBe(201)
-      expect((yield* json<{ records: unknown[] }>(bulk)).records).toHaveLength(2)
+      expect((yield* json<{ records: Array<unknown> }>(bulk)).records).toHaveLength(2)
 
       const denied = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/locked").pipe(

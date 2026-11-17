@@ -1,6 +1,7 @@
 import { Effect, Redacted } from "effect"
 
-import { RateLimitedError, RateLimitUnavailableError } from "@/rate-limit/errors.js"
+import type { RateLimitUnavailableError } from "@/rate-limit/errors.js"
+import { RateLimitedError } from "@/rate-limit/errors.js"
 import {
   AuthRateLimitConfig,
   normalizeIpForRateLimit,

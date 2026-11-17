@@ -1,5 +1,5 @@
 import type { FilterNode } from "@gettersethya/mira-client"
-import { ValidationError } from "@gettersethya/mira-client"
+import type { ValidationError } from "@gettersethya/mira-client"
 import { Context, Data, type Effect } from "effect"
 
 /** A log row ready for persistence. The core owns id and timestamp generation. */

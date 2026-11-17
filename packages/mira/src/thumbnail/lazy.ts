@@ -2,7 +2,8 @@ import { Data, Effect, Layer } from "effect"
 
 import type * as PhotonModule from "./photon.js"
 import type { PhotonThumbnailOptions } from "./photon.js"
-import { ThumbnailService, type ThumbnailError, type ThumbSpec } from "./types.js"
+import type { ThumbnailService } from "./types.js"
+import { type ThumbnailError, type ThumbSpec } from "./types.js"
 
 /**
  * Raised when the optional Photon backend cannot be loaded. The layer path
