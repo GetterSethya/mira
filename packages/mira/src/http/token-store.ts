@@ -14,12 +14,15 @@
  * `TokenStore` is a `Context.Reference`: it has a built-in in-memory default, so
  * every existing test layer that never mentions it keeps working unchanged
  * (against the process-local default). `MiraApp` overrides it with the
- * SQLite-backed `TokenStoreLive`, which is durable across restarts and shared
+ * SQL-backed `TokenStoreLive`, which is durable across restarts and shared
  * between instances that point at the same database.
  */
 import { Context, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql"
 import { SqlClient } from "effect/sql"
+
+import { Dialect } from "@/dialect/dialect.js"
+import { withStoreBootstrap } from "@/dialect/store-sql.js"
 
 /**
  * The behaviour every `TokenStore` implementation must provide. The SQL-backed
@@ -100,38 +103,45 @@ export const TokenStore = Context.Reference<TokenStoreShape>("mira/TokenStore", 
 })
 
 // ---------------------------------------------------------------------------
-// SQLite-backed implementation (shared + durable)
+// SQL-backed implementation (shared + durable)
 // ---------------------------------------------------------------------------
 
 /**
- * SQLite-backed `TokenStore`.
+ * SQL-backed `TokenStore`.
  *
  * Pruning strategy: expired deny-list rows are deleted on `revoke` (a rare,
- * explicit write). The read path is a single indexed lookup
- * (`_revoked_tokens_expires`) so it is O(log n), hot-cacheable, and never a
- * full scan.
+ * explicit write). The read path is a single primary-key lookup on `jti`, so it
+ * is O(log n), hot-cacheable, and never a full scan.
  */
 export const TokenStoreLive = Layer.effect(
   TokenStore,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    const dialect = yield* Dialect
 
-    // DDL — sql.unsafe is fine for CREATE TABLE / CREATE INDEX.
-    yield* sql.unsafe(
-      `CREATE TABLE IF NOT EXISTS _revoked_tokens (jti TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)`
-    )
-    yield* sql.unsafe(`CREATE INDEX IF NOT EXISTS _revoked_tokens_expires ON _revoked_tokens (expires_at)`)
-    yield* sql.unsafe(
-      `CREATE TABLE IF NOT EXISTS _auth_generations (` +
-        `collection TEXT NOT NULL, user_id TEXT NOT NULL, gen INTEGER NOT NULL DEFAULT 0, ` +
-        `PRIMARY KEY (collection, user_id))`
+    yield* withStoreBootstrap(sql, dialect.store, (tx) =>
+      Effect.gen(function* () {
+        yield* tx.unsafe(
+          `CREATE TABLE IF NOT EXISTS _revoked_tokens (jti TEXT PRIMARY KEY, expires_at BIGINT NOT NULL)`
+        )
+        yield* tx.unsafe(`CREATE INDEX IF NOT EXISTS _revoked_tokens_expires ON _revoked_tokens (expires_at)`)
+        yield* tx.unsafe(
+          `CREATE TABLE IF NOT EXISTS _auth_generations (` +
+            `collection TEXT NOT NULL, user_id TEXT NOT NULL, gen INTEGER NOT NULL DEFAULT 0, ` +
+            `PRIMARY KEY (collection, user_id))`
+        )
+      })
     )
 
     const revoke = (jti: string, expiresAtMs: number) =>
       Effect.gen(function* () {
-        // Prune on the write path only — the read path stays indexed/O(1)-ish.
+        // Prune on the write path only; the read path stays indexed/O(1)-ish.
         yield* sql`DELETE FROM ${sql("_revoked_tokens")} WHERE expires_at <= ${Date.now()}`
-        yield* sql`INSERT OR IGNORE INTO ${sql("_revoked_tokens")} (jti, expires_at) VALUES (${jti}, ${expiresAtMs})`
+        yield* sql`
+          INSERT INTO ${sql("_revoked_tokens")} (jti, expires_at)
+          VALUES (${jti}, ${expiresAtMs})
+          ON CONFLICT (jti) DO NOTHING
+        `
       })
 
     const isRevoked = (jti: string) =>

@@ -139,7 +139,7 @@ The libSQL driver is loaded only when the preset is built, so importing `@getter
 
 ## Rate limits
 
-Rate limits use a `RateLimitStore` service. The app's default store is SQLite (`_rate_limits`). Tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQLite store is single-node. A multi-instance deployment needs a shared store. Request policies fail open on store errors. Send policies fail closed with `503 rate_limit_unavailable`.
+Rate limits use a `RateLimitStore` service. The app's default store is the SQL-backed store (`_rate_limits`). Today it runs on SQLite and libSQL; PostgreSQL support lands with #29. Tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQL store is single-node on SQLite and libSQL. A multi-instance deployment needs a shared database or a shared store. Request policies fail open on store errors. Send policies fail closed with `503 rate_limit_unavailable`.
 
 ## Migrations at boot
 

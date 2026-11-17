@@ -5,24 +5,29 @@ import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { AppConfig, AppConfigLive } from "@/config/index.js"
+import { CONFIG_TABLE_DDL } from "@/config/config-sql.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 const db = SqliteClient.layer({ filename: ":memory:" })
-const freshLayer = AppConfigLive.pipe(Layer.provide(db), Layer.provide(NodeCryptoLayer))
+const dialectLayer = Layer.succeed(Dialect, sqliteDialect)
+const freshLayer = AppConfigLive.pipe(
+  Layer.provide(Layer.mergeAll(db, dialectLayer)),
+  Layer.provide(NodeCryptoLayer)
+)
 
 function preSeeded(rows: Record<string, string>) {
   return Layer.unwrap(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* sql.unsafe(
-        `CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`
-      )
+      yield* sql.unsafe(CONFIG_TABLE_DDL)
       for (const [key, value] of Object.entries(rows)) {
         yield* sql`INSERT INTO ${sql("_config")} ${sql.insert({ key, value })}`
       }
       return AppConfigLive
     })
-  ).pipe(Layer.provide(NodeCryptoLayer))
+  ).pipe(Layer.provide(Layer.mergeAll(db, dialectLayer)), Layer.provide(NodeCryptoLayer))
 }
 
 describe("AppConfig", () => {
@@ -51,7 +56,15 @@ describe("AppConfig", () => {
       const rows = yield* sql<{ value: string }>`SELECT value FROM ${sql("_config")} WHERE key = 'jwt_secret'`
       expect(rows).toHaveLength(1)
       expect(rows[0]?.value).toBe(Redacted.value(config.jwtSecret))
-    }).pipe(Effect.provide(AppConfigLive.pipe(Layer.provideMerge(db), Layer.provideMerge(NodeCryptoLayer))))
+    }).pipe(
+      Effect.provide(
+        AppConfigLive.pipe(
+          Layer.provideMerge(db),
+          Layer.provideMerge(dialectLayer),
+          Layer.provideMerge(NodeCryptoLayer)
+        )
+      )
+    )
   )
 
   it.effect("application_url derives from custom port", () =>

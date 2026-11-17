@@ -2,6 +2,9 @@ import { Context, Effect, Layer } from "effect"
 import type { SqlError } from "effect/sql"
 import { SqlClient } from "effect/sql"
 
+import { Dialect } from "@/dialect/dialect.js"
+import { withStoreBootstrap } from "@/dialect/store-sql.js"
+
 export type ChallengePurpose =
   | "password_reset"
   | "verify_email"
@@ -187,41 +190,49 @@ export const AuthChallengeStoreLive = Layer.effect(
   AuthChallengeStore,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    const dialect = yield* Dialect
+    const store = dialect.store
 
-    yield* sql.unsafe(
-      `CREATE TABLE IF NOT EXISTS _auth_challenges (
-        id TEXT PRIMARY KEY,
-        collection TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        purpose TEXT NOT NULL,
-        token_hash TEXT NOT NULL,
-        expires_at INTEGER NOT NULL,
-        consumed_at INTEGER,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        new_email TEXT
-      )`
-    )
+    yield* withStoreBootstrap(sql, store, (tx) =>
+      Effect.gen(function* () {
+        yield* tx.unsafe(
+          `CREATE TABLE IF NOT EXISTS _auth_challenges (
+            id TEXT PRIMARY KEY,
+            collection TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            token_hash TEXT NOT NULL,
+            expires_at BIGINT NOT NULL,
+            consumed_at BIGINT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            created_at BIGINT NOT NULL,
+            new_email TEXT
+          )`
+        )
 
-    const challengeColumns = yield* sql<{ name: string }>`PRAGMA table_info(_auth_challenges)`
-    if (!challengeColumns.some((column) => column.name === "new_email")) {
-      yield* sql.unsafe(`ALTER TABLE _auth_challenges ADD COLUMN new_email TEXT`)
-    }
-    yield* sql.unsafe(
-      `CREATE UNIQUE INDEX IF NOT EXISTS _auth_challenges_live
-       ON _auth_challenges (collection, user_id, purpose)
-       WHERE consumed_at IS NULL`
-    )
-    yield* sql.unsafe(
-      `CREATE INDEX IF NOT EXISTS _auth_challenges_hash
-       ON _auth_challenges (collection, purpose, token_hash)`
-    )
-    yield* sql.unsafe(
-      `CREATE INDEX IF NOT EXISTS _auth_challenges_user
-       ON _auth_challenges (collection, user_id, purpose, created_at)`
-    )
-    yield* sql.unsafe(
-      `CREATE INDEX IF NOT EXISTS _auth_challenges_expires ON _auth_challenges (expires_at)`
+        const challengeColumns = yield* tx.unsafe<{ name: string }>(
+          store.columnExistsSql("_auth_challenges", "new_email")
+        )
+        if (challengeColumns.length === 0) {
+          yield* tx.unsafe(`ALTER TABLE _auth_challenges ADD COLUMN new_email TEXT`)
+        }
+        yield* tx.unsafe(
+          `CREATE UNIQUE INDEX IF NOT EXISTS _auth_challenges_live
+           ON _auth_challenges (collection, user_id, purpose)
+           WHERE consumed_at IS NULL`
+        )
+        yield* tx.unsafe(
+          `CREATE INDEX IF NOT EXISTS _auth_challenges_hash
+           ON _auth_challenges (collection, purpose, token_hash)`
+        )
+        yield* tx.unsafe(
+          `CREATE INDEX IF NOT EXISTS _auth_challenges_user
+           ON _auth_challenges (collection, user_id, purpose, created_at)`
+        )
+        yield* tx.unsafe(
+          `CREATE INDEX IF NOT EXISTS _auth_challenges_expires ON _auth_challenges (expires_at)`
+        )
+      })
     )
 
     const create: AuthChallengeStoreShape["create"] = (record) =>

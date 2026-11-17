@@ -8,6 +8,8 @@ import { expect } from "vitest"
 
 import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
 import type { CronDef } from "@/cron/types.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
@@ -39,6 +41,7 @@ function bootCronService(
   const layer = makeCronServiceLayer(defs).pipe(
     Layer.provide(makeHookServiceLayer([])),
     Layer.provide(Layer.succeedContext(dbContext)),
+    Layer.provide(Layer.succeed(Dialect, sqliteDialect)),
     Layer.provide(extra)
   )
   return Layer.build(layer).pipe(Effect.map((ctx) => Context.get(ctx, CronService)))

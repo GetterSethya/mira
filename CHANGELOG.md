@@ -17,6 +17,21 @@ published by CI.
 
 ### Changed
 
+- **Internal auth, session, rate-limit, config, and cron stores are dialect-aware.**
+  `DialectType.store` supplies bootstrap locking, a zero-or-one-row column probe,
+  request-path lock timeout, and retry classification. SQLite and libSQL keep
+  their current non-transactional DDL path; PostgreSQL uses a transaction-scoped
+  advisory lock. Epoch-millisecond columns now use `BIGINT`. The token store
+  uses parameterized `ON CONFLICT DO NOTHING`, cron state uses
+  `ON CONFLICT DO UPDATE`, and the rate-limit store uses a write-free
+  conditional upsert with a read-only pre-blocked fast path. `_config` is
+  created by `AppConfigLive` and the cron layer through one shared DDL constant.
+- **Breaking: store layers and `DialectType` changed.** `DialectType` gains a
+  required `store` member. `AppConfigLive`, `TokenStoreLive`,
+  `AuthChallengeStoreLive`, `SqlRateLimitStoreLive`, and
+  `makeCronServiceLayer` now require `Dialect`. `SqliteRateLimitStoreLive` is
+  renamed to `SqlRateLimitStoreLive`; the old name remains as a deprecated
+  alias until the next minor release.
 - **Telemetry now sits behind a `TelemetryStore` boundary.** `makeTelemetryLayer`
   supports dedicated storage (a full database preset with both `SqlClient` and
   `Dialect`) and shared storage (the application database). The SQL-free core

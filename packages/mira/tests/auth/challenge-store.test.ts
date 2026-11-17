@@ -9,6 +9,8 @@ import {
   inMemoryAuthChallengeStore
 } from "@/auth/index.js"
 import type { AuthChallengeStoreShape, ChallengeRecord } from "@/auth/index.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 const record = (overrides: Partial<ChallengeRecord> = {}): ChallengeRecord => ({
   id: "challenge-1",
@@ -25,7 +27,8 @@ const record = (overrides: Partial<ChallengeRecord> = {}): ChallengeRecord => ({
 })
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const storeLayer = AuthChallengeStoreLive.pipe(Layer.provide(sqliteLayer))
+const dialectLayer = Layer.succeed(Dialect, sqliteDialect)
+const storeLayer = AuthChallengeStoreLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, dialectLayer)))
 
 const exercise = (label: string) => (store: AuthChallengeStoreShape) =>
   Effect.gen(function* () {
@@ -60,6 +63,18 @@ describe("AuthChallengeStore", () => {
     Effect.gen(function* () {
       const store = yield* AuthChallengeStore
       yield* exercise("sql")(store)
+    }).pipe(Effect.provide(storeLayer))
+  )
+
+  it.effect("rejects a second unconsumed challenge for the same tuple", () =>
+    Effect.gen(function* () {
+      const store = yield* AuthChallengeStore
+      const now = Date.now()
+      yield* store.create(record({ id: "first", createdAt: now, expiresAt: now + 60_000 }))
+      const exit = yield* Effect.exit(
+        store.create(record({ id: "second", createdAt: now, expiresAt: now + 60_000 }))
+      )
+      expect(exit._tag).toBe("Failure")
     }).pipe(Effect.provide(storeLayer))
   )
 

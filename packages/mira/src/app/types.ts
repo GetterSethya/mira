@@ -93,7 +93,7 @@ export interface MiraEmail {
 }
 
 /**
- * Optional rate-limit configuration. The default store is SQLite; a custom
+ * Optional rate-limit configuration. The default store is the SQL-backed store; a custom
  * store layer must be self-contained so the app does not need to know its
  * backend. `emailPolicies` overrides the default limits for the email flows.
  */

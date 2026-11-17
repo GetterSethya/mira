@@ -4,9 +4,9 @@
 
 A storage-neutral fixed-window rate limiter. `RateLimiter` is a `Context.Service`
 implemented by `RateLimiterLive` from a `RateLimitStore`. The store is the only storage
-boundary: an in-memory implementation for tests, a SQLite implementation for the app, and
+boundary: an in-memory implementation for tests, a SQL implementation for the app, and
 any future Redis/Postgres implementation. Email, HTTP, and auth code depend on
-`RateLimiter`/`RateLimitStore`, never on `SqlClient` or SQLite.
+`RateLimiter`/`RateLimitStore`, never on `SqlClient` or a dialect name.
 
 ## Interface
 
@@ -18,7 +18,7 @@ any future Redis/Postgres implementation. Email, HTTP, and auth code depend on
 - `RateLimitUnavailableError` — send-path store failure [errors.ts:RateLimitUnavailableError]
 - `RateLimitStoreError` — internal store failure with a `retryable` flag [errors.ts:RateLimitStoreError]
 - `InMemoryRateLimiterLive` — fresh in-memory store per layer build [memory.ts:InMemoryRateLimiterLive]
-- `SqliteRateLimitStoreLive`, `RateLimiterLive`, `RateLimitKeySecretLive` [sqlite.ts:SqliteRateLimitStoreLive]
+- `SqlRateLimitStoreLive` (alias `SqliteRateLimitStoreLive`), `RateLimiterLive`, `RateLimitKeySecretLive` [sql.ts:SqlRateLimitStoreLive]
 - `EmailRateLimitConfig` — `Context.Reference` with the email policy defaults [policies.ts:EmailRateLimitConfig]
 - `AuthRateLimitConfig` — `Context.Reference` with the password-login defaults (`auth:login:ip`, `auth:login:recipient`) [policies.ts:AuthRateLimitConfig]
 - `defaultAuthRateLimitPolicies`, `assertValidAuthRateLimitPolicies` [policies.ts:defaultAuthRateLimitPolicies]
@@ -32,8 +32,12 @@ any future Redis/Postgres implementation. Email, HTTP, and auth code depend on
   charge the global or collection budgets [types.ts:RateLimitStoreShape].
 - `cost` must be a positive integer. Invalid costs fail with
   `RateLimitUnavailableError`.
-- `used` is clamped to `limit + 1` in SQLite; the single-entry fast path uses
-  `WHERE used + cost <= limit RETURNING used` [sqlite.ts:SqliteRateLimitStoreLive].
+- `increment` runs one reporting read, a read-only pre-blocked fast return, then one
+  conditional upsert per entry in sorted bucket order. The upsert is
+  `INSERT ... SELECT ... WHERE cost <= limit ON CONFLICT ... DO UPDATE ... WHERE used + cost <= limit
+  RETURNING used`; zero rows means blocked, and a blocked batch writes nothing for that
+  entry. Any allowed entry in a mixed batch is rolled back when a later entry blocks.
+- `prune` orders its candidate subquery by `bucket` to match the batch write order.
 - `prune` deletes rows with `expires_at <= before`; the caller passes a cutoff with a
   five-minute retention margin. Prune failures are logged and never fail a consume.
 - A store failure with `onStoreError: "allow"` logs `rate_limit.store_failed` and returns
@@ -51,9 +55,14 @@ any future Redis/Postgres implementation. Email, HTTP, and auth code depend on
 
 ## Side Effects
 
-- Reads and writes `_rate_limits` in the application SQLite database.
-- The SQLite store is single-node; WAL does not make a network filesystem safe.
-- `RETURNING` requires SQLite 3.35+; the bundled `node:sqlite` engine supports it.
+- Reads and writes `_rate_limits` in the application database.
+- SQLite and libSQL keep the non-transactional DDL path; PostgreSQL uses a
+  transaction-scoped advisory lock and a request-path `lock_timeout`.
+- `RETURNING` requires SQLite 3.35+ or PostgreSQL; the bundled `node:sqlite` engine
+  supports it.
+- The prune cap is 1000 rows per 60 seconds per process. Sustained creation above
+  about 16.7 new buckets per second outpaces pruning; #29 must measure and tune it
+  before claiming high-throughput support.
 - No network, filesystem, or environment access.
 
 ## Verification

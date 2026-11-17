@@ -39,8 +39,8 @@ import {
 import {
   RateLimiterLive,
   RateLimitKeySecretLive,
-  SqliteRateLimitStoreLive
-} from "@/rate-limit/sqlite.js"
+  SqlRateLimitStoreLive
+} from "@/rate-limit/sql.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { ThumbnailServicePhotonLive } from "@/thumbnail/lazy.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/types.js"
@@ -292,9 +292,9 @@ export class MiraApp<R = never, Telemetry = never> {
       telemetryLayer
     ).pipe(Layer.provideMerge(platform.layer))
 
-    // Rate limiting: the store is the swap point. The default is SQLite.
+    // Rate limiting: the store is the swap point. The default is SQL-backed.
     const appConfigLayer = AppConfigLive
-    const rateLimitStoreLayer = this.#config.rateLimits?.store ?? SqliteRateLimitStoreLive
+    const rateLimitStoreLayer = this.#config.rateLimits?.store ?? SqlRateLimitStoreLive
     const rateLimiterLayer = RateLimiterLive.pipe(Layer.provide(rateLimitStoreLayer))
     const rateLimitKeySecretLayer = RateLimitKeySecretLive.pipe(Layer.provide(appConfigLayer))
     const emailRateLimitPolicies = {

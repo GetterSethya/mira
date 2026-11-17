@@ -1,9 +1,13 @@
 import { Cause, Context, Effect, Exit, HashMap, Layer, Option, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 
+import { CONFIG_TABLE_DDL } from "@/config/config-sql.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { withStoreBootstrap } from "@/dialect/store-sql.js"
 import { HookService as HookServiceTag } from "@/hooks/hook-service.js"
 
 import { loadPersistedCronState, savePersistedCronState } from "./persistence.js"
+import type { PersistedCronState } from "./persistence.js"
 import type {
   CronContext,
   CronDef,
@@ -138,8 +142,17 @@ export function makeCronServiceLayer<R>(defs: ReadonlyArray<CronDef<R>>) {
 
       const hookService = yield* HookServiceTag
       const sql = yield* SqlClient.SqlClient
+      const dialect = yield* Dialect
 
-      const persisted = yield* loadPersistedCronState(sql)
+      const persisted: PersistedCronState =
+        defs.length === 0
+          ? {}
+          : yield* Effect.gen(function* () {
+              yield* withStoreBootstrap(sql, dialect.store, (tx) =>
+                tx.unsafe(CONFIG_TABLE_DDL).pipe(Effect.asVoid)
+              )
+              return yield* loadPersistedCronState(sql)
+            })
 
       const initialEntries = defs.map((def): [string, CronState] => {
         const entry = persisted[def.name]
