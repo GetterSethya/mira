@@ -30,7 +30,7 @@
       index: '05',
       domain: 'dashboard',
       title: 'An optional dashboard',
-      body: 'The plugin mounts /_dashboard/: a record browser, config, crons and Connect snippets. Log and span viewers need makeSqliteTelemetryLayer.'
+      body: 'The plugin mounts /_dashboard/: a record browser, config, crons and Connect snippets. Log and span viewers need makeTelemetryLayer.'
     },
     {
       index: '06',

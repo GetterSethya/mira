@@ -39,11 +39,11 @@ to `crypto/node.ts`, `http/auth-node.ts`, and `http/server-factory-node.ts`, agg
 - Hooks: `HookService`, `makeHookServiceLayer`, `makeHookCollectionServiceLayer`
   (`HookCollectionService` itself is internal) — `[hooks/hook-service.ts:HookService]`.
 - Cron and telemetry: `CronService`, `makeCronServiceLayer`, `CronNotFoundError`, cron
-  context types; `makeSqliteTelemetryLayer` (driver-neutral: the caller supplies a
-  `SqlClient` layer for a dedicated telemetry database), `SqliteLoggerConfig`,
-  `logCleanupCronDef`, `TelemetrySqlClient`, `ConsoleTelemetryLayer`,
+  context types; `makeTelemetryLayer` (dedicated or shared storage over
+  `TelemetryStore`), `TelemetryLoggerConfig`,
+  `logCleanupCronDef`, `TelemetryStore`, `ConsoleTelemetryLayer`,
   `makeConsoleTelemetryLayer` —
-  `[cron/index.ts:CronService]`, `[telemetry/sqlite-logger.ts:makeSqliteTelemetryLayer]`,
+  `[cron/index.ts:CronService]`, `[telemetry/layer.ts:makeTelemetryLayer]`,
   `[telemetry/index.ts:ConsoleTelemetryLayer]`.
 - Plugin API (via `app/index.ts`): `MiraPlugin`, `onCollection`, `onCollectionSuccess`,
   `fromLayer`, `isMiraPlugin`, `applyRulesToCollections` — `[app/plugin.ts:MiraPlugin]`,
@@ -105,7 +105,7 @@ to `crypto/node.ts`, `http/auth-node.ts`, and `http/server-factory-node.ts`, agg
   `[storage/storage.ts:FileStorage]`, `[thumbnail/lazy.ts:ThumbnailServicePhotonLive]`.
 - Cron fibers, telemetry queues/spans, SQLite log persistence, and structured logging —
   `[cron/cron-service.ts:CronService]`, `[telemetry/tracer.ts:makeConsoleTracer]`,
-  `[telemetry/sqlite-logger.ts:makeSqliteTelemetryLayer]`.
+  `[telemetry/layer.ts:makeTelemetryLayer]`.
 - Password hashing (scrypt), JWT signing/verification, and CSPRNG entropy —
   `[http/auth-node.ts:NodeAuthServiceLayer]`, `[http/auth.ts:signJwt]`,
   `[crypto/node.ts:NodeCryptoLayer]`.

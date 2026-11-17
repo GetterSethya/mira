@@ -13,7 +13,15 @@ import type { FilterNode, WhereClause } from "./types.js"
  */
 export type FilterCompileOptions = {
   allowHiddenFields?: boolean
+  /**
+   * Wraps a column name in the target dialect's identifier quotes. Defaults to
+   * the current output, `"field"`, so existing callers keep the same SQL.
+   */
+  quoteIdentifier?: (field: string) => string
 }
+
+const fieldRef = (field: string, options: FilterCompileOptions) =>
+  `t.${(options.quoteIdentifier ?? ((name: string) => `"${name}"`))(field)}`
 
 /**
  * Compile a `FilterNode` AST into a `WhereClause` (`{ sql, params }`) suitable
@@ -26,8 +34,10 @@ export type FilterCompileOptions = {
  * values (arrays, objects, booleans) are likewise rejected — only
  * `string | number | null` is accepted.
  *
- * Field names are SQL-identifier-quoted (double-quoted as `t."fieldName"`).
- * Values use `?`-style positional placeholders with params in the returned array.
+ * Field names are SQL-identifier-quoted. The default is `t."fieldName"`; a
+ * caller can pass `quoteIdentifier` for PostgreSQL/MySQL quoting. Values use
+ * `?`-style positional placeholders with params in the returned array; the SQL
+ * store rewrites the whole statement to numbered placeholders when needed.
  *
  * Edge cases:
  * - `IN ()` with an empty array produces `1 = 0` (always false) instead of
@@ -169,7 +179,7 @@ function compileComparison(
   return Effect.gen(function* () {
     yield* validateField(node.field, collection, schema, options)
     yield* validateScalar(collection, node.field, node.value)
-    return { sql: `t."${node.field}" ${opMap[node.op]} ?`, params: [node.value] }
+    return { sql: `${fieldRef(node.field, options)} ${opMap[node.op]} ?`, params: [node.value] }
   })
 }
 
@@ -186,7 +196,7 @@ function compileIn(
       yield* validateScalar(collection, node.field, value)
     }
     const placeholders = node.values.map(() => "?").join(", ")
-    return { sql: `t."${node.field}" IN (${placeholders})`, params: [...node.values] }
+    return { sql: `${fieldRef(node.field, options)} IN (${placeholders})`, params: [...node.values] }
   })
 }
 
@@ -198,7 +208,7 @@ function compileLike(
 ): Effect.Effect<WhereClause, ValidationError> {
   return Effect.gen(function* () {
     yield* validateField(node.field, collection, schema, options)
-    return { sql: `t."${node.field}" LIKE ?`, params: [node.value] }
+    return { sql: `${fieldRef(node.field, options)} LIKE ?`, params: [node.value] }
   })
 }
 
@@ -211,9 +221,9 @@ function compileNull(
   return Effect.gen(function* () {
     yield* validateField(node.field, collection, schema, options)
     if (node.op === "null") {
-      return { sql: `t."${node.field}" IS NULL`, params: [] }
+      return { sql: `${fieldRef(node.field, options)} IS NULL`, params: [] }
     }
-    return { sql: `t."${node.field}" IS NOT NULL`, params: [] }
+    return { sql: `${fieldRef(node.field, options)} IS NOT NULL`, params: [] }
   })
 }
 

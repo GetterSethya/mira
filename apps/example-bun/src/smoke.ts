@@ -19,18 +19,17 @@ import {
   FileStorage,
   hmacSha256Base64Url,
   LocalFileStorage,
-  makeSqliteTelemetryLayer,
+  makeTelemetryLayer,
   makeThumbnailServiceBunLive,
   Mira,
   parseThumbSpec,
   RateLimiter,
   sha256Base64Url,
   SmtpEmail,
-  TelemetrySqlClient,
+  TelemetryStore,
   ThumbnailService
 } from "@gettersethya/mira/bun"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
-import { SqliteClient } from "@effect/sql-sqlite-bun"
 
 type BunImagePipeline = {
   metadata(): Promise<{ readonly width: number; readonly height: number }>
@@ -109,8 +108,11 @@ const app = Mira.builder()
   .collections([Posts])
   .rules([rules])
   .telemetry(
-    makeSqliteTelemetryLayer({
-      sqlLayer: SqliteClient.layer({ filename: join(dir, "telemetry.db") })
+    makeTelemetryLayer({
+      storage: {
+        mode: "dedicated",
+        database: BunSqliteDatabase({ filename: join(dir, "telemetry.db") })
+      }
     })
   )
   .build()
@@ -130,22 +132,27 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo("bun-smoke-log")
   yield* Effect.void.pipe(Effect.withSpan("bun-smoke-span"))
   yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 250)))
-  const telemetrySql = Context.get(context, TelemetrySqlClient)
+  const store = Context.get(context, TelemetryStore)
   const mainSql = Context.get(context, SqlClient.SqlClient)
   const mainJournal = yield* mainSql<{ journal_mode: string }>`PRAGMA journal_mode`
-  const telemetryJournal = yield* telemetrySql<{ journal_mode: string }>`PRAGMA journal_mode`
   if (mainJournal[0]?.journal_mode !== "wal") {
     throw new Error(`main SQLite database is not in WAL mode: ${mainJournal[0]?.journal_mode ?? "missing"}`)
   }
-  if (telemetryJournal[0]?.journal_mode !== "wal") {
-    throw new Error(
-      `telemetry SQLite database is not in WAL mode: ${telemetryJournal[0]?.journal_mode ?? "missing"}`
-    )
-  }
-  const logRows = yield* telemetrySql<{ count: number }>`SELECT COUNT(*) AS count FROM logs`
-  const spanRows = yield* telemetrySql<{ count: number }>`SELECT COUNT(*) AS count FROM spans`
-  const logCount = Number(logRows[0]?.count ?? 0)
-  const spanCount = Number(spanRows[0]?.count ?? 0)
+  if (store.read === null) throw new Error("telemetry store has no read capability")
+  const logPage = yield* store.read.listLogs({
+    limit: 1000,
+    after: null,
+    filter: null,
+    traceId: null
+  })
+  const spanPage = yield* store.read.listSpans({
+    limit: 1000,
+    after: null,
+    filter: null,
+    traceId: null
+  })
+  const logCount = logPage.total
+  const spanCount = spanPage.total
   if (logCount === 0 || spanCount === 0) {
     throw new Error(`telemetry rows missing: logs=${logCount} spans=${spanCount}`)
   }
@@ -336,8 +343,7 @@ const program = Effect.gen(function* () {
     emailReceived: startedSmtp.received.length,
     storage: { key, listed: listedKeys.length },
     sqlite: {
-      mainJournal: mainJournal[0]?.journal_mode,
-      telemetryJournal: telemetryJournal[0]?.journal_mode
+      mainJournal: mainJournal[0]?.journal_mode
     },
     telemetry: { logs: logCount, spans: spanCount },
     port: requestPort,
@@ -373,7 +379,6 @@ type SmokeResult = {
   readonly storage: { readonly key: string; readonly listed: number }
   readonly sqlite: {
     readonly mainJournal: string | undefined
-    readonly telemetryJournal: string | undefined
   }
   readonly telemetry: { readonly logs: number; readonly spans: number }
   readonly port: number

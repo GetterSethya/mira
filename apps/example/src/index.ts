@@ -6,14 +6,13 @@ import {
   InferRecord,
   LocalFileStorage,
   logCleanupCronDef,
-  makeSqliteTelemetryLayer,
+  makeTelemetryLayer,
   Mira,
   NodePlatform,
   S3CompatibleStorage,
   SqliteDatabase
 } from "@gettersethya/mira"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
-import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Config } from "effect"
 
 const UserCollection = AuthCollection.define("users", {
@@ -89,8 +88,11 @@ Mira.builder()
     likeCollectionRules
   ])
   .telemetry(
-    makeSqliteTelemetryLayer({
-      sqlLayer: SqliteClient.layer({ filename: "log.db" }),
+    makeTelemetryLayer({
+      storage: {
+        mode: "dedicated",
+        database: SqliteDatabase({ filename: "log.db" })
+      },
       logConsole: true,
       pretty: true
     })

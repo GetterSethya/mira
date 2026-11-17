@@ -24,7 +24,7 @@ To see how one request travels from a collection definition through rules and th
 - **Client:** `createMiraClient`, `CollectionClient`, `BrowserAuth`, `ServerAuth`
 - **Adapter:** `collectionAdapter`, `createCollectionAdapter`, `withCollections`
 - **Runtime:** `NodePlatform`, `SqliteDatabase`, `BunPlatform`, `BunSqliteDatabase`
-- **Operations:** `SmtpEmail`, `RateLimiter`, `ThumbnailService`, `makeSqliteTelemetryLayer`
+- **Operations:** `SmtpEmail`, `RateLimiter`, `ThumbnailService`, `makeTelemetryLayer`
 
 ## Source and contracts
 

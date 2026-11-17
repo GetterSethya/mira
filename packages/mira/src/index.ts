@@ -102,13 +102,37 @@ export {
 } from "./thumbnail/index.js"
 export type { PhotonThumbnailOptions, ThumbSpec } from "./thumbnail/index.js"
 
-// Telemetry (sqlite logger)
-export type { SqliteLoggerConfig } from "./telemetry/sqlite-logger.js"
-export { logCleanupCronDef, makeSqliteTelemetryLayer } from "./telemetry/sqlite-logger.js"
+// Telemetry (store + SQL implementation)
+export type {
+  TelemetryCoreConfig,
+  TelemetryDatabase,
+  TelemetryDeleteResult,
+  TelemetryListQuery,
+  TelemetryLogEntry,
+  TelemetryLogPage,
+  TelemetryLogRow,
+  TelemetryLoggerConfig,
+  TelemetryReadShape,
+  TelemetrySpanEntry,
+  TelemetrySpanPage,
+  TelemetrySpanRow,
+  TelemetryStorageConfig,
+  TelemetryStoreShape
+} from "./telemetry/index.js"
+export {
+  logCleanupCronDef,
+  makeSqlTelemetryStoreLayer,
+  makeTelemetryLayer,
+  makeTelemetryLayerForClient,
+  SqlTelemetryStoreLive,
+  TelemetryDuplicateEntryError,
+  TelemetryStore,
+  TelemetryStoreError
+} from "./telemetry/index.js"
 
 // Telemetry (console tracer/logger)
 export type { ConsolePrintOptions } from "./telemetry/index-core.js"
-export { ConsoleTelemetryLayer, makeConsoleTelemetryLayer, TelemetrySqlClient } from "./telemetry/index-core.js"
+export { ConsoleTelemetryLayer, makeConsoleTelemetryLayer } from "./telemetry/index-core.js"
 
 // Cron system
 export type {

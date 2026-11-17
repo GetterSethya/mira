@@ -130,26 +130,28 @@ SQLite cannot `ALTER COLUMN`, so the dialect rebuilds any table targeted by a co
 
 `ConsoleTelemetryLayer` prints one JSON line per completed span prefixed `[trace]`, plus structured logs carrying `traceId`/`spanId` when a span is active. `makeConsoleTelemetryLayer({ pretty: true })` switches to Chalk output.
 
-To keep logs and spans in SQLite, pass the SQL driver layer yourself. The layer is driver-neutral and requires a **dedicated telemetry database**, separate from the application database:
+To keep logs and spans in SQLite, use a **dedicated telemetry database** preset. Shared storage is also available when a second connection is impossible:
 
 ```ts
-import { makeSqliteTelemetryLayer } from "@gettersethya/mira"
-import { SqliteClient } from "@effect/sql-sqlite-node"
+import { makeTelemetryLayer, SqliteDatabase } from "@gettersethya/mira"
 
-.telemetry(makeSqliteTelemetryLayer({
-  sqlLayer: SqliteClient.layer({ filename: "mira-logs.db" }),
+.telemetry(makeTelemetryLayer({
+  storage: {
+    mode: "dedicated",
+    database: SqliteDatabase({ filename: "mira-logs.db" }),
+  },
   logConsole: true,
   pretty: false,
 }))
 ```
 
-On Bun, import `SqliteClient` from `@effect/sql-sqlite-bun` and keep the same shape. Both the Node entry and `@gettersethya/mira/bun` export `makeSqliteTelemetryLayer`, `SqliteLoggerConfig`, `TelemetrySqlClient`, and `logCleanupCronDef`. There is no `dbPath` option: the caller owns the driver and supplies the layer, so neither entry carries a runtime-specific SQLite dependency for telemetry.
+On Bun, use `BunSqliteDatabase` from `@gettersethya/mira/bun` and keep the same shape. Both entries export `makeTelemetryLayer`, `TelemetryLoggerConfig`, `TelemetryStore`, and `logCleanupCronDef`.
 
-The layer applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` at construction, then migrates `logs` and `spans`. Both tables index `created`, so retention scans do not read the whole table. The connection is re-provided as `TelemetrySqlClient` for the admin telemetry routes.
+Dedicated mode applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` at construction, then migrates `logs` and `spans`. Both tables index `created`, so retention scans do not read the whole table. The admin telemetry routes read through `TelemetryStore`. Set `flushBatchSize` to batch rows per store call; the default of one preserves current behavior.
 
 Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-entry queue, each drained by a scoped fiber, so span and record completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports log rows dropped because the bounded queue was full. `logConsole` echoes to stdout; `pretty` affects only that echo, never the stored rows.
 
-`logCleanupCronDef` is a daily `0 0 * * *` job deleting `logs` and `spans` older than `AppConfig.logRetentionDays`; add it to `.crons([...])`. Deletes run in batches of 1,000 using the `created` index, then the job runs `PRAGMA wal_checkpoint(TRUNCATE)` and logs a warning when the checkpoint is busy. It requires `TelemetrySqlClient`, so use it only with `makeSqliteTelemetryLayer`; the default console telemetry does not provide the table client. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
+`logCleanupCronDef` is a daily `0 0 * * *` job deleting `logs` and `spans` older than `AppConfig.logRetentionDays` through `TelemetryStore.deleteOlderThan`. Add it to `.crons([...])`. Deletes run in batches of 1,000 using the `created` index, then the dialect cleanup hook runs and the actual deleted counts are logged. The default console telemetry has no store, so use it with `makeTelemetryLayer` or a custom store. Reading persisted telemetry needs a superadmin session. See the [HTTP API](../http-api/).
 
 ## Thumbnails and the platform boundary
 
@@ -157,7 +159,7 @@ Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-en
 
 `NodePlatform` provides the node-backed file system, path, crypto, HTTP server factory, and password service, and delegates `runMain` to the Node runtime. `BunPlatform` does the same with native Bun filesystem, path, HTTP server, and runtime; it reuses the Node-compatible crypto, password, and SMTP layers. `BunSqliteDatabase` pairs Bun SQLite with the same dialect.
 
-Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic. Photon works under both runtimes, and SQLite telemetry works on both when you pass the matching `SqlClient` layer.
+Most of the service graph (repository, migrator, config, collection service, router) is platform-agnostic. Photon works under both runtimes, and SQLite telemetry works on both through the matching database preset.
 
 For hook ordering and cron state see [plugins](../plugins/); for routes and status codes see the [HTTP API](../http-api/); for the admin UI see the [dashboard](../dashboard/).
 

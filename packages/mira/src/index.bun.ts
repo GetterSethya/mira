@@ -109,10 +109,34 @@ export {
 } from "./thumbnail/index.js"
 export type { BunThumbnailOptions, PhotonThumbnailOptions, ThumbSpec } from "./thumbnail/index.js"
 
-// Telemetry. The SQLite logger is driver-neutral: pass a Bun SQLite layer.
+// Telemetry. The SQL store is driver-neutral: pass a Bun SQLite database preset.
 export * from "./telemetry/index-core.js"
-export type { SqliteLoggerConfig } from "./telemetry/sqlite-logger.js"
-export { logCleanupCronDef, makeSqliteTelemetryLayer } from "./telemetry/sqlite-logger.js"
+export type {
+  TelemetryCoreConfig,
+  TelemetryDatabase,
+  TelemetryDeleteResult,
+  TelemetryListQuery,
+  TelemetryLogEntry,
+  TelemetryLogPage,
+  TelemetryLogRow,
+  TelemetryLoggerConfig,
+  TelemetryReadShape,
+  TelemetrySpanEntry,
+  TelemetrySpanPage,
+  TelemetrySpanRow,
+  TelemetryStorageConfig,
+  TelemetryStoreShape
+} from "./telemetry/index.js"
+export {
+  logCleanupCronDef,
+  makeSqlTelemetryStoreLayer,
+  makeTelemetryLayer,
+  makeTelemetryLayerForClient,
+  SqlTelemetryStoreLive,
+  TelemetryDuplicateEntryError,
+  TelemetryStore,
+  TelemetryStoreError
+} from "./telemetry/index.js"
 
 // Cron system.
 export type {
