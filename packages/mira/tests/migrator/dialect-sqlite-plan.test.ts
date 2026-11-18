@@ -25,7 +25,8 @@ const shape = (columns: Array<ColumnDef>, indexes: TableShape["indexes"] = []): 
 })
 
 const context = (stored: TableShape | null, desired: TableShape): TranslatePlanContext => ({
-  tables: new Map([["todos", { stored, desired }]])
+  tables: new Map([["todos", { stored, desired }]]),
+  views: new Map()
 })
 
 const relaxCategory: MigrationStep = {
@@ -150,7 +151,10 @@ describe("sqliteDialect.translatePlan", () => {
 
   it.effect("fails when a column change carries no stored shape", () =>
     Effect.gen(function* () {
-      const detail = yield* sqliteDialect.translatePlan([relaxCategory], { tables: new Map() }).pipe(
+      const detail = yield* sqliteDialect.translatePlan([relaxCategory], {
+        tables: new Map(),
+        views: new Map()
+      }).pipe(
         Effect.catchTag("UnsupportedMigrationStepError", (error) => Effect.succeed(error.detail)),
         Effect.orDie
       )

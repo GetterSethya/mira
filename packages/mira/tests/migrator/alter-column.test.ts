@@ -60,6 +60,14 @@ function todosSchema(opts: TodosOptions = {}): CollectionSchema {
   return schema
 }
 
+/** A `todos` shape without the `title` column, used to force a dropColumn. */
+function todosWithoutTitle(): CollectionSchema {
+  const schema = todosSchema({ categoryRequired: true })
+  delete schema.properties["title"]
+  schema.required = ["id", "category"]
+  return schema
+}
+
 /** A view collection reading from `todos`; unchanged across the migrations below. */
 function todosView(): CollectionSchema {
   return {
@@ -283,6 +291,34 @@ describe("SQLite column changes (table recreation)", () => {
 
       const rows = yield* sql<{ id: string; title: string }>`SELECT id, title FROM ${sql("todos_view")}`
       expect(rows).toEqual([{ id: "t1", title: "one" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("still fails on a drop column referenced by a view", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+
+      const exit = yield* Effect.exit(
+        migrator.migrate(
+          [
+            { name: "todos", schema: todosWithoutTitle() },
+            { name: "todos_view", schema: todosView() }
+          ],
+          { allowDestructive: true }
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      const columns = (yield* tableInfo(sql, "todos")).map((c) => c.name)
+      expect(columns).toContain("title")
+      const views = yield* sql<{ name: string }>`
+        SELECT name FROM sqlite_master WHERE type = 'view' AND name = 'todos_view'
+      `
+      expect(views).toHaveLength(1)
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("refuses to overwrite a stale scratch table", () =>

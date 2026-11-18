@@ -39,7 +39,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 - (type) `ColumnType`, `ColumnDef` — physical column type and DDL description [types.ts:ColumnDef]
 - (type) `IndexShape`, `TableShape`, `TableShapes` — index identity, table columns+indexes, and the stored/desired pair given to `translatePlan` [types.ts:TableShapes]
 - (type) `MigrationStep` — the 12-kind DDL union (`createTable`, `dropTable`, `renameTable`, `addColumn`, `dropColumn`, `renameColumn`, `alterColumn`, `createIndex`, `dropIndex`, `createSystemTable`, `createView`, `dropView`) [types.ts:MigrationStep]
-- (type) `MigrationPlan` — `{ steps, destructive }` [types.ts:MigrationPlan]
+- (type) `MigrationPlan` — `{ steps, destructive, notes? }` [types.ts:MigrationPlan]
 - (type) `NamedSchema` — collection name paired with its desired `CollectionSchema` [types.ts:NamedSchema]
 - (type) `MigrateOptions` — `{ allowDestructive?, logLevel? }` [types.ts:MigrateOptions]
 
@@ -64,6 +64,18 @@ desired schema passed by the app is "what should exist". The migrator only write
 - Destructiveness is per change: `dropTable`/`dropColumn` always, `alterColumn` only on a type change or `nullable → NOT NULL`; nullable relaxation and default changes are non-destructive [schema-diff.ts:isDestructiveStep]
 - Collections present in stored but absent from desired are dropped only when `allowDestructive` is set, and the step kind matches the collection kind (`dropView` vs `dropTable`) [schema-diff.ts:computePlan]
 - `status` reports `"behind"` for any collection missing from stored or any diff containing an add/create step (mixed add+drop included); `"ahead"` for any other non-empty diff, including drop-only and `alterColumn`-only changes; `"current"` for an empty diff [migrator.ts:statusImplWith]
+
+- `buildPlanContext` populates `views` from both desired and stored view collections. A desired view has `stored` and `desired` query shapes; a stored-only orphan has `desired: null`; a view with no `x-view-query` records `{ query: null }` on that side [migrator.ts:buildPlanContext].
+- `plan` returns `MigrationPlan.notes` from the translated plan when the dialect supplies notes. Empty notes are omitted, so SQLite's `plan()` shape is unchanged [migrator.ts:planImplWith].
+- `migrate` logs every dialect note at info before the transaction. Notes describe intended operations, not committed ones; read them with the failure log [migrator.ts:migrateImplWith].
+- `_migrations` still records the abstract `plan.steps`, not the synthesized statements. The notes and debug SQL log expose the synthesized operations [migrator.ts:migrateImplWith].
+
+## PostgreSQL view synthesis (issue #49)
+
+- The PostgreSQL DDL capability can synthesize `DROP VIEW` and `CREATE VIEW` statements around a destructive table change. The migrator passes the stored and desired view queries through `TranslatePlanContext.views` [dialect.ts:TranslatePlanContext].
+- The abstract plan still contains the schema differ's view steps. The dialect adds dependent-view statements that the differ does not emit, and returns their names in `TranslatedPlan.notes` [dialect-postgres.ts:translatePlan].
+- SQLite and libSQL ignore `views`. SQLite still fails on `ALTER TABLE ... DROP COLUMN` when a view reads the column; #49 pins that current failure in a test and does not change it [dialect-sqlite.ts:translatePlan].
+- A collection kind change (base table to view or view to base table) is pre-existing and unhandled. The PostgreSQL preflight and the differ fail loudly rather than silently reclassifying [schema-diff.ts:diffViewSchemas].
 
 ## Side Effects
 

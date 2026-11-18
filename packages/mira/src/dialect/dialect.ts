@@ -28,10 +28,23 @@ export type DeleteResultStrategy =
     }
   | { readonly _tag: "precheck" }
 
+/**
+ * The stored and desired query for one view collection.
+ *
+ * `null` on a side means the view is absent from that side. `{ query: null }`
+ * means the view is present in the schema but has no usable query.
+ */
+export type ViewShape = {
+  readonly stored: { readonly query: string | null } | null
+  readonly desired: { readonly query: string | null } | null
+}
+
 /** What a dialect needs to render a plan, beyond the step list itself. */
 export type TranslatePlanContext = {
   /** Every physical (non-view) collection the plan may touch, keyed by collection name. */
   tables: ReadonlyMap<string, TableShapes>
+  /** Every view collection the plan may touch, keyed by collection name. */
+  views: ReadonlyMap<string, ViewShape>
 }
 
 /**
@@ -93,6 +106,11 @@ export type TranslatedPlan = {
    * on failure — a rollback would skip anything a plan appended at its own end.
    */
   cleanup: Array<string>
+  /**
+   * Optional statement-level notes for operations the dialect synthesized but
+   * the abstract plan does not list, such as dependent-view drops and creates.
+   */
+  readonly notes?: ReadonlyArray<string>
 }
 
 /**
@@ -174,6 +192,23 @@ export type RuleSqlDialect = Pick<
   | "timestampDiff"
   | "caseInsensitiveLike"
   | "castValue"
+>
+
+/**
+ * Narrow dialect view used by physical schema rendering.
+ *
+ * Despite the name, it also carries literal encoding and the boolean-storage
+ * flag because DDL rendering and row decoding must agree on those conventions.
+ */
+export type DdlSqlDialect = Pick<
+  DialectType,
+  | "translatePlan"
+  | "translate"
+  | "nativeType"
+  | "quoteIdentifier"
+  | "quoteLiteral"
+  | "indexName"
+  | "storesBooleanAsInteger"
 >
 
 /**

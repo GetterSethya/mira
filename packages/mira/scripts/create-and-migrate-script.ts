@@ -137,6 +137,12 @@ const program = Effect.gen(function* () {
       const marker = plan.destructive ? "  [DESTRUCTIVE]" : "  "
       console.log(`${marker} ${step.kind}: ${"table" in step ? step.table : "name" in step ? step.name : ""}`)
     }
+    if (plan.notes !== undefined && plan.notes.length > 0) {
+      console.log("\n  Statement notes:")
+      for (const note of plan.notes) {
+        console.log(`    ${note}`)
+      }
+    }
     if (plan.destructive) {
       console.log("\n  Warning: plan contains destructive steps.")
     }
