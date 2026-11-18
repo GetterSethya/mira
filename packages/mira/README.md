@@ -178,6 +178,8 @@ Each collection gets a full set of REST endpoints:
 | `GET` | `/api/_telemetry/logs` | Read persisted logs (admin collection session required) |
 | `GET` | `/api/_telemetry/spans` | Read persisted spans (admin collection session required) |
 
+`nextCursor` is opaque: the shipped SQLite and libSQL presets return a number, PostgreSQL returns a decimal string for `BIGINT`, and callers pass the value back unchanged.
+
 ## Cron jobs
 
 Register scheduled tasks via the `.crons()` builder step. Each cron uses an Effect `Schedule` to define its recurrence.

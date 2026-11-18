@@ -171,6 +171,25 @@ describe("CollectionClient", () => {
     expect(captured[0].url).not.toContain("cursor=")
   })
 
+  it("string cursor serializes without rounding", async () => {
+    const captured: Array<{ method: string; url: string }> = []
+    const execute = makeTestExecute(captured)
+    const client = makeCollectionClient({
+      collectionName: "tasks",
+      schema: TestCollection.schema,
+      fields: TestCollection.fields,
+      execute,
+      baseUrl: "http://localhost",
+      authTokenRef: null,
+      loggedInRef: null,
+      fileTokenCacheRef: MutableRef.make(new Map()),
+      isAuth: false,
+    })
+
+    await client.getList({ cursor: "9007199254740993" }).raw()
+    expect(captured[0].url).toContain("after=9007199254740993")
+  })
+
   it("getOne → correct path", async () => {
     const captured: Array<{ method: string; url: string }> = []
     const execute = makeTestExecute(captured)
@@ -773,6 +792,20 @@ describe("retryOptions", () => {
     const { callsMade, execute } = makeRetryExecute(2)
     await makeClient(execute).getList({ retryOptions: { schedule: retrySchedule } }).raw()
     expect(callsMade()).toBe(3)
+  })
+
+  it("does not retry HTTP 500", async () => {
+    let calls = 0
+    const execute: ExecuteFn = () =>
+      Effect.gen(function* () {
+        calls++
+        return yield* Effect.fail(new MiraError({ status: 500, body: { error: "internal" } }))
+      })
+
+    await expect(
+      makeClient(execute).getOne("1", { retryOptions: { schedule: retrySchedule } }).raw()
+    ).rejects.toBeInstanceOf(MiraError)
+    expect(calls).toBe(1)
   })
 
   it("getOne retries on failure and succeeds", async () => {

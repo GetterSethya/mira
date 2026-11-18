@@ -71,6 +71,12 @@ describe("createCollectionAdapter / collectionAdapter", () => {
     expect(handler.queryKey).toEqual(["posts", ActionKeys.GetList, { limit: 5 }])
   })
 
+  it("getList normalizes number and string cursors to one query key", () => {
+    const numberKey = adapted.getList({ cursor: 1 }).queryKey
+    const stringKey = adapted.getList({ cursor: "1" }).queryKey
+    expect(numberKey).toEqual(stringKey)
+  })
+
   it("getList with no options — options defaults to {}", () => {
     const handler = adapted.getList()
     expect(handler.queryKey).toEqual(["posts", ActionKeys.GetList, {}])

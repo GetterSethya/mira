@@ -7,6 +7,7 @@ export type {
   AdaptedQueryOptions,
   AuthByKind,
   CollectionClient,
+  Cursor,
   FilterBuilder,
   GetListOptions,
   GetOneOptions,

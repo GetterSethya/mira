@@ -336,6 +336,8 @@ describe("fuzz-secure: pagination", () => {
         ["after=abc", "/api/collections/posts?after=abc"],
         ["after=1e309", "/api/collections/posts?after=1e309"],
         ["after=99999999999999999999", "/api/collections/posts?after=99999999999999999999"],
+        ["after=9007199254740993", "/api/collections/posts?after=9007199254740993"],
+        ["after=9223372036854775808", "/api/collections/posts?after=9223372036854775808"],
         ["after=1.9&limit=2", "/api/collections/posts?after=1.9&limit=2"],
       ]
       for (const [label, url] of cases) {
@@ -347,6 +349,18 @@ describe("fuzz-secure: pagination", () => {
         )(e.text).pipe(Effect.orDie)
         assert.ok(parsed.items.length <= 100, `limit not clamped for ${label}`)
       }
+
+      const outOfRange = yield* tryGet("/api/collections/posts?after=9223372036854775808")
+      const outOfRangeBody = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))
+      )(outOfRange.text).pipe(Effect.orDie)
+      assert.strictEqual(outOfRangeBody.items.length, 3, "out-of-range after restarts at the first page")
+
+      const largeString = yield* tryGet("/api/collections/posts?after=9007199254740993")
+      const largeStringBody = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))
+      )(largeString.text).pipe(Effect.orDie)
+      assert.strictEqual(largeStringBody.items.length, 0, "a valid large cursor returns an empty page")
     }).pipe(Effect.provide(layer))
   )
 })

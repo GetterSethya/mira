@@ -276,6 +276,29 @@ describe("dialect-aware predicates and payload markers", () => {
     expect(fieldEqualsClause("email", "a@b.c", backtick).sql).toBe("t.`email` = ?")
   })
 
+  it("keeps string cursors and supports descending seqId", () => {
+    expect(cursorClause("2", backtick)).toEqual({
+      sql: "t.`seqId` > ?",
+      params: ["2"]
+    })
+    expect(cursorClause("9007199254740993", backtick)).toEqual({
+      sql: "t.`seqId` > ?",
+      params: ["9007199254740993"]
+    })
+    expect(cursorClause("2", backtick, "desc")).toEqual({
+      sql: "t.`seqId` < ?",
+      params: ["2"]
+    })
+    expect(seqIdEqualsClause("2", backtick)).toEqual({
+      sql: "t.`seqId` = ?",
+      params: ["2"]
+    })
+    expect(keysetClause({ field: "name", direction: "asc" }, "a", "2", backtick)).toEqual({
+      sql: "(t.`name`, t.`seqId`) > (?, ?)",
+      params: ["a", "2"]
+    })
+  })
+
   it.effect("does not rewrite tokens inside quoted identifiers", () =>
     Effect.gen(function* () {
       const refs = extractCtxRefs('t."note@auth_id" = ? AND t."a?b" = ?')

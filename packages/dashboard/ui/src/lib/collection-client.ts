@@ -1,12 +1,12 @@
-import type { FilterNode } from "@gettersethya/mira-client"
+import type { Cursor, FilterNode } from "@gettersethya/mira-client"
 
 const API_BASE = "/api"
 
-export type ListResult<T> = { items: T[]; nextCursor: number | null }
+export type ListResult<T> = { items: T[]; nextCursor: Cursor | null }
 
 export type ListOptions = {
   limit?: number
-  after?: string | number
+  after?: Cursor
   expand?: ReadonlyArray<string>
   filter?: FilterNode
   sort?: string
@@ -34,8 +34,11 @@ export function makeCollectionApi(collectionName: string) {
         q.set("sort", params.sort)
         q.set("order", params.order ?? "asc")
       }
+      const keyParams = params?.after !== undefined
+        ? { ...params, after: String(params.after) }
+        : params
       return {
-        queryKey: ["collection", collectionName, "list", params] as const,
+        queryKey: ["collection", collectionName, "list", keyParams] as const,
         queryFn: () => req<ListResult<Record<string, unknown>>>(`${base}?${q}`),
       }
     },

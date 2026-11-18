@@ -1,4 +1,4 @@
-import type { AnyCollectionDef } from "@gettersethya/mira-client"
+import type { AnyCollectionDef, Cursor } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
 
 import type { EmailMessage, EmailSendError, EmailSendResult } from "@/email/types.js"
@@ -28,7 +28,7 @@ export interface ListHookContext {
   readonly sort: SortOrder | undefined
   readonly select: ReadonlyArray<string> | null | undefined
   readonly expand: ReadonlyArray<string> | null | undefined
-  readonly cursor: number | null
+  readonly cursor: Cursor | null
   readonly limit: number
   readonly auth: AuthContext | undefined
 }
@@ -47,7 +47,7 @@ export interface RecordResultContext extends RecordHookContext {
 
 export interface ListResultContext extends ListHookContext {
   readonly items: ReadonlyArray<RepoRecord>
-  readonly nextCursor: number | null
+  readonly nextCursor: Cursor | null
 }
 
 export interface ViewResultContext extends ViewHookContext {

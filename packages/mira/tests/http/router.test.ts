@@ -130,6 +130,42 @@ const makeBaseLayer = (authLayer: Layer.Layer<AuthService>) =>
 const baseLayer = makeBaseLayer(NodeAuthServiceLayer)
 const testLayer = Layer.mergeAll(baseLayer, rateLimitTestLayer)
 
+// A repository that returns rows with an unusable seqId, used to pin the
+// generic 500 response for the full-page cursor defect.
+const brokenRepo = Layer.effect(
+  Repository,
+  Effect.gen(function* () {
+    const repo = yield* Repository
+    return Repository.of({
+      ...repo,
+      list: (table, limit, options) =>
+        Effect.map(repo.list(table, limit, options), (page) => ({
+          items: page.items.map((row) => ({ ...row, seqId: {} }))
+        }))
+    })
+  })
+).pipe(Layer.provide(repoWithSql))
+
+const brokenLayer = Layer.mergeAll(
+  makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
+    Layer.provide(brokenRepo),
+    Layer.provide(FileStorageTest),
+    Layer.provide(sqliteLayer),
+    Layer.provide(DialectTest),
+    Layer.provide(NodeAuthServiceLayer)
+  ),
+  brokenRepo,
+  FileStorageTest,
+  sqliteLayer,
+  ThumbnailServiceNoopLive,
+  NodeHttpServer.layerTest,
+  AppConfigTest,
+  NodeCryptoLayer,
+  NodeAuthServiceLayer,
+  DialectTest,
+  rateLimitTestLayer
+)
+
 const serveWithTracer = HttpServer.serveEffect(HttpMiddleware.tracer)
 
 // ---------------------------------------------------------------------------
@@ -273,7 +309,25 @@ describe("makeCollectionRouter", () => {
     }).pipe(Effect.provide(testLayer))
   )
 
-  it.effect("GET /api/collections/:name — list returns 404 for unknown collection", () =>
+  it.effect("GET /api/collections/:name - list returns 500 for an unusable seqId with more rows", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      const repo = yield* Repository
+      yield* repo.create("posts", { title: "a" })
+      yield* repo.create("posts", { title: "b" })
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+        HttpServer.serveEffect()
+      )
+
+      const res = yield* HttpClient.get("/api/collections/posts?limit=1")
+      assert.strictEqual(res.status, 500)
+      const body = yield* jsonRecord(yield* res.json)
+      assert.deepStrictEqual(body, { error: "internal" })
+    }).pipe(Effect.provide(brokenLayer))
+  )
+
+  it.effect("GET /api/collections/:name - list returns 404 for unknown collection", () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())

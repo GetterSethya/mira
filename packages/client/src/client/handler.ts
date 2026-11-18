@@ -19,7 +19,7 @@ import type { MiraError } from "./errors.js"
  * import type { ClientHandler } from "@gettersethya/mira-client"
  *
  * // Query handler: TInput = void
- * const listHandler: ClientHandler<{ items: Post[]; nextCursor: number | null }>
+ * const listHandler: ClientHandler<{ items: Post[]; nextCursor: number | string | null }>
  * const items = await listHandler.raw()  // Promise-based
  * const effect = listHandler.toEffect()  // Effect-based
  *

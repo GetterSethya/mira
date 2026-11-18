@@ -6,6 +6,7 @@ export {
   makeBatchedCollectionServiceLayer,
   makeCollectionServiceLayer
 } from "./collection-service.js"
+export type { Cursor } from "@gettersethya/mira-client"
 export type { CursorPage, RequestCtx } from "./context.js"
 export type {
   BatchMutationFlush,

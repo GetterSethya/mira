@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation"
   import { resolve } from "$app/paths"
   import { Filter } from "@gettersethya/mira-collection"
-  import type { FilterNode } from "@gettersethya/mira-client"
+  import type { Cursor, FilterNode } from "@gettersethya/mira-client"
   import { mira } from "$lib/mira.js"
   import { makeCollectionApi } from "$lib/collection-client.js"
   import {
@@ -100,7 +100,7 @@
   let filterConditions = $state<FilterCondition[]>([])
   let filterConnectors = $state<FilterConnector[]>([])
   let schemaDialogOpen = $state(false)
-  let cursor = $state(0)
+  let cursor = $state<Cursor | null>(null)
   let lastData: unknown = null
   let previousName = $state("")
 
@@ -199,7 +199,7 @@
   })
 
   let records = $state<Record<string, unknown>[]>([])
-  let nextCursor = $state<number | null>(null)
+  let nextCursor = $state<Cursor | null>(null)
   let selectedIds = $state(new SvelteSet<string>())
   const rangeLabel = $derived.by(() => {
     if (records.length === 0) return "No records"
@@ -219,7 +219,7 @@
     filterConditions = []
     filterConnectors = []
     schemaDialogOpen = false
-    cursor = 0
+    cursor = null
     records = []
     nextCursor = null
     lastData = null
@@ -252,7 +252,7 @@
   const listQuery = createQuery(() =>
     api.listOptions({
       limit: 50,
-      after: cursor,
+      after: cursor ?? undefined,
       expand: relationFields,
       filter: effectiveFilter,
       sort: sortField,
@@ -266,7 +266,7 @@
     const data = listQuery.data
     if (!data || data === lastData) return
     lastData = data
-    if (cursor === 0) {
+    if (cursor === null) {
       records = data.items
       clearSelection()
     } else {
@@ -307,7 +307,7 @@
   }
 
   function resetToList() {
-    cursor = 0
+    cursor = null
     records = []
     nextCursor = null
     lastData = null
@@ -595,7 +595,7 @@
         {#if search || filterConditions.length > 0}
           <Button variant="ghost" class="h-11 sm:h-9" onclick={clearFilters}>Clear filters</Button>
         {/if}
-        {#if cursor > 0}
+        {#if cursor !== null}
           <Button variant="ghost" class="h-11 sm:h-9" onclick={resetToList}>First page</Button>
         {/if}
       </div>

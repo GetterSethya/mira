@@ -22,7 +22,8 @@ Every operation is a `ClientHandler`: the data payload lives at the call site fo
 ### Collection client
 
 - `RetryOptions` (type) — optional `{ schedule?: Schedule<unknown, MiraError, never> }`. [collection.ts:RetryOptions]
-- `GetListOptions<F>` (type) — filter callback, sort/order, cursor, limit, select, expand, retry options. [collection.ts:GetListOptions]
+- `Cursor` (type) - opaque `number | string` list cursor. The shipped SQLite and libSQL presets return numbers; PostgreSQL returns a decimal string for `BIGINT`. [collection.ts:Cursor]
+- `GetListOptions<F>` (type) - filter callback, sort/order, cursor, limit, select, expand, retry options. [collection.ts:GetListOptions]
 - `GetOneOptions<F>` (type) — select, expand, retry options for single-record reads. [collection.ts:GetOneOptions]
 - `FilterBuilder<F>` (type) — typed `field`/`and`/`or`/`not` builder used by filter callbacks. [collection.ts:FilterBuilder]
 - `RawCollectionClient<F, K>` (type) - the full collection surface: `getList`, `getFirstOrNone`, `getFullList`, `getOne`, `create`, `createMany`, `update`, `updateMany`, `delete`, `deleteMany`, optional auth methods, and `fields`. [collection.ts:RawCollectionClient]
@@ -103,8 +104,9 @@ This module also re-exports the collection DSL types (`InferRecord`, `CreateInpu
 - The multipart serializer drops `null`/`undefined` values, so clearing a field and uploading a file cannot happen in one call; clear via a JSON update instead. [collection.ts:buildFormData]
 - Retry precedence is per-call `retryOptions.schedule` then collection-level `defaultRetryOptions.schedule`; with neither, the operation is not retried. [collection.ts:withRetry]
 - `getFirstOrNone` forces `limit: 1` and resolves to `Option` (`None` when no item is returned). [collection.ts:getFirstOrNone]
-- `getFullList` uses a page size of `1000` by default and resolves to a flat array rather than a single page envelope. [collection.ts:getFullList]
-- Cursor pagination is transmitted as the `after` query parameter, not `cursor`. [collection.ts:listHandler]
+- `getFullList` requests `limit: 1000` by default, but the server clamps the page to 100. It issues one request and resolves to a flat array; it does not follow `nextCursor`. [collection.ts:getFullList]
+- Cursor pagination is transmitted as the `after` query parameter, not `cursor`. The value is opaque and may be a number or a decimal string; pass `nextCursor` back unchanged. [collection.ts:listHandler]
+- A configured retry schedule does not retry HTTP 429 or HTTP 500. [collection.ts:withRetry]
 - `select` and `expand` are serialized as comma-separated query values; filters are encoded through `FilterNodeSchema`. [collection.ts:listHandler]
 - `withCollections` stores accessors under the caller's map key, while the adapter and query keys receive `def.name`; accessors are attached to the base client with `Object.assign`. [factory.ts:withCollections]
 - File-field clients are created only for properties with `x-kind === "file"`, and are protected only when `x-protected === true`. [file.ts:makeFileFields]
