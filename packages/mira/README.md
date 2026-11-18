@@ -91,8 +91,9 @@ affected table: create a scratch table, copy rows with `INSERT … SELECT`, tran
 `sqlite_sequence`, drop and recreate the table, then recreate indexes. A column
 becoming `NOT NULL` with a default is copied through `COALESCE(column, default)`.
 The rebuild also subsumes that table's add/drop/index steps. The whole plan is
-rendered and validated before the migration transaction opens, and SQLite
-returns an empty cleanup list.
+rendered before the migration transaction opens and checked to contain real
+SQL; view validation probes run inside the transaction. SQLite returns an empty
+cleanup list.
 
 A `dropColumn` plan with tracked views also drops the views that depend on the
 changed table, recreates them after the column change, and validates their
