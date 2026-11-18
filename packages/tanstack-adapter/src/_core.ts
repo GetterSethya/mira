@@ -192,8 +192,13 @@ export function createCollectionAdapter() {
     const common: AdaptedCommon<F, K> = {
       fields: client.fields,
 
-      getList: <const O extends GetListOptions<F> = GetListOptions<F>>(options?: O) =>
-        enrichQuery(client.getList(options), [name, ActionKeys.GetList, options ?? {}]),
+      getList: <const O extends GetListOptions<F> = GetListOptions<F>>(options?: O) => {
+        const keyOptions =
+          options?.cursor !== undefined && options.cursor !== null
+            ? { ...options, cursor: String(options.cursor) }
+            : options
+        return enrichQuery(client.getList(options), [name, ActionKeys.GetList, keyOptions ?? {}])
+      },
 
       getOne: <const O extends GetOneOptions<F> = GetOneOptions<F>>(id: string, options?: O) =>
         enrichQuery(client.getOne(id, options), [name, ActionKeys.GetOne, id, options ?? {}]),

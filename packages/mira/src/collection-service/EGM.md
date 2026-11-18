@@ -17,7 +17,10 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - `makeCollectionServiceLayer(allCollections)` â€” builds the layer; requires `Repository`, `SqlClient`, `FileStorage`, `Dialect`, `AuthService`: `[collection-service.ts:makeCollectionServiceLayer]`
 - `CollectionServiceLive` â€” deprecated empty-collection layer kept for compatibility: `[collection-service.ts:CollectionServiceLive]`
 - `RequestCtx` (type) â€” `auth?`, `headers`, `query`, `body?`, `admin?`: `[context.ts:RequestCtx]`
+- `Cursor` (type) - opaque `number | string` list cursor: `[context.ts:Cursor]`
 - `CursorPage` (type) â€” `items`, `nextCursor`: `[context.ts:CursorPage]`
+- `cursorFromSeqId(value)` - normalizes a driver `number`, `bigint`, or canonical decimal string to a JSON-safe cursor; rejects unsafe and out-of-range values: `[cursor.ts:cursorFromSeqId]`
+- `parseCursor(raw)` - parses `after`, preserving safe legacy number forms and keeping large canonical strings unrounded: `[cursor.ts:parseCursor]`
 - `NotFoundError` â€” tagged 404 error (`collection`, `id`): `[errors.ts:NotFoundError]`
 - `ForbiddenError` â€” tagged 403 error (`collection`, `action`): `[errors.ts:ForbiddenError]`
 - `ReadOnlyError` â€” tagged 405 error raised by view collections: `[errors.ts:ReadOnlyError]`
@@ -34,7 +37,7 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - `parseErrToValidationError(collection)` â€” formats `Schema.SchemaError` into issue strings: `[input-schema.ts:parseErrToValidationError]`
 - `andWhere(a, b)` â€” AND-combines two `WhereClause`s and concatenates params: `[where.ts:andWhere]`
 - `idClause(id, quote)` â€” `t.id = ?`: `[where.ts:idClause]`
-- `cursorClause(after, quote)` - `t.seqId > ?`: `[where.ts:cursorClause]`
+- `cursorClause(after, quote, direction?)` - `t.seqId > ?` for ASC or `< ?` for DESC: `[where.ts:cursorClause]`
 - `keysetClause(sort, value, after, quote)` - `(t."<field>", t.seqId) > (?, ?)` for ASC / `<` for DESC: `[where.ts:keysetClause]`
 - `resolveCtxPlaceholders(result, ctx, collection, action, options, bodyPlan?)` â€” binds `@auth_*` / `@request_*` placeholders: `[where.ts:resolveCtxPlaceholders]`
 - `extractCtxRefs(sql)` â€” reports exactly which ctx fields a rule references: `[where.ts:extractCtxRefs]`
@@ -56,7 +59,7 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - Required keys are non-nullable; optional keys accept `null` only when DDL-nullable (non-required, non-`x-system`): `[input-schema.ts:buildInputSchemas]`
 - `select` is an allowlist checked with `Object.hasOwn` against the collection's properties; `id`, `created`, `updated` are always included; hidden fields are excluded unless admin: `[collection-service.ts:resolveFields]`
 - A non-admin sort on an `x-hidden` field fails with `ValidationError`; unknown sort fields fall back to default ordering: `[collection-service.ts:validateSort]`
-- `list` always fetches `seqId`, derives `nextCursor` only when the page is full, and removes `seqId` from returned items: `[collection-service.ts:CollectionService]`
+- `list` fetches `perPage + 1` rows, returns at most `perPage`, derives `nextCursor` only when another row exists, and removes `seqId` from returned items. An exact-`perPage` final page returns `nextCursor: null`. A page with more rows and an unusable last-returned `seqId` logs and fails with a defect (500) instead of returning null: `[collection-service.ts:CollectionService]`
 - For a non-`seqId` sort with `after`, `list` resolves the cursor row's sort value with a raw `seqId` lookup and uses the row-value `keysetClause`; `seqId` is the tie-breaker in both `ORDER BY` and the predicate. Nullable sort fields and missing cursor rows fail with `ValidationError` (422) instead of silently skipping rows: `[collection-service.ts:CollectionService]`, `[repository.ts:orderFrag]`
 - Default visible fields are cached per schema identity and frozen; `seqId` is appended once through a second array cache. The no-select/no-expand list path reuses both arrays: `[collection-service.ts:resolveFields]`
 - The default list uses `makeProjectedListRowMapper`, iterating the exact `fieldsForQuery` projection so response key set/order match the SELECT and non-projected keys are omitted; `select`/`expand` keep `makeListRowMapper`. A custom `Repository` that returns extra columns has them dropped on the default path: `[collection-service.ts:list]`
@@ -90,7 +93,7 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - SQL rule pre-check `SELECT 1 AS ok WHERE <payload-bound rule>` before insert: `[collection-service.ts:create]`
 - SQL rule check `SELECT 1 AS ok WHERE <ctx-bound manage rule>` for `canManagePayload`: `[collection-service.ts:canManagePayload]`
 - Filesystem: file deletion and thumbnail-directory listing/deletion via `FileStorage`: `[collection-service.ts:CollectionService]`
-- Logging: `Effect.logWarning` for body-referencing bodiless rules: `[collection-service.ts:makeCollectionServiceLayer]`
+- Logging: `Effect.logWarning` for body-referencing bodiless rules, and `Effect.logError` before the full-page cursor defect: `[collection-service.ts:makeCollectionServiceLayer]` `[collection-service.ts:CollectionService]`
 - Tracing: `collection.list` / `collection.view` / `collection.create` / `collection.update` / `collection.delete` spans with a `collection` attribute, created through `withSpanWhenEnabled` so tracing-off requests skip no-op spans: `[collection-service.ts:CollectionService]`
 - CPU: password hashing/verification via `AuthService`: `[collection-service.ts:hashAuthPassword]`
 
@@ -101,7 +104,7 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 
 ## Dialect boundary (issue #45)
 
-- idClause(id, quote), cursorClause(after, quote), seqIdEqualsClause(seqId, quote), keysetClause(sort, value, after, quote), and ieldEqualsClause(field, value, quote) quote every identifier with the active dialect [where.ts:idClause] [where.ts:seqIdEqualsClause] [where.ts:fieldEqualsClause].
+- idClause(id, quote), cursorClause(after, quote, direction), seqIdEqualsClause(seqId, quote), keysetClause(sort, value, after, quote), and fieldEqualsClause(field, value, quote) quote every identifier with the active dialect. The cursor may be a number or a canonical decimal string; the same type flows through the service, parser, hooks, and cache [where.ts:idClause] [where.ts:seqIdEqualsClause] [where.ts:fieldEqualsClause].
 - esolveCtxPlaceholders requires ResolveOptions with encodeParam, quoteIdentifier, and castValue. Body-column bindings use the dialect quoter [where.ts:ResolveOptions] [where.ts:resolveCtxPlaceholders].
 - esolveFieldRefs replaces typed @field_<type>_<base64url>@ markers with cast ? params. It never parses quoted identifiers [where.ts:resolveFieldRefs].
 - Create and canManagePayload compile with payloadEnforcerForAction and execute enderRuleCheck through sql.unsafe, so no raw ? reaches PostgreSQL [collection-service.ts:prepareCreate] [collection-service.ts:canManagePayload] [repository/sql.ts:renderRuleCheck].

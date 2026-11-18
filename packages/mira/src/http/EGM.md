@@ -98,7 +98,7 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `/api/_schema` and telemetry routes require a valid session whose collection is in the admin set; non-admin authenticated sessions get 403: `[router.ts:requireApiAuth]`
 - Admin bypass for generic collection routes is granted only when the token's collection is in `adminCollections`: `[router.ts:buildRequestCtx]`
 - Sorting only accepts a field present in the schema (via `Object.hasOwn`); `order` defaults to `asc`: `[params.ts:parseSortParam]`
-- Pagination defaults `limit` to 30 and clamps it to 100; `after` must be a non-negative integer: `[params.ts:parsePaginationParam]`
+- Pagination defaults `limit` to 30 and clamps it to 100. `after` accepts a non-negative safe integer or a canonical decimal string in the non-negative BIGINT range. Safe legacy forms such as `1.9`, `1e3`, `0x10`, and `+5` are floored to safe numbers; malformed, non-finite, and out-of-range values are ignored and start from the first page. The parser never returns a 5xx: `[params.ts:parsePaginationParam]` `[cursor.ts:parseCursor]`
 - `filter` must JSON-decode to a `FilterNode` or the request 422s: `[params.ts:parseFilterParam]`
 - CORS rejects `credentials: true` with a wildcard/omitted origin list: `[cors.ts:assertValidCorsConfig]`
 - Port retry only retries `EADDRINUSE`; the starting port is attempted first; other serve errors fail immediately. `Bun.serve` throws bind errors as defects, so `serveErrorFromCause` normalizes typed `ServeError` failures and `EADDRINUSE` defects: `[port-retry.ts:serveErrorFromCause]`

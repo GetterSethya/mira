@@ -1,10 +1,11 @@
-import type { CollectionSchema } from "@gettersethya/mira-client"
+import type { CollectionSchema, Cursor } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
 import { FilterNodeSchema } from "@gettersethya/mira-client"
 import { Schema } from "effect"
 import { Effect } from "effect"
 
 import type { RequestCtx } from "@/collection-service/context.js"
+import { parseCursor } from "@/collection-service/cursor.js"
 import { ValidationError } from "@/collection-service/errors.js"
 import type { SortOrder } from "@/repository/types.js"
 
@@ -56,10 +57,10 @@ export function parseSortParam(
 
 export function parsePaginationParam(
   query: RequestCtx["query"]
-): { cursor: number | null; limit: number } {
-  const rawCursor = typeof query["after"] === "string" ? Number(query["after"]) : NaN
+): { cursor: Cursor | null; limit: number } {
+  const rawCursor = typeof query["after"] === "string" ? query["after"] : null
   const rawLimit  = typeof query["limit"]  === "string" ? Number(query["limit"])  : NaN
-  const cursor = !Number.isNaN(rawCursor) && rawCursor >= 0 ? Math.floor(rawCursor) : null
+  const cursor = parseCursor(rawCursor)
   const limit  = !Number.isNaN(rawLimit)  && rawLimit  >= 1 ? Math.min(Math.floor(rawLimit), 100) : 30
   return { cursor, limit }
 }

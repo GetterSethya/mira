@@ -60,7 +60,7 @@ If the JSON does not decode to a valid node the request fails with 422, so build
 | `order` | `asc` or `desc` | defaults to `asc`. Only applies when `sort` is set |
 | `select` | comma-separated field names | allowlist. Unknown or hidden names are dropped |
 | `expand` | comma-separated relation names | one `LEFT JOIN` per relation |
-| `after` | non-negative integer | the `seqId` cursor from the previous page |
+| `after` | non-negative safe integer or canonical decimal string | the opaque `seqId` cursor from the previous page |
 | `limit` | integer | defaults to 30, clamped to 100 |
 
 Sorting uses the collection schema as an allowlist. A non-admin caller cannot sort by a hidden field (that request is a 422), while an unknown field name is silently ignored and the list keeps its default order. `select` is also an allowlist. For base and auth collections, `id`, `created`, and `updated` are returned whether or not you name them. View collections only return the columns their query exposes. Hidden fields are never selected for ordinary callers.
@@ -71,7 +71,9 @@ Expansion joins the target's `id` column. A relation declared with a different t
 
 ## Cursor pagination
 
-`after` is a cursor, not an offset: pass the `seqId` of the last row you received. The default order is `seqId` ascending. Sorted pagination is also supported: the server resolves the cursor row's sort value and continues with a `(sortField, seqId)` keyset, using `seqId` as a stable tie-breaker. The sort field must be non-nullable. A sorted request that uses `after` on a nullable field returns `422 validation_failed` rather than silently skipping rows. If the cursor row has been deleted, the server also returns `422` so you can restart from the first page. `nextCursor` is the last row's `seqId` when the page is full, and `null` when it is not. A full page can still be the end of the data, so keep requesting until `nextCursor` is `null` and treat a final empty page as normal.
+`after` is a cursor, not an offset: pass the opaque value from the previous `nextCursor`. The default order is `seqId` ascending. Sorted pagination is also supported: the server resolves the cursor row's sort value and continues with a `(sortField, seqId)` keyset, using `seqId` as a stable tie-breaker. The sort field must be non-nullable. A sorted request that uses `after` on a nullable field returns `422 validation_failed` rather than silently skipping rows. If the cursor row has been deleted, the server also returns `422` so you can restart from the first page. `nextCursor` is the last returned row's `seqId` when another page exists, and `null` when it does not. A final page with exactly `limit` rows returns `null`. Keep requesting until `nextCursor` is `null`.
+
+The cursor is opaque. The shipped SQLite and libSQL presets return a JavaScript number. PostgreSQL returns a decimal string when `seqId` is a `BIGINT`, because a JSON number cannot represent every 64-bit value exactly. Pass the value back unchanged; do not convert a string cursor to a number.
 
 ```json
 {
@@ -81,6 +83,8 @@ Expansion joins the target's `id` column. A relation declared with a different t
   "nextCursor": 42
 }
 ```
+
+`nextCursor` is a number in this SQLite example. A PostgreSQL response can use a decimal string such as `"9007199254740993"`.
 
 For ordinary list callers, `seqId` is not part of the response payload. Admin contexts and some write responses can expose it. The next request is `?after=42&limit=10`.
 

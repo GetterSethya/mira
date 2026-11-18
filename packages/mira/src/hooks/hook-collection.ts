@@ -1,4 +1,4 @@
-import type { AnyCollectionDef, FilterNode } from "@gettersethya/mira-client"
+import type { AnyCollectionDef, Cursor, FilterNode } from "@gettersethya/mira-client"
 import { Effect, Layer } from "effect"
 
 import { CollectionService } from "@/collection-service/collection-service.js"
@@ -29,7 +29,7 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
       return CollectionService.of({
         list: (
           collection: AnyCollectionDef,
-          cursor: number | null,
+          cursor: Cursor | null,
           perPage: number,
           ctx: RequestCtx,
           filter?: FilterNode,

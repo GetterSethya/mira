@@ -1,3 +1,4 @@
+import type { Cursor } from "@gettersethya/mira-client"
 import { Effect } from "effect"
 
 import type { FieldValueType, Quote } from "@/dialect/dialect.js"
@@ -21,13 +22,21 @@ export function idClause(id: string, quote: Quote): WhereClause {
   return { sql: `t.${quote("id")} = ?`, params: [id] }
 }
 
-/** Produces a WHERE clause for cursor pagination: seqId strictly after the cursor. */
-export function cursorClause(after: number, quote: Quote): WhereClause {
-  return { sql: `t.${quote("seqId")} > ?`, params: [after] }
+/**
+ * Produces a WHERE clause for cursor pagination: seqId strictly after the cursor
+ * for ASC, or strictly before it for DESC.
+ */
+export function cursorClause(
+  after: Cursor,
+  quote: Quote,
+  direction: "asc" | "desc" = "asc"
+): WhereClause {
+  const op = direction === "asc" ? ">" : "<"
+  return { sql: `t.${quote("seqId")} ${op} ?`, params: [after] }
 }
 
 /** Produces an equality lookup for the row at a seqId cursor. */
-export function seqIdEqualsClause(seqId: number, quote: Quote): WhereClause {
+export function seqIdEqualsClause(seqId: Cursor, quote: Quote): WhereClause {
   return { sql: `t.${quote("seqId")} = ?`, params: [seqId] }
 }
 
@@ -47,7 +56,7 @@ export function fieldEqualsClause(field: string, value: unknown, quote: Quote): 
 export function keysetClause(
   sort: SortOrder,
   value: unknown,
-  after: number,
+  after: Cursor,
   quote: Quote
 ): WhereClause {
   const op = sort.direction === "asc" ? ">" : "<"

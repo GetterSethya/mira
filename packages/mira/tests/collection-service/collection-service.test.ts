@@ -544,6 +544,7 @@ describe("list sorted cursor pagination", () => {
       yield* setupPostsTable
       const svc = yield* CollectionService
       yield* svc.create(Posts, { title: "nullable-sort" }, noCtx)
+      yield* svc.create(Posts, { title: "nullable-sort-2" }, noCtx)
 
       const page1 = yield* svc.list(Posts, null, 1, noCtx, undefined, {
         field: "authorId",

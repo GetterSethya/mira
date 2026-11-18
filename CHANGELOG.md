@@ -17,6 +17,16 @@ published by CI.
 
 ### Changed
 
+- **The collection cursor is now opaque `number | string`.** The shipped SQLite
+  and libSQL presets keep returning numbers. PostgreSQL `BIGINT` cursors are
+  canonical decimal strings, because a JSON number cannot represent every
+  64-bit value exactly. `after` accepts either form and never rounds a large
+  decimal string. A final page with exactly `perPage` rows now returns
+  `nextCursor: null` instead of forcing one extra empty request. Descending
+  `seqId` pagination now advances. A page with more rows and an unusable
+  last-returned `seqId` logs and fails visibly instead of returning null. The
+  client no longer retries HTTP 500 on any operation; 503 still retries.
+
 - **Internal PostgreSQL DDL capability and plan notes.** `TranslatePlanContext`
   gains a required `views` map with stored and desired query shapes.
   `MigrationPlan` and `TranslatedPlan` gain optional `notes`.

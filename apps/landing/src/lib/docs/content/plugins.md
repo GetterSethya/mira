@@ -45,7 +45,7 @@ Pre and execute hooks return the next context, so returning `{ ...ctx, data: { .
 
 ## List and view hooks
 
-`onRecordList` receives `ListHookContext`: `{ collection, filter, sort, select, expand, cursor, limit, auth }`. Its success hook adds `items` and `nextCursor`, and its error hook receives `HookErrorContext`. `onRecordView` receives `ViewHookContext`: `{ collection, id, select, expand, auth }`. Its success hook adds `result`. Use these to inject tenant filters or force a select list. The success stage is an observer and cannot change a record.
+`onRecordList` receives `ListHookContext`: `{ collection, filter, sort, select, expand, cursor, limit, auth }`. `cursor` and the success hook's `nextCursor` are opaque `number | string` values; do not parse or compare them. Its success hook adds `items` and `nextCursor`, and its error hook receives `HookErrorContext`. `onRecordView` receives `ViewHookContext`: `{ collection, id, select, expand, auth }`. Its success hook adds `result`. Use these to inject tenant filters or force a select list. The success stage is an observer and cannot change a record.
 
 ## Ordering and forwarding
 
