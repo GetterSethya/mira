@@ -142,7 +142,10 @@ function buildPlanContext(
     const desiredQuery = schema["x-view-query"]
     views.set(name, {
       stored: storedSchema === undefined ? null : { query: storedQuery ?? null },
-      desired: { query: desiredQuery ?? null }
+      desired: {
+        query: desiredQuery ?? null,
+        properties: Object.keys(schema.properties)
+      }
     })
   }
   for (const [name, schema] of Object.entries(stored)) {
@@ -176,7 +179,7 @@ function renderPlan(
 ) {
   return Effect.gen(function* () {
     const translated = yield* dialect.translatePlan(steps, ctx)
-    for (const statement of translated.statements) {
+    for (const statement of [...translated.statements, ...(translated.validations ?? [])]) {
       if (!isExecutable(statement)) {
         return yield* Effect.fail(new InvalidMigrationStatementError({ statement }))
       }
@@ -270,7 +273,7 @@ function migrateImplWith(
       )
     }
 
-    const { statements, cleanup, notes } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
+    const { statements, validations, cleanup, notes } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
 
     for (const note of notes ?? []) {
       yield* Effect.logInfo(note)
@@ -291,6 +294,7 @@ function migrateImplWith(
         yield* Effect.logDebug("Starting migration transaction")
         yield* Effect.logDebug(`Steps: ${stepsJson}`)
         yield* runStatements(sql, statements)
+        yield* runStatements(sql, validations ?? [])
         yield* sql`INSERT INTO ${sql(migrationsTable)} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
 
         for (const [name, schemaJson] of schemaJsonByName) {

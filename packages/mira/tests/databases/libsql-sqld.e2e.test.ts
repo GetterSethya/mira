@@ -22,7 +22,7 @@ import {
   type CollectionSchema,
   Field
 } from "@gettersethya/mira-client"
-import { Effect, Layer, Schedule, Schema } from "effect"
+import { Effect, Exit, Layer, Schedule, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
@@ -118,6 +118,8 @@ const dropRebuildTables = Effect.gen(function* () {
     yield* sql.unsafe(`DROP TABLE IF EXISTS "${name}"`).pipe(Effect.ignore)
   }
   yield* sql.unsafe(`DROP VIEW IF EXISTS "e2e_view"`).pipe(Effect.ignore)
+  yield* sql.unsafe(`DROP VIEW IF EXISTS "e2e_view_v2"`).pipe(Effect.ignore)
+  yield* sql.unsafe(`DROP VIEW IF EXISTS "e2e_view_stale"`).pipe(Effect.ignore)
 })
 
 const todosSchema = (categoryRequired: boolean): CollectionSchema => {
@@ -138,6 +140,44 @@ const todosSchema = (categoryRequired: boolean): CollectionSchema => {
       : ["id", "title", "created", "updated"]
   }
 }
+
+const todosWithoutTitle = (categoryRequired: boolean): CollectionSchema => {
+  const schema = todosSchema(categoryRequired)
+  delete schema.properties["title"]
+  schema.required = categoryRequired
+    ? ["id", "category", "created", "updated"]
+    : ["id", "created", "updated"]
+  return schema
+}
+
+const todosView = (query: string, properties: ReadonlyArray<string>): CollectionSchema => {
+  const definitions: CollectionSchema["properties"] = {
+    id: { type: "string", "x-system": true, "x-view-only": true },
+    seqId: { type: "integer", "x-system": true, "x-view-only": true, "x-kind": "seqId" },
+    title: { type: "string" }
+  }
+  const viewProperties: CollectionSchema["properties"] = {}
+  for (const name of properties) {
+    const definition = definitions[name]
+    if (definition !== undefined) viewProperties[name] = definition
+  }
+  return {
+    "x-collection-kind": "view",
+    type: "object",
+    properties: viewProperties,
+    required: ["id"],
+    "x-view-query": query
+  }
+}
+
+const insertE2eTodo = (sql: SqlClient.SqlClient, id: string, title: string, category: string) =>
+  sql`INSERT INTO ${sql("e2e_todos")} ${sql.insert({
+    id,
+    title,
+    category,
+    created: "2026-01-01",
+    updated: "2026-01-01"
+  })}`
 
 describeE2E("libSQL remote sqld", () => {
   it.effect("runs migrations, CRUD, list/filter/sort/cursor, rules, auth, and bulk", () => {
@@ -332,6 +372,101 @@ describeE2E("libSQL remote sqld", () => {
         SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'e2e_rollback'
       `
       expect(rolledBack).toEqual([])
+    }).pipe(Effect.provide(layer))
+  }, 60_000)
+
+  it.effect("dropColumn recreates a tracked dependent view on sqld", () => {
+    const database = LibsqlDatabase({ url })
+    const layer = Layer.mergeAll(
+      MigratorLive.pipe(Layer.provide(database.layer)),
+      database.layer
+    )
+
+    return Effect.gen(function* () {
+      yield* waitForServer
+      yield* dropRebuildTables
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      const options = { schemaTable: "e2e_collections", migrationsTable: "e2e_migrations" }
+
+      yield* migrator.migrate(
+        [
+          { name: "e2e_todos", schema: todosSchema(true) },
+          {
+            name: "e2e_view_v2",
+            schema: todosView("SELECT id, seqId, title FROM e2e_todos", ["id", "seqId", "title"])
+          }
+        ],
+        options
+      )
+      yield* insertE2eTodo(sql, "t1", "one", "c1")
+
+      yield* migrator.migrate(
+        [
+          { name: "e2e_todos", schema: todosWithoutTitle(true) },
+          {
+            name: "e2e_view_v2",
+            schema: todosView("SELECT id, seqId FROM e2e_todos", ["id", "seqId"])
+          }
+        ],
+        { ...options, allowDestructive: true }
+      )
+
+      const columns = yield* sql<{ name: string }>`PRAGMA table_info(e2e_todos)`
+      expect(columns.map((c) => c.name)).not.toContain("title")
+      const rows = yield* sql<{ id: string }>`SELECT id FROM ${sql("e2e_view_v2")}`
+      expect(rows).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(layer))
+  }, 60_000)
+
+  it.effect("dropColumn with a stale tracked view rolls back on sqld", () => {
+    const database = LibsqlDatabase({ url })
+    const layer = Layer.mergeAll(
+      MigratorLive.pipe(Layer.provide(database.layer)),
+      database.layer
+    )
+
+    return Effect.gen(function* () {
+      yield* waitForServer
+      yield* dropRebuildTables
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      const options = { schemaTable: "e2e_collections", migrationsTable: "e2e_migrations" }
+
+      yield* migrator.migrate(
+        [
+          { name: "e2e_todos", schema: todosSchema(true) },
+          {
+            name: "e2e_view_stale",
+            schema: todosView("SELECT id, seqId, title FROM e2e_todos", ["id", "seqId", "title"])
+          }
+        ],
+        options
+      )
+      yield* insertE2eTodo(sql, "t1", "one", "c1")
+
+      const exit = yield* Effect.exit(
+        migrator.migrate(
+          [
+            { name: "e2e_todos", schema: todosWithoutTitle(true) },
+            {
+              name: "e2e_view_stale",
+              schema: todosView("SELECT id, seqId, title FROM e2e_todos", ["id", "seqId", "title"])
+            }
+          ],
+          { ...options, allowDestructive: true }
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      const columns = yield* sql<{ name: string }>`PRAGMA table_info(e2e_todos)`
+      expect(columns.map((c) => c.name)).toContain("title")
+      const views = yield* sql<{ name: string }>`
+        SELECT name FROM sqlite_master WHERE type = 'view' AND name = 'e2e_view_stale'
+      `
+      expect(views).toHaveLength(1)
+      const rows = yield* sql<{ id: string }>`SELECT id FROM ${sql("e2e_todos")}`
+      expect(rows).toEqual([{ id: "t1" }])
     }).pipe(Effect.provide(layer))
   }, 60_000)
 

@@ -12,10 +12,35 @@ import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 
-const testLayer = Layer.mergeAll(
-  MigratorLive.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Dialect, sqliteDialect), sqliteLayer))),
-  sqliteLayer
-)
+const testLayerWith = (
+  dialect: DialectType,
+  sqlLayer: Layer.Layer<SqlClient.SqlClient>
+) =>
+  Layer.mergeAll(
+    MigratorLive.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Dialect, dialect), sqlLayer))),
+    sqlLayer
+  )
+
+const testLayer = testLayerWith(sqliteDialect, sqliteLayer)
+
+const recordingLayer = (recorded: Array<string>) =>
+  Layer.effect(
+    SqlClient.SqlClient,
+    Effect.gen(function* () {
+      const base = yield* SqlClient.SqlClient
+      return new Proxy(base, {
+        get(target, property, receiver) {
+          if (property === "unsafe") {
+            return (statement: string, params?: ReadonlyArray<unknown>) => {
+              recorded.push(statement)
+              return target.unsafe(statement, params)
+            }
+          }
+          return Reflect.get(target, property, receiver)
+        }
+      })
+    })
+  ).pipe(Layer.provide(sqliteLayer))
 
 /** A dialect that renders a comment instead of SQL — the shape of the original defect. */
 const commentOnlyDialect: DialectType = {
@@ -68,19 +93,56 @@ function todosWithoutTitle(): CollectionSchema {
   return schema
 }
 
-/** A view collection reading from `todos`; unchanged across the migrations below. */
-function todosView(): CollectionSchema {
+type ViewOptions = {
+  query?: string
+  properties?: ReadonlyArray<string>
+}
+
+const viewPropertyDefinitions: Record<string, CollectionSchema["properties"][string]> = {
+  id: { type: "string", "x-system": true, "x-view-only": true },
+  seqId: { type: "integer", "x-system": true, "x-view-only": true, "x-kind": "seqId" },
+  title: { type: "string" },
+  secret: { type: "string", "x-hidden": true }
+}
+
+/** A view collection reading from `todos`. */
+function todosView({
+  query = "SELECT id, seqId, title FROM todos",
+  properties = ["id", "seqId", "title"]
+}: ViewOptions = {}): CollectionSchema {
+  const viewProperties: CollectionSchema["properties"] = {}
+  for (const name of properties) {
+    const definition = viewPropertyDefinitions[name]
+    if (definition !== undefined) viewProperties[name] = definition
+  }
   return {
     "x-collection-kind": "view",
     type: "object",
-    properties: {
-      id: { type: "string", "x-system": true, "x-view-only": true },
-      seqId: { type: "integer", "x-system": true, "x-view-only": true, "x-kind": "seqId" },
-      title: { type: "string" }
-    },
+    properties: viewProperties,
     required: ["id"],
-    "x-view-query": "SELECT id, seqId, title FROM todos"
+    "x-view-query": query
   }
+}
+
+function todosViewWithoutTitle(): CollectionSchema {
+  return todosView({
+    query: "SELECT id, seqId FROM todos",
+    properties: ["id", "seqId"]
+  })
+}
+
+function todosViewWithStaleProperty(): CollectionSchema {
+  return todosView({
+    query: "SELECT id, seqId FROM todos",
+    properties: ["id", "seqId", "title"]
+  })
+}
+
+function todosWithoutTitleCategoryRequired(): CollectionSchema {
+  const schema = todosSchema({ categoryRequired: true })
+  delete schema.properties["title"]
+  schema.required = ["id", "category"]
+  return schema
 }
 
 const tableInfo = (sql: SqlClient.SqlClient, table: string) =>
@@ -98,6 +160,14 @@ const indexNames = (sql: SqlClient.SqlClient, table: string) =>
 
 const tableExists = (sql: SqlClient.SqlClient, table: string) =>
   sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${table}`
+
+const viewSql = (sql: SqlClient.SqlClient, view: string) =>
+  sql<{ name: string; sql: string }>`
+    SELECT name, sql FROM sqlite_master WHERE type = 'view' AND name = ${view}
+  `
+
+const countRows = (sql: SqlClient.SqlClient, table: string) =>
+  sql<{ count: number }>`SELECT COUNT(*) AS count FROM ${sql(table)}`
 
 const sequenceFor = (sql: SqlClient.SqlClient, table: string) =>
   sql<{ seq: number }>`SELECT seq FROM sqlite_sequence WHERE name = ${table}`
@@ -293,7 +363,7 @@ describe("SQLite column changes (table recreation)", () => {
       expect(rows).toEqual([{ id: "t1", title: "one" }])
     }).pipe(Effect.provide(testLayer)))
 
-  it.effect("still fails on a drop column referenced by a view", () =>
+  it.effect("recreates a view whose desired query and properties drop the removed column", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const migrator = yield* Migrator
@@ -301,6 +371,80 @@ describe("SQLite column changes (table recreation)", () => {
         { name: "todos", schema: todosSchema({ categoryRequired: true }) },
         { name: "todos_view", schema: todosView() }
       ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      yield* migrator.migrate(
+        [
+          { name: "todos", schema: todosWithoutTitle() },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ],
+        { allowDestructive: true }
+      )
+
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).not.toContain("title")
+      const views = yield* viewSql(sql, "todos_view")
+      expect(views).toHaveLength(1)
+      expect(views[0]?.sql).toContain("SELECT id, seqId FROM todos")
+      const rows = yield* sql<{ id: string }>`SELECT id FROM ${sql("todos_view")}`
+      expect(rows).toEqual([{ id: "t1" }])
+      const base = yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`
+      expect(base).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rolls back when the view query drops the column but the property remains", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      const initial = todosSchema({
+        categoryRequired: true,
+        indexes: [{ fields: ["category"], unique: false }]
+      })
+      yield* migrator.migrate([
+        { name: "todos", schema: initial },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const beforeCollections = yield* countRows(sql, "_collections")
+      const beforeMigrations = yield* countRows(sql, "_migrations")
+      const beforeIndexes = (yield* indexNames(sql, "todos")).map((i) => i.name).sort()
+
+      const destructive = todosWithoutTitle()
+      destructive["x-indexes"] = [{ fields: ["category"], unique: false }]
+      const exit = yield* Effect.exit(
+        migrator.migrate(
+          [
+            { name: "todos", schema: destructive },
+            { name: "todos_view", schema: todosViewWithStaleProperty() }
+          ],
+          { allowDestructive: true }
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).toContain("title")
+      const views = yield* viewSql(sql, "todos_view")
+      expect(views).toHaveLength(1)
+      expect(views[0]?.sql).toContain("title")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+      expect(yield* countRows(sql, "_collections")).toEqual(beforeCollections)
+      expect(yield* countRows(sql, "_migrations")).toEqual(beforeMigrations)
+      expect((yield* indexNames(sql, "todos")).map((i) => i.name).sort()).toEqual(beforeIndexes)
+      const storedView = yield* sql<{ schema: string }>`
+        SELECT schema FROM "_collections" WHERE name = ${"todos_view"}
+      `
+      expect(storedView[0]?.schema).toContain("SELECT id, seqId, title FROM todos")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rolls back when the view query still selects the dropped column", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
 
       const exit = yield* Effect.exit(
         migrator.migrate(
@@ -313,13 +457,328 @@ describe("SQLite column changes (table recreation)", () => {
       )
 
       expect(Exit.isFailure(exit)).toBe(true)
-      const columns = (yield* tableInfo(sql, "todos")).map((c) => c.name)
-      expect(columns).toContain("title")
-      const views = yield* sql<{ name: string }>`
-        SELECT name FROM sqlite_master WHERE type = 'view' AND name = 'todos_view'
-      `
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).toContain("title")
+      const views = yield* viewSql(sql, "todos_view")
       expect(views).toHaveLength(1)
+      expect(views[0]?.sql).toContain("title")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
     }).pipe(Effect.provide(testLayer)))
+
+  it.effect("recreates a SELECT * view when the declared properties drop the removed column", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        {
+          name: "todos_view",
+          schema: todosView({ query: "SELECT * FROM todos", properties: ["id", "seqId", "title"] })
+        }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      yield* migrator.migrate(
+        [
+          { name: "todos", schema: todosWithoutTitle() },
+          {
+            name: "todos_view",
+            schema: todosView({ query: "SELECT * FROM todos", properties: ["id", "seqId"] })
+          }
+        ],
+        { allowDestructive: true }
+      )
+
+      const views = yield* viewSql(sql, "todos_view")
+      expect(views).toHaveLength(1)
+      expect(views[0]?.sql).toContain("SELECT * FROM todos")
+      const columns = (yield* tableInfo(sql, "todos_view")).map((c) => c.name)
+      expect(columns).toContain("id")
+      expect(columns).toContain("seqId")
+      expect(columns).not.toContain("title")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos_view")}`).toEqual([
+        { id: "t1" }
+      ])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rolls back when a SELECT * view still declares the removed column", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        {
+          name: "todos_view",
+          schema: todosView({ query: "SELECT * FROM todos", properties: ["id", "seqId", "title"] })
+        }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate(
+          [
+            { name: "todos", schema: todosWithoutTitle() },
+            {
+              name: "todos_view",
+              schema: todosView({ query: "SELECT * FROM todos", properties: ["id", "seqId", "title"] })
+            }
+          ],
+          { allowDestructive: true }
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).toContain("title")
+      expect(yield* viewSql(sql, "todos_view")).toHaveLength(1)
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("recreates a transitive view chain so both views remain queryable", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_v1", schema: todosView() },
+        {
+          name: "todos_v2",
+          schema: todosView({
+            query: "SELECT id, seqId FROM todos_v1",
+            properties: ["id", "seqId"]
+          })
+        }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      yield* migrator.migrate(
+        [
+          { name: "todos", schema: todosWithoutTitle() },
+          { name: "todos_v1", schema: todosViewWithoutTitle() },
+          {
+            name: "todos_v2",
+            schema: todosView({
+              query: "SELECT id, seqId FROM todos_v1",
+              properties: ["id", "seqId"]
+            })
+          }
+        ],
+        { allowDestructive: true }
+      )
+
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos_v1")}`).toEqual([
+        { id: "t1" }
+      ])
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos_v2")}`).toEqual([
+        { id: "t1" }
+      ])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("recreates views when a dropColumn is subsumed by a rebuild", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema() },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      yield* migrator.migrate(
+        [
+          { name: "todos", schema: todosWithoutTitleCategoryRequired() },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ],
+        { allowDestructive: true }
+      )
+
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).not.toContain("title")
+      expect(yield* categoryNotNull(sql)).toBe(1)
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain("SELECT id, seqId FROM todos")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos_view")}`).toEqual([
+        { id: "t1" }
+      ])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rolls back when a rebuild leaves a stale view", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema() },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate(
+          [
+            { name: "todos", schema: todosWithoutTitleCategoryRequired() },
+            { name: "todos_view", schema: todosView() }
+          ],
+          { allowDestructive: true }
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).toContain("title")
+      expect(yield* categoryNotNull(sql)).toBe(0)
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain("title")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("removes an affected orphan view with an explicit drop", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      yield* migrator.migrate([{ name: "todos", schema: todosWithoutTitle() }], {
+        allowDestructive: true
+      })
+
+      expect(yield* viewSql(sql, "todos_view")).toEqual([])
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).not.toContain("title")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("leaves an unaffected view untouched", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }])
+      yield* sql.unsafe(`CREATE VIEW "other_view" AS SELECT 1 AS "id"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      yield* migrator.migrate([{ name: "todos", schema: todosWithoutTitle() }], {
+        allowDestructive: true
+      })
+
+      expect((yield* viewSql(sql, "other_view"))[0]?.sql).toContain("SELECT 1")
+      expect(yield* sql<{ id: number }>`SELECT id FROM ${sql("other_view")}`).toEqual([{ id: 1 }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("untracked view blocks the native drop and rolls back", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }])
+      yield* sql.unsafe(`CREATE VIEW "raw_view" AS SELECT "id", "title" FROM "todos"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([{ name: "todos", schema: todosWithoutTitle() }], {
+          allowDestructive: true
+        })
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).toContain("title")
+      expect(yield* viewSql(sql, "raw_view")).toHaveLength(1)
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("pins the untracked-view rebuild gap", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema() }])
+      yield* sql.unsafe(`CREATE VIEW "raw_view" AS SELECT "id", "title" FROM "todos"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      yield* migrator.migrate([{ name: "todos", schema: todosWithoutTitleCategoryRequired() }], {
+        allowDestructive: true
+      })
+
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).not.toContain("title")
+      const rawView = yield* viewSql(sql, "raw_view")
+      if (rawView.length > 0) {
+        const broken = yield* Effect.exit(sql.unsafe(`SELECT * FROM "raw_view"`))
+        expect(Exit.isFailure(broken)).toBe(true)
+      } else {
+        expect(rawView).toHaveLength(0)
+      }
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rolls back when an affected view query is invalid for another reason", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate(
+          [
+            { name: "todos", schema: todosWithoutTitle() },
+            {
+              name: "todos_view",
+              schema: todosView({
+                query: "SELECT id, missing FROM nowhere",
+                properties: ["id", "missing"]
+              })
+            }
+          ],
+          { allowDestructive: true }
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).toContain("title")
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain("title")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails plan() preflight with an actionable allowDestructive message", () =>
+    Effect.gen(function* () {
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+
+      const error = yield* Effect.flip(
+        migrator.plan([{ name: "todos", schema: todosWithoutTitle() }])
+      )
+      const detail =
+        typeof error === "object" && error !== null && "detail" in error
+          ? String(Reflect.get(error, "detail"))
+          : String(error)
+      expect(detail).toContain("allowDestructive")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("records validation queries after the DDL statements", () => {
+    const recorded: Array<string> = []
+    return Effect.gen(function* () {
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      recorded.length = 0
+
+      yield* migrator.migrate(
+        [
+          { name: "todos", schema: todosWithoutTitle() },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ],
+        { allowDestructive: true }
+      )
+
+      const ddlIndex = recorded.findIndex(
+        (statement) => statement === 'ALTER TABLE "todos" DROP COLUMN "title"'
+      )
+      const validationIndex = recorded.findIndex((statement) =>
+        statement.includes('SELECT "id", "seqId" FROM "todos_view" LIMIT 0')
+      )
+      expect(ddlIndex).toBeGreaterThanOrEqual(0)
+      expect(validationIndex).toBeGreaterThan(ddlIndex)
+    }).pipe(Effect.provide(testLayerWith(sqliteDialect, recordingLayer(recorded))))
+  })
 
   it.effect("refuses to overwrite a stale scratch table", () =>
     Effect.gen(function* () {

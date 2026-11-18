@@ -51,7 +51,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 - Stored schemas are decoded from JSON with Effect Schema; a corrupt stored row surfaces as `SqlError` naming `Invalid stored schema` rather than throwing [migrator.ts:decodeStoredSchema]
 - A plan with zero steps returns early and logs "nothing to migrate" — `_collections` is not rewritten [migrator.ts:migrateImplWith]
 - When `plan.destructive` is true and `allowDestructive` is falsy, the entire plan is skipped (all-or-nothing, never partially applied) and each destructive step is logged [migrator.ts:migrateImplWith]
-- `_migrations` insert, the `_collections` upsert, and the plan statements run inside one `sql.withTransaction`; a failure rolls all of them back [migrator.ts:migrateImplWith]
+- `_migrations` insert, the `_collections` upsert, the plan statements, and the dialect validation queries run inside one `sql.withTransaction`; a failure rolls all of them back [migrator.ts:migrateImplWith]
 - Cleanup statements run through `Effect.ensuring`, so they execute on both the committed and rolled-back path; cleanup failures are logged with `Effect.logWarning` and never propagated [migrator.ts:runCleanup]
 - The `_collections` upsert happens inside the transaction, after the `_migrations` insert, and only for a plan that was not skipped [migrator.ts:migrateImplWith]
 - Steps are ordered globally by `STEP_PRIORITY` — `dropView` → `dropIndex` → table changes → `createIndex` → `createView` — so plan ordering never depends on collection declaration order [schema-diff.ts:STEP_PRIORITY]
@@ -65,16 +65,18 @@ desired schema passed by the app is "what should exist". The migrator only write
 - Collections present in stored but absent from desired are dropped only when `allowDestructive` is set, and the step kind matches the collection kind (`dropView` vs `dropTable`) [schema-diff.ts:computePlan]
 - `status` reports `"behind"` for any collection missing from stored or any diff containing an add/create step (mixed add+drop included); `"ahead"` for any other non-empty diff, including drop-only and `alterColumn`-only changes; `"current"` for an empty diff [migrator.ts:statusImplWith]
 
-- `buildPlanContext` populates `views` from both desired and stored view collections. A desired view has `stored` and `desired` query shapes; a stored-only orphan has `desired: null`; a view with no `x-view-query` records `{ query: null }` on that side [migrator.ts:buildPlanContext].
-- `plan` returns `MigrationPlan.notes` from the translated plan when the dialect supplies notes. Empty notes are omitted, so SQLite's `plan()` shape is unchanged [migrator.ts:planImplWith].
+- `buildPlanContext` populates `views` from both desired and stored view collections. A desired view has `stored` and `desired` query shapes plus the desired `properties` list; a stored-only orphan has `desired: null`; a view with no `x-view-query` records `{ query: null }` on that side [migrator.ts:buildPlanContext].
+- `plan` returns `MigrationPlan.notes` from the translated plan when the dialect supplies notes. Empty notes are omitted; SQLite's `plan()` shape changes only for a `dropColumn` plan with synthesized view operations [migrator.ts:planImplWith].
 - `migrate` logs every dialect note at info before the transaction. Notes describe intended operations, not committed ones; read them with the failure log [migrator.ts:migrateImplWith].
+- The migrator runs `TranslatedPlan.validations` after `statements` and before the `_migrations` insert, inside the same transaction. Validation queries are read-only; a failure rolls back the DDL and metadata [migrator.ts:migrateImplWith].
 - `_migrations` still records the abstract `plan.steps`, not the synthesized statements. The notes and debug SQL log expose the synthesized operations [migrator.ts:migrateImplWith].
 
-## PostgreSQL view synthesis (issue #49)
+## View synthesis (issues #49 and #58)
 
-- The PostgreSQL DDL capability can synthesize `DROP VIEW` and `CREATE VIEW` statements around a destructive table change. The migrator passes the stored and desired view queries through `TranslatePlanContext.views` [dialect.ts:TranslatePlanContext].
-- The abstract plan still contains the schema differ's view steps. The dialect adds dependent-view statements that the differ does not emit, and returns their names in `TranslatedPlan.notes` [dialect-postgres.ts:translatePlan].
-- SQLite and libSQL ignore `views`. SQLite still fails on `ALTER TABLE ... DROP COLUMN` when a view reads the column; #49 pins that current failure in a test and does not change it [dialect-sqlite.ts:translatePlan].
+- PostgreSQL and SQLite can synthesize `DROP VIEW` and `CREATE VIEW` statements around a destructive table change. The migrator passes stored and desired view queries through `TranslatePlanContext.views` [dialect.ts:TranslatePlanContext].
+- The abstract plan still contains the schema differ's view steps. The dialect adds dependent-view statements that the differ does not emit, and returns their names in `TranslatedPlan.notes` [dialect-postgres.ts:translatePlan] [dialect-sqlite.ts:translatePlan].
+- SQLite synthesizes views only for a `dropColumn` plan. It drops affected tracked views in reverse dependency order, recreates desired views in dependency order, and validates declared properties plus `seqId` through `TranslatedPlan.validations`. A stale query or property fails and rolls back [dialect-sqlite.ts:translatePlan].
+- SQLite does not handle untracked views. A native drop fails immediately if an untracked view names the column; a rebuild-subsumed drop can leave one broken. Follow-up #59 covers detection [dialect-sqlite.ts:analyzeViewPlan].
 - A collection kind change (base table to view or view to base table) is pre-existing and unhandled. The PostgreSQL preflight and the differ fail loudly rather than silently reclassifying [schema-diff.ts:diffViewSchemas].
 
 ## Side Effects

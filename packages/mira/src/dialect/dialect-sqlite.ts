@@ -1,9 +1,16 @@
 import type { TimestampUnit } from "@gettersethya/mira-client"
 import { Effect } from "effect"
 
-import type { StoreSqlCapabilities, TranslatePlanContext } from "./dialect.js"
+import type { StoreSqlCapabilities, TranslatePlanContext, ViewShape } from "./dialect.js"
 import { errorHasCode, translateStep } from "./dialect.js"
 import type { DialectType } from "./dialect.js"
+import {
+  affectedViews,
+  fromJoinReferences,
+  normalizeIdentifier,
+  topologicalViewOrder,
+  viewDependencies
+} from "./view-dependencies.js"
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
 import type { ColumnDef, IndexShape, MigrationStep, TableShape, TableShapes } from "@/migrator/types.js"
 
@@ -268,6 +275,317 @@ const caseInsensitiveLikeSql = (
 const sqliteColumnExistsSql = (table: string, column: string) =>
   `SELECT 1 AS present FROM pragma_table_info(${quoteLiteral(table)}) WHERE name = ${quoteLiteral(column)} LIMIT 1`
 
+type ViewLookupEntry = { readonly raw: string; readonly shape: ViewShape }
+
+type ViewAnalysis = {
+  readonly changedTablesRaw: ReadonlySet<string>
+  readonly changedTables: ReadonlySet<string>
+  readonly hasSubsumedDrop: boolean
+  readonly droppedViews: ReadonlySet<string>
+  readonly explicitDrop: ReadonlyMap<string, string>
+  readonly explicitCreate: ReadonlyMap<string, { readonly raw: string; readonly query: string }>
+  readonly viewLookup: ReadonlyMap<string, ViewLookupEntry>
+  readonly viewNames: ReadonlyArray<string>
+  readonly storedViewMap: ReadonlyMap<string, ViewShape>
+  readonly sentinelViews: ReadonlySet<string>
+  readonly affected: ReadonlySet<string>
+}
+
+type ViewCreate = {
+  readonly raw: string
+  readonly query: string
+  readonly properties: ReadonlyArray<string>
+  readonly validate: boolean
+}
+
+type ViewSynthesis = {
+  readonly drops: ReadonlyArray<string>
+  readonly creates: ReadonlyArray<ViewCreate>
+  readonly notes: ReadonlyArray<string>
+}
+
+const hasQuery = (query: string | null | undefined): query is string =>
+  query !== null && query !== undefined && query.trim().length > 0
+
+/**
+ * Collects the view context a SQLite view plan needs, or returns null when the
+ * plan has no `dropColumn` step.
+ *
+ * The stored-view map may contain sentinel entries for explicitly dropped views
+ * that are absent from `ctx.views`. The sentinel makes the name a known view
+ * node in the stored dependency graph, so a tracked view that reads the
+ * untracked dropped view enters the affected closure.
+ */
+function analyzeViewPlan(
+  steps: ReadonlyArray<MigrationStep>,
+  ctx: TranslatePlanContext
+): ViewAnalysis | null {
+  const changedTablesRaw = new Set<string>()
+  for (const step of steps) {
+    if (step.kind === "dropColumn") changedTablesRaw.add(step.table)
+  }
+  if (changedTablesRaw.size === 0) return null
+
+  const changedTables = new Set([...changedTablesRaw].map(normalizeIdentifier))
+  const alteredTables = new Set<string>()
+  for (const step of steps) {
+    if (step.kind === "alterColumn") alteredTables.add(normalizeIdentifier(step.table))
+  }
+  const hasSubsumedDrop = [...changedTables].some((table) => alteredTables.has(table))
+
+  const droppedViews = new Set<string>()
+  const explicitDrop = new Map<string, string>()
+  const explicitCreate = new Map<string, { raw: string; query: string }>()
+  for (const step of steps) {
+    if (step.kind === "dropView") {
+      const normalized = normalizeIdentifier(step.view)
+      droppedViews.add(normalized)
+      explicitDrop.set(normalized, step.view)
+    } else if (step.kind === "createView") {
+      explicitCreate.set(normalizeIdentifier(step.view), {
+        raw: step.view,
+        query: step.query
+      })
+    }
+  }
+
+  const viewLookup = new Map<string, ViewLookupEntry>()
+  for (const [name, shape] of ctx.views) {
+    viewLookup.set(normalizeIdentifier(name), { raw: name, shape })
+  }
+
+  const storedViewMap = new Map(ctx.views)
+  const sentinelViews = new Set<string>()
+  for (const [normalized, raw] of explicitDrop) {
+    if (!viewLookup.has(normalized)) {
+      storedViewMap.set(raw, { stored: { query: "" }, desired: null })
+      sentinelViews.add(normalized)
+    }
+  }
+
+  return {
+    changedTablesRaw,
+    changedTables,
+    hasSubsumedDrop,
+    droppedViews,
+    explicitDrop,
+    explicitCreate,
+    viewLookup,
+    viewNames: [...ctx.views.keys()],
+    storedViewMap,
+    sentinelViews,
+    affected: affectedViews(storedViewMap, droppedViews, changedTablesRaw)
+  }
+}
+
+function createCandidatesFor(analysis: ViewAnalysis): Set<string> {
+  const candidates = new Set<string>(analysis.explicitCreate.keys())
+  for (const name of analysis.affected) {
+    const entry = analysis.viewLookup.get(name)
+    if (entry !== undefined && entry.shape.desired !== null) candidates.add(name)
+  }
+  return candidates
+}
+
+function collectViewPreflightErrors(
+  steps: ReadonlyArray<MigrationStep>,
+  analysis: ViewAnalysis
+): Array<UnsupportedMigrationStepError> {
+  const errors: Array<UnsupportedMigrationStepError> = []
+
+  const names = new Map<string, Set<string>>()
+  const addName = (raw: string) => {
+    const normalized = normalizeIdentifier(raw)
+    const rawNames = names.get(normalized) ?? new Set<string>()
+    rawNames.add(raw)
+    names.set(normalized, rawNames)
+  }
+  for (const raw of analysis.viewNames) addName(raw)
+  for (const raw of analysis.explicitDrop.values()) addName(raw)
+  for (const create of analysis.explicitCreate.values()) addName(create.raw)
+
+  for (const rawNames of names.values()) {
+    if (rawNames.size <= 1) continue
+    const [first, second] = [...rawNames]
+    errors.push(
+      new UnsupportedMigrationStepError({
+        step: "createView",
+        detail: `view names "${first}" and "${second}" collide after case folding`
+      })
+    )
+    return errors
+  }
+
+  const seenCreates = new Map<string, { raw: string; query: string }>()
+  for (const step of steps) {
+    if (step.kind !== "createView") continue
+    const normalized = normalizeIdentifier(step.view)
+    const previous = seenCreates.get(normalized)
+    if (previous !== undefined && previous.query !== step.query) {
+      errors.push(
+        new UnsupportedMigrationStepError({
+          step: "createView",
+          detail: `duplicate createView steps for "${step.view}" have different queries`
+        })
+      )
+      return errors
+    }
+    if (previous === undefined) seenCreates.set(normalized, { raw: step.view, query: step.query })
+  }
+
+  if (analysis.hasSubsumedDrop) {
+    for (const [name, shape] of analysis.storedViewMap) {
+      if (shape.stored === null) continue
+      if (analysis.sentinelViews.has(normalizeIdentifier(name))) continue
+      if (!hasQuery(shape.stored.query) && !analysis.droppedViews.has(normalizeIdentifier(name))) {
+        errors.push(
+          new UnsupportedMigrationStepError({
+            step: "dropView",
+            detail: `stored view "${name}" has no x-view-query`
+          })
+        )
+        return errors
+      }
+    }
+  }
+
+  for (const normalized of createCandidatesFor(analysis)) {
+    const entry = analysis.viewLookup.get(normalized)
+    const explicit = analysis.explicitCreate.get(normalized)
+    const desired = entry?.shape.desired
+
+    if (desired !== null && desired !== undefined && !hasQuery(desired.query)) {
+      const raw = entry?.raw ?? explicit?.raw ?? normalized
+      errors.push(
+        new UnsupportedMigrationStepError({
+          step: "createView",
+          detail: `desired view "${raw}" has no x-view-query`
+        })
+      )
+      return errors
+    }
+    if (explicit !== undefined && !hasQuery(explicit.query)) {
+      errors.push(
+        new UnsupportedMigrationStepError({
+          step: "createView",
+          detail: `createView "${explicit.raw}" has no query`
+        })
+      )
+      return errors
+    }
+  }
+
+  for (const normalized of analysis.affected) {
+    const entry = analysis.viewLookup.get(normalized)
+    if (entry === undefined || entry.shape.desired !== null) continue
+    if (analysis.explicitDrop.has(normalized)) continue
+    errors.push(
+      new UnsupportedMigrationStepError({
+        step: "dropView",
+        detail: `removed view "${entry.raw}" has no dropView step; pass allowDestructive: true or add an explicit dropView`
+      })
+    )
+    return errors
+  }
+
+  return errors
+}
+
+function referencesTouched(
+  query: string,
+  changedTables: ReadonlySet<string>,
+  affected: ReadonlySet<string>
+): boolean {
+  for (const reference of fromJoinReferences(query)) {
+    if (changedTables.has(reference) || affected.has(reference)) return true
+  }
+  return false
+}
+
+function buildViewSynthesis(analysis: ViewAnalysis, ctx: TranslatePlanContext): ViewSynthesis {
+  const dropOrder = topologicalViewOrder(
+    analysis.affected,
+    viewDependencies(analysis.storedViewMap, "stored")
+  ).reverse()
+
+  const drops: Array<string> = []
+  for (const normalized of dropOrder) {
+    const entry = analysis.viewLookup.get(normalized)
+    const explicit = analysis.explicitDrop.get(normalized)
+    const raw = entry?.raw ?? explicit
+    if (raw === undefined) continue
+    const stored = entry?.shape.stored
+    if (
+      explicit === undefined &&
+      (stored === undefined || stored === null || stored.query === null)
+    ) {
+      continue
+    }
+    drops.push(raw)
+  }
+
+  const createRaw = new Map<string, ViewCreate>()
+  for (const normalized of createCandidatesFor(analysis)) {
+    const entry = analysis.viewLookup.get(normalized)
+    const explicit = analysis.explicitCreate.get(normalized)
+    const raw = entry?.raw ?? explicit?.raw
+    if (raw === undefined) continue
+    const desired = entry?.shape.desired
+    const query = desired?.query ?? explicit?.query
+    if (!hasQuery(query)) continue
+    const properties = desired?.properties ?? []
+    const validate =
+      analysis.affected.has(normalized) ||
+      (explicit !== undefined && referencesTouched(query, analysis.changedTables, analysis.affected))
+    createRaw.set(normalized, { raw, query, properties, validate })
+  }
+
+  const effectiveDesired = new Map<string, ViewShape>()
+  for (const [name, shape] of ctx.views) {
+    const query = shape.desired?.query
+    if (!hasQuery(query)) continue
+    effectiveDesired.set(normalizeIdentifier(name), {
+      stored: null,
+      desired: { query }
+    })
+  }
+  for (const [name, create] of createRaw) {
+    if (!effectiveDesired.has(name)) {
+      effectiveDesired.set(name, {
+        stored: null,
+        desired: { query: create.query }
+      })
+    }
+  }
+
+  const createOrder = topologicalViewOrder(
+    new Set(createRaw.keys()),
+    viewDependencies(effectiveDesired, "desired")
+  )
+  const creates = createOrder.flatMap((name) => {
+    const create = createRaw.get(name)
+    return create === undefined ? [] : [create]
+  })
+
+  const notes: Array<string> = []
+  for (const raw of drops) notes.push(`drop view ${raw}`)
+  for (const create of creates) notes.push(`create view ${create.raw}`)
+  for (const create of creates) {
+    if (create.validate) notes.push(`validate view ${create.raw}`)
+  }
+
+  return { drops, creates, notes }
+}
+
+function validationQuery(raw: string, properties: ReadonlyArray<string>): string {
+  const columns = properties.length === 0
+    ? ["seqId"]
+    : properties.includes("seqId")
+      ? properties
+      : [...properties, "seqId"]
+  return `SELECT ${columns.map(quote).join(", ")} FROM ${quote(raw)} LIMIT 0`
+}
+
 export const sqliteStoreSql: StoreSqlCapabilities = {
   bootstrapMode: "plain",
   columnExistsSql: sqliteColumnExistsSql,
@@ -306,6 +624,14 @@ export const sqliteDialect: DialectType = {
     Effect.gen(function* () {
       yield* validateUniqueChanges(steps, ctx)
 
+      const analysis = analyzeViewPlan(steps, ctx)
+      if (analysis !== null) {
+        const errors = collectViewPreflightErrors(steps, analysis)
+        const firstError = errors[0]
+        if (firstError !== undefined) return yield* Effect.fail(firstError)
+      }
+      const synthesis = analysis === null ? null : buildViewSynthesis(analysis, ctx)
+
       const rebuilds = new Map<string, TableShapes>()
       for (const step of steps) {
         if (step.kind !== "alterColumn") continue
@@ -322,8 +648,19 @@ export const sqliteDialect: DialectType = {
       }
 
       const statements: Array<string> = []
+      const validations: Array<string> = []
+      if (synthesis !== null) {
+        for (const raw of synthesis.drops) {
+          statements.push(`DROP VIEW IF EXISTS ${quote(raw)}`)
+        }
+      }
+
       const rebuilt = new Set<string>()
       for (const step of steps) {
+        if (synthesis !== null && (step.kind === "createView" || step.kind === "dropView")) {
+          continue
+        }
+
         const table = "table" in step ? step.table : null
         const shapes = table === null ? undefined : rebuilds.get(table)
 
@@ -343,9 +680,20 @@ export const sqliteDialect: DialectType = {
         statements.push(...(yield* translateStep(sqliteDialect.translate, step)))
       }
 
+      if (synthesis !== null) {
+        for (const create of synthesis.creates) {
+          statements.push(`CREATE VIEW IF NOT EXISTS ${quote(create.raw)} AS ${create.query}`)
+          if (create.validate) {
+            validations.push(validationQuery(create.raw, create.properties))
+          }
+        }
+      }
+
       return {
         statements,
-        cleanup: []
+        ...(validations.length > 0 ? { validations } : {}),
+        cleanup: [],
+        ...(synthesis !== null && synthesis.notes.length > 0 ? { notes: synthesis.notes } : {})
       }
     }),
 
