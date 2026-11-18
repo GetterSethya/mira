@@ -17,6 +17,13 @@ published by CI.
 
 ### Changed
 
+- **Internal PostgreSQL DDL capability and plan notes.** `TranslatePlanContext`
+  gains a required `views` map with stored and desired query shapes.
+  `MigrationPlan` and `TranslatedPlan` gain optional `notes`.
+  `postgresDdlSql` renders identity columns, boolean and real types, native
+  `ALTER COLUMN`, 63-byte-safe index names, and dependent-view drops and
+  recreates. This is internal plumbing for #29; SQLite and libSQL behavior is
+  unchanged.
 - **Internal auth, session, rate-limit, config, and cron stores are dialect-aware.**
   `DialectType.store` supplies bootstrap locking, a zero-or-one-row column probe,
   request-path lock timeout, and retry classification. SQLite and libSQL keep

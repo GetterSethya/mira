@@ -2,7 +2,7 @@ import type { CollectionSchema } from "@gettersethya/mira-client"
 import { Cause, Context, Effect, Layer, References, Schema } from "effect"
 import { SqlClient, SqlError } from "effect/sql"
 
-import type { DialectType, TranslatePlanContext } from "@/dialect/dialect.js"
+import type { DialectType, TranslatePlanContext, ViewShape } from "@/dialect/dialect.js"
 import { Dialect } from "@/dialect/dialect.js"
 
 import type { MigrationError } from "./errors.js"
@@ -133,7 +133,27 @@ function buildPlanContext(
       desired: { columns: schemaToColumns(schema), indexes: schemaToIndexEntries(schema) }
     })
   }
-  return { tables }
+
+  const views = new Map<string, ViewShape>()
+  for (const { name, schema } of schemas) {
+    if (schema["x-collection-kind"] !== "view") continue
+    const storedSchema = stored[name]
+    const storedQuery = storedSchema?.["x-view-query"]
+    const desiredQuery = schema["x-view-query"]
+    views.set(name, {
+      stored: storedSchema === undefined ? null : { query: storedQuery ?? null },
+      desired: { query: desiredQuery ?? null }
+    })
+  }
+  for (const [name, schema] of Object.entries(stored)) {
+    if (schema["x-collection-kind"] !== "view" || views.has(name)) continue
+    views.set(name, {
+      stored: { query: schema["x-view-query"] ?? null },
+      desired: null
+    })
+  }
+
+  return { tables, views }
 }
 
 /** A statement is only worth executing when it contains SQL, not just comments or whitespace. */
@@ -250,7 +270,11 @@ function migrateImplWith(
       )
     }
 
-    const { statements, cleanup } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
+    const { statements, cleanup, notes } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
+
+    for (const note of notes ?? []) {
+      yield* Effect.logInfo(note)
+    }
 
     const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
       Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
@@ -323,14 +347,16 @@ function planImplWith(
     const plan = computePlan(schemas, storedRecord, options)
     // Render (and reject) the plan here too, so a dry run surfaces an impossible plan
     // instead of leaving it to the next boot.
-    yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
+    const translated = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
 
     yield* Effect.logInfo(`Plan: ${plan.steps.length} steps`)
     const planJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
       Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
     )
     yield* Effect.logDebug(`Steps: ${planJson}`)
-    return plan
+    return translated.notes !== undefined && translated.notes.length > 0
+      ? { ...plan, notes: translated.notes }
+      : plan
   })
 }
 

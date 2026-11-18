@@ -60,6 +60,8 @@ export type MigrationPlan = {
   steps: Array<MigrationStep>
   /** True if any step would destroy data (drop table, drop column, alter column). */
   destructive: boolean
+  /** Optional statement-level notes from the dialect, such as synthesized view operations. */
+  notes?: ReadonlyArray<string>
 }
 
 /** A collection name paired with its desired `CollectionSchema`. Input to the migrator. */
