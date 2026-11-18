@@ -43,7 +43,7 @@ migrator and database preset.
 - `perStepPlan` concatenates per-step statements in step order and always returns an empty `cleanup` [dialect.ts:perStepPlan]
 - `cleanup` runs after the transaction on both commit and rollback, so it must restore connection-level state the plan mutated [dialect.ts:TranslatedPlan]
 - SQLite `translatePlan` rebuilds a table whenever an `alterColumn` step targets it, and fails with `UnsupportedMigrationStepError` if the plan carries no stored shape for that table [dialect-sqlite.ts:translatePlan]
-- A rebuild subsumes `addColumn`, `alterColumn`, `dropColumn`, `createIndex` and `dropIndex` for its table; each rebuilt table is emitted exactly once [dialect-sqlite.ts:SUBSUMED_BY_REBUILD] [dialect-sqlite.ts:translatePlan]
+- A rebuild is triggered by `alterColumn` and subsumes `addColumn`, `dropColumn`, `createIndex` and `dropIndex` for its table; each rebuilt table is emitted exactly once [dialect-sqlite.ts:SUBSUMED_BY_REBUILD] [dialect-sqlite.ts:translatePlan]
 - Rebuild order is fixed: create scratch table (never drop a pre-existing one), copy stored columns, move the `sqlite_sequence` row, drop the original, create the desired original, copy back, move the sequence row back, drop the scratch, then recreate the desired indexes [dialect-sqlite.ts:rebuildStatements]
 - A new `NOT NULL` column without a default gets the same synthetic `DEFAULT ''`/`0` as `ADD COLUMN`, in both the scratch and final DDL [dialect-sqlite.ts:columnSql]
 - A column changing from nullable to `NOT NULL` with a default is copied through `COALESCE(col, default)`, since `SELECT` of an explicit `NULL` bypasses the default [dialect-sqlite.ts:rebuildStatements]
@@ -92,6 +92,19 @@ migrator and database preset.
 - The `USING` table covers all twelve ordered type pairs. Boolean-to-real routes through integer because PostgreSQL rejects a direct boolean-to-double cast [dialect-postgres.ts:usingExpression].
 - `indexName` hashes names over 63 UTF-8 bytes with a 64-bit FNV-1a suffix and truncates on a code-point boundary. `CREATE INDEX` and `DROP INDEX` use the same name [dialect-postgres.ts:indexNameOf].
 - `translatePlan` drops dependent views in one `DROP VIEW IF EXISTS` list, then creates them in desired-graph dependency order. Explicit `createView`/`dropView` steps survive an empty `views` map [dialect-postgres.ts:translatePlan].
-- `ViewShape.stored` and `ViewShape.desired` are `{ query: string | null } | null`. Null or blank queries fail preflight, except that an explicit `dropView` may repair a stored view [dialect.ts:ViewShape] [dialect-postgres.ts:collectPreflightErrors].
-- `TranslatePlanContext.views` is required. SQLite and libSQL receive it and ignore it [dialect-sqlite.ts:translatePlan].
-- `translatePlan` returns optional `notes` naming synthesized view drops and creates. The migrator logs them at info and returns them on `MigrationPlan.notes` [dialect-postgres.ts:translatePlan].
+- `ViewShape.stored` is `{ query: string | null } | null`. `ViewShape.desired` is `{ query: string | null; properties?: ReadonlyArray<string> } | null`. The optional `properties` list carries the declared view property names for SQLite validation; PostgreSQL ignores it [dialect.ts:ViewShape].
+- Null or blank queries fail preflight, except that an explicit `dropView` may repair a stored view [dialect-postgres.ts:collectPreflightErrors].
+- `TranslatePlanContext.views` is required. PostgreSQL and SQLite use it for dependent-view synthesis; libSQL inherits the SQLite behavior [dialect-postgres.ts:translatePlan] [dialect-sqlite.ts:translatePlan].
+- `translatePlan` returns optional `notes` naming synthesized view drops, creates, and validations. The migrator logs them at info and returns them on `MigrationPlan.notes` [dialect-postgres.ts:translatePlan] [dialect-sqlite.ts:translatePlan].
+
+## SQLite dependent-view DDL (issue #58)
+
+- `sqliteDialect.translatePlan` synthesizes view statements only when the plan contains a `dropColumn` step. Plans without a `dropColumn` keep their previous SQL [dialect-sqlite.ts:translatePlan].
+- The changed table set includes every `dropColumn` table, including a drop subsumed by an `alterColumn` rebuild. A rebuild can silently break a tracked view because SQLite does not validate views during the table recreation [dialect-sqlite.ts:analyzeViewPlan].
+- `analyzeViewPlan` normalizes table and view names, collects explicit `dropView`/`createView` steps, and computes the affected views with `affectedViews` over the stored graph. An explicit drop of an untracked view adds a sentinel node so tracked dependents enter the closure [dialect-sqlite.ts:analyzeViewPlan] [view-dependencies.ts:affectedViews].
+- Drops use reverse stored-graph order (dependents first). Creates use the effective desired graph, which includes explicit create queries, in dependency order. Every create is emitted before any validation query [dialect-sqlite.ts:buildViewSynthesis].
+- `TranslatedPlan.validations` carries the read-only probes. The migrator runs them after `statements` and before the `_migrations` insert. A probe selects every declared property plus `seqId` when absent, or `seqId` alone when no properties are declared. A stale property or a view body that still names the dropped column fails and rolls back [dialect-sqlite.ts:validationQuery] [migrator.ts:migrateImplWith].
+- Explicit view steps are deduplicated by normalized name. The desired query wins over an explicit create query; the explicit step is a fallback for views absent from `ctx.views`. Synthesized creates use `CREATE VIEW IF NOT EXISTS` [dialect-sqlite.ts:buildViewSynthesis].
+- Preflight rejects case-colliding view names, duplicate explicit creates with different queries, unanalyzable stored views in a rebuild-subsumed plan, unanalyzable create candidates, blank explicit creates, and affected orphans without an explicit `dropView` [dialect-sqlite.ts:collectViewPreflightErrors].
+- Untracked views are not covered. A native drop fails immediately if an untracked view names the column; a rebuild-subsumed drop can leave one broken. Follow-up #59 covers detection [dialect-sqlite.ts:analyzeViewPlan].
+- `libsqlDialect` local mode returns `sqliteDialect` and remote mode spreads it, so both inherit this behavior [dialect-libsql.ts:libsqlDialect].

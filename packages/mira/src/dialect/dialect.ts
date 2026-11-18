@@ -36,7 +36,15 @@ export type DeleteResultStrategy =
  */
 export type ViewShape = {
   readonly stored: { readonly query: string | null } | null
-  readonly desired: { readonly query: string | null } | null
+  readonly desired: {
+    readonly query: string | null
+    /**
+     * Declared view property names, in insertion order. SQLite uses them to
+     * validate a recreated view against the admin read path. PostgreSQL ignores
+     * this field. `undefined` means the caller did not provide the list.
+     */
+    readonly properties?: ReadonlyArray<string>
+  } | null
 }
 
 /** What a dialect needs to render a plan, beyond the step list itself. */
@@ -100,6 +108,12 @@ export type StoreSqlCapabilities = {
 export type TranslatedPlan = {
   /** Statements to run inside the migration transaction, in order. */
   statements: Array<string>
+  /**
+   * Read-only statements that validate the result of the DDL, such as SQLite's
+   * view probes. The migrator runs these after `statements` inside the same
+   * transaction. They return no rows and must not mutate state.
+   */
+  readonly validations?: ReadonlyArray<string>
   /**
    * Statements that restore connection-level state a plan mutated (a pragma, for
    * instance). The migrator runs these after the transaction ends, on success *and*

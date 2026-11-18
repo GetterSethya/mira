@@ -10,7 +10,7 @@ import {
   type CollectionSchema,
   Field
 } from "@gettersethya/mira-client"
-import { Effect, Layer, Redacted, Schema } from "effect"
+import { Effect, Exit, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { afterAll, expect } from "vitest"
@@ -175,6 +175,47 @@ const todosSchema = (categoryRequired: boolean): CollectionSchema => {
   }
 }
 
+const todosWithoutTitle = (categoryRequired: boolean): CollectionSchema => {
+  const schema = todosSchema(categoryRequired)
+  delete schema.properties["title"]
+  schema.required = categoryRequired
+    ? ["id", "category", "created", "updated"]
+    : ["id", "created", "updated"]
+  return schema
+}
+
+const todosView = (query: string, properties: ReadonlyArray<string>): CollectionSchema => {
+  const definitions: CollectionSchema["properties"] = {
+    id: { type: "string", "x-system": true, "x-view-only": true },
+    seqId: { type: "integer", "x-system": true, "x-view-only": true, "x-kind": "seqId" },
+    title: { type: "string" }
+  }
+  const viewProperties: CollectionSchema["properties"] = {}
+  for (const name of properties) {
+    const definition = definitions[name]
+    if (definition !== undefined) viewProperties[name] = definition
+  }
+  return {
+    "x-collection-kind": "view",
+    type: "object",
+    properties: viewProperties,
+    required: ["id"],
+    "x-view-query": query
+  }
+}
+
+const insertTodo = (id: string, title: string, category: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`INSERT INTO ${sql("todos")} ${sql.insert({
+      id,
+      title,
+      category,
+      created: "2026-01-01",
+      updated: "2026-01-01"
+    })}`
+  })
+
 describe("libSQL SQL behavior", () => {
   it.effect("migrates, rebuilds with a view, and preserves the high-water mark", () => {
     const dir = tempDir("mira-libsql-rebuild-")
@@ -235,6 +276,81 @@ describe("libSQL SQL behavior", () => {
     }).pipe(
       Effect.provide(layer)
     )
+  })
+})
+
+describe("libSQL dependent-view handling", () => {
+  it.effect("dropColumn with a tracked dependent view recreates and validates it", () => {
+    const dir = tempDir("mira-libsql-drop-view-")
+    const database = LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) })
+    const layer = Layer.mergeAll(
+      MigratorLive.pipe(Layer.provide(database.layer)),
+      database.layer
+    )
+
+    return Effect.gen(function* () {
+      const migrator = yield* Migrator
+      const sql = yield* SqlClient.SqlClient
+
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema(true) },
+        { name: "todos_view", schema: todosView("SELECT id, seqId, title FROM todos", ["id", "seqId", "title"]) }
+      ])
+      yield* insertTodo("t1", "one", "c1")
+
+      yield* migrator.migrate(
+        [
+          { name: "todos", schema: todosWithoutTitle(true) },
+          { name: "todos_view", schema: todosView("SELECT id, seqId FROM todos", ["id", "seqId"]) }
+        ],
+        { allowDestructive: true }
+      )
+
+      const columns = yield* sql<{ name: string }>`PRAGMA table_info(todos)`
+      expect(columns.map((c) => c.name)).not.toContain("title")
+      const rows = yield* sql<{ id: string }>`SELECT id FROM ${sql("todos_view")}`
+      expect(rows).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("dropColumn with a stale tracked view rolls back", () => {
+    const dir = tempDir("mira-libsql-drop-view-stale-")
+    const database = LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) })
+    const layer = Layer.mergeAll(
+      MigratorLive.pipe(Layer.provide(database.layer)),
+      database.layer
+    )
+
+    return Effect.gen(function* () {
+      const migrator = yield* Migrator
+      const sql = yield* SqlClient.SqlClient
+
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema(true) },
+        { name: "todos_view", schema: todosView("SELECT id, seqId, title FROM todos", ["id", "seqId", "title"]) }
+      ])
+      yield* insertTodo("t1", "one", "c1")
+
+      const exit = yield* Effect.exit(
+        migrator.migrate(
+          [
+            { name: "todos", schema: todosWithoutTitle(true) },
+            { name: "todos_view", schema: todosView("SELECT id, seqId, title FROM todos", ["id", "seqId", "title"]) }
+          ],
+          { allowDestructive: true }
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      const columns = yield* sql<{ name: string }>`PRAGMA table_info(todos)`
+      expect(columns.map((c) => c.name)).toContain("title")
+      const views = yield* sql<{ name: string }>`
+        SELECT name FROM sqlite_master WHERE type = 'view' AND name = 'todos_view'
+      `
+      expect(views).toHaveLength(1)
+      const rows = yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`
+      expect(rows).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(layer))
   })
 })
 

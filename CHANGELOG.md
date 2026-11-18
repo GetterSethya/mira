@@ -22,8 +22,9 @@ published by CI.
   `MigrationPlan` and `TranslatedPlan` gain optional `notes`.
   `postgresDdlSql` renders identity columns, boolean and real types, native
   `ALTER COLUMN`, 63-byte-safe index names, and dependent-view drops and
-  recreates. This is internal plumbing for #29; SQLite and libSQL behavior is
-  unchanged.
+  recreates. This is internal plumbing for #29. SQLite and libSQL behavior is
+  unchanged for plans without a `dropColumn`; see the SQLite dependent-view fix
+  below.
 - **Internal auth, session, rate-limit, config, and cron stores are dialect-aware.**
   `DialectType.store` supplies bootstrap locking, a zero-or-one-row column probe,
   request-path lock timeout, and retry classification. SQLite and libSQL keep
@@ -94,6 +95,8 @@ published by CI.
 
 ### Fixed
 
+- **SQLite `dropColumn` now handles dependent tracked views.** The dialect drops affected views in reverse dependency order, applies the column change, recreates desired views in dependency order, and validates their declared properties plus `seqId` inside the migration transaction. A view that still names the dropped column, or declares a property the view no longer returns, fails and rolls back. Local SQLite and libSQL inherit the behavior. Views created outside Mira are not tracked; see #59 for detection.
+- **`TranslatedPlan.validations` is a separate read-only channel.** The migrator runs it after the DDL statements and before the `_migrations` insert, so a failed view probe rolls back the plan. The SQLite rebuild also no longer claims a `PRAGMA legacy_alter_table` cleanup; it drops and recreates the table in place.
 - **Migrations now use `sql.withTransaction`.** The migrator no longer issues raw `BEGIN`, `COMMIT`, or `ROLLBACK` statements, which `@effect/sql-libsql` cannot keep on one connection. The plan statements, `_migrations` row, and `_collections` upserts commit or roll back together.
 - **The SQLite table rebuild works remotely.** It now creates the table in place with a scratch copy, preserves the AUTOINCREMENT high-water mark, recreates indexes, and no longer emits `PRAGMA legacy_alter_table`. A view that references surviving columns keeps working; a new column that would collapse a single-field unique index is rejected before any copy.
 - **Landing benchmark page and header rebuild.** The shared nav is now four

@@ -82,7 +82,10 @@ describe("buildPlanContext views", () => {
 
       expect(captured[0]?.views.get("todos_view")).toEqual({
         stored: { query: "SELECT id, seqId, title FROM todos" },
-        desired: { query: "SELECT id, seqId, title FROM todos" }
+        desired: {
+          query: "SELECT id, seqId, title FROM todos",
+          properties: ["id", "seqId", "title"]
+        }
       })
     }).pipe(Effect.provide(testLayer(capturingDialect(captured))))
   })
@@ -114,7 +117,7 @@ describe("buildPlanContext views", () => {
 
       expect(captured[0]?.views.get("bad_view")).toEqual({
         stored: null,
-        desired: { query: null }
+        desired: { query: null, properties: ["id", "seqId"] }
       })
     }).pipe(Effect.provide(testLayer(capturingDialect(captured))))
   })
