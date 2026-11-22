@@ -2,7 +2,7 @@ import type { TimestampUnit } from "@gettersethya/mira-client"
 import { Effect } from "effect"
 
 import type { StoreSqlCapabilities, TranslatePlanContext, ViewShape } from "./dialect.js"
-import { errorHasCode, translateStep } from "./dialect.js"
+import { errorHasCode, hasUniqueViolationReason, translateStep } from "./dialect.js"
 import type { DialectType } from "./dialect.js"
 import {
   affectedViews,
@@ -50,13 +50,27 @@ const quoteLiteral = (value: unknown) => {
 
 const isSqliteBusy = (error: unknown) => errorHasCode(error, ["SQLITE_BUSY", "SQLITE_LOCKED"])
 
+const SQLITE_UNIQUE_CODES = [
+  "SQLITE_CONSTRAINT_PRIMARYKEY",
+  "SQLITE_CONSTRAINT_UNIQUE",
+  1555,
+  2067
+]
+
 export const isSqliteUniqueViolation = (error: unknown) =>
-  errorHasCode(error, [
-    "SQLITE_CONSTRAINT_PRIMARYKEY",
-    "SQLITE_CONSTRAINT_UNIQUE",
-    1555,
-    2067
-  ])
+  errorHasCode(error, SQLITE_UNIQUE_CODES)
+
+const STORE_CODE_KEYS = ["code", "errno", "errstr", "errcode", "extendedCode", "rawCode"]
+
+/**
+ * Store-only duplicate classifier. Telemetry keeps `isSqliteUniqueViolation`
+ * unchanged; the auth email path gets the broader code fields and the
+ * structured `UniqueViolation` reason fallback.
+ */
+export const isSqliteStoreDuplicateKey = (error: unknown) =>
+  isSqliteUniqueViolation(error) ||
+  hasUniqueViolationReason(error) ||
+  errorHasCode(error, SQLITE_UNIQUE_CODES, STORE_CODE_KEYS)
 
 const upsertSql = (
   table: string,
@@ -589,7 +603,8 @@ function validationQuery(raw: string, properties: ReadonlyArray<string>): string
 export const sqliteStoreSql: StoreSqlCapabilities = {
   bootstrapMode: "plain",
   columnExistsSql: sqliteColumnExistsSql,
-  isRetryable: isSqliteBusy
+  isRetryable: isSqliteBusy,
+  isDuplicateKey: isSqliteStoreDuplicateKey
 }
 
 export const sqliteDialect: DialectType = {

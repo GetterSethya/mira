@@ -2,7 +2,11 @@ import { isSqlError } from "effect/sql/SqlError"
 
 import type { DialectType } from "./dialect.js"
 import { errorHasCode } from "./dialect.js"
-import { isSqliteUniqueViolation, sqliteDialect } from "./dialect-sqlite.js"
+import {
+  isSqliteStoreDuplicateKey,
+  isSqliteUniqueViolation,
+  sqliteDialect
+} from "./dialect-sqlite.js"
 
 /** How Mira talks to a libSQL endpoint. */
 export type LibsqlConnectionMode = "local" | "remote"
@@ -71,7 +75,8 @@ export function libsqlDialect(mode: LibsqlConnectionMode): DialectType {
     ...sqliteDialect,
     store: {
       ...sqliteDialect.store,
-      isRetryable: remoteClassifiers.isRetryable
+      isRetryable: remoteClassifiers.isRetryable,
+      isDuplicateKey: isSqliteStoreDuplicateKey
     },
     telemetry: {
       setup: [],

@@ -15,9 +15,9 @@ migrator and database preset.
 ## Interface
 
 - `Dialect` - `Context.Service` tag over a `DialectType`; inject with `Layer.succeed(Dialect, sqliteDialect)` [dialect.ts:Dialect]
-- `StoreSqlCapabilities` - the nested `DialectType.store` value used by the internal SQL stores: bootstrap mode, optional bootstrap SQL, zero-or-one-row column probe, request lock timeout, and retry classification [dialect.ts:StoreSqlCapabilities]
+- `StoreSqlCapabilities` - the nested `DialectType.store` value used by the internal SQL stores and the HTTP auth email path: bootstrap mode, optional bootstrap SQL, zero-or-one-row column probe, request lock timeout, retry classification, and duplicate-key classification [dialect.ts:StoreSqlCapabilities]
 - `withStoreBootstrap(sql, store, f)` - runs DDL in plain mode or in one transaction after `store.bootstrapSql`, retrying once for a retryable error [store-sql.ts:withStoreBootstrap]
-- `DialectType` (type) - the contract: `translatePlan`, `translate`, `nativeType`, `quoteIdentifier`, `currentTimestamp`, `timestampAdd`, `timestampDiff`, `caseInsensitiveLike`, `castValue`, `quoteLiteral`, `indexName`, `storesBooleanAsInteger`, `deleteResult`, `placeholder`, `upsert`, optional `telemetry` [dialect.ts:DialectType]
+- `DialectType` (type) - the contract: `translatePlan`, `translate`, `nativeType`, `quoteIdentifier`, `currentTimestamp`, `timestampAdd`, `timestampDiff`, `caseInsensitiveLike`, `castValue`, `quoteLiteral`, `indexName`, `storesBooleanAsInteger`, `deleteResult`, `placeholder`, `upsert`, required `store`, optional `telemetry` [dialect.ts:DialectType]
 - `DeleteResultStrategy` (type) - how a `DELETE` reports an affected row: `returning`, `affectedRows`, or `precheck` [dialect.ts:DeleteResultStrategy]
 - `TranslatePlanContext` (type) - `{ tables, views }` passed to `translatePlan`; `views` maps view names to stored/desired query shapes [dialect.ts:TranslatePlanContext]
 - `TranslatedPlan` (type) - `{ statements, cleanup, notes? }` returned by `translatePlan` [dialect.ts:TranslatedPlan]
@@ -35,7 +35,7 @@ migrator and database preset.
 - `topologicalViewOrder(names, dependencies)` - dependency-first view create order [view-dependencies.ts:topologicalViewOrder]
 - `rewritePlaceholders(statement, dialect)` - quote-aware `?` to driver placeholder rewrite [dialect.ts:rewritePlaceholders]
 - `libsqlConnectionMode(url)` - pure URL classifier: `:memory:`/`file:` local, `libsql:`/`http(s):`/`ws(s):` remote [dialect-libsql.ts:libsqlConnectionMode]
-- `libsqlDialect(mode)` - local returns `sqliteDialect`; remote returns a shallow copy with empty telemetry setup/cleanup and the remote retry classifier [dialect-libsql.ts:libsqlDialect]
+- `libsqlDialect(mode)` - local returns `sqliteDialect`; remote returns a shallow copy with empty telemetry setup/cleanup, the remote retry classifier, and the SQLite store duplicate classifier. Remote sqld exposes only generic `SQLITE_CONSTRAINT`, so remote duplicate races still return 503 [dialect-libsql.ts:libsqlDialect]
 
 ## Invariants
 
@@ -51,6 +51,9 @@ migrator and database preset.
 - `sqliteDialect.translate("alterColumn")` returns `[]`; that arm is unreachable through `translatePlan`, which rebuilds instead [dialect-sqlite.ts:sqliteDialect]
 - SQLite stores booleans as integers (`storesBooleanAsInteger: true`) [dialect-sqlite.ts:sqliteDialect]
 - SQLite uses `bootstrapMode: "plain"` for store DDL. The column probe uses `pragma_table_info`, and `store.isRetryable` is the same `isSqliteBusy` predicate as telemetry [dialect-sqlite.ts:sqliteStoreSql].
+- SQLite's `store.isDuplicateKey` is `isSqliteStoreDuplicateKey`: it accepts the symbolic constraint codes `1555`/`2067`, the extended code fields `errcode`/`extendedCode`/`rawCode`, and an Effect `UniqueViolation` reason. Telemetry keeps the narrower `isSqliteUniqueViolation` predicate. The store classifier treats any unique violation on the confirmation update as `email_taken`; the update only writes `email` and `emailVerified` [dialect-sqlite.ts:isSqliteStoreDuplicateKey].
+- PostgreSQL `postgresStoreSql.isDuplicateKey` is `isPostgresUniqueViolation`: SQLSTATE `23505` or an Effect `UniqueViolation` reason. It is internal capability work for #29, not a shipped PostgreSQL route [dialect-postgres.ts:isPostgresUniqueViolation].
+- A custom dialect must supply `store.isDuplicateKey`. A SQLite-like dialect can spread `sqliteDialect.store`; a new engine must provide its own structured classifier [dialect.ts:StoreSqlCapabilities].
 - `postgresStoreSql` uses `bootstrapMode: "transaction"`, `SET LOCAL lock_timeout = '5s'`, and `pg_advisory_xact_lock(hashtextextended('mira.system-tables', 0))`. Its probe is schema-qualified and returns one row; its retry predicate covers `40001`, `40P01`, and `55P03` [dialect-postgres.ts:postgresStoreSql].
 - SQLite reports `DELETE` results with `returning`; Node 24 and Bun 1.4 both return the deleted id from `DELETE ... RETURNING id` [dialect-sqlite.ts:sqliteDialect]
 - A dialect without `RETURNING` chooses `affectedRows` when its driver exposes an affected count, or `precheck` for the portable `SELECT 1` + `DELETE` fallback [dialect.ts:DeleteResultStrategy]

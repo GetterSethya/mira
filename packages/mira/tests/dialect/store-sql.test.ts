@@ -1,11 +1,12 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Data, Effect } from "effect"
+import { Data, Effect, Result } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import type { StoreSqlCapabilities } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { libsqlDialect } from "@/dialect/dialect-libsql.js"
 import { postgresStoreSql } from "@/dialect/dialect-postgres.js"
 import { withStoreBootstrap } from "@/dialect/store-sql.js"
 
@@ -28,7 +29,8 @@ describe("withStoreBootstrap", () => {
       const store: StoreSqlCapabilities = {
         bootstrapMode: "plain",
         columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false
+        isRetryable: () => false,
+        isDuplicateKey: () => false
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>
@@ -49,7 +51,8 @@ describe("withStoreBootstrap", () => {
           "INSERT INTO _bootstrap_gate (id) VALUES (1)"
         ],
         columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false
+        isRetryable: () => false,
+        isDuplicateKey: () => false
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>
@@ -72,7 +75,8 @@ describe("withStoreBootstrap", () => {
         bootstrapMode: "transaction",
         bootstrapSql: ["CREATE TABLE _rollback_gate (id INTEGER)"],
         columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false
+        isRetryable: () => false,
+        isDuplicateKey: () => false
       }
 
       const exit = yield* Effect.exit(
@@ -98,7 +102,8 @@ describe("withStoreBootstrap", () => {
         bootstrapMode: "transaction",
         bootstrapSql: ["SELECT 1"],
         columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: (error) => error instanceof TestError && error.retryable
+        isRetryable: (error) => error instanceof TestError && error.retryable,
+        isDuplicateKey: () => false
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>
@@ -138,5 +143,74 @@ describe("store capabilities", () => {
     expect(postgresStoreSql.isRetryable({ code: "55P03" })).toBe(true)
     expect(postgresStoreSql.isRetryable({ code: "23505" })).toBe(false)
     expect(postgresStoreSql.transactionLockTimeoutSql).toContain("2s")
+  })
+})
+
+describe("duplicate key classifiers", () => {
+  it.effect("classifies a real SQLite duplicate and rejects a NOT NULL error", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(`
+        CREATE TABLE IF NOT EXISTS "_duplicate_email" (
+          "email" TEXT NOT NULL UNIQUE
+        )
+      `)
+      yield* sql.unsafe(`DELETE FROM "_duplicate_email"`)
+      yield* sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, ["a@example.com"])
+
+      const duplicate = yield* Effect.result(
+        sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, ["a@example.com"])
+      )
+      expect(Result.isFailure(duplicate)).toBe(true)
+      if (Result.isFailure(duplicate)) {
+        expect(sqliteDialect.store.isDuplicateKey(duplicate.failure)).toBe(true)
+        expect(sqliteDialect.store.isDuplicateKey(duplicate.failure.reason)).toBe(true)
+      }
+
+      const notNull = yield* Effect.result(
+        sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, [null])
+      )
+      expect(Result.isFailure(notNull)).toBe(true)
+      if (Result.isFailure(notNull)) {
+        expect(sqliteDialect.store.isDuplicateKey(notNull.failure)).toBe(false)
+      }
+    }).pipe(Effect.provide(sqliteLayer))
+  )
+
+  it("classifies structured codes without message text", () => {
+    expect(sqliteDialect.store.isDuplicateKey({ errcode: 2067 })).toBe(true)
+    expect(sqliteDialect.store.isDuplicateKey({ rawCode: 2067 })).toBe(true)
+    expect(sqliteDialect.store.isDuplicateKey({ extendedCode: "SQLITE_CONSTRAINT_UNIQUE" })).toBe(
+      true
+    )
+    expect(sqliteDialect.store.isDuplicateKey({ reason: { _tag: "UniqueViolation" } })).toBe(true)
+
+    expect(sqliteDialect.telemetry?.isDuplicateKey({ reason: { _tag: "UniqueViolation" } })).toBe(
+      false
+    )
+    expect(sqliteDialect.telemetry?.isDuplicateKey({ rawCode: 2067 })).toBe(false)
+    expect(sqliteDialect.store.isDuplicateKey({ errstr: "constraint failed" })).toBe(false)
+
+    expect(postgresStoreSql.isDuplicateKey({ code: "23505" })).toBe(true)
+    expect(
+      postgresStoreSql.isDuplicateKey({
+        _tag: "SqlError",
+        reason: { _tag: "UniqueViolation", cause: { code: "23505" } }
+      })
+    ).toBe(true)
+    expect(
+      postgresStoreSql.isDuplicateKey({ _tag: "SqlError", reason: { _tag: "UniqueViolation" } })
+    ).toBe(true)
+    expect(postgresStoreSql.isDuplicateKey({ code: "40P01" })).toBe(false)
+    expect(
+      postgresStoreSql.isDuplicateKey({
+        message: "duplicate key value violates unique constraint"
+      })
+    ).toBe(false)
+
+    expect(libsqlDialect("remote").store.isDuplicateKey({ errno: 2067 })).toBe(true)
+    expect(
+      libsqlDialect("remote").telemetry?.isDuplicateKey({ reason: { _tag: "UniqueViolation" } })
+    ).toBe(false)
   })
 })

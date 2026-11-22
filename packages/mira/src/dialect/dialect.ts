@@ -1,6 +1,6 @@
 import type { TimestampUnit } from "@gettersethya/mira-client"
 import type { Option } from "effect"
-import { Context, Effect } from "effect"
+import { Context, Effect, Predicate } from "effect"
 
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
 import type { ColumnDef, MigrationStep, TableShapes } from "@/migrator/types.js"
@@ -76,7 +76,12 @@ export type TelemetryDialectHooks = {
   readonly isDuplicateKey: (error: unknown) => boolean
 }
 
-/** Capabilities the internal auth, session, rate-limit, and cron stores need. */
+/**
+ * Capabilities the internal auth, session, rate-limit, and cron stores need.
+ *
+ * The HTTP auth email flow also reads `isDuplicateKey` when a confirmation
+ * update loses a race for a unique email address.
+ */
 export type StoreSqlCapabilities = {
   /**
    * Returns a complete SQL query with one row when the column exists and zero
@@ -86,6 +91,12 @@ export type StoreSqlCapabilities = {
   readonly columnExistsSql: (table: string, column: string) => string
   /** Whether a failed SQL statement is safe to retry by the caller. */
   readonly isRetryable: (error: unknown) => boolean
+  /**
+   * Whether a failed write was rejected because a primary-key or unique-index
+   * value already exists. Classify by structured driver values, not message
+   * text.
+   */
+  readonly isDuplicateKey: (error: unknown) => boolean
   /**
    * Optional transaction-local lock timeout for request-path write
    * transactions. SQLite omits it. PostgreSQL uses
@@ -242,12 +253,22 @@ export function rewritePlaceholders(
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
 
+const DEFAULT_ERROR_CODE_KEYS = ["code", "errno", "errstr"] as const
+
 /**
- * Finds a `code` or `errno` value inside an error shape, including nested
+ * Finds an error code value inside an error shape, including nested
  * `cause`/`reason` fields. Useful for driver-neutral retry and duplicate
  * predicates without importing a driver.
+ *
+ * The default keys are `code`, `errno`, and `errstr`. A caller can pass a wider
+ * key list for a driver that stores codes under `errcode`, `extendedCode`, or
+ * `rawCode`. Matching is on exact values; this does not inspect message text.
  */
-export function errorHasCode(error: unknown, codes: ReadonlyArray<string | number>): boolean {
+export function errorHasCode(
+  error: unknown,
+  codes: ReadonlyArray<string | number>,
+  keys: ReadonlyArray<string> = DEFAULT_ERROR_CODE_KEYS
+): boolean {
   const wanted = new Set(codes.map(String))
   const seen = new Set<unknown>()
   const stack: Array<unknown> = [error]
@@ -257,7 +278,7 @@ export function errorHasCode(error: unknown, codes: ReadonlyArray<string | numbe
     if (!isRecord(value) || seen.has(value)) continue
     seen.add(value)
 
-    for (const key of ["code", "errno", "errstr"] as const) {
+    for (const key of keys) {
       const candidate = value[key]
       if (candidate !== undefined && wanted.has(String(candidate))) return true
     }
@@ -270,6 +291,16 @@ export function errorHasCode(error: unknown, codes: ReadonlyArray<string | numbe
 
   return false
 }
+
+/**
+ * Whether an Effect SQL error carries a structured `UniqueViolation` reason.
+ * This is a fallback for a driver that classifies the error but stores its code
+ * under a field the caller does not know.
+ */
+export const hasUniqueViolationReason = (error: unknown): boolean =>
+  Predicate.isObject(error) &&
+  Predicate.hasProperty(error, "reason") &&
+  Predicate.isTagged(error.reason, "UniqueViolation")
 
 /** Builds a retry predicate from one or more driver error codes. */
 export function retryableByCauseCode(codes: ReadonlyArray<string | number>) {

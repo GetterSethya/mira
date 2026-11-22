@@ -569,6 +569,7 @@ export const confirmEmailChange = (
     }
 
     const repo = yield* Repository
+    const dialect = yield* Dialect
     const rows = yield* repo.view(collection.name, record.userId)
     if (Option.isNone(rows)) {
       return yield* Effect.fail(new InvalidResetTokenError({ message: "Invalid or expired token" }))
@@ -589,10 +590,7 @@ export const confirmEmailChange = (
       )
       .pipe(
         Effect.mapError((error) => {
-          if (
-            error._tag === "SqlError" &&
-            /UNIQUE constraint failed.*email/i.test(error.message)
-          ) {
+          if (error._tag === "SqlError" && dialect.store.isDuplicateKey(error)) {
             return new EmailTakenError({ message: "That email is already in use" })
           }
           return new EmailUnavailableError({ message: `Email change failed: ${error._tag}` })
