@@ -54,9 +54,14 @@ const latest = await mira.posts.getFirstOrNone(
   { sort: "created", order: "desc" },
 ).raw()
 
-// All records as a flat array (no pagination)
-const all = await mira.posts.getFullList({ limit: 5000 }).raw()
+// One page as a flat array. The server clamps the limit to 100.
+// getFullList does not follow nextCursor; use getList to page.
+const page = await mira.posts.getFullList({ limit: 100 }).raw()
 ```
+
+`nextCursor` is opaque. The shipped SQLite and libSQL presets return a number;
+PostgreSQL returns a decimal string for `BIGINT`. Pass it back unchanged as the
+next `cursor`; do not convert a string cursor to a number.
 
 ## Mutations
 
@@ -120,7 +125,7 @@ Every handler exposes `.toEffect()` for use inside Effect pipelines.
 import { Effect } from "effect"
 
 const effect = mira.posts.getList({ limit: 10 }).toEffect()
-// Effect.Effect<{ items: Post[], nextCursor: number | null }, MiraError, HttpClient>
+// Effect.Effect<{ items: Post[], nextCursor: number | string | null }, MiraError, HttpClient>
 
 Effect.gen(function* () {
   const { items } = yield* mira.posts.getList({ limit: 10 }).toEffect()

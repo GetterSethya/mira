@@ -177,7 +177,7 @@ describe("getList select narrowing", () => {
     expectTypeOf<Data["items"][number]>().toEqualTypeOf<
       Pick<InferRecord<PostFields>, "id" | "created" | "updated" | "title" | "views">
     >()
-    expectTypeOf<Data["nextCursor"]>().toEqualTypeOf<number | null>()
+    expectTypeOf<Data["nextCursor"]>().toEqualTypeOf<number | string | null>()
     expect(true).toBe(true)
   })
 

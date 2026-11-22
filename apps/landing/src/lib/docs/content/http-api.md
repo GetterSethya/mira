@@ -50,7 +50,7 @@ The telemetry routes accept `filter`, `after`, and `limit` (spans also accept `t
 
 - `filter`: a URL-encoded JSON `FilterNode`.
 - `sort`, `order`, `select`, `expand`: the sort field and direction, the field projection, and relation embedding.
-- `after`, `limit`: the `seqId` cursor and page size. `limit` defaults to `30` and is clamped to `100`.
+- `after`, `limit`: the opaque `seqId` cursor and page size. `after` accepts a non-negative safe integer or a canonical decimal string; pass the previous `nextCursor` back unchanged. `limit` defaults to `30` and is clamped to `100`.
 
 The response is `{ items, nextCursor }`. [Querying and pagination](../querying/) owns the full parameter table, the filter AST, cursor semantics, and caching.
 

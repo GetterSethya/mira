@@ -1,4 +1,4 @@
-import type { AnyCollectionDef, CollectionSchema } from "@gettersethya/mira-client"
+import type { AnyCollectionDef, CollectionSchema, Cursor } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
 import { filterNodeToWhereClause } from "@gettersethya/mira-client"
 import { Clock, Context, Effect, Layer, Option, References, Schema } from "effect"
@@ -17,6 +17,7 @@ import { FileStorage } from "@/storage/storage.js"
 import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import type { CursorPage, RequestCtx } from "./context.js"
+import { cursorFromSeqId } from "./cursor.js"
 import { MutationBatcher, MutationBatcherDisabledLive, estimateRowBytes, makeMutationBatcherLayer } from "./mutation-batcher.js"
 import type {
   BatchMutationStats,
@@ -60,7 +61,7 @@ export class CollectionService extends Context.Service<
   {
     list(
       collection: AnyCollectionDef,
-      cursor: number | null,
+      cursor: Cursor | null,
       perPage: number,
       ctx: RequestCtx,
       filter?: FilterNode,
@@ -686,7 +687,7 @@ function makeCollectionServiceLayerWith(
 
       const list = (
         collection: AnyCollectionDef,
-        cursor: number | null,
+        cursor: Cursor | null,
         perPage: number,
         ctx: RequestCtx,
         filter?: FilterNode,
@@ -711,7 +712,7 @@ function makeCollectionServiceLayerWith(
           let cursorWhere: WhereClause | null = null
           if (cursor !== null) {
             if (effectiveSort.field === "seqId") {
-              cursorWhere = cursorClause(cursor, dialect.quoteIdentifier)
+              cursorWhere = cursorClause(cursor, dialect.quoteIdentifier, effectiveSort.direction)
             } else {
               if (isNullableSortField(collection.schema, effectiveSort.field)) {
                 return yield* Effect.fail(
@@ -743,6 +744,8 @@ function makeCollectionServiceLayerWith(
           const combined =
             cursorWhere !== null ? (where !== null ? andWhere(where, cursorWhere) : cursorWhere) : where
 
+          if (perPage <= 0) return { items: [], nextCursor: null }
+
           const fields = resolveFields(collection.schema, select ?? null, ctx.admin === true)
           const expandDefs =
             expand === null || expand === undefined || expand.length === 0
@@ -767,14 +770,26 @@ function makeCollectionServiceLayerWith(
 
           const rows = yield* repo.list(
             collection.name,
-            perPage,
+            perPage + 1,
             combined !== null ? { ...listOpts, where: combined } : listOpts
           )
 
-          const lastRow = rows.items.at(-1)
-          const rawSeqId = lastRow?.["seqId"]
-          const lastSeqId = typeof rawSeqId === "number" ? rawSeqId : null
-          const nextCursor = rows.items.length === perPage ? lastSeqId : null
+          const hasMore = rows.items.length > perPage
+          const pageItems = hasMore ? rows.items.slice(0, perPage) : rows.items
+          let nextCursor: Cursor | null = null
+
+          if (hasMore) {
+            const lastRow = pageItems.at(-1)
+            const lastSeqId = cursorFromSeqId(lastRow?.["seqId"])
+            if (lastSeqId === null) {
+              const seqIdType = typeof lastRow?.["seqId"]
+              const message =
+                `Collection "${collection.name}" returned a page with more rows and no usable seqId for cursor pagination (seqId type: ${seqIdType})`
+              yield* Effect.logError(message)
+              return yield* Effect.die(new Error(message))
+            }
+            nextCursor = lastSeqId
+          }
 
           // One synchronous pass per row: strip seqId (internal pagination column,
           // must not appear in API responses) and decode booleans together. Each
@@ -782,7 +797,7 @@ function makeCollectionServiceLayerWith(
           const mapRow = defaultProjection
             ? getProjectedListMapper(collection, fieldsForQuery)
             : getListRowMapper(collection)
-          const items = rows.items.map(mapRow)
+          const items = pageItems.map(mapRow)
           return { items, nextCursor }
         }).pipe(
           withSpanWhenEnabled("collection.list", {

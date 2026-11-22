@@ -1,3 +1,5 @@
+import type { Cursor } from "@gettersethya/mira-client"
+
 import type { RepoRecord } from "@/repository/types.js"
 
 /** Auth-resolved request context. JWT parsing is not done here — the route handler provides this. */
@@ -20,6 +22,6 @@ export type RequestCtx = {
 /** Paginated result — cursor-based via seqId. Used for all collection kinds. */
 export type CursorPage = {
   items: ReadonlyArray<RepoRecord>
-  /** seqId of the last item. Pass as `after` to fetch the next page. null = no more pages. */
-  nextCursor: number | null
+  /** Opaque seqId of the last item. Pass as `after` to fetch the next page. null = no more pages. */
+  nextCursor: Cursor | null
 }

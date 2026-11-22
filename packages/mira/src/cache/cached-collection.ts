@@ -1,4 +1,4 @@
-import type { AnyCollectionDef } from "@gettersethya/mira-client"
+import type { AnyCollectionDef, Cursor } from "@gettersethya/mira-client"
 import type { FilterNode } from "@gettersethya/mira-client"
 import { Effect, Layer, Option } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -55,7 +55,7 @@ function stableViewKey(
 }
 
 function stableListKey(
-  cursor: number | null,
+  cursor: Cursor | null,
   perPage: number,
   filter: FilterNode | undefined,
   sort: SortOrder | undefined,

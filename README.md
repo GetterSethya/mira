@@ -968,7 +968,7 @@ interface ListHookContext {
   sort:       SortOrder | undefined          // modify to change sort direction
   select:     ReadonlyArray<string> | null | undefined  // restrict returned fields
   expand:     ReadonlyArray<string> | null | undefined  // which relations to expand
-  cursor:     number | null
+  cursor:     number | string | null        // opaque; pass back unchanged
   limit:      number
   auth:       AuthContext | undefined
 }
@@ -979,7 +979,7 @@ interface ListHookContext {
 ```typescript
 interface ListResultContext extends ListHookContext {
   items:       ReadonlyArray<RepoRecord>
-  nextCursor:  number | null
+  nextCursor:  number | string | null       // opaque; SQLite/libSQL number, PostgreSQL BIGINT string
 }
 ```
 
@@ -1433,7 +1433,7 @@ Every query method returns a `ClientHandler<TData>` with two execution styles:
 - `.toEffect()` — returns an `Effect.Effect<TData, MiraError, HttpClient>` for use in Effect pipelines.
 
 ```typescript
-// Paginated list — returns { items: Post[], nextCursor: number | null }
+// Paginated list - returns { items: Post[], nextCursor: number | string | null }
 const { items, nextCursor } = await mira.posts.getList({
   filter: (f) => f.field("published").eq(true),
   sort:   "created",
@@ -1454,9 +1454,14 @@ const latest = await mira.posts.getFirstOrNone(
   { sort: "created", order: "desc" },
 ).raw()
 
-// All records as a flat array — fetches all pages internally
-const all = await mira.posts.getFullList({ limit: 5000 }).raw()
+// One page as a flat array. The server clamps the limit to 100.
+// getFullList does not follow nextCursor; use getList to page.
+const page = await mira.posts.getFullList({ limit: 100 }).raw()
 ```
+
+`nextCursor` is opaque. The shipped SQLite and libSQL presets return a number;
+PostgreSQL returns a decimal string for `BIGINT`. Pass it back unchanged; do not
+convert a string cursor to a number.
 
 ### Mutations
 

@@ -57,7 +57,7 @@ Queries take their arguments at the call site and their terminal call is zero-ar
 
 ```ts
 const page = await mira.posts.getList({ limit: 20 }).raw()
-// Promise<{ items: PostsRecord[]; nextCursor: number | null }>
+// Promise<{ items: PostsRecord[]; nextCursor: number | string | null }>
 
 const one = mira.posts.getOne("abc123").toEffect()
 // Effect<PostsRecord, MiraError, HttpClient.HttpClient>
@@ -65,16 +65,16 @@ const one = mira.posts.getOne("abc123").toEffect()
 
 `.raw()` supplies the fetch-based HTTP client and rejects with the unwrapped `MiraError`, which carries `status`, `body`, and `retryAfterSeconds` when the server supplied one. `.toEffect()` leaves the `HttpClient` requirement to you, so you can provide a test client or a different transport.
 
-Use `isRateLimited(error)` or `error.status === 429` to detect a backoff response. A generic retry schedule does not retry `429`. Honor `error.retryAfterSeconds` instead. `error.rateLimitScope` says whether the request, a cooldown, or the mail budget blocked. `error.restart` is true for `too_many_attempts`, meaning the client must request a new code. Email mutations are not idempotent, so do not retry a reset or OTP request without user intent.
+Use `isRateLimited(error)` or `error.status === 429` to detect a backoff response. A generic retry schedule does not retry `429` or `500`. Honor `error.retryAfterSeconds` instead. `error.rateLimitScope` says whether the request, a cooldown, or the mail budget blocked. `error.restart` is true for `too_many_attempts`, meaning the client must request a new code. Email mutations are not idempotent, so do not retry a reset or OTP request without user intent.
 
-`getFirstOrNone` requires a filter and forces `limit: 1`. `getFullList` fetches pages at a default page size of `1000` and returns the flat array. It is a convenience method, not an unbounded export.
+`getFirstOrNone` requires a filter and forces `limit: 1`. `getFullList` issues one request and returns a flat array. The default requested limit is `1000`, but the server clamps the page to `100`, so it returns at most 100 records and does not follow `nextCursor`.
 
 ## Query options
 
-`getList` accepts `filter`, `sort`, `order`, `cursor`, `limit`, `select`, `expand`, and `retryOptions`. The filter is a **callback** that receives the typed builder, not a prebuilt node. The `cursor` value is whatever the previous page returned as `nextCursor`, and the client sends it as the `after` parameter. Sorted pagination is supported for non-nullable sort fields. Nullable sorted cursors and cursors whose row was deleted return a `422` validation error.
+`getList` accepts `filter`, `sort`, `order`, `cursor`, `limit`, `select`, `expand`, and `retryOptions`. The filter is a **callback** that receives the typed builder, not a prebuilt node. The `cursor` value is whatever the previous page returned as `nextCursor`, and the client sends it as the `after` parameter. The cursor is opaque: the shipped SQLite and libSQL presets return a number, PostgreSQL returns a decimal string for `BIGINT`, and you pass it back unchanged. Sorted pagination is supported for non-nullable sort fields. Nullable sorted cursors and cursors whose row was deleted return a `422` validation error.
 
 ```ts
-let cursor: number | null = null
+let cursor: number | string | null = null
 
 do {
   const page = await mira.posts.getList({
@@ -99,6 +99,8 @@ do {
   "nextCursor": 42
 }
 ```
+
+A PostgreSQL `BIGINT` cursor uses a decimal string instead, for example `"9007199254740993"`.
 
 See [Querying and pagination](../querying/) for the full filter and pagination model.
 

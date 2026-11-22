@@ -81,11 +81,22 @@ function buildFormData(input: object): FormData {
 }
 
 /**
+ * Opaque pagination cursor for collection lists.
+ *
+ * The shipped SQLite and libSQL presets return a JavaScript number. PostgreSQL
+ * returns a canonical decimal string when `seqId` is a `BIGINT`, because JSON
+ * cannot represent every 64-bit value exactly. Treat the value as opaque and
+ * pass it back unchanged as the next `cursor`.
+ */
+export type Cursor = number | string
+
+/**
  * Optional retry configuration for collection operations.
  * Wraps an Effect `Schedule` that determines retry behavior when a `MiraError` occurs.
  *
  * If not provided, the operation is not retried. Set at the collection level via
  * `defaultRetryOptions` in `createMiraClient()` or per-call via the `retryOptions` parameter.
+ * HTTP 429 and HTTP 500 are never retried, regardless of the schedule.
  *
  * @example
  * import { Schedule } from "effect"
@@ -114,7 +125,7 @@ export type GetListOptions<F extends FieldsMap> = {
   filter?: (f: FilterBuilder<F>) => FilterNode
   sort?: keyof F & string
   order?: "asc" | "desc"
-  cursor?: number | null
+  cursor?: Cursor | null
   limit?: number
   select?: ReadonlyArray<SelectableKeys<F>>
   expand?: ReadonlyArray<RelationKeys<F>>
@@ -215,7 +226,7 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    * response's `nextCursor` as the `cursor` option.
    *
    * @example
-   * let cursor: number | null = null
+   * let cursor: Cursor | null = null
    * do {
    *   const { items, nextCursor } = await posts.getList({ cursor, limit: 20 }).raw()
    *   cursor = nextCursor
@@ -233,7 +244,7 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
    */
   getList<const O extends GetListOptions<F> = GetListOptions<F>>(
     options?: O
-  ): ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: number | null }>
+  ): ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: Cursor | null }>
 
   /**
    * Get the first record matching a filter, or `Option.none()` if none match.
@@ -255,16 +266,17 @@ export type RawCollectionClient<F extends FieldsMap, K extends CollectionKind = 
   ): ClientHandler<Option.Option<WithSelect<F, SelectOf<O>, ExpandOf<O>>>>
 
   /**
-   * Fetch all records matching the filter, automatically following pagination.
-   * Defaults to `limit: 1000` — override via options if you need a different page size.
+   * Fetch one page of records and return a flat array.
    *
-   * Unlike `getList` which returns a single page with `nextCursor`,
-   * `getFullList` fetches pages internally and returns a flat array.
+   * This issues one request and does not follow `nextCursor`. The default
+   * `limit` is 1000, but the server clamps the page size to 100, so the result
+   * contains at most 100 records. Use `getList` to page through a larger
+   * collection.
    *
    * @param options.filter - Optional filter callback
    * @param options.sort - Field name to sort by
    * @param options.order - Sort direction
-   * @param options.limit - Page size for internal pagination (default: 1000)
+   * @param options.limit - Requested page size (server clamps to 100; default: 1000)
    * @param options.select - Subset of field names to include
    * @param options.expand - Relation field names to expand
    * @param options.retryOptions - Optional retry schedule
@@ -603,7 +615,7 @@ export type AdaptedCommon<F extends FieldsMap, K extends CollectionKind = "base"
 > & {
   getList<const O extends GetListOptions<F> = GetListOptions<F>>(
     options?: O
-  ): EnrichedQueryHandler<ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: number | null }>>
+  ): EnrichedQueryHandler<ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: Cursor | null }>>
   getOne<const O extends GetOneOptions<F> = GetOneOptions<F>>(
     id: string,
     options?: O
@@ -669,7 +681,10 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
   ): Effect.Effect<T, MiraError, HttpClient.HttpClient> {
     const schedule = methodOptions?.retryOptions?.schedule ?? defaultRetryOptions?.schedule
     return schedule
-      ? Effect.retry(effect, { schedule, while: (error: MiraError) => error.status !== 429 })
+      ? Effect.retry(effect, {
+          schedule,
+          while: (error: MiraError) => error.status !== 429 && error.status !== 500
+        })
       : effect
   }
 
@@ -694,7 +709,7 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
   function listHandler<const O extends GetListOptions<F> = GetListOptions<F>>(
     options?: O,
     overrides?: { filter?: (f: FilterBuilder<F>) => FilterNode; limit?: number }
-  ): ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: number | null }> {
+  ): ClientHandler<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: Cursor | null }> {
     const filterNode = (overrides?.filter ?? options?.filter)?.(makeFilterBuilder<F>())
     const limit = overrides?.limit ?? options?.limit
     const queryParams = buildQueryParams({
@@ -707,7 +722,7 @@ export function makeCollectionClient<F extends FieldsMap, K extends CollectionKi
       ...(options?.expand ? { expand: options.expand.join(",") } : {}),
     })
 
-    const effect = execute<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: number | null }>(
+    const effect = execute<{ items: Array<WithSelect<F, SelectOf<O>, ExpandOf<O>>>; nextCursor: Cursor | null }>(
       HCR.get(`/api/collections/${collectionName}${queryParams}`)
     )
     return makeHandler(withRetry(effect, options))
