@@ -10,13 +10,14 @@ import {
   type CollectionSchema,
   Field
 } from "@gettersethya/mira-client"
-import { Effect, Exit, Layer, Redacted, Schema } from "effect"
+import { Effect, Exit, Layer, Redacted, Result, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { afterAll, expect } from "vitest"
 
 import { applyRulesToCollections, defineRule, Mira } from "@/app/index.js"
 import { LibsqlDatabase, LibsqlConfigError, TursoDatabase } from "@/databases/libsql.js"
+import { libsqlDialect } from "@/dialect/dialect-libsql.js"
 import { makeCollectionRouter } from "@/http/router.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 import { NodePlatform } from "@/platforms/node.js"
@@ -615,4 +616,34 @@ describe("libSQL app and HTTP behavior", () => {
       expect(tables).toEqual([])
     }).pipe(Effect.provide(app.buildServiceLayer()))
   }, 30_000)
+})
+
+describe("libSQL duplicate key classification", () => {
+  it.effect("classifies a real local libSQL unique violation", () => {
+    const database = LibsqlDatabase({ url: ":memory:" })
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(`
+        CREATE TABLE "_duplicate_email" (
+          "email" TEXT NOT NULL UNIQUE
+        )
+      `)
+      yield* sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, ["a@example.com"])
+      const duplicate = yield* Effect.result(
+        sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, ["a@example.com"])
+      )
+      expect(Result.isFailure(duplicate)).toBe(true)
+      if (Result.isFailure(duplicate)) {
+        expect(libsqlDialect("local").store.isDuplicateKey(duplicate.failure)).toBe(true)
+      }
+
+      const notNull = yield* Effect.result(
+        sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, [null])
+      )
+      expect(Result.isFailure(notNull)).toBe(true)
+      if (Result.isFailure(notNull)) {
+        expect(libsqlDialect("local").store.isDuplicateKey(notNull.failure)).toBe(false)
+      }
+    }).pipe(Effect.provide(database.layer))
+  })
 })

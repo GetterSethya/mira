@@ -17,6 +17,11 @@ published by CI.
 
 ### Changed
 
+- **Custom dialects must implement `StoreSqlCapabilities.isDuplicateKey`.**
+  This required classifier names how a dialect recognizes a primary-key or
+  unique-key violation. SQLite-like dialects can spread `sqliteDialect.store`;
+  new engines must supply a structured predicate. The PostgreSQL capability
+  object now classifies SQLSTATE `23505` for #29.
 - **The collection cursor is now opaque `number | string`.** The shipped SQLite
   and libSQL presets keep returning numbers. PostgreSQL `BIGINT` cursors are
   canonical decimal strings, because a JSON number cannot represent every
@@ -105,6 +110,7 @@ published by CI.
 
 ### Fixed
 
+- **Duplicate email changes now return 409 instead of 503 when the confirmation update loses a race.** The auth email path classifies the driver's structured duplicate-key code through the dialect store instead of matching SQLite message text. SQLite and libSQL are covered by real classifier tests; a fake PostgreSQL classifier test covers `23505`. A non-duplicate update failure still returns 503.
 - **SQLite `dropColumn` now handles dependent tracked views.** The dialect drops affected views in reverse dependency order, applies the column change, recreates desired views in dependency order, and validates their declared properties plus `seqId` inside the migration transaction. A view that still names the dropped column, or declares a property the view no longer returns, fails and rolls back. Local SQLite and libSQL inherit the behavior. Views created outside Mira are not tracked; see #59 for detection.
 - **`TranslatedPlan.validations` is a separate read-only channel.** The migrator runs it after the DDL statements and before the `_migrations` insert, so a failed view probe rolls back the plan. The SQLite rebuild also no longer claims a `PRAGMA legacy_alter_table` cleanup; it drops and recreates the table in place.
 - **Migrations now use `sql.withTransaction`.** The migrator no longer issues raw `BEGIN`, `COMMIT`, or `ROLLBACK` statements, which `@effect/sql-libsql` cannot keep on one connection. The plan statements, `_migrations` row, and `_collections` upserts commit or roll back together.

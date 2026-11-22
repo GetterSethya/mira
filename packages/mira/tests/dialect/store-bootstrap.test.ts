@@ -19,7 +19,8 @@ const transactionalStore: StoreSqlCapabilities = {
   bootstrapMode: "transaction",
   bootstrapSql: ["SELECT 1"],
   columnExistsSql: sqliteDialect.store.columnExistsSql,
-  isRetryable: sqliteDialect.store.isRetryable
+  isRetryable: sqliteDialect.store.isRetryable,
+  isDuplicateKey: sqliteDialect.store.isDuplicateKey
 }
 
 const transactionalDialect: DialectType = {

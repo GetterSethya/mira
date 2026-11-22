@@ -13,7 +13,12 @@ import type {
   TranslatePlanContext,
   ViewShape
 } from "./dialect.js"
-import { retryableByCauseCode, translateStep } from "./dialect.js"
+import {
+  errorHasCode,
+  hasUniqueViolationReason,
+  retryableByCauseCode,
+  translateStep
+} from "./dialect.js"
 import {
   affectedViews,
   normalizeIdentifier,
@@ -73,6 +78,10 @@ const quoteLiteral = (value: unknown): string => {
   return `'${String(value).replaceAll("'", "''")}'`
 }
 
+/** SQLSTATE 23505 is `unique_violation`; the reason tag is a driver fallback. */
+export const isPostgresUniqueViolation = (error: unknown) =>
+  errorHasCode(error, ["23505"]) || hasUniqueViolationReason(error)
+
 /**
  * Store capability for the future PostgreSQL dialect. It is intentionally a
  * capability object, not a full `DialectType`; #29 composes it.
@@ -90,6 +99,7 @@ export const postgresStoreSql: StoreSqlCapabilities = {
        AND column_name = ${quoteLiteral(column)}
      LIMIT 1`,
   isRetryable: retryableByCauseCode(["40001", "40P01", "55P03"]),
+  isDuplicateKey: isPostgresUniqueViolation,
   transactionLockTimeoutSql: "SET LOCAL lock_timeout = '2s'"
 }
 

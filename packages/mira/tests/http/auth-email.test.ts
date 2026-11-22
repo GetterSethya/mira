@@ -5,7 +5,7 @@ import { AuthCollection, Field } from "@gettersethya/mira-client"
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import type { HttpClientResponse } from "effect/http"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
-import { SqlClient } from "effect/sql"
+import { SqlClient, SqlError } from "effect/sql"
 import { expect } from "vitest"
 
 import { applyRulesToCollections, defineRule } from "@/app/index.js"
@@ -18,7 +18,8 @@ import { EmailService, EmailTemplates, makeEmailTemplates } from "@/email/index.
 import type { EmailMessage, EmailServiceShape } from "@/email/index.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
-import { RepositoryLive } from "@/repository/repository.js"
+import { TokenStore } from "@/http/token-store.js"
+import { Repository, RepositoryLive } from "@/repository/repository.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/index.js"
 import { rateLimitTestLayer } from "@tests/_rate-limit.js"
@@ -104,28 +105,70 @@ const FileStorageTest = Layer.succeed(
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
-const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
-  Layer.provide(repoWithSql),
-  Layer.provide(FileStorageTest),
-  Layer.provide(sqliteLayer),
-  Layer.provide(DialectTest),
-  Layer.provide(NodeAuthServiceLayer)
-)
 
-const testLayer = Layer.mergeAll(
-  collectionServiceWithDeps,
-  repoWithSql,
-  FileStorageTest,
-  sqliteLayer,
-  ThumbnailServiceNoopLive,
-  NodeHttpServer.layerTest,
-  AppConfigTest,
-  NodeCryptoLayer,
-  NodeAuthServiceLayer,
-  DialectTest,
-  Layer.succeed(EmailService, fakeEmail),
-  rateLimitTestLayer
-)
+const makeTestLayer = (repoLayer: Layer.Layer<Repository>) => {
+  const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
+    Layer.provide(repoLayer),
+    Layer.provide(FileStorageTest),
+    Layer.provide(sqliteLayer),
+    Layer.provide(DialectTest),
+    Layer.provide(NodeAuthServiceLayer)
+  )
+  return Layer.mergeAll(
+    collectionServiceWithDeps,
+    repoLayer,
+    FileStorageTest,
+    sqliteLayer,
+    ThumbnailServiceNoopLive,
+    NodeHttpServer.layerTest,
+    AppConfigTest,
+    NodeCryptoLayer,
+    NodeAuthServiceLayer,
+    DialectTest,
+    Layer.succeed(EmailService, fakeEmail),
+    rateLimitTestLayer
+  )
+}
+
+const testLayer = makeTestLayer(repoWithSql)
+
+const TAKEN_EMAIL = "taken@example.com"
+let hiddenLookups = 0
+
+const repoWithHiddenEmail = Layer.effect(
+  Repository,
+  Effect.gen(function* () {
+    const repo = yield* Repository
+    return Repository.of({
+      ...repo,
+      viewFilter: (table, filter) => {
+        if (filter.where.params.includes(TAKEN_EMAIL)) {
+          hiddenLookups += 1
+          return Effect.succeed([])
+        }
+        return repo.viewFilter(table, filter)
+      }
+    })
+  })
+).pipe(Layer.provide(repoWithSql))
+const testLayerHiddenEmail = makeTestLayer(repoWithHiddenEmail)
+
+const repoWithUpdateFailure = Layer.effect(
+  Repository,
+  Effect.gen(function* () {
+    const repo = yield* Repository
+    return Repository.of({
+      ...repo,
+      update: () =>
+        Effect.fail(
+          new SqlError.SqlError({
+            reason: new SqlError.DeadlockError({ cause: new Error("deadlock") })
+          })
+        )
+    })
+  })
+).pipe(Layer.provide(repoWithSql))
+const testLayerUpdateFailure = makeTestLayer(repoWithUpdateFailure)
 
 const setupTables = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -504,5 +547,182 @@ describe("auth email HTTP flows", () => {
       })
       expect(invalidConfirm.status).toBe(400)
     }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("returns 409 for a duplicate email race after a missed confirmation pre-check", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* serve
+
+      const createdA = yield* post("/api/collections/users", {
+        email: "a@example.com",
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "A"
+      })
+      const a = yield* responseBody(
+        Schema.Struct({ id: Schema.String, email: Schema.String })
+      )(createdA)
+      yield* post("/api/collections/users", {
+        email: TAKEN_EMAIL,
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "B"
+      })
+
+      sent = []
+      const session = yield* loginForToken("a@example.com", "password123")
+      const tokens = yield* TokenStore
+      const generationBefore = yield* tokens.currentGeneration("users", a.id)
+      sent = []
+      hiddenLookups = 0
+
+      const request = yield* postAuth(
+        "/api/collections/users/request-email-change",
+        { newEmail: TAKEN_EMAIL, oldPassword: "password123" },
+        session.token
+      )
+      expect(request.status).toBe(202)
+      expect(sent).toHaveLength(1)
+      expect(hiddenLookups).toBeGreaterThanOrEqual(1)
+
+      const token = new URL(linkFrom(firstEmail())).searchParams.get("token")
+      expect(token).not.toBeNull()
+      hiddenLookups = 0
+      const sentBeforeConfirm = sent.length
+
+      const confirm = yield* post("/api/collections/users/confirm-email-change", { token })
+      expect(confirm.status).toBe(409)
+      const body = yield* responseBody(
+        Schema.Struct({ error: Schema.Literal("email_taken") })
+      )(confirm)
+      expect(body.error).toBe("email_taken")
+      expect(hiddenLookups).toBeGreaterThanOrEqual(1)
+      expect(sent).toHaveLength(sentBeforeConfirm)
+
+      const reuse = yield* post("/api/collections/users/confirm-email-change", { token })
+      expect(reuse.status).toBe(400)
+
+      const me = yield* getAuth("/api/auth/me", session.token)
+      expect(me.status).toBe(200)
+      const meBody = yield* responseBody(
+        Schema.Struct({ record: Schema.Struct({ email: Schema.String }) })
+      )(me)
+      expect(meBody.record.email).toBe("a@example.com")
+      expect(yield* tokens.currentGeneration("users", a.id)).toBe(generationBefore)
+    }).pipe(Effect.provide(testLayerHiddenEmail))
+  )
+
+  it.effect("returns 409 from the confirmation pre-check when the target was taken meanwhile", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* serve
+
+      const createdA = yield* post("/api/collections/users", {
+        email: "a@example.com",
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "A"
+      })
+      const a = yield* responseBody(
+        Schema.Struct({ id: Schema.String, email: Schema.String })
+      )(createdA)
+
+      sent = []
+      const session = yield* loginForToken("a@example.com", "password123")
+      const tokens = yield* TokenStore
+      const generationBefore = yield* tokens.currentGeneration("users", a.id)
+      sent = []
+
+      const request = yield* postAuth(
+        "/api/collections/users/request-email-change",
+        { newEmail: "later@example.com", oldPassword: "password123" },
+        session.token
+      )
+      expect(request.status).toBe(202)
+      expect(sent).toHaveLength(1)
+      const token = new URL(linkFrom(firstEmail())).searchParams.get("token")
+      expect(token).not.toBeNull()
+
+      yield* post("/api/collections/users", {
+        email: "later@example.com",
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "B"
+      })
+      const sentBeforeConfirm = sent.length
+
+      const confirm = yield* post("/api/collections/users/confirm-email-change", { token })
+      expect(confirm.status).toBe(409)
+      const body = yield* responseBody(
+        Schema.Struct({ error: Schema.Literal("email_taken") })
+      )(confirm)
+      expect(body.error).toBe("email_taken")
+      expect(sent).toHaveLength(sentBeforeConfirm)
+
+      const reuse = yield* post("/api/collections/users/confirm-email-change", { token })
+      expect(reuse.status).toBe(400)
+
+      const me = yield* getAuth("/api/auth/me", session.token)
+      expect(me.status).toBe(200)
+      const meBody = yield* responseBody(
+        Schema.Struct({ record: Schema.Struct({ email: Schema.String }) })
+      )(me)
+      expect(meBody.record.email).toBe("a@example.com")
+      expect(yield* tokens.currentGeneration("users", a.id)).toBe(generationBefore)
+    }).pipe(Effect.provide(testLayer))
+  )
+
+  it.effect("returns 503 for a non-duplicate update failure without changing the session", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* serve
+
+      const createdA = yield* post("/api/collections/users", {
+        email: "a@example.com",
+        password: "password123",
+        passwordConfirm: "password123",
+        name: "A"
+      })
+      const a = yield* responseBody(
+        Schema.Struct({ id: Schema.String, email: Schema.String })
+      )(createdA)
+
+      sent = []
+      const session = yield* loginForToken("a@example.com", "password123")
+      const tokens = yield* TokenStore
+      const generationBefore = yield* tokens.currentGeneration("users", a.id)
+      sent = []
+
+      const request = yield* postAuth(
+        "/api/collections/users/request-email-change",
+        { newEmail: "free@example.com", oldPassword: "password123" },
+        session.token
+      )
+      expect(request.status).toBe(202)
+      expect(sent).toHaveLength(1)
+      const token = new URL(linkFrom(firstEmail())).searchParams.get("token")
+      expect(token).not.toBeNull()
+      const sentBeforeConfirm = sent.length
+
+      const confirm = yield* post("/api/collections/users/confirm-email-change", { token })
+      expect(confirm.status).toBe(503)
+      const body = yield* responseBody(
+        Schema.Struct({ error: Schema.Literal("email_unavailable") })
+      )(confirm)
+      expect(body.error).toBe("email_unavailable")
+      expect(sent).toHaveLength(sentBeforeConfirm)
+
+      const reuse = yield* post("/api/collections/users/confirm-email-change", { token })
+      expect(reuse.status).toBe(400)
+
+      const me = yield* getAuth("/api/auth/me", session.token)
+      expect(me.status).toBe(200)
+      const meBody = yield* responseBody(
+        Schema.Struct({ record: Schema.Struct({ email: Schema.String }) })
+      )(me)
+      expect(meBody.record.email).toBe("a@example.com")
+      expect(yield* tokens.currentGeneration("users", a.id)).toBe(generationBefore)
+    }).pipe(Effect.provide(testLayerUpdateFailure))
   )
 })
