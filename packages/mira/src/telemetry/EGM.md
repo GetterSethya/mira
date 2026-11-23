@@ -88,7 +88,14 @@ its module graph.
   throws.
 - The SQL store quotes every generated identifier with
   `dialect.quoteIdentifier`. Filters keep `?` placeholders; the store rewrites
-  the whole statement with `dialect.placeholder`.
+  the whole statement with `dialect.placeholder`. Telemetry reads pass a bound
+  `caseInsensitivePattern` closure into `filterNodeToWhereClause`, so the
+  pattern stays a bound parameter. PostgreSQL telemetry `like` filters use
+  `ILIKE` while SQLite keeps `LIKE` [sql-store.ts:filterParts].
+- A sentinel test replaces `caseInsensitivePattern` with a renderer that matches
+  nothing. It covers both `listLogs` and `listSpans` through the shared
+  `filterParts` helper, verifying the reads consult the dialect capability rather
+  than a local hardcoded `LIKE` [sql-store.test.ts].
 - The SQL store selects `seqId` for span cursors but does not expose it in the
   public span row, matching the current response JSON.
 - Counts and cursor values are coerced with `Number(...)` for drivers that

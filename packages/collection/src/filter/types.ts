@@ -27,7 +27,7 @@ export type WhereClause = {
  * |---|---|---|
  * | `eq`, `neq`, `gt`, `gte`, `lt`, `lte` | `field`, `value` | Value comparisons |
  * | `in` | `field`, `values` | Membership test |
- * | `like` | `field`, `value` | SQL LIKE pattern match |
+ * | `like` | `field`, `value` | dialect-controlled case-insensitive pattern match |
  * | `null`, `not_null` | `field` | Null checks (no value operand) |
  * | `and`, `or` | `left`, `right` | Binary logical combinators |
  * | `not` | `node` | Unary negation |

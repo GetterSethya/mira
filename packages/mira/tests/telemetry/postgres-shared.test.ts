@@ -5,7 +5,7 @@ import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { Dialect, errorHasCode, type DialectType } from "@/dialect/dialect.js"
-import { postgresRuleSql } from "@/dialect/dialect-postgres.js"
+import { postgresFilterSql, postgresRuleSql } from "@/dialect/dialect-postgres.js"
 import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
 import { type TelemetryLogEntry, TelemetryStore } from "@/telemetry/store.js"
 
@@ -13,6 +13,7 @@ const postgresUrl = process.env["MIRA_TEST_POSTGRES_URL"]
 
 const postgresTestDialect: DialectType = {
   ...postgresRuleSql,
+  ...postgresFilterSql,
   translatePlan: () => Effect.succeed({ statements: [], cleanup: [] }),
   translate: () => [],
   nativeType: () => "text",
@@ -140,6 +141,62 @@ if (postgresUrl === undefined) {
         expect(Exit.isFailure(exit)).toBe(true)
         const rows = yield* sql<{ id: string }>`SELECT "id" FROM "logs"`
         expect(rows).toEqual([])
+      }).pipe(Effect.provide(makeLayer(url)))
+    )
+
+    it.effect("matches mixed-case log messages with a dialect-aware like filter", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const store = yield* TelemetryStore
+        if (store.read === null) {
+          throw new Error("expected the SQL telemetry store to expose reads")
+        }
+        const read = store.read
+
+        yield* createLogsTable(sql)
+
+        const collationRows = yield* sql<{ collation: string }>`
+          SELECT datcollate || '|' || datctype || '|' || datlocprovider::text AS collation
+          FROM pg_database
+          WHERE datname = current_database()
+        `
+        const collation = collationRows.map((row) => row.collation).join(", ")
+
+        yield* store.appendLogs([log("a", "Alpha"), log("b", "beta"), log("c", "GAMMA")])
+
+        const ascii = yield* read.listLogs({
+          limit: 10,
+          after: null,
+          filter: { op: "like", field: "message", value: "%a%" },
+          traceId: null
+        })
+        expect(ascii.items.map((row) => row.id).sort(), `collation: ${collation}`).toEqual([
+          "a",
+          "b",
+          "c"
+        ])
+        expect(ascii.total, `collation: ${collation}`).toBe(3)
+
+        yield* store.appendLogs([log("pct", "100%"), log("x", "100x")])
+
+        const escaped = yield* read.listLogs({
+          limit: 10,
+          after: null,
+          filter: { op: "like", field: "message", value: "100\\%" },
+          traceId: null
+        })
+        expect(escaped.items.map((row) => row.id), `collation: ${collation}`).toEqual(["pct"])
+
+        const wildcard = yield* read.listLogs({
+          limit: 10,
+          after: null,
+          filter: { op: "like", field: "message", value: "100%" },
+          traceId: null
+        })
+        expect(wildcard.items.map((row) => row.id).sort(), `collation: ${collation}`).toEqual([
+          "pct",
+          "x"
+        ])
       }).pipe(Effect.provide(makeLayer(url)))
     )
   })

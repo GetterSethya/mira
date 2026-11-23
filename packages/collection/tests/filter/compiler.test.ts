@@ -1,3 +1,4 @@
+import { it as effectIt } from "@effect/vitest"
 import { Effect, Result } from "effect"
 import { describe, expect, it } from "vitest"
 
@@ -15,6 +16,7 @@ const filterNodeToWhereClause = (
 ) =>
   filterNodeToWhereClauseRaw(node, schema, collectionName, {
     quoteIdentifier: (field) => `"${field}"`,
+    caseInsensitivePattern: (left, right) => `${left} LIKE ${right}`,
     ...options
   })
 
@@ -95,6 +97,35 @@ describe("filterNodeToWhereClause", () => {
       expect(result.sql).toBe('t."title" LIKE ?')
       expect(result.params).toEqual(["%hello%"])
     }).pipe(Effect.runPromise))
+
+  effectIt.effect("like calls the supplied case-insensitive pattern renderer", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ left: string; right: string }> = []
+      const node: FilterNode = { op: "like", field: "title", value: "%hello%" }
+      const result = yield* filterNodeToWhereClause(node, testSchema, "testCollection", {
+        caseInsensitivePattern: (left, right) => {
+          calls.push({ left, right })
+          return `${left} SENTINEL_PATTERN ${right}`
+        }
+      })
+      expect(calls).toEqual([{ left: 't."title"', right: "?" }])
+      expect(result.sql).toBe('t."title" SENTINEL_PATTERN ?')
+      expect(result.sql).not.toContain("LIKE")
+      expect(result.params).toEqual(["%hello%"])
+    })
+  )
+
+  effectIt.effect("like keeps wildcard and backslash patterns in one placeholder", () =>
+    Effect.gen(function* () {
+      const pattern = "100\\%_"
+      const node: FilterNode = { op: "like", field: "title", value: pattern }
+      const result = yield* filterNodeToWhereClause(node, testSchema, "testCollection")
+      expect(result.sql).toBe('t."title" LIKE ?')
+      expect(result.sql.match(/\?/g)?.length).toBe(1)
+      expect(result.sql).not.toContain("ESCAPE")
+      expect(result.params).toEqual([pattern])
+    })
+  )
 
   it("null produces IS NULL", () =>
     Effect.gen(function* () {

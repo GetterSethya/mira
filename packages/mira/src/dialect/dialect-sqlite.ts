@@ -616,6 +616,7 @@ export const sqliteDialect: DialectType = {
   timestampAdd: timestampAddSql,
   timestampDiff: timestampDiffSql,
   caseInsensitiveLike: caseInsensitiveLikeSql,
+  caseInsensitivePattern: (left, right) => `${left} LIKE ${right}`,
   castValue: (expr) => expr,
   quoteLiteral,
   nativeType: nativeTypeOf,

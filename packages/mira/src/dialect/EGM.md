@@ -17,7 +17,8 @@ migrator and database preset.
 - `Dialect` - `Context.Service` tag over a `DialectType`; inject with `Layer.succeed(Dialect, sqliteDialect)` [dialect.ts:Dialect]
 - `StoreSqlCapabilities` - the nested `DialectType.store` value used by the internal SQL stores and the HTTP auth email path: bootstrap mode, optional bootstrap SQL, zero-or-one-row column probe, request lock timeout, retry classification, and duplicate-key classification [dialect.ts:StoreSqlCapabilities]
 - `withStoreBootstrap(sql, store, f)` - runs DDL in plain mode or in one transaction after `store.bootstrapSql`, retrying once for a retryable error [store-sql.ts:withStoreBootstrap]
-- `DialectType` (type) - the contract: `translatePlan`, `translate`, `nativeType`, `quoteIdentifier`, `currentTimestamp`, `timestampAdd`, `timestampDiff`, `caseInsensitiveLike`, `castValue`, `quoteLiteral`, `indexName`, `storesBooleanAsInteger`, `deleteResult`, `placeholder`, `upsert`, required `store`, optional `telemetry` [dialect.ts:DialectType]
+- `DialectType` (type) - the contract: `translatePlan`, `translate`, `nativeType`, `quoteIdentifier`, `currentTimestamp`, `timestampAdd`, `timestampDiff`, `caseInsensitiveLike`, `caseInsensitivePattern`, `castValue`, `quoteLiteral`, `indexName`, `storesBooleanAsInteger`, `deleteResult`, `placeholder`, `upsert`, required `store`, optional `telemetry` [dialect.ts:DialectType]
+- `DialectType.caseInsensitivePattern(left, right)` - complete-pattern match: match `left` against a whole `LIKE` pattern in `right` with no added wildcards. Consumes `right` once, returns SQL, and leaves the pattern a bound parameter. The compiler invokes it as a plain function, so a call site passing a dialect method must bind it with a closure [dialect.ts:DialectType]
 - `DeleteResultStrategy` (type) - how a `DELETE` reports an affected row: `returning`, `affectedRows`, or `precheck` [dialect.ts:DeleteResultStrategy]
 - `TranslatePlanContext` (type) - `{ tables, views }` passed to `translatePlan`; `views` maps view names to stored/desired query shapes [dialect.ts:TranslatePlanContext]
 - `TranslatedPlan` (type) - `{ statements, cleanup, notes? }` returned by `translatePlan` [dialect.ts:TranslatedPlan]
@@ -25,6 +26,7 @@ migrator and database preset.
 - `perStepPlan(translate)` - `translatePlan` implementation for dialects that can express every step alone [dialect.ts:perStepPlan]
 - `sqliteDialect` - the SQLite implementation of `DialectType` [dialect-sqlite.ts:sqliteDialect]
 - `postgresRuleSql` - pure PostgreSQL rule renderer, not a database preset [dialect-postgres.ts:postgresRuleSql]
+- `postgresFilterSql` - pure PostgreSQL user-filter capability, not a database preset; its `caseInsensitivePattern` renders `ILIKE` [dialect-postgres.ts:postgresFilterSql]
 - `postgresStoreSql` - PostgreSQL store capability for #29 to compose into the full dialect [dialect-postgres.ts:postgresStoreSql]
 - `postgresDdlSql` - pure PostgreSQL physical-schema renderer; #29 composes it [dialect-postgres.ts:postgresDdlSql]
 - `DdlSqlDialect` (type) - the narrow PostgreSQL DDL capability [dialect.ts:DdlSqlDialect]
@@ -76,6 +78,33 @@ migrator and database preset.
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+
+## Dialect-aware user filter LIKE (issue #55)
+
+- `DialectType.caseInsensitivePattern(left, right)` is required. It matches a
+  complete pattern with no added wildcards, consumes `right` once, and leaves the
+  pattern a bound parameter [dialect.ts:DialectType].
+- SQLite renders `LIKE`, so SQLite behavior is unchanged. PostgreSQL renders
+  `ILIKE` through `postgresFilterSql` [dialect-sqlite.ts:sqliteDialect] [dialect-postgres.ts:postgresFilterSql].
+- Both production call sites pass a bound `caseInsensitivePattern` closure: the
+  collection list and the telemetry `filterParts` helper shared by `listLogs`
+  and `listSpans` [collection-service.ts:filterNodeToWhereClause] [sql-store.ts:filterParts].
+- `caseInsensitiveLike` is unchanged and stays limited to the `prefix` and
+  `contains` modes of the rule DSL. `RuleSqlDialect` keeps its narrow `Pick`, so
+  rule SQL and cache keys are untouched [dialect.ts:RuleSqlDialect].
+- `libsqlDialect` local mode returns `sqliteDialect` and remote mode spreads it,
+  so both inherit the SQLite `LIKE` behavior [dialect-libsql.ts:libsqlDialect].
+- No `ESCAPE` clause is added. PostgreSQL gives backslash a default escape
+  meaning in `LIKE` and `ILIKE` while SQLite has none, so `100\%` is not
+  portable. Patterns pass through unchanged [dialect-postgres.ts:postgresFilterSql].
+- SQLite folds ASCII only. PostgreSQL `ILIKE` follows the database locale and
+  collation, including the ICU or libc provider, so non-ASCII matching can
+  differ between engines and between PostgreSQL deployments. Pin a
+  deterministic locale for `like`-dependent reads
+  [dialect-postgres.ts:postgresFilterSql].
+- An environment-gated test keyed on `MIRA_TEST_POSTGRES_URL` covers the real
+  PostgreSQL `ILIKE` query and records the locale and collation
+  [postgres-shared.test.ts].
 ## Rule SQL and quote safety (issue #45)
 
 - `DialectType` adds `currentTimestamp`, `timestampAdd`, `timestampDiff`, `caseInsensitiveLike`, and `castValue`. `RuleSqlDialect` is the narrow view used by the compiler and enforcer [dialect.ts:DialectType] [dialect.ts:RuleSqlDialect].

@@ -178,6 +178,18 @@ export type DialectType = {
     right: string,
     mode: "prefix" | "contains"
   ) => string
+  /**
+   * Renders a case-insensitive match of `left` against a complete pattern
+   * expression `right`.
+   *
+   * The renderer adds no wildcards, consumes `right` exactly once, returns a SQL
+   * string, and does not transform the pattern value: the value stays a bound
+   * parameter supplied by the caller. The filter compiler invokes it as a plain
+   * function, so a call site that passes a dialect method must bind it with a
+   * closure, `(left, right) => dialect.caseInsensitivePattern(left, right)`, to
+   * keep the method's receiver.
+   */
+  caseInsensitivePattern: (left: string, right: string) => string
   /** Casts a value expression for a typed rule comparison. */
   castValue: (expr: string, type: FieldValueType) => string
   /** Serializes a literal value to a SQL-safe string. */

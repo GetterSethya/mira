@@ -807,7 +807,7 @@ f.field("price").lte(100)
 f.field("status").in(["draft", "published"])
 
 // String patterns
-f.field("title").like("%effect%")    // SQL LIKE
+f.field("title").like("%effect%")    // dialect-aware (LIKE/ILIKE)
 
 // Null checks
 f.field("deletedAt").null()
@@ -827,6 +827,12 @@ f.or(
 )
 f.not(f.field("archived").eq(true))
 ```
+
+`like` matching is case-insensitive per dialect: SQLite uses ASCII `LIKE` under
+the default `PRAGMA case_sensitive_like`, and PostgreSQL uses `ILIKE` when a
+PostgreSQL dialect is available. Non-ASCII folding differs by engine and locale.
+This API adds no `ESCAPE` clause, so backslash and literal wildcard matching
+remain engine-dependent. No PostgreSQL preset ships in this change.
 
 ---
 
