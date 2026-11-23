@@ -175,7 +175,9 @@ const filterParts = (
   Effect.gen(function* () {
     if (filter === null) return { where: "", params: [] }
     const compiled = yield* filterNodeToWhereClause(filter, schema, collection, {
-      quoteIdentifier: dialect.quoteIdentifier
+      quoteIdentifier: dialect.quoteIdentifier,
+      caseInsensitivePattern: (left, right) =>
+        dialect.caseInsensitivePattern(left, right)
     })
     return { where: compiled.sql, params: compiled.params }
   })

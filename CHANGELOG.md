@@ -24,9 +24,22 @@ published by CI.
   `25P02`, while at-least-once delivery and id-based deduplication are preserved.
   SQLite and libSQL keep their externally observable behavior. An
   environment-gated shared-mode test covers the PostgreSQL transaction contract.
+- **User filter `like` is dialect-aware.** SQLite keeps its ASCII-insensitive
+  `LIKE`, while PostgreSQL uses `ILIKE` so the same filter keeps its meaning
+  across databases. Telemetry log and span reads share the behavior with
+  collection lists. The pattern stays a bound parameter with no added wildcards
+  or `ESCAPE` clause, and non-ASCII folding still follows the engine and locale.
 
 ### Changed
 
+- **Breaking: user filter `like` requires a dialect pattern renderer.**
+  `DialectType` gains a required `caseInsensitivePattern(left, right)` member, and
+  `FilterCompileOptions` gains a required `caseInsensitivePattern` member of the
+  same shape. Custom dialects and direct filter-compiler callers must supply it.
+  `FilterCompileOptions` is now exported from `@gettersethya/mira-collection` so
+  callers can name the changed option. The rule-side `caseInsensitiveLike`
+  capability is unchanged and still limited to `prefix` and `contains`. libSQL
+  inherits the SQLite `LIKE` behavior.
 - **Custom dialects must implement `StoreSqlCapabilities.isDuplicateKey`.**
   This required classifier names how a dialect recognizes a primary-key or
   unique-key violation. SQLite-like dialects can spread `sqliteDialect.store`;

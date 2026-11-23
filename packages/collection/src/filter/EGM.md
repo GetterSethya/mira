@@ -19,18 +19,18 @@ Values:
   - `Filter.and(left, right)` — builds an `{ op: "and" }` node — [builder.ts:Filter.and].
   - `Filter.or(left, right)` — builds an `{ op: "or" }` node — [builder.ts:Filter.or].
   - `Filter.not(node)` — builds an `{ op: "not" }` node — [builder.ts:Filter.not].
-- `filterNodeToWhereClause(node, schema, collectionName, options?)` — validates and compiles a node into `WhereClause`, failing with `ValidationError` — [compiler.ts:filterNodeToWhereClause].
+- `filterNodeToWhereClause(node, schema, collectionName, options)` - validates and compiles a node into `WhereClause`, failing with `ValidationError`. `options` is required and carries the identifier quoter and the pattern renderer - [compiler.ts:filterNodeToWhereClause].
 - `FilterNodeSchema` — exported alias of the recursive `_filterNodeSchema` codec used to decode HTTP filter params — [types.ts:FilterNodeSchema].
 
 Types:
 
 - `FieldFilterOperand<V>` (type) — comparison surface produced by `Filter.field`: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `like`, `null`, `notNull`, `between` — [builder.ts:FieldFilterOperand].
 - `FilterBuilder<F>` (type) — typed DSL: `field<K>` is constrained to `keyof F` and returns `FieldFilterOperand<InferFieldValue<F[K]>>` — [builder.ts:FilterBuilder].
-- `FilterCompileOptions` (type) — `{ allowHiddenFields?: boolean }` controlling `x-hidden` access — [compiler.ts:FilterCompileOptions].
+- `FilterCompileOptions` (type) - required options for compilation: `allowHiddenFields?: boolean` controlling `x-hidden` access, `quoteIdentifier` for column references, and the required `caseInsensitivePattern(left, right)` renderer that chooses `LIKE` or `ILIKE` - [compiler.ts:FilterCompileOptions].
 - `FilterNode` (type) — discriminated union of comparison, `in`, `like`, null, logical, and negation variants — [types.ts:FilterNode].
 - `WhereClause` (type) — `{ sql, params }` with positional `?` placeholders — [types.ts:WhereClause].
 
-Barrel: `index.ts` forwards `Filter`, `filterNodeToWhereClause`, `FilterNodeSchema` and the four types — [index.ts:Filter]; `FilterCompileOptions` is exported from `compiler.ts` but not re-exported by the barrel.
+Barrel: `index.ts` forwards `Filter`, `filterNodeToWhereClause`, `FilterNodeSchema` and all five types, including `FilterCompileOptions` as a type re-export from `compiler.ts` - [index.ts:Filter].
 
 ## Invariants
 
@@ -41,7 +41,7 @@ Barrel: `index.ts` forwards `Filter`, `filterNodeToWhereClause`, `FilterNodeSche
 - Comparison values must be `string`, `number`, or `null`; arrays, objects, and booleans are rejected — [compiler.ts:validateScalar].
 - An empty `in` list compiles to `1 = 0` rather than invalid `IN ()` SQL — [compiler.ts:compileIn].
 - Every compiled column reference is double-quoted and prefixed with the hardcoded alias `t` — [compiler.ts:compileComparison].
-- `like` passes its pattern through unchanged; the caller owns `%` wildcards — [compiler.ts:compileLike].
+- `like` passes its pattern through unchanged as a bound parameter; the caller owns `%` wildcards. The required `caseInsensitivePattern` renderer chooses `LIKE` or `ILIKE` and must not add wildcards or transform the value, so the collection package stays dialect-free - [compiler.ts:compileLike].
 - Logical nodes parenthesize both operands and concatenate params left-then-right — [compiler.ts:compileLogical].
 - `between(lo, hi)` desugars into `and(gte(lo), lte(hi))` — [builder.ts:toFieldOperand].
 - `Filter.field` produces `FieldFilterOperand<unknown>`; typed narrowing only happens through `FilterBuilder<F>` — [builder.ts:FilterBuilder].

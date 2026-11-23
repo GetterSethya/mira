@@ -26,6 +26,8 @@ Filter.and(
 
 The comparison surface is `.eq`, `.neq`, `.gt`, `.gte`, `.lt`, `.lte`, `.in`, `.like`, `.null`, `.notNull`, and `.between`. `.between(lo, hi)` is sugar for `.gte(lo)` and `.lte(hi)`. There is no `contains` or `startsWith` helper here: `.like` passes your pattern through untouched, so add the `%` wildcards yourself.
 
+The pattern is passed through unchanged, so `%` and `_` are the caller's responsibility. Matching is case-insensitive per dialect: SQLite keeps `LIKE` with ASCII folding, and PostgreSQL uses `ILIKE` when the dialect is available. Non-ASCII folding differs by engine and locale. This API adds no `ESCAPE` clause, so backslash and literal wildcard matching remain engine-dependent. No PostgreSQL preset ships in this change.
+
 Comparison values must be a string, a number, or `null`. Boolean values are rejected by the filter compiler. An empty `.in([])` list compiles to `1 = 0` and matches nothing. Unknown fields fail with 422. The same applies to fields marked hidden, unless the caller is an admin.
 
 ## Raw JSON shape

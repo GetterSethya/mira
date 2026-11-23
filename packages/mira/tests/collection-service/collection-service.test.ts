@@ -11,7 +11,7 @@ import { applyRulesToCollections,defineRule } from "@/app/index.js"
 import { CollectionService, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import type { CursorPage, RequestCtx } from "@/collection-service/context.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
-import { Dialect } from "@/dialect/dialect.js"
+import { Dialect, type DialectType } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { RepositoryLive } from "@/repository/repository.js"
@@ -191,15 +191,23 @@ const rolesRules = defineRule(rolesDef, (R) => ({
 const Roles = applyRulesToCollections([rolesDef], [rolesRules])[0]
 
 // PostsServiceLayer wires Posts into the collection service (registers `published` for boolean encode/decode)
-const collectionServiceWithDeps = makeCollectionServiceLayer([Posts]).pipe(
-  Layer.provide(RepositoryLive),
-  Layer.provide(sqliteLayer),
-  Layer.provide(FileStorageTest),
-  Layer.provide(NodeCryptoLayer),
-  Layer.provide(DialectTest),
-  Layer.provide(NodeAuthServiceLayer)
-)
-const testLayer = Layer.mergeAll(collectionServiceWithDeps, sqliteLayer, FileStorageTest, NodeCryptoLayer)
+const makeCollectionServiceWithDialect = (dialect: DialectType) =>
+  makeCollectionServiceLayer([Posts]).pipe(
+    Layer.provide(RepositoryLive),
+    Layer.provide(sqliteLayer),
+    Layer.provide(FileStorageTest),
+    Layer.provide(NodeCryptoLayer),
+    Layer.provide(Layer.succeed(Dialect, dialect)),
+    Layer.provide(NodeAuthServiceLayer)
+  )
+const makeTestLayer = (dialect: DialectType) =>
+  Layer.mergeAll(
+    makeCollectionServiceWithDialect(dialect),
+    sqliteLayer,
+    FileStorageTest,
+    NodeCryptoLayer
+  )
+const testLayer = makeTestLayer(sqliteDialect)
 
 // ScoredServiceLayer wires Scored into the collection service
 const scoredServiceWithDeps = makeCollectionServiceLayer([Scored]).pipe(
@@ -718,6 +726,55 @@ describe("list with filter", () => {
       const titles = result.items.map((r) => r["title"])
       expect(titles).not.toContain("Skip")
     }).pipe(Effect.provide(testLayer)))
+
+  it.effect("like filters fold ASCII only under SQLite LIKE", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      for (const title of ["Alpha", "beta", "GAMMA", "Ärger"]) {
+        yield* svc.create(Posts, { title }, noCtx)
+      }
+
+      const ascii = yield* svc.list(Posts, null, 10, noCtx, {
+        op: "like",
+        field: "title",
+        value: "%a%"
+      })
+      if (!isCursorPage(ascii)) throw new Error("expected CursorPage")
+      expect(ascii.items.map((r) => r["title"])).toEqual(["Alpha", "beta", "GAMMA"])
+
+      const unicode = yield* svc.list(Posts, null, 10, noCtx, {
+        op: "like",
+        field: "title",
+        value: "%ä%"
+      })
+      if (!isCursorPage(unicode)) throw new Error("expected CursorPage")
+      expect(unicode.items).toEqual([])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("like filters consult the dialect pattern renderer", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const svc = yield* CollectionService
+      for (const title of ["Alpha", "beta", "GAMMA", "Ärger"]) {
+        yield* svc.create(Posts, { title }, noCtx)
+      }
+
+      const result = yield* svc.list(Posts, null, 10, noCtx, {
+        op: "like",
+        field: "title",
+        value: "%a%"
+      })
+      if (!isCursorPage(result)) throw new Error("expected CursorPage")
+      expect(result.items).toEqual([])
+    }).pipe(
+      Effect.provide(
+        makeTestLayer({
+          ...sqliteDialect,
+          caseInsensitivePattern: (left, right) => `${left} LIKE ${right} AND 1 = 0`
+        })
+      )
+    ))
 })
 
 // ---------------------------------------------------------------------------

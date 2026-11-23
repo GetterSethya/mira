@@ -6,6 +6,7 @@ import type { ColumnDef, MigrationStep } from "@/migrator/types.js"
 
 import type {
   DdlSqlDialect,
+  DialectType,
   FieldValueType,
   Quote,
   RuleSqlDialect,
@@ -67,6 +68,16 @@ export const postgresRuleSql: RuleSqlDialect = {
       ? `${left} ILIKE (${right} || '%')`
       : `${left} ILIKE ('%' || ${right} || '%')`,
   castValue
+}
+
+/**
+ * PostgreSQL filter-SQL renderer. This is a pure capability object, not a
+ * `DialectType` and not a database preset. #29 composes it into the full
+ * PostgreSQL dialect. `ILIKE` is case-insensitive in PostgreSQL, so the user
+ * filter `like` operator keeps the same meaning as on SQLite.
+ */
+export const postgresFilterSql: Pick<DialectType, "caseInsensitivePattern"> = {
+  caseInsensitivePattern: (left, right) => `${left} ILIKE ${right}`
 }
 
 const quoteLiteral = (value: unknown): string => {

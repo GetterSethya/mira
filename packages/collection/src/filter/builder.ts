@@ -16,7 +16,7 @@ import type { FilterNode } from "./types.js"
  * - `.gt(v)` / `.gte(v)` — greater than / greater or equal
  * - `.lt(v)` / `.lte(v)` — less than / less or equal
  * - `.in(values)` — membership in a list
- * - `.like(pattern)` — SQL LIKE pattern match (always string-valued)
+ * - `.like(pattern)` — dialect-controlled case-insensitive pattern match (always string-valued)
  * - `.null()` / `.notNull()` — IS NULL / IS NOT NULL (no value argument)
  * - `.between(lo, hi)` — compound of `.gte(lo)` + `.lte(hi)`
  *
@@ -114,7 +114,7 @@ export type FilterBuilder<F extends FieldsMap = FieldsMap> = {
  * // In-list
  * const draftOrArchived = Filter.field("status").in(["draft", "archived"])
  *
- * // LIKE pattern
+ * // Dialect-controlled pattern match
  * const search = Filter.field("title").like("%effect%")
  *
  * // Null checks

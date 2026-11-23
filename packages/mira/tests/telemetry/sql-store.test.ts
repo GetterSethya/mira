@@ -310,5 +310,76 @@ describe("SqlTelemetryStore", () => {
     }).pipe(Effect.provide(makeLayer()))
   )
 
+  it.effect("log like filters fold ASCII only under SQLite LIKE", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const read = requireRead(store)
+      yield* store.appendLogs([
+        log("alpha", "Alpha"),
+        log("beta", "beta"),
+        log("gamma", "GAMMA"),
+        log("aerger", "Ärger")
+      ])
 
+      const ascii = yield* read.listLogs({
+        limit: 10,
+        after: null,
+        filter: { op: "like", field: "message", value: "%a%" },
+        traceId: null
+      })
+      expect(ascii.items.map((row) => row.id).sort()).toEqual(["alpha", "beta", "gamma"])
+      expect(ascii.total).toBe(3)
+
+      const unicode = yield* read.listLogs({
+        limit: 10,
+        after: null,
+        filter: { op: "like", field: "message", value: "%ä%" },
+        traceId: null
+      })
+      expect(unicode.items).toEqual([])
+      expect(unicode.total).toBe(0)
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("log and span like filters consult the dialect pattern renderer", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const read = requireRead(store)
+      yield* store.appendLogs([
+        log("alpha", "Alpha"),
+        log("beta", "beta"),
+        log("gamma", "GAMMA"),
+        log("aerger", "Ärger")
+      ])
+      yield* store.appendSpans([
+        { ...span("span-alpha", "trace-a"), name: "Alpha" },
+        { ...span("span-beta", "trace-a"), name: "beta" },
+        { ...span("span-gamma", "trace-a"), name: "GAMMA" },
+        { ...span("span-aerger", "trace-a"), name: "Ärger" }
+      ])
+
+      const logs = yield* read.listLogs({
+        limit: 10,
+        after: null,
+        filter: { op: "like", field: "message", value: "%a%" },
+        traceId: null
+      })
+      expect(logs.items).toEqual([])
+
+      const spans = yield* read.listSpans({
+        limit: 10,
+        after: null,
+        filter: { op: "like", field: "name", value: "%a%" },
+        traceId: null
+      })
+      expect(spans.items).toEqual([])
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          ...sqliteDialect,
+          caseInsensitivePattern: (left, right) => `${left} LIKE ${right} AND 1 = 0`
+        })
+      )
+    )
+  )
 })

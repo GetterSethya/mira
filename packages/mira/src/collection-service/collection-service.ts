@@ -701,7 +701,9 @@ function makeCollectionServiceLayerWith(
             filter !== undefined
               ? yield* filterNodeToWhereClause(filter, collection.schema, collection.name, {
                   allowHiddenFields: ctx.admin === true,
-                  quoteIdentifier: dialect.quoteIdentifier
+                  quoteIdentifier: dialect.quoteIdentifier,
+                  caseInsensitivePattern: (left, right) =>
+                    dialect.caseInsensitivePattern(left, right)
                 })
               : null
           const where: WhereClause | null =

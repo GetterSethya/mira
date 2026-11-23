@@ -8,13 +8,23 @@ import type { FilterNode, WhereClause } from "./types.js"
 /**
  * Options controlling how a `FilterNode` is compiled.
  *
- * - `allowHiddenFields` — when `true`, `x-hidden` schema properties may be
+ * - `allowHiddenFields` - when `true`, `x-hidden` schema properties may be
  *   referenced (admin callers). Defaults to `false`.
+ * - `caseInsensitivePattern` - renders a complete case-insensitive pattern
+ *   match for the active dialect (`LIKE` on SQLite, `ILIKE` on PostgreSQL).
+ *   It receives the quoted field reference and the `?` placeholder, adds no
+ *   wildcards, consumes `right` once, and returns a SQL string without
+ *   transforming the pattern value. The pattern stays a bound parameter. The
+ *   compiler invokes the renderer as a plain function, so a caller that
+ *   supplies a dialect method must bind it with a closure, for example
+ *   `(left, right) => dialect.caseInsensitivePattern(left, right)`.
  */
 export type FilterCompileOptions = {
   allowHiddenFields?: boolean
   /** Wraps a column name in the active dialect's identifier quotes. */
   quoteIdentifier: (field: string) => string
+  /** Renders a complete case-insensitive pattern match for the dialect. */
+  caseInsensitivePattern: (left: string, right: string) => string
 }
 
 const fieldRef = (field: string, options: FilterCompileOptions) =>
@@ -39,8 +49,10 @@ const fieldRef = (field: string, options: FilterCompileOptions) =>
  * Edge cases:
  * - `IN ()` with an empty array produces `1 = 0` (always false) instead of
  *   invalid SQL like `IN ()`.
- * - The `like` pattern is passed through verbatim — the caller is responsible
- *   for adding `%` wildcards.
+ * - The `like` pattern stays a bound parameter and is passed through verbatim;
+ *   the renderer owns the operator (`LIKE` or `ILIKE`), adds no wildcards, and
+ *   does not transform the value. The caller is responsible for any `%`
+ *   wildcards and escape sequences.
  * - All column references use the hardcoded table alias `t`.
  *
  * @param node - The filter AST to compile
@@ -64,7 +76,10 @@ const fieldRef = (field: string, options: FilterCompileOptions) =>
  *   Filter.field("title").eq("hello"),
  *   schema,
  *   "posts",
- *   { quoteIdentifier: (field) => `"${field}"` }
+ *   {
+ *     quoteIdentifier: (field) => `"${field}"`,
+ *     caseInsensitivePattern: (left, right) => `${left} LIKE ${right}`
+ *   }
  * )
  * // Resolves to: { sql: 't."title" = ?', params: ["hello"] }
  *
@@ -206,7 +221,11 @@ function compileLike(
 ): Effect.Effect<WhereClause, ValidationError> {
   return Effect.gen(function* () {
     yield* validateField(node.field, collection, schema, options)
-    return { sql: `${fieldRef(node.field, options)} LIKE ?`, params: [node.value] }
+    const renderPattern = options.caseInsensitivePattern
+    return {
+      sql: renderPattern(fieldRef(node.field, options), "?"),
+      params: [node.value]
+    }
   })
 }
 
