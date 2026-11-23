@@ -151,6 +151,101 @@ export function normalizeIdentifier(name: string): string {
   return name.toLowerCase()
 }
 
+const skipSpaces = (sql: string, from: number) => {
+  let index = from
+  while (index < sql.length && /\s/.test(sql[index] ?? "")) index++
+  return index
+}
+
+const readWord = (
+  sql: string,
+  from: number
+): { readonly value: string; readonly next: number } | null => {
+  if (!isWordStart(sql[from] ?? "")) return null
+  let index = from + 1
+  while (index < sql.length && isWordPart(sql[index] ?? "")) index++
+  return { value: sql.slice(from, index), next: index }
+}
+
+const readQuotedName = (sql: string, from: number): { readonly next: number } | null => {
+  const open = sql[from] ?? ""
+  if (open !== '"' && open !== "`" && open !== "[") return null
+  const close = open === "[" ? "]" : open
+  const doubledEscape = open !== "["
+  let index = from + 1
+  while (index < sql.length) {
+    if (sql[index] === close) {
+      if (doubledEscape && sql[index + 1] === close) {
+        index += 2
+        continue
+      }
+      return { next: index + 1 }
+    }
+    index++
+  }
+  return null
+}
+
+/** Consumes one view name: plain, double-quoted, backtick, or bracket form. */
+const readName = (sql: string, from: number): { readonly next: number } | null => {
+  const word = readWord(sql, from)
+  if (word !== null) return { next: word.next }
+  return readQuotedName(sql, from)
+}
+
+/**
+ * Reports whether a stored `CREATE VIEW` front matter declares an explicit
+ * column list, such as `CREATE VIEW v (a, b) AS SELECT ...`.
+ *
+ * The scanner consumes only the front matter: `CREATE`, an optional
+ * `TEMP`/`TEMPORARY`, `VIEW`, an optional `IF NOT EXISTS`, and one name in plain,
+ * double-quoted, backtick-quoted, bracket-quoted, or schema-qualified form. It
+ * then reports whether the next significant character is `(` before the `AS`
+ * keyword. The direction is explicit: a column list is missed only when the
+ * front matter is unparsable, which returns `false`; the text came from
+ * `sqlite_master`, so a non-`CREATE VIEW` statement is not a user view.
+ */
+export function viewDeclaresColumnList(sql: string): boolean {
+  let index = skipSpaces(sql, 0)
+  const create = readWord(sql, index)
+  if (create === null || create.value.toUpperCase() !== "CREATE") return false
+  index = skipSpaces(sql, create.next)
+
+  const temp = readWord(sql, index)
+  if (temp !== null) {
+    const keyword = temp.value.toUpperCase()
+    if (keyword === "TEMP" || keyword === "TEMPORARY") index = skipSpaces(sql, temp.next)
+  }
+
+  const view = readWord(sql, index)
+  if (view === null || view.value.toUpperCase() !== "VIEW") return false
+  index = skipSpaces(sql, view.next)
+
+  const ifKeyword = readWord(sql, index)
+  if (ifKeyword !== null && ifKeyword.value.toUpperCase() === "IF") {
+    index = skipSpaces(sql, ifKeyword.next)
+    const notKeyword = readWord(sql, index)
+    if (notKeyword === null || notKeyword.value.toUpperCase() !== "NOT") return false
+    index = skipSpaces(sql, notKeyword.next)
+    const existsKeyword = readWord(sql, index)
+    if (existsKeyword === null || existsKeyword.value.toUpperCase() !== "EXISTS") return false
+    index = skipSpaces(sql, existsKeyword.next)
+  }
+
+  const name = readName(sql, index)
+  if (name === null) return false
+  index = skipSpaces(sql, name.next)
+  if (sql[index] === ".") {
+    const qualified = readName(sql, skipSpaces(sql, index + 1))
+    if (qualified === null) return false
+    index = skipSpaces(sql, qualified.next)
+  }
+
+  const asKeyword = readWord(sql, index)
+  if (asKeyword !== null && asKeyword.value.toUpperCase() === "AS") return false
+  return sql[index] === "("
+}
+
 type FromContext = {
   readonly depth: number
   expectReference: boolean

@@ -1,5 +1,6 @@
 import type { TimestampUnit } from "@gettersethya/mira-client"
 import type { Option } from "effect"
+import type { SqlError } from "effect/sql"
 import { Context, Effect, Predicate } from "effect"
 
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
@@ -79,6 +80,17 @@ export type TranslatePlanContext = {
   tables: ReadonlyMap<string, TableShapes>
   /** Every view collection the plan may touch, keyed by collection name. */
   views: ReadonlyMap<string, ViewShape>
+  /**
+   * Guarded read-only catalog `SELECT` capability, issued by the dialect during
+   * render, before the migration transaction opens.
+   *
+   * The migrator's implementation requires a `SELECT` first token and rejects
+   * semicolons, so a dialect cannot turn a render into a hidden mutation path.
+   * Dialects interpolate no user data into the statement.
+   */
+  readonly readonlyQuery: (
+    statement: string
+  ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, SqlError.SqlError>
 }
 
 /**
@@ -181,11 +193,15 @@ export type DialectType = {
    * changing a column means rebuilding the table — coalesces the steps of the
    * affected tables here. Keeping that at this boundary leaves `MigrationStep`, the
    * schema differ and `Migrator.plan()` free of any dialect-specific notion.
+   *
+   * The error channel includes `SqlError.SqlError` for a failed catalog read
+   * through `ctx.readonlyQuery`. Implementations with a narrower channel remain
+   * assignable, because Effect is covariant in the error channel.
    */
   translatePlan: (
     steps: ReadonlyArray<MigrationStep>,
     ctx: TranslatePlanContext
-  ) => Effect.Effect<TranslatedPlan, UnsupportedMigrationStepError>
+  ) => Effect.Effect<TranslatedPlan, UnsupportedMigrationStepError | SqlError.SqlError>
   /** Translates a single `MigrationStep` into one or more SQL statements. */
   translate: (step: MigrationStep) => Array<string>
   /** Returns the dialect's native SQL type keyword for a given `ColumnDef`. */

@@ -6,6 +6,7 @@ import {
   fromJoinReferences,
   normalizeIdentifier,
   topologicalViewOrder,
+  viewDeclaresColumnList,
   viewDependencies
 } from "@/dialect/view-dependencies.js"
 
@@ -14,6 +15,41 @@ const refs = (query: string) => [...fromJoinReferences(query)].sort()
 describe("normalizeIdentifier", () => {
   it("lowercases names for dependency lookups", () => {
     expect(normalizeIdentifier("Posts")).toBe("posts")
+  })
+})
+
+describe("viewDeclaresColumnList", () => {
+  it("detects a plain column list", () => {
+    expect(viewDeclaresColumnList("CREATE VIEW v (a, b) AS SELECT 1, 2")).toBe(true)
+    expect(viewDeclaresColumnList("CREATE VIEW v AS SELECT 1")).toBe(false)
+  })
+
+  it("detects double-quoted, backtick, and bracket names", () => {
+    expect(viewDeclaresColumnList('CREATE VIEW "v" ("a", "b") AS SELECT 1, 2')).toBe(true)
+    expect(viewDeclaresColumnList("CREATE VIEW `v` (`a`) AS SELECT 1")).toBe(true)
+    expect(viewDeclaresColumnList("CREATE VIEW [v] ([a], [b]) AS SELECT 1, 2")).toBe(true)
+  })
+
+  it("detects a schema-qualified name", () => {
+    expect(viewDeclaresColumnList("CREATE VIEW main.v (a) AS SELECT 1")).toBe(true)
+    expect(viewDeclaresColumnList('CREATE VIEW "main"."v" AS SELECT 1')).toBe(false)
+  })
+
+  it("skips IF NOT EXISTS and TEMP front matter", () => {
+    expect(viewDeclaresColumnList("CREATE VIEW IF NOT EXISTS v (a) AS SELECT 1")).toBe(true)
+    expect(viewDeclaresColumnList("CREATE TEMP VIEW v (a) AS SELECT 1")).toBe(true)
+    expect(viewDeclaresColumnList("CREATE TEMPORARY VIEW IF NOT EXISTS v AS SELECT 1")).toBe(false)
+  })
+
+  it("does not treat a parenthesized query expression as a column list", () => {
+    expect(viewDeclaresColumnList("CREATE VIEW v AS SELECT * FROM t WHERE (a = 1)")).toBe(false)
+  })
+
+  it("returns false for unparsable front matter", () => {
+    expect(viewDeclaresColumnList("SELECT 1")).toBe(false)
+    expect(viewDeclaresColumnList("CREATE TABLE v (a)")).toBe(false)
+    expect(viewDeclaresColumnList("CREATE VIEW")).toBe(false)
+    expect(viewDeclaresColumnList("CREATE OR REPLACE VIEW v (a) AS SELECT 1")).toBe(false)
   })
 })
 

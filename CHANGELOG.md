@@ -17,6 +17,10 @@ published by CI.
 
 ### Fixed
 
+- **Destructive SQLite plans no longer silently break untracked views or discard
+  view-attached objects.** The preflight scan names the object it would damage,
+  native drops log a note, and every connected surviving view is probed inside
+  the transaction.
 - **Telemetry duplicate recovery is transaction-safe on PostgreSQL.** The SQL
   store now appends with a dialect conflict clause, by default
   `ON CONFLICT (id) DO NOTHING`, instead of catching a failed insert and running
@@ -38,6 +42,16 @@ published by CI.
 
 ### Changed
 
+- **`TranslatePlanContext` gains the guarded `readonlyQuery` executor and
+  `translatePlan`'s error channel includes `SqlError`.** The context type is not
+  root-exported; the change is source-compatible through the exported
+  `DialectType` signature; the supported package surface is unaffected, and any
+  external code referencing the internal context type directly must supply the
+  executor. Six silent successes become named refusals (untracked and tracked
+  dependents of rebuilt or dropped objects, triggers on recreated views,
+  explicit column lists, triggers on rebuilt tables, a `createView` over an
+  existing untracked object), and a migration that would have succeeded while
+  leaving a connected view broken now rolls back on its probe.
 - **Breaking: user filter `like` requires a dialect pattern renderer.**
   `DialectType` gains a required `caseInsensitivePattern(left, right)` member, and
   `FilterCompileOptions` gains a required `caseInsensitivePattern` member of the

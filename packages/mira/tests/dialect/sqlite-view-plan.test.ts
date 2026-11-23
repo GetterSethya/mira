@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Data, Effect } from "effect"
 import { expect } from "vitest"
 
 import type { TranslatePlanContext, ViewShape } from "@/dialect/dialect.js"
@@ -27,7 +27,11 @@ const views = (...entries: ReadonlyArray<readonly [string, ViewShape]>) =>
 const context = (
   viewMap: ReadonlyMap<string, ViewShape>,
   tables: ReadonlyMap<string, TableShapes> = new Map()
-): TranslatePlanContext => ({ tables, views: viewMap })
+): TranslatePlanContext => ({
+  tables,
+  views: viewMap,
+  readonlyQuery: () => Effect.succeed([])
+})
 
 const plan = (
   steps: ReadonlyArray<MigrationStep>,
@@ -41,9 +45,17 @@ const failure = (
   tables: ReadonlyMap<string, TableShapes> = new Map()
 ) =>
   plan(steps, viewMap, tables).pipe(
-    Effect.flip,
-    Effect.map((error) => ({ step: error.step, detail: error.detail }))
+    Effect.flatMap((translated) => new PreflightSucceededError({ statements: translated.statements.length })),
+    Effect.catchTag("UnsupportedMigrationStepError", (error) =>
+      Effect.succeed({ step: error.step, detail: error.detail })
+    ),
+    Effect.orDie
   )
+
+/** A render that was expected to fail preflight but succeeded. */
+class PreflightSucceededError extends Data.TaggedError("PreflightSucceededError")<{
+  readonly statements: number
+}> {}
 
 const dropColumn: MigrationStep = {
   kind: "dropColumn",

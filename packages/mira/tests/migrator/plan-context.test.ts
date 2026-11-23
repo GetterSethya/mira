@@ -87,6 +87,7 @@ describe("buildPlanContext views", () => {
           properties: ["id", "seqId", "title"]
         }
       })
+      expect(typeof captured[0]?.readonlyQuery).toBe("function")
     }).pipe(Effect.provide(testLayer(capturingDialect(captured))))
   })
 
@@ -135,4 +136,27 @@ describe("buildPlanContext views", () => {
       const plan = yield* migrator.plan([todos])
       expect(plan.notes).toBeUndefined()
     }).pipe(Effect.provide(testLayer(capturingDialect([])))))
+
+  it.effect("guards the captured readonlyQuery against non-read statements", () => {
+    const captured: Array<TranslatePlanContext> = []
+
+    return Effect.gen(function* () {
+      const migrator = yield* Migrator
+      yield* migrator.plan([todos])
+
+      const readonlyQuery = captured[0]?.readonlyQuery
+      if (readonlyQuery === undefined) {
+        return yield* Effect.die("captured context has no readonlyQuery")
+      }
+
+      for (const statement of [
+        "DROP TABLE x",
+        "WITH removed AS (SELECT 1) DELETE FROM todos",
+        "SELECT 1; DROP TABLE x"
+      ]) {
+        const error = yield* readonlyQuery(statement).pipe(Effect.flip)
+        expect(error._tag).toBe("SqlError")
+      }
+    }).pipe(Effect.provide(testLayer(capturingDialect(captured))))
+  })
 })
