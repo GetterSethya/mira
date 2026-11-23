@@ -610,6 +610,9 @@ export const sqliteDialect: DialectType = {
   storesBooleanAsInteger: true,
   // SQLite 3.35+ supports DELETE ... RETURNING on both the Node and Bun drivers.
   deleteResult: { _tag: "returning" },
+  // SQLite rejects a nested BEGIN while a transaction is alive, so the probe
+  // reads a BEGIN failure as the alive signal.
+  transactionProbe: "nested-begin",
 
   quoteIdentifier: quote,
   currentTimestamp: () => "datetime('now')",

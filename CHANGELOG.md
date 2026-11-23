@@ -29,6 +29,12 @@ published by CI.
   across databases. Telemetry log and span reads share the behavior with
   collection lists. The pattern stays a bound parameter with no added wildcards
   or `ESCAPE` clause, and non-ASCII folding still follows the engine and locale.
+- **A mid-batch statement failure no longer rolls back already-succeeded entries
+  on PostgreSQL.** A failing entry now isolates to its own savepoint instead of
+  aborting the whole batch. The liveness probe no longer issues SQLite-specific
+  `BEGIN`/`ROLLBACK` on that engine, so it can no longer abort the outer
+  transaction with its cleanup `ROLLBACK`. This is latent #29 contract work; no
+  PostgreSQL preset ships yet.
 
 ### Changed
 
@@ -54,6 +60,29 @@ published by CI.
   `seqId` pagination now advances. A page with more rows and an unusable
   last-returned `seqId` logs and fails visibly instead of returning null. The
   client no longer retries HTTP 500 on any operation; 503 still retries.
+- **Breaking: `DialectType` gains a required `transactionProbe` member.** It
+  names the transaction liveness probe strategy (`nested-begin` or
+  `select-only`); a custom dialect must choose a verified strategy because no
+  default is safe on an unverified engine. The `TransactionProbeStrategy` type
+  is re-exported from the package root alongside `DialectType`.
+- **Breaking: `makeMutationBatcherLayer` now requires `Dialect`.** It reads the
+  probe strategy from the active dialect at layer build. Direct builders of the
+  layer must provide it; the public collection service layer signatures are
+  unchanged because `CollectionServiceDeps` already includes `Dialect`.
+- **PostgreSQL batches now follow the documented per-entry failure policy.**
+  A statement-level failure isolates to its entry instead of being accidentally
+  all-or-nothing, so entries that already succeeded still commit. No PostgreSQL
+  preset ships in this change.
+- **A failed savepoint release after a successful entry now aborts the batch.**
+  The wrapper-failure guard compares the guarded exit's cause with the entry's
+  own cause; when they differ the batch aborts without probing instead of
+  settling only that entry as a failure while its row commits.
+- **A fast-path failure after a successful write commits that row on PostgreSQL
+  once the preset ships.** This hazard already exists on SQLite and was
+  previously masked on PostgreSQL by the misfiring probe; the single-entry fast
+  path has no savepoint.
+- **libSQL inherits the SQLite probe declaration.** Local and remote libSQL use
+  `nested-begin` through `sqliteDialect`, unchanged by this work.
 
 - **Internal PostgreSQL DDL capability and plan notes.** `TranslatePlanContext`
   gains a required `views` map with stored and desired query shapes.

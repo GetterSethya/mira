@@ -26,6 +26,7 @@ const postgresTestDialect: DialectType = {
   indexName: (table, fields) => `${table}_${fields.join("_")}_idx`,
   storesBooleanAsInteger: false,
   deleteResult: { _tag: "returning" },
+  transactionProbe: "select-only",
   placeholder: (index) => `$${index}`,
   upsert: () => "",
   store: {

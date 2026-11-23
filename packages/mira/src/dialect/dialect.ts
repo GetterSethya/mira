@@ -29,6 +29,32 @@ export type DeleteResultStrategy =
   | { readonly _tag: "precheck" }
 
 /**
+ * How the mutation batcher probes transaction liveness after a failed entry.
+ *
+ * The caller must already be inside the batch's outer transaction; a probe
+ * outside one cannot tell a live transaction from a usable autocommit
+ * connection. Both strategies run `SELECT 1` first and treat its failure as
+ * not-usable.
+ *
+ * - `"nested-begin"`: the SQLite-family probe. After `SELECT 1` succeeds, the
+ *   probe issues `BEGIN`. A failing `BEGIN` is the alive signal, because a
+ *   live SQLite transaction rejects a nested `BEGIN`. A succeeding `BEGIN`
+ *   means SQLite already rolled the outer transaction back implicitly, so the
+ *   probe rolls the throwaway transaction back and reports not-usable.
+ * - `"select-only"`: `SELECT 1` is the whole probe. A success reports usable,
+ *   and a failure reports not-usable. The probe fails closed: any failure,
+ *   including a statement timeout or an admin cancel, aborts the batch. No
+ *   transaction control statement is issued, so the probe cannot end the
+ *   outer transaction.
+ *
+ * MySQL and SQL Server must verify either strategy against their engine before
+ * choosing one. A nested `BEGIN` implicitly commits in MySQL and nests in SQL
+ * Server, so `"nested-begin"` is known-unsafe there, and the applicability of
+ * `"select-only"` is unverified.
+ */
+export type TransactionProbeStrategy = "nested-begin" | "select-only"
+
+/**
  * The stored and desired query for one view collection.
  *
  * `null` on a side means the view is absent from that side. `{ query: null }`
@@ -205,6 +231,17 @@ export type DialectType = {
    * `"?"`; PostgreSQL returns `"$" + index`.
    */
   placeholder: (index: number) => string
+  /**
+   * How the mutation batcher probes transaction liveness after a failed entry
+   * in a multi-entry batch.
+   *
+   * The batcher reads this once at layer build and runs the probe only while
+   * the outer transaction is open. Omission is a compile error because no
+   * strategy is safe to inherit on an engine that has not verified it. See
+   * {@link TransactionProbeStrategy} for both strategies and their failure
+   * rules.
+   */
+  readonly transactionProbe: TransactionProbeStrategy
   /**
    * Portable upsert used by the migrator for schema metadata. SQLite and
    * PostgreSQL use `ON CONFLICT`; MySQL uses `ON DUPLICATE KEY UPDATE`.
