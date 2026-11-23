@@ -63,9 +63,8 @@ export const isSqliteUniqueViolation = (error: unknown) =>
 const STORE_CODE_KEYS = ["code", "errno", "errstr", "errcode", "extendedCode", "rawCode"]
 
 /**
- * Store-only duplicate classifier. Telemetry keeps `isSqliteUniqueViolation`
- * unchanged; the auth email path gets the broader code fields and the
- * structured `UniqueViolation` reason fallback.
+ * Store-only duplicate classifier. It adds the broader code fields and the
+ * structured `UniqueViolation` reason fallback the auth email path needs.
  */
 export const isSqliteStoreDuplicateKey = (error: unknown) =>
   isSqliteUniqueViolation(error) ||
@@ -631,8 +630,7 @@ export const sqliteDialect: DialectType = {
       "PRAGMA busy_timeout = 5000"
     ],
     cleanup: ["PRAGMA wal_checkpoint(TRUNCATE)"],
-    isRetryable: isSqliteBusy,
-    isDuplicateKey: isSqliteUniqueViolation
+    isRetryable: isSqliteBusy
   },
 
   translatePlan: (steps, ctx) =>

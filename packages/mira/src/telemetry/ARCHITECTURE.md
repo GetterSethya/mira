@@ -50,9 +50,23 @@ explicit `synchronous` setting and skip telemetry setup/cleanup.
 
 Shared mode reuses the application `SqlClient` and `Dialect`, runs no setup or
 cleanup, and stores telemetry migration metadata in `_telemetry_collections` and
-`_telemetry_migrations`. An application transaction can include or roll back a
-telemetry write; that is the documented trade-off that makes shared mode work on
-PGlite and browser OPFS.
+`_telemetry_migrations`. A direct store append inside an application transaction
+can be included in or rolled back with it; that is the documented trade-off that
+makes shared mode work on PGlite and browser OPFS. The core's forked consumers
+do not inherit the caller transaction.
+
+## Transaction contract
+
+A telemetry append is one `INSERT` with the dialect conflict clause, by default
+`ON CONFLICT (<id>) DO NOTHING`. A duplicate id is a no-op, not an error. No
+statement fails on a duplicate, and no recovery query runs after a failed
+statement, so PostgreSQL cannot enter `25P02`.
+
+A direct store append inside a caller transaction joins that transaction. A
+commit writes the rows; a rollback removes them. This is the documented
+trade-off that makes shared mode work on PGlite and browser OPFS. The telemetry
+core runs its consumers in forked fibers, so a log emitted through the Effect
+`Logger` does not inherit the caller transaction.
 
 ## Dialect hooks
 
@@ -65,7 +79,10 @@ PGlite and browser OPFS.
   checkpoint; remote libSQL uses an empty list.
 - `isRetryable`: driver-specific busy/lock classifier, plus nested network codes
   for remote libSQL.
-- `isDuplicateKey`: driver-specific duplicate-id classifier.
+- `insertConflictClause`: optional suffix for the batch insert. The store passes
+  the quoted id column, for example `"id"`. Absent means
+  `ON CONFLICT (<quoted id>) DO NOTHING`. A dialect that needs another form
+  overrides it.
 
 The SQL store reads these hooks. The core never imports `Dialect` and never
 branches on a dialect name.

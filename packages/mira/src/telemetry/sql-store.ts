@@ -9,7 +9,6 @@ import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 import { LogsCollection, SpansCollection } from "./collections.js"
 import {
   type TelemetryDeleteResult,
-  TelemetryDuplicateEntryError,
   type TelemetryLogEntry,
   type TelemetryLogPage,
   type TelemetryLogRow,
@@ -68,11 +67,34 @@ const run = <A extends object>(
   params: ReadonlyArray<unknown> = []
 ) => sql.unsafe<A>(rewritePlaceholders(statement, dialect), params)
 
-const duplicatePredicate = (dialect: DialectType) =>
-  dialect.telemetry?.isDuplicateKey ?? (() => false)
-
 const retryPredicate = (dialect: DialectType) =>
   dialect.telemetry?.isRetryable ?? (() => false)
+
+const resolveConflictClause = (dialect: DialectType) => {
+  const quotedId = dialect.quoteIdentifier("id")
+  return (
+    dialect.telemetry?.insertConflictClause?.(quotedId) ??
+    `ON CONFLICT (${quotedId}) DO NOTHING`
+  )
+}
+
+/**
+ * Builds the telemetry batch insert with the dialect's duplicate-ignoring
+ * clause. Exported so tests can compile the exact statement without a driver.
+ *
+ * The caller must pass at least one row; `appendRows` guards empty input.
+ */
+export const makeInsertStatement = <
+  A extends { readonly id: string } & Record<string, unknown>
+>(
+  sql: SqlClient.SqlClient,
+  dialect: DialectType,
+  table: string,
+  rows: ReadonlyArray<A>
+) =>
+  sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} ${sql.literal(
+    resolveConflictClause(dialect)
+  )}`
 
 const inList = (values: ReadonlyArray<unknown>) =>
   values.length === 0 ? "NULL" : values.map(() => "?").join(", ")
@@ -83,56 +105,14 @@ const appendRows = <A extends { readonly id: string } & Record<string, unknown>>
   table: string,
   operation: string,
   rows: ReadonlyArray<A>
-): Effect.Effect<void, TelemetryStoreError | TelemetryDuplicateEntryError> =>
+): Effect.Effect<void, TelemetryStoreError> =>
   Effect.gen(function* () {
     if (rows.length === 0) return
 
-    const insert = (values: ReadonlyArray<A>) =>
-      sql`INSERT INTO ${sql(table)} ${sql.insert(values)}`.pipe(
-        Effect.asVoid
-      )
-
-    const attempt = yield* insert(rows).pipe(
-      Effect.as({ ok: true as const }),
-      Effect.catch((error) => Effect.succeed({ ok: false as const, error }))
+    yield* makeInsertStatement(sql, dialect, table, rows).pipe(
+      Effect.asVoid,
+      Effect.mapError((error) => mapStoreError(operation, error))
     )
-
-    if (attempt.ok) return
-
-    if (!duplicatePredicate(dialect)(attempt.error)) {
-      return yield* Effect.fail(mapStoreError(operation, attempt.error))
-    }
-
-    const ids = rows.map((row) => row.id)
-    const q = dialect.quoteIdentifier
-    const existing = yield* run<{ id: string }>(
-      sql,
-      dialect,
-      `SELECT ${q("id")} FROM ${q(table)} WHERE ${q("id")} IN (${inList(ids)})`,
-      ids
-    ).pipe(Effect.mapError((error) => mapStoreError(operation, error)))
-
-    const existingIds = new Set(existing.map((row) => String(row.id)))
-    const missing = rows.filter((row) => !existingIds.has(row.id))
-    if (missing.length === 0) return
-
-    const retry = yield* insert(missing).pipe(
-      Effect.as({ ok: true as const }),
-      Effect.catch((error) => Effect.succeed({ ok: false as const, error }))
-    )
-
-    if (retry.ok) return
-
-    if (duplicatePredicate(dialect)(retry.error)) {
-      return yield* Effect.fail(
-        new TelemetryDuplicateEntryError({
-          operation,
-          ids: missing.map((row) => row.id)
-        })
-      )
-    }
-
-    return yield* Effect.fail(mapStoreError(operation, retry.error))
   })
 
 const mapLogEntry = (

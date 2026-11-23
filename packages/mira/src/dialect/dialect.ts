@@ -69,11 +69,15 @@ export type TelemetryDialectHooks = {
   /** Whether a failed setup or migration should be retried. */
   readonly isRetryable: (error: unknown) => boolean
   /**
-   * Whether an append failed because the row id already exists. A retry of a
-   * committed batch then treats the single duplicate row as success instead of
-   * losing it or duplicating the other rows.
+   * Suffix appended to a telemetry batch insert so a duplicate row id becomes a
+   * no-op instead of a constraint error.
+   *
+   * The store passes the dialect-quoted id column, for example `"id"`. Absent
+   * means `ON CONFLICT (<quoted id>) DO NOTHING`. A dialect that needs another
+   * form overrides this hook; the returned clause is trusted SQL and must not
+   * contain user input.
    */
-  readonly isDuplicateKey: (error: unknown) => boolean
+  readonly insertConflictClause?: (quotedId: string) => string
 }
 
 /**

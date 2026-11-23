@@ -1,12 +1,15 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Data, Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
-import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
+import {
+  makeInsertStatement,
+  makeSqlTelemetryStoreLayer
+} from "@/telemetry/sql-store.js"
 import {
   type TelemetryLogEntry,
   type TelemetrySpanEntry,
@@ -25,6 +28,17 @@ const makeLayer = (dialect = sqliteDialect) =>
   makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(
     Layer.provideMerge(databaseLayer(dialect))
   )
+
+const makeSharedLayer = (dialect = sqliteDialect) =>
+  makeSqlTelemetryStoreLayer({ dedicated: false }).pipe(
+    Layer.provideMerge(databaseLayer(dialect))
+  )
+
+class RollbackError extends Data.TaggedError("RollbackError")<Record<string, never>> {}
+
+class MissingTelemetryHooks extends Data.TaggedError("MissingTelemetryHooks")<
+  Record<string, never>
+> {}
 
 const log = (
   id: string,
@@ -102,6 +116,92 @@ describe("SqlTelemetryStore", () => {
 
       yield* store.appendLogs(rows)
       yield* store.appendLogs(rows)
+
+      expect(yield* count("logs")).toBe(2)
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("compiles a conflict-ignoring insert for the SQLite dialect", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const rows = [{ id: "one", level: "INFO", message: "first" }]
+
+      const [query] = makeInsertStatement(sql, sqliteDialect, "logs", rows).compile()
+
+      expect(query).toContain('ON CONFLICT ("id") DO NOTHING')
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("lets a dialect override the conflict clause", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const hooks = sqliteDialect.telemetry
+      if (hooks === undefined) {
+        return yield* Effect.fail(new MissingTelemetryHooks({}))
+      }
+      const customDialect = {
+        ...sqliteDialect,
+        telemetry: {
+          ...hooks,
+          insertConflictClause: (id: string) => `ON DUPLICATE KEY UPDATE ${id} = ${id}`
+        }
+      }
+      const rows = [{ id: "one", level: "INFO", message: "first" }]
+
+      const [query] = makeInsertStatement(sql, customDialect, "logs", rows).compile()
+
+      expect(query).toContain('ON DUPLICATE KEY UPDATE "id" = "id"')
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("keeps a caller transaction usable when appending duplicate ids", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const sql = yield* SqlClient.SqlClient
+      const read = requireRead(store)
+
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          yield* store.appendLogs([log("dup"), log("first")])
+          yield* store.appendLogs([log("dup"), log("second")])
+        })
+      )
+
+      const page = yield* read.listLogs({
+        limit: 10,
+        after: null,
+        filter: null,
+        traceId: null
+      })
+
+      expect(page.items.map((row) => row.id).sort()).toEqual(["dup", "first", "second"])
+    }).pipe(Effect.provide(makeSharedLayer()))
+  )
+
+  it.effect("rolls telemetry back with a direct caller transaction", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const sql = yield* SqlClient.SqlClient
+
+      const exit = yield* Effect.exit(
+        sql.withTransaction(
+          Effect.gen(function* () {
+            yield* store.appendLogs([log("rolled-back")])
+            return yield* Effect.fail(new RollbackError({}))
+          })
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(yield* count("logs")).toBe(0)
+    }).pipe(Effect.provide(makeSharedLayer()))
+  )
+
+  it.effect("ignores duplicate ids inside a single batch", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+
+      yield* store.appendLogs([log("dup", "first"), log("dup", "second"), log("new")])
 
       expect(yield* count("logs")).toBe(2)
     }).pipe(Effect.provide(makeLayer()))
