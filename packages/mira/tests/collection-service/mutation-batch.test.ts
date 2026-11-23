@@ -45,7 +45,7 @@ import type { Repository } from "@/repository/repository.js"
 import { LocalFileStorage } from "@/storage/index.js"
 import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 import type { AuthService } from "@/http/auth.js"
-import type { Dialect as DialectService } from "@/dialect/dialect.js"
+import type { Dialect as DialectService, TransactionProbeStrategy } from "@/dialect/dialect.js"
 import type { FileStorage as FileStorageService } from "@/storage/storage.js"
 import type { CompletedSpan } from "@/telemetry/tracer.js"
 import { makeConsoleTracer } from "@/telemetry/tracer.js"
@@ -689,7 +689,7 @@ describe("create batching", () => {
             yield* Effect.exit(
               sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('poison', 'poison', 'x', 'x')`
             )
-            yield* Ref.set(dead, Option.some(yield* probeTransactionAlive(sql)))
+            yield* Ref.set(dead, Option.some((yield* probeTransactionAlive(sql, "nested-begin")).alive))
             // Leave the (already rolled back) transaction: the driver skips
             // ROLLBACK when `isTransaction` is false.
             return yield* Effect.fail(new ProbeAbort())
@@ -703,11 +703,69 @@ describe("create batching", () => {
           yield* Effect.exit(
             sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('dupe', 'dup', 'x', 'x')`
           )
-          return yield* probeTransactionAlive(sql)
+          return yield* probeTransactionAlive(sql, "nested-begin")
         })
       )
-      expect(alive).toBe(true)
+      expect(alive.alive).toBe(true)
     }).pipe(Effect.provide(batcherOnlyLayer()))
+  )
+
+  it.effect("transaction probe: select-only stays usable where nested-begin reads not-usable on the poison state", () =>
+    Effect.gen(function* () {
+      yield* setupPostsTable
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(`
+        CREATE TRIGGER "posts_poison" BEFORE INSERT ON "posts"
+        WHEN NEW."title" = 'poison'
+        BEGIN
+          SELECT RAISE(ROLLBACK, 'poison');
+        END
+      `)
+
+      const selectOnly = yield* Ref.make(Option.none<boolean>())
+      const nestedBegin = yield* Ref.make(Option.none<boolean>())
+      yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* Effect.exit(
+              sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('poison', 'poison', 'x', 'x')`
+            )
+            // SQLite has already rolled the transaction back, so `SELECT 1`
+            // succeeds and only the nested `BEGIN` can tell the transaction is
+            // gone. Both strategies probe the same connection state.
+            yield* Ref.set(selectOnly, Option.some((yield* probeTransactionAlive(sql, "select-only")).alive))
+            yield* Ref.set(nestedBegin, Option.some((yield* probeTransactionAlive(sql, "nested-begin")).alive))
+            // Leave the (already rolled back) transaction: the driver skips
+            // ROLLBACK when `isTransaction` is false.
+            return yield* Effect.fail(new ProbeAbort())
+          })
+        )
+        .pipe(Effect.exit)
+
+      expect(Option.getOrUndefined(yield* Ref.get(selectOnly))).toBe(true)
+      expect(Option.getOrUndefined(yield* Ref.get(nestedBegin))).toBe(false)
+    }).pipe(Effect.provide(batcherOnlyLayer()))
+  )
+
+  it.effect("transaction probe: a closed connection reports not-usable and carries a failure tag", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const context = yield* Layer.buildWithScope(SqliteClient.layer({ filename: ":memory:" }), scope)
+      const sql = yield* Effect.provide(
+        Effect.gen(function* () {
+          return yield* SqlClient.SqlClient
+        }),
+        context
+      )
+      // Releasing the layer scope closes the database handle; the probe must
+      // report that as not-usable instead of dying on the closed connection.
+      yield* Scope.close(scope, Exit.void)
+
+      const result = yield* probeTransactionAlive(sql, "select-only")
+
+      expect(result.alive).toBe(false)
+      expect(typeof result.probeFailureTag).toBe("string")
+    })
   )
 
   it.effect("windowMs 0 drains without sleeping (virtual clock, no flushNow)", () =>
@@ -828,6 +886,137 @@ describe("create batching", () => {
         .pipe(Effect.exit)
       expect(failureTag(result)).toBe("BatchMutationNestedTransactionError")
     }).pipe(Effect.provide(batchedLayer()))
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Dialect-driven probe wiring
+// ---------------------------------------------------------------------------
+
+interface RecordedCall {
+  readonly strings: ReadonlyArray<string>
+  readonly values: ReadonlyArray<unknown>
+}
+
+/** Collects every string leaf of a recorded interpolation (fragments are objects). */
+const stringsIn = (value: unknown): ReadonlyArray<string> => {
+  if (typeof value === "string") return [value]
+  if (Array.isArray(value)) return value.flatMap(stringsIn)
+  if (typeof value === "object" && value !== null) return Object.values(value).flatMap(stringsIn)
+  return []
+}
+
+/**
+ * Records the tagged-template calls the probe issues, including interpolated
+ * fragments: `sql.literal("BEGIN")` arrives as a value with an empty leading
+ * template string, so recording the strings alone would miss it.
+ */
+const recordingSqlLayer = (recorded: Array<RecordedCall>): Layer.Layer<SqlClient.SqlClient> =>
+  Layer.effect(
+    SqlClient.SqlClient,
+    Effect.gen(function* () {
+      const base = yield* SqlClient.SqlClient
+      return new Proxy(base, {
+        apply(target, thisArg, args) {
+          const [strings, ...values] = args
+          recorded.push({
+            strings: Array.isArray(strings) ? strings.map((part) => String(part)) : [],
+            values
+          })
+          return Reflect.apply(target, thisArg, args)
+        },
+        get(target, property, receiver) {
+          if (property === "unsafe") {
+            return (statement: string, params?: ReadonlyArray<unknown>) => {
+              recorded.push({ strings: [statement], values: params ?? [] })
+              return target.unsafe(statement, params)
+            }
+          }
+          return Reflect.get(target, property, receiver)
+        }
+      })
+    })
+  ).pipe(Layer.provide(sqliteLayer))
+
+/** The probe's own `SELECT 1` calls, which a batch hit only after a failed entry. */
+const probeSelects = (calls: ReadonlyArray<RecordedCall>) =>
+  calls.filter((call) => call.strings.join("").trim().toUpperCase().startsWith("SELECT 1"))
+
+/** Fragments interpolated into a statement, such as the probe's literal `BEGIN`. */
+const interpolatedFragments = (calls: ReadonlyArray<RecordedCall>) =>
+  calls.filter((call) => call.strings.join("") === "").flatMap((call) => stringsIn(call.values))
+
+const runRecordedBatch = (transactionProbe: TransactionProbeStrategy) =>
+  Effect.gen(function* () {
+    const recorded: Array<RecordedCall> = []
+    const statsLayer = makeBatchMutationStatsLayer()
+    const layer = Layer.merge(
+      makeMutationBatcherLayer(batchedConfig, statsLayer).pipe(
+        Layer.provideMerge(
+          Layer.merge(
+            recordingSqlLayer(recorded),
+            Layer.succeed(Dialect, { ...sqliteDialect, transactionProbe })
+          )
+        )
+      ),
+      statsLayer
+    )
+
+    const exits = yield* Effect.gen(function* () {
+      yield* setupPostsTable
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(`CREATE UNIQUE INDEX "posts_title_unique" ON "posts" ("title")`)
+      yield* sql.unsafe(`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('seed', 'same', 'x', 'x')`)
+      const stats = yield* BatchMutationStats
+      const batcher = yield* MutationBatcher
+      // Only the batch traffic matters; the fixture DDL above is noise.
+      recorded.length = 0
+
+      const duplicate = yield* Effect.forkChild(
+        batcher.submit({
+          operation: "create",
+          collection: Posts,
+          execute: sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('dup', 'same', 'x', 'x')`.pipe(
+            Effect.as({ value: { id: "dup" }, afterCommit: Effect.void })
+          ),
+          estimatedBytes: 10
+        })
+      )
+      // Admit the failing entry first so the batch order matches the
+      // statement-level isolation path.
+      yield* waitForAdmitted(1)
+      const other = yield* Effect.forkChild(
+        batcher.submit({
+          operation: "create",
+          collection: Posts,
+          execute: sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('other', 'other', 'x', 'x')`.pipe(
+            Effect.as({ value: { id: "other" }, afterCommit: Effect.void })
+          ),
+          estimatedBytes: 10
+        })
+      )
+      yield* waitForAdmitted(2)
+      yield* stats.flushNow
+      return [yield* Fiber.await(duplicate), yield* Fiber.await(other)]
+    }).pipe(Effect.provide(layer))
+
+    return { recorded, exits }
+  })
+
+describe("transaction probe wiring", () => {
+  it.effect("runs the dialect's probe strategy on the statement-level path", () =>
+    Effect.gen(function* () {
+      const selectOnly = yield* runRecordedBatch("select-only")
+      expect(probeSelects(selectOnly.recorded).length).toBe(1)
+      expect(interpolatedFragments(selectOnly.recorded)).not.toContain("BEGIN")
+      expect(interpolatedFragments(selectOnly.recorded)).not.toContain("ROLLBACK")
+      expect(selectOnly.exits.map(failureTag)).toEqual(["SqlError", undefined])
+
+      const nestedBegin = yield* runRecordedBatch("nested-begin")
+      expect(probeSelects(nestedBegin.recorded).length).toBe(1)
+      expect(interpolatedFragments(nestedBegin.recorded)).toContain("BEGIN")
+      expect(nestedBegin.exits.map(failureTag)).toEqual(["SqlError", undefined])
+    })
   )
 })
 
@@ -1240,7 +1429,7 @@ describe("create batcher shutdown", () => {
         expect((yield* stats.snapshot).commits).toBe(0)
         expect(yield* countPosts).toBe(0)
       }).pipe(Effect.provide(context))
-    }).pipe(Effect.provide(sqliteLayer))
+    }).pipe(Effect.provide(Layer.merge(sqliteLayer, DialectTest)))
   )
 })
 
@@ -1250,7 +1439,7 @@ function batcherOnlyLayer(
   statsLayer: Layer.Layer<BatchMutationStats> = makeBatchMutationStatsLayer()
 ) {
   return Layer.merge(
-    makeMutationBatcherLayer(config, statsLayer).pipe(Layer.provideMerge(sqliteLayer)),
+    makeMutationBatcherLayer(config, statsLayer).pipe(Layer.provideMerge(Layer.merge(sqliteLayer, DialectTest))),
     statsLayer
   )
 }

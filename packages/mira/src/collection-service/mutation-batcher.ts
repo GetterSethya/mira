@@ -1,11 +1,13 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import { Cause, Clock, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Queue, Ref, Result, Semaphore } from "effect"
+import { Cause, Clock, Context, Deferred, Effect, Equal, Exit, Fiber, Layer, Option, Queue, Ref, Result, Semaphore } from "effect"
 import { SqlClient } from "effect/sql"
 import type { SqlError } from "effect/sql"
 import { isSqlError } from "effect/sql/SqlError"
 
+import { Dialect } from "@/dialect/dialect.js"
+import type { TransactionProbeStrategy } from "@/dialect/dialect.js"
 import type { RepoRecord } from "@/repository/types.js"
-import { withSpanWhenEnabled } from "@/telemetry/span.js"
+import { annotateCurrentSpanWhenEnabled, withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import type { BatchOperation, CollectionError } from "./errors.js"
 import {
@@ -623,31 +625,75 @@ function collectionErrorOf(
 }
 
 /**
+ * The verdict of a transaction-liveness probe, plus the `SqlError` reason tag
+ * of the probe statement that failed when the probe reported not-usable.
+ */
+export interface TransactionProbeResult {
+  readonly alive: boolean
+  readonly probeFailureTag?: string
+}
+
+/** Extracts the `SqlError` reason tag from a probe statement's failure cause. */
+const probeFailureTagOf = (cause: Cause.Cause<SqlError.SqlError>): string | undefined => {
+  const fail = Cause.findFail(cause)
+  if (Result.isFailure(fail)) return undefined
+  if (!isSqlError(fail.success.error)) return undefined
+  return fail.success.error.reason._tag
+}
+
+/**
  * Probe whether the current SQL transaction is still usable.
  *
- * `SELECT 1` catches a dead connection. SQLite's implicit rollbacks
- * (`SQLITE_FULL`, `ON CONFLICT ROLLBACK`, `RAISE(ROLLBACK)`) leave the
- * connection in autocommit, where `SELECT 1` still succeeds — so a second
- * probe distinguishes the two states: `BEGIN` fails with "cannot start a
- * transaction within a transaction" while the outer transaction is alive, and
- * succeeds (starting a throwaway transaction) once SQLite has rolled it back.
- * A successful probe is undone with `ROLLBACK`.
+ * The caller must already be inside a transaction: the batch body runs inside
+ * the flusher's outer `sql.withTransaction`, and the probe executes on that
+ * same transaction connection.
+ *
+ * `SELECT 1` runs first. On a dead connection, or inside an aborted
+ * transaction, every statement fails, so the probe reports not-usable and
+ * carries the `SqlError` reason tag of the failed `SELECT 1` as
+ * `probeFailureTag`. The strategy then decides how to classify the remaining
+ * states, and the strategies fail differently:
+ *
+ * - `select-only`: `SELECT 1` is the whole probe. A successful `SELECT 1`
+ *   means the transaction is usable; a failed one means it is not. The
+ *   strategy fails closed: any `SELECT 1` failure, not only connection
+ *   death, reports not-usable. No transaction control statement is issued,
+ *   so the probe cannot damage the outer transaction.
+ * - `nested-begin`: `BEGIN` is the second probe. `BEGIN` fails while the
+ *   outer transaction is alive (the alive signal, not a death), and succeeds
+ *   (starting a throwaway transaction) once the engine has implicitly rolled
+ *   the outer transaction back. A successful `BEGIN` is undone with a
+ *   throwaway `ROLLBACK`, and the probe then reports not-usable.
  *
  * Exported for the focused probe tests.
  *
  * @internal
  */
 export const probeTransactionAlive = (
-  sql: SqlClient.SqlClient
-): Effect.Effect<boolean> =>
+  sql: SqlClient.SqlClient,
+  strategy: TransactionProbeStrategy
+): Effect.Effect<TransactionProbeResult> =>
   Effect.gen(function* () {
     const select = yield* Effect.exit(sql`SELECT 1 AS ok`)
-    if (Exit.isFailure(select)) return false
+    if (Exit.isFailure(select)) {
+      const probeFailureTag = probeFailureTagOf(select.cause)
+      return {
+        alive: false,
+        ...(probeFailureTag !== undefined ? { probeFailureTag } : {})
+      }
+    }
+    if (strategy === "select-only") return { alive: true }
     const begin = yield* Effect.exit(sql`${sql.literal("BEGIN")}`)
-    if (Exit.isFailure(begin)) return true
+    if (Exit.isFailure(begin)) return { alive: true }
     yield* Effect.exit(sql`${sql.literal("ROLLBACK")}`)
-    return false
+    return { alive: false }
   })
+
+/** The probe outcome for one flush, recorded for the batch span annotation. */
+interface ProbeObservation {
+  readonly strategy: TransactionProbeStrategy
+  readonly result: TransactionProbeResult
+}
 
 /**
  * Wait for more entries before draining a partially filled batch.
@@ -678,13 +724,16 @@ const waitForWindow = (windowMs: number, flushSignal: Queue.Dequeue<void>): Effe
 export function makeMutationBatcherLayer(
   config: ResolvedBatchMutationConfig,
   statsLayer: Layer.Layer<BatchMutationStats>
-): Layer.Layer<MutationBatcher, never, SqlClient.SqlClient> {
+): Layer.Layer<MutationBatcher, never, SqlClient.SqlClient | Dialect> {
+  // The disabled-batch early return technically claims the `Dialect` requirement it does not use.
   if (config.queue === null) return MutationBatcherDisabledLive
   const queueConfig = config.queue
   return Layer.effect(
     MutationBatcher,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      const dialect = yield* Dialect
+      const transactionProbe = dialect.transactionProbe
       const stats = yield* BatchMutationStats
 
       const queue = yield* Queue.unbounded<QueuedEntry>()
@@ -868,7 +917,8 @@ export function makeMutationBatcherLayer(
       const runBatchBody = (
         taken: ReadonlyArray<QueuedEntry>,
         outcomes: Ref.Ref<ReadonlyArray<EntryOutcome>>,
-        aborted: Ref.Ref<Option.Option<Cause.Cause<CollectionError>>>
+        aborted: Ref.Ref<Option.Option<Cause.Cause<CollectionError>>>,
+        probeRecord: Ref.Ref<Option.Option<ProbeObservation>>
       ) =>
         Effect.gen(function* () {
           const settled: Array<EntryOutcome> = []
@@ -924,8 +974,22 @@ export function makeMutationBatcherLayer(
 
             const originalCause = Option.getOrElse(observed.cause, () => result.cause)
 
-            const alive = yield* probeTransactionAlive(sql)
-            if (!alive) {
+            // The savepoint wrapper (`@effect/sql` renders the driver's nested
+            // transaction as savepoint statements wrapped in `Effect.orDie`)
+            // replaces a failed rollback or release with a defect. If the
+            // guarded exit does not carry the entry's own cause, the wrapper
+            // injected a failure: abort the batch as transaction-fatal with
+            // the captured cause without probing, so a failed entry can never
+            // commit its partial writes.
+            if (Option.isNone(observed.cause) || !Equal.equals(result.cause, observed.cause.value)) {
+              yield* Ref.set(aborted, Option.some(originalCause))
+              yield* Ref.set(outcomes, settled)
+              return yield* Effect.failCause(result.cause)
+            }
+
+            const probe = yield* probeTransactionAlive(sql, transactionProbe)
+            yield* Ref.set(probeRecord, Option.some({ strategy: transactionProbe, result: probe }))
+            if (!probe.alive) {
               // Transaction-fatal: every entry in the batch fails with the
               // entry's own cause, and the commit is skipped.
               yield* Ref.set(aborted, Option.some(originalCause))
@@ -972,6 +1036,7 @@ export function makeMutationBatcherLayer(
 
         const outcomes = yield* Ref.make<ReadonlyArray<EntryOutcome>>([])
         const aborted = yield* Ref.make<Option.Option<Cause.Cause<CollectionError>>>(Option.none())
+        const probeRecord = yield* Ref.make<Option.Option<ProbeObservation>>(Option.none())
         const collections = [...new Set(taken.map((entry) => entry.collection.name))]
         const operationCounts = new Map<BatchOperation, number>()
         for (const entry of taken) {
@@ -979,7 +1044,29 @@ export function makeMutationBatcherLayer(
         }
         const startedAt = yield* Clock.currentTimeMillis
 
-        yield* sql.withTransaction(runBatchBody(taken, outcomes, aborted)).pipe(
+        yield* sql.withTransaction(runBatchBody(taken, outcomes, aborted, probeRecord)).pipe(
+          // Annotated here, between the driver's transaction and the batch
+          // span wrapper, so the probe outcome lands on the current
+          // `collection.mutationBatch` span: inside the body the current span
+          // would be the driver's nested `sql.transaction` span, which closes
+          // first. Runs on success and failure; a batch that failed before
+          // probing records nothing.
+          Effect.onExit(() =>
+            Effect.gen(function* () {
+              const probe = yield* Ref.get(probeRecord)
+              if (Option.isNone(probe)) return
+              yield* annotateCurrentSpanWhenEnabled((span) => {
+                span.attribute("batch.probeStrategy", probe.value.strategy)
+                span.attribute(
+                  "batch.probeVerdict",
+                  probe.value.result.alive ? "alive" : "not-usable"
+                )
+                if (probe.value.result.probeFailureTag !== undefined) {
+                  span.attribute("batch.probeFailureTag", probe.value.result.probeFailureTag)
+                }
+              })
+            })
+          ),
           withSpanWhenEnabled(
             "collection.mutationBatch",
             {

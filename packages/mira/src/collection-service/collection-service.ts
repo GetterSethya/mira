@@ -415,7 +415,7 @@ export function makeBatchedCollectionServiceLayer(
 
 function makeCollectionServiceLayerWith(
   allCollections: ReadonlyArray<AnyCollectionDef>,
-  batcherLayer: Layer.Layer<MutationBatcher, never, SqlClient.SqlClient>
+  batcherLayer: Layer.Layer<MutationBatcher, never, SqlClient.SqlClient | Dialect>
 ): Layer.Layer<CollectionService, never, CollectionServiceDeps> {
   return Layer.effect(
     CollectionService,

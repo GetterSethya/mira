@@ -98,7 +98,8 @@ export type {
   DialectType,
   FieldValueType,
   Quote,
-  RuleSqlDialect
+  RuleSqlDialect,
+  TransactionProbeStrategy
 } from "./dialect/dialect.js"
 export type { TimestampUnit } from "@gettersethya/mira-client"
 export {
