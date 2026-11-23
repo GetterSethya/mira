@@ -8,6 +8,7 @@ import { expect } from "vitest"
 import { Dialect } from "@/dialect/dialect.js"
 import type { DialectType } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import type { MigrationError } from "@/migrator/errors.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
@@ -42,7 +43,7 @@ const recordingLayer = (recorded: Array<string>) =>
     })
   ).pipe(Layer.provide(sqliteLayer))
 
-/** A dialect that renders a comment instead of SQL — the shape of the original defect. */
+/** A dialect that renders a comment instead of SQL - the shape of the original defect. */
 const commentOnlyDialect: DialectType = {
   ...sqliteDialect,
   translatePlan: () =>
@@ -158,6 +159,12 @@ const indexNames = (sql: SqlClient.SqlClient, table: string) =>
     WHERE type = 'index' AND tbl_name = ${table} AND name NOT LIKE 'sqlite_%'
   `
 
+const triggerNames = (sql: SqlClient.SqlClient) =>
+  sql<{ name: string }>`
+    SELECT name FROM sqlite_master
+    WHERE type = 'trigger'
+  `
+
 const tableExists = (sql: SqlClient.SqlClient, table: string) =>
   sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${table}`
 
@@ -185,6 +192,13 @@ const migrateTodos = (schema: CollectionSchema, options?: { allowDestructive?: b
     const migrator = yield* Migrator
     yield* migrator.migrate([{ name: "todos", schema }], options)
   })
+
+/** Narrows a preflight failure to its detail; any other failure aborts the test. */
+const preflightDetail = <A>(effect: Effect.Effect<A, MigrationError>) =>
+  effect.pipe(
+    Effect.catchTag("UnsupportedMigrationStepError", (error) => Effect.succeed(error.detail)),
+    Effect.orDie
+  )
 
 describe("SQLite column changes (table recreation)", () => {
   it.effect("relaxes NOT NULL to nullable without allowDestructive", () =>
@@ -667,6 +681,14 @@ describe("SQLite column changes (table recreation)", () => {
       yield* sql.unsafe(`CREATE VIEW "raw_view" AS SELECT "id", "title" FROM "todos"`)
       yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
 
+      const plan = yield* migrator.plan(
+        [{ name: "todos", schema: todosWithoutTitle() }],
+        { allowDestructive: true }
+      )
+      expect(plan.notes ?? []).toContain(
+        'untracked view "raw_view" may fail this native drop at execution if it reads the dropped column'
+      )
+
       const exit = yield* Effect.exit(
         migrator.migrate([{ name: "todos", schema: todosWithoutTitle() }], {
           allowDestructive: true
@@ -679,7 +701,7 @@ describe("SQLite column changes (table recreation)", () => {
       expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
     }).pipe(Effect.provide(testLayer)))
 
-  it.effect("pins the untracked-view rebuild gap", () =>
+  it.effect("fails preflight instead of leaving an untracked view broken", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const migrator = yield* Migrator
@@ -687,18 +709,32 @@ describe("SQLite column changes (table recreation)", () => {
       yield* sql.unsafe(`CREATE VIEW "raw_view" AS SELECT "id", "title" FROM "todos"`)
       yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
 
-      yield* migrator.migrate([{ name: "todos", schema: todosWithoutTitleCategoryRequired() }], {
-        allowDestructive: true
-      })
+      const beforeMigrations = yield* countRows(sql, "_migrations")
 
-      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).not.toContain("title")
+      const exit = yield* Effect.exit(
+        migrator.migrate([{ name: "todos", schema: todosWithoutTitleCategoryRequired() }], {
+          allowDestructive: true
+        })
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([{ name: "todos", schema: todosWithoutTitleCategoryRequired() }], {
+          allowDestructive: true
+        })
+      )
+      expect(detail).toContain('untracked views: "raw_view" depends on rebuilt table "todos"')
+      expect(detail).toContain(
+        "they would be left broken. Track each view in Mira, or remove or rename it before migrating."
+      )
+
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).toContain("title")
       const rawView = yield* viewSql(sql, "raw_view")
-      if (rawView.length > 0) {
-        const broken = yield* Effect.exit(sql.unsafe(`SELECT * FROM "raw_view"`))
-        expect(Exit.isFailure(broken)).toBe(true)
-      } else {
-        expect(rawView).toHaveLength(0)
-      }
+      expect(rawView).toHaveLength(1)
+      expect(rawView[0]?.sql).toContain("title")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+      const afterMigrations = yield* countRows(sql, "_migrations")
+      expect(Number(afterMigrations[0]?.count)).toBe(Number(beforeMigrations[0]?.count))
     }).pipe(Effect.provide(testLayer)))
 
   it.effect("rolls back when an affected view query is invalid for another reason", () =>
@@ -844,6 +880,481 @@ describe("SQLite column changes (table recreation)", () => {
       expect(Number(collections[0]?.count)).toBe(0)
     }).pipe(Effect.provide(layer))
   })
+})
+
+describe("SQLite untracked views and view-attached objects", () => {
+  it.effect("notes and passes a native drop whose untracked view reads a surviving column", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }])
+      yield* sql.unsafe(`CREATE VIEW "raw_view" AS SELECT "id", "category" FROM "todos"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const plan = yield* migrator.plan(
+        [{ name: "todos", schema: todosWithoutTitle() }],
+        { allowDestructive: true }
+      )
+      expect(plan.notes ?? []).toContain(
+        'untracked view "raw_view" may fail this native drop at execution if it reads the dropped column'
+      )
+
+      yield* migrator.migrate([{ name: "todos", schema: todosWithoutTitle() }], {
+        allowDestructive: true
+      })
+
+      expect((yield* tableInfo(sql, "todos")).map((c) => c.name)).not.toContain("title")
+      expect(
+        yield* sql<{ id: string; category: string }>`SELECT id, category FROM ${sql("raw_view")}`
+      ).toEqual([{ id: "t1", category: "c1" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when a dropped table has an untracked dependent view", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }])
+      yield* sql.unsafe(`CREATE VIEW "raw_view" AS SELECT "id", "title" FROM "todos"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const beforeMigrations = yield* countRows(sql, "_migrations")
+
+      const exit = yield* Effect.exit(migrator.migrate([], { allowDestructive: true }))
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(migrator.plan([], { allowDestructive: true }))
+      expect(detail).toContain('untracked views: "raw_view" depends on dropped table "todos"')
+      expect(detail).toContain(
+        "they would be left broken. Track each view in Mira, or remove or rename it before migrating."
+      )
+
+      expect(yield* tableExists(sql, "todos")).not.toEqual([])
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+      expect(yield* viewSql(sql, "raw_view")).toHaveLength(1)
+      const afterMigrations = yield* countRows(sql, "_migrations")
+      expect(Number(afterMigrations[0]?.count)).toBe(Number(beforeMigrations[0]?.count))
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when a removed view has an untracked dependent", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* sql.unsafe(`CREATE VIEW "raw_dependent" AS SELECT "id" FROM "todos_view"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const beforeMigrations = yield* countRows(sql, "_migrations")
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }], {
+          allowDestructive: true
+        })
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }], {
+          allowDestructive: true
+        })
+      )
+      expect(detail).toContain(
+        'untracked views: "raw_dependent" depends on dropped view "todos_view"'
+      )
+      expect(detail).toContain(
+        "they would be left broken. Track each view in Mira, or remove or rename it before migrating."
+      )
+
+      expect(yield* tableExists(sql, "todos")).not.toEqual([])
+      expect(yield* viewSql(sql, "todos_view")).toHaveLength(1)
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("raw_dependent")}`).toEqual([
+        { id: "t1" }
+      ])
+      const afterMigrations = yield* countRows(sql, "_migrations")
+      expect(Number(afterMigrations[0]?.count)).toBe(Number(beforeMigrations[0]?.count))
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when a dropped table leaves a tracked dependent view broken", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([{ name: "todos_view", schema: todosView() }], { allowDestructive: true })
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([{ name: "todos_view", schema: todosView() }], { allowDestructive: true })
+      )
+      expect(detail).toContain(
+        'tracked view "todos_view" depends on dropped table "todos" and is neither recreated nor dropped'
+      )
+      expect(detail).toContain(
+        "Mira would leave it broken. Remove the view collection, or recreate or drop it in this plan."
+      )
+
+      expect(yield* tableExists(sql, "todos")).not.toEqual([])
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos_view")}`).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("notes and probes an untracked dependent of an edited view and proceeds", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* sql.unsafe(`CREATE VIEW "raw_dependent" AS SELECT "id" FROM "todos_view"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const plan = yield* migrator.plan([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosViewWithoutTitle() }
+      ])
+      expect(plan.steps.map((s) => s.kind)).toEqual(["dropView", "createView"])
+      expect(plan.notes ?? []).toContain(
+        'untracked view "raw_dependent" depends on recreated view "todos_view"; a probe verifies it inside the migration'
+      )
+
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosViewWithoutTitle() }
+      ])
+
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain("SELECT id, seqId FROM todos")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("raw_dependent")}`).toEqual([
+        { id: "t1" }
+      ])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when an edited view carries a trigger and leaves both untouched", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* sql.unsafe(`CREATE TRIGGER "t" INSTEAD OF INSERT ON "todos_view" BEGIN SELECT 1; END`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ])
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ])
+      )
+      expect(detail).toContain(
+        'view "todos_view" has trigger "t"; SQLite allows only INSTEAD OF triggers on views and Mira cannot recreate them. Remove the trigger or migrate the view by hand.'
+      )
+
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain(
+        "SELECT id, seqId, title FROM todos"
+      )
+      expect((yield* triggerNames(sql)).map((t) => t.name)).toContain("t")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when an edited view carries a trigger stored with mixed case", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* sql.unsafe(`CREATE TRIGGER "t" INSTEAD OF INSERT ON TODOS_VIEW BEGIN SELECT 1; END`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ])
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ])
+      )
+      expect(detail).toContain(
+        'view "todos_view" has trigger "t"; SQLite allows only INSTEAD OF triggers on views and Mira cannot recreate them. Remove the trigger or migrate the view by hand.'
+      )
+
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain(
+        "SELECT id, seqId, title FROM todos"
+      )
+      expect((yield* triggerNames(sql)).map((t) => t.name)).toContain("t")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when a rebuilt table carries a trigger and leaves both untouched", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema() }])
+      yield* sql.unsafe(`CREATE TRIGGER "t" BEFORE INSERT ON "todos" BEGIN SELECT 1; END`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }], {
+          allowDestructive: true
+        })
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }], {
+          allowDestructive: true
+        })
+      )
+      expect(detail).toContain(
+        'table "todos" has trigger "t"; the rebuild would drop it. Remove the trigger or migrate by hand.'
+      )
+
+      expect(yield* categoryNotNull(sql)).toBe(0)
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+      expect((yield* triggerNames(sql)).map((t) => t.name)).toContain("t")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("notes the trigger a dropped table removes and proceeds", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }])
+      yield* sql.unsafe(`CREATE TRIGGER "t" BEFORE INSERT ON "todos" BEGIN SELECT 1; END`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const plan = yield* migrator.plan([], { allowDestructive: true })
+      expect(plan.notes ?? []).toContain('dropping table "todos" also removes trigger "t"')
+
+      yield* migrator.migrate([], { allowDestructive: true })
+
+      expect(yield* tableExists(sql, "todos")).toEqual([])
+      expect((yield* triggerNames(sql)).map((t) => t.name)).not.toContain("t")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("notes the trigger a removed view removes and proceeds", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* sql.unsafe(`CREATE TRIGGER "t" INSTEAD OF INSERT ON "todos_view" BEGIN SELECT 1; END`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const plan = yield* migrator.plan(
+        [{ name: "todos", schema: todosSchema({ categoryRequired: true }) }],
+        { allowDestructive: true }
+      )
+      expect(plan.notes ?? []).toContain('dropping view "todos_view" also removes trigger "t"')
+
+      yield* migrator.migrate(
+        [{ name: "todos", schema: todosSchema({ categoryRequired: true }) }],
+        { allowDestructive: true }
+      )
+
+      expect(yield* viewSql(sql, "todos_view")).toEqual([])
+      expect((yield* triggerNames(sql)).map((t) => t.name)).not.toContain("t")
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when a stored view declares an explicit column list", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+      yield* sql.unsafe(`DROP VIEW "todos_view"`)
+      yield* sql.unsafe(
+        `CREATE VIEW "todos_view" ("id", "title") AS SELECT "id", "title" FROM "todos"`
+      )
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ])
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ])
+      )
+      expect(detail).toContain(
+        'stored view "todos_view" declares an explicit column list; Mira recreates views from x-view-query only. Remove the column list or migrate the view by hand.'
+      )
+
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain('("id", "title")')
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos_view")}`).toEqual([{ id: "t1" }])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when a desired view collides with a hand-created view", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }])
+      yield* sql.unsafe(`CREATE VIEW "legacy_view" AS SELECT "id", "seqId", "title" FROM "todos"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "legacy_view", schema: todosView() }
+        ])
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "legacy_view", schema: todosView() }
+        ])
+      )
+      expect(detail).toContain(
+        'an object named "legacy_view" already exists and is not tracked; CREATE VIEW IF NOT EXISTS would not apply the desired query. Remove or rename the object, or track it in Mira.'
+      )
+
+      expect((yield* viewSql(sql, "legacy_view"))[0]?.sql).toContain("SELECT")
+      expect(yield* tableExists(sql, "todos")).not.toEqual([])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("fails preflight when a desired view collides with a hand-created view of another case", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([{ name: "todos", schema: todosSchema({ categoryRequired: true }) }])
+      yield* sql.unsafe(`CREATE VIEW "LEGACY_VIEW" AS SELECT "id", "seqId", "title" FROM "todos"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "legacy_view", schema: todosView() }
+        ])
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const detail = yield* preflightDetail(
+        migrator.plan([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "legacy_view", schema: todosView() }
+        ])
+      )
+      expect(detail).toContain(
+        'an object named "legacy_view" already exists and is not tracked; CREATE VIEW IF NOT EXISTS would not apply the desired query. Remove or rename the object, or track it in Mira.'
+      )
+
+      expect((yield* viewSql(sql, "LEGACY_VIEW"))[0]?.sql).toContain("SELECT")
+      expect(yield* tableExists(sql, "todos")).not.toEqual([])
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rolls back when the probe catches an untracked dependent of an edited view", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() }
+      ])
+      yield* sql.unsafe(`CREATE VIEW "raw_dependent" AS SELECT "title" FROM "todos_view"`)
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const beforeMigrations = yield* countRows(sql, "_migrations")
+
+      const plan = yield* migrator.plan([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosViewWithoutTitle() }
+      ])
+      expect(plan.steps.map((s) => s.kind)).toEqual(["dropView", "createView"])
+      expect(plan.notes ?? []).toContain(
+        'untracked view "raw_dependent" depends on recreated view "todos_view"; a probe verifies it inside the migration'
+      )
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "todos_view", schema: todosViewWithoutTitle() }
+        ])
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain(
+        "SELECT id, seqId, title FROM todos"
+      )
+      expect((yield* viewSql(sql, "raw_dependent"))[0]?.sql).toContain("title")
+      expect(yield* sql<{ id: string }>`SELECT id FROM ${sql("todos")}`).toEqual([{ id: "t1" }])
+      const afterMigrations = yield* countRows(sql, "_migrations")
+      expect(Number(afterMigrations[0]?.count)).toBe(Number(beforeMigrations[0]?.count))
+    }).pipe(Effect.provide(testLayer)))
+
+  it.effect("rolls back when the probe catches a tracked dependent of an edited view", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const migrator = yield* Migrator
+      const todosV2 = todosView({
+        query: "SELECT id, seqId, title FROM todos_view",
+        properties: ["id", "seqId", "title"]
+      })
+      yield* migrator.migrate([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosView() },
+        { name: "todos_v2", schema: todosV2 }
+      ])
+      yield* insertTodo(sql, { id: "t1", title: "one", category: "c1" })
+
+      const beforeMigrations = yield* countRows(sql, "_migrations")
+
+      const plan = yield* migrator.plan([
+        { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+        { name: "todos_view", schema: todosViewWithoutTitle() },
+        { name: "todos_v2", schema: todosV2 }
+      ])
+      expect(plan.steps.map((s) => s.kind)).toEqual(["dropView", "createView"])
+
+      const exit = yield* Effect.exit(
+        migrator.migrate([
+          { name: "todos", schema: todosSchema({ categoryRequired: true }) },
+          { name: "todos_view", schema: todosViewWithoutTitle() },
+          { name: "todos_v2", schema: todosV2 }
+        ])
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      expect((yield* viewSql(sql, "todos_view"))[0]?.sql).toContain(
+        "SELECT id, seqId, title FROM todos"
+      )
+      expect((yield* viewSql(sql, "todos_v2"))[0]?.sql).toContain(
+        "SELECT id, seqId, title FROM todos_view"
+      )
+      const afterMigrations = yield* countRows(sql, "_migrations")
+      expect(Number(afterMigrations[0]?.count)).toBe(Number(beforeMigrations[0]?.count))
+    }).pipe(Effect.provide(testLayer)))
 })
 
 describe("migrator statement guard", () => {

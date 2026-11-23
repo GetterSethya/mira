@@ -27,7 +27,8 @@ const title = column("title", "text")
 
 const context = (): TranslatePlanContext => ({
   tables: new Map(),
-  views: new Map()
+  views: new Map(),
+  readonlyQuery: () => Effect.succeed([])
 })
 
 const plan = (steps: ReadonlyArray<MigrationStep>, ctx = context()) =>
@@ -35,8 +36,8 @@ const plan = (steps: ReadonlyArray<MigrationStep>, ctx = context()) =>
 
 const failureDetail = (steps: ReadonlyArray<MigrationStep>, ctx = context()) =>
   plan(steps, ctx).pipe(
-    Effect.flip,
-    Effect.map((error) => error.detail)
+    Effect.catchTag("UnsupportedMigrationStepError", (error) => Effect.succeed(error.detail)),
+    Effect.orDie
   )
 
 describe("postgresDdlSql type mapping and identity", () => {

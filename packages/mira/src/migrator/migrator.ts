@@ -30,6 +30,35 @@ function sqlError(message: string): SqlError.SqlError {
   return new SqlError.SqlError({ reason: new SqlError.UnknownError({ cause: undefined, message }) })
 }
 
+/**
+ * Builds the guarded read-only executor a dialect uses to read the catalog
+ * during render.
+ *
+ * The guard is deliberately narrower than SQL's read-only surface: the first
+ * token must be `SELECT`, so `WITH` cannot lead into DML, and any semicolon is
+ * rejected, so a second statement cannot ride along. Every other statement
+ * fails with an `SqlError` before reaching the driver.
+ */
+function makeReadonlyQueryGuard(
+  sql: SqlClient.SqlClient
+): TranslatePlanContext["readonlyQuery"] {
+  return (statement) => {
+    const trimmed = statement.trim()
+    const firstToken = trimmed.split(/\s+/, 1)[0]?.toUpperCase() ?? ""
+    if (firstToken !== "SELECT") {
+      return Effect.fail(
+        sqlError(`readonlyQuery rejected a statement that does not start with SELECT: ${trimmed}`)
+      )
+    }
+    if (trimmed.includes(";")) {
+      return Effect.fail(
+        sqlError(`readonlyQuery rejected a statement containing a semicolon: ${trimmed}`)
+      )
+    }
+    return sql.unsafe<Record<string, unknown>>(trimmed)
+  }
+}
+
 function isCollectionSchema(value: unknown): value is CollectionSchema {
   return typeof value === "object" && value !== null && "properties" in value
 }
@@ -119,7 +148,8 @@ export class Migrator extends Context.Service<
 /** The stored and desired shape of every physical collection a plan may touch. */
 function buildPlanContext(
   schemas: Array<NamedSchema>,
-  stored: Record<string, CollectionSchema>
+  stored: Record<string, CollectionSchema>,
+  readonlyQuery: TranslatePlanContext["readonlyQuery"]
 ): TranslatePlanContext {
   const tables = new Map<string, TableShapes>()
   for (const { name, schema } of schemas) {
@@ -156,7 +186,7 @@ function buildPlanContext(
     })
   }
 
-  return { tables, views }
+  return { tables, views, readonlyQuery }
 }
 
 /** A statement is only worth executing when it contains SQL, not just comments or whitespace. */
@@ -273,7 +303,7 @@ function migrateImplWith(
       )
     }
 
-    const { statements, validations, cleanup, notes } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
+    const { statements, validations, cleanup, notes } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(sql)))
 
     for (const note of notes ?? []) {
       yield* Effect.logInfo(note)
@@ -351,7 +381,7 @@ function planImplWith(
     const plan = computePlan(schemas, storedRecord, options)
     // Render (and reject) the plan here too, so a dry run surfaces an impossible plan
     // instead of leaving it to the next boot.
-    const translated = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord))
+    const translated = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(sql)))
 
     yield* Effect.logInfo(`Plan: ${plan.steps.length} steps`)
     const planJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(

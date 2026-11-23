@@ -9,6 +9,7 @@ import {
   fromJoinReferences,
   normalizeIdentifier,
   topologicalViewOrder,
+  viewDeclaresColumnList,
   viewDependencies
 } from "./view-dependencies.js"
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
@@ -599,6 +600,426 @@ function validationQuery(raw: string, properties: ReadonlyArray<string>): string
   return `SELECT ${columns.map(quote).join(", ")} FROM ${quote(raw)} LIMIT 0`
 }
 
+/** The one catalog statement the scan issues; it is fully static. */
+const CATALOG_STATEMENT = 'SELECT "name", "sql", "tbl_name", "type" FROM "sqlite_master"'
+
+/** One `sqlite_master` row the classification can read. */
+type CatalogRow = {
+  readonly name: string
+  readonly sql: string | null
+  readonly tbl_name: string
+  readonly type: string
+}
+
+/**
+ * Narrows one raw catalog row without assertions. SQLite stores `NULL` in `sql`
+ * for internally created objects (implicit auto-index rows), so a row is
+ * accepted only when `name`, `tbl_name`, and `type` are strings and `sql` is a
+ * string or `null`; any other row is skipped.
+ */
+const readCatalogRow = (row: Record<string, unknown>): CatalogRow | null => {
+  const name = row["name"]
+  const sql = row["sql"]
+  const tblName = row["tbl_name"]
+  const type = row["type"]
+  if (typeof name !== "string" || typeof tblName !== "string" || typeof type !== "string") {
+    return null
+  }
+  if (sql !== null && typeof sql !== "string") return null
+  return { name, sql, tbl_name: tblName, type }
+}
+
+/** The plan surface the scan gate and the classification read, keyed by normalized name. */
+type PlanSurface = {
+  /** Whether the plan contains a step that can invalidate a catalog object. */
+  readonly scanRequired: boolean
+  /** Tables with an `alterColumn` step; every one of them is rebuilt. */
+  readonly rebuiltTables: ReadonlySet<string>
+  /** `dropColumn` tables that also have an `alterColumn` step, so the rebuild subsumes the drop. */
+  readonly rebuildDropTables: ReadonlySet<string>
+  /** `dropColumn` tables without an `alterColumn` step, rendered as a native drop. */
+  readonly nativeDropTables: ReadonlySet<string>
+  /** Tables a `dropTable` step removes. */
+  readonly droppedTables: ReadonlySet<string>
+  /** Every `dropView` step's view, removed or recreated. */
+  readonly droppedViews: ReadonlySet<string>
+  /** `dropView` steps with no matching `createView` on the same name. */
+  readonly removedViews: ReadonlySet<string>
+  /** `createView` steps whose name is neither dropped first nor already tracked. */
+  readonly newCreateViews: ReadonlySet<string>
+  /** `createView` steps, normalized name to the raw view name. */
+  readonly explicitCreates: ReadonlyMap<string, string>
+  /** Tracked view names, normalized. */
+  readonly trackedViews: ReadonlySet<string>
+  /** First raw spelling seen for a normalized name, for error and note text. */
+  readonly rawNames: ReadonlyMap<string, string>
+}
+
+/**
+ * Builds the plan surface in one pass over the steps, the same iteration pattern
+ * `analyzeViewPlan` uses. Every catalog-to-plan name comparison goes through
+ * `normalizeIdentifier`.
+ */
+function planSurfaceOf(
+  steps: ReadonlyArray<MigrationStep>,
+  ctx: TranslatePlanContext
+): PlanSurface {
+  const rawNames = new Map<string, string>()
+  const nameOf = (raw: string) => {
+    const normalized = normalizeIdentifier(raw)
+    if (!rawNames.has(normalized)) rawNames.set(normalized, raw)
+    return normalized
+  }
+
+  const rebuiltTables = new Set<string>()
+  const dropColumnTables = new Set<string>()
+  const droppedTables = new Set<string>()
+  const droppedViews = new Set<string>()
+  const explicitCreates = new Map<string, string>()
+  let scanRequired = false
+
+  for (const step of steps) {
+    switch (step.kind) {
+      case "alterColumn":
+        scanRequired = true
+        rebuiltTables.add(nameOf(step.table))
+        break
+      case "dropColumn":
+        scanRequired = true
+        dropColumnTables.add(nameOf(step.table))
+        break
+      case "dropTable":
+        scanRequired = true
+        droppedTables.add(nameOf(step.table))
+        break
+      case "dropView":
+        scanRequired = true
+        droppedViews.add(nameOf(step.view))
+        break
+      case "createView":
+        scanRequired = true
+        explicitCreates.set(nameOf(step.view), step.view)
+        break
+      default:
+        break
+    }
+  }
+
+  const trackedViews = new Set<string>()
+  for (const [name, shape] of ctx.views) {
+    // Tracked means stored: a desired view collection with no stored shape
+    // is new, so a catalog object of the same name is a createView conflict,
+    // not an already-tracked view. Stored-null views have no stored query,
+    // so they never enter the affected closure either way.
+    if (shape.stored !== null) trackedViews.add(nameOf(name))
+  }
+
+  const rebuildDropTables = new Set<string>()
+  const nativeDropTables = new Set<string>()
+  for (const normalized of dropColumnTables) {
+    if (rebuiltTables.has(normalized)) rebuildDropTables.add(normalized)
+    else nativeDropTables.add(normalized)
+  }
+
+  const removedViews = new Set<string>()
+  const newCreateViews = new Set<string>()
+  for (const normalized of droppedViews) {
+    if (!explicitCreates.has(normalized)) removedViews.add(normalized)
+  }
+  for (const normalized of explicitCreates.keys()) {
+    if (droppedViews.has(normalized) || trackedViews.has(normalized)) continue
+    newCreateViews.add(normalized)
+  }
+
+  return {
+    scanRequired,
+    rebuiltTables,
+    rebuildDropTables,
+    nativeDropTables,
+    droppedTables,
+    droppedViews,
+    removedViews,
+    newCreateViews,
+    explicitCreates,
+    trackedViews,
+    rawNames
+  }
+}
+
+/** The classification outcome: preflight errors, notes, and in-transaction probes. */
+type CatalogClassification = {
+  readonly errors: ReadonlyArray<UnsupportedMigrationStepError>
+  readonly notes: ReadonlyArray<string>
+  readonly probes: ReadonlyArray<string>
+}
+
+const EMPTY_CLASSIFICATION: CatalogClassification = { errors: [], notes: [], probes: [] }
+
+/** The plan-surface sets a view's references are resolved against. */
+type ReferenceSurface = {
+  readonly rebuildDropTables: ReadonlySet<string>
+  readonly droppedTables: ReadonlySet<string>
+  readonly removedViews: ReadonlySet<string>
+  readonly nativeDropTables: ReadonlySet<string>
+  readonly recreateSet: ReadonlySet<string>
+}
+
+/** The first object a view's stored references match, with its class. */
+type MatchedReference = {
+  readonly kind:
+    | "rebuildDropTable"
+    | "droppedTable"
+    | "removedView"
+    | "nativeDropTable"
+    | "recreatedView"
+  readonly name: string
+}
+
+/**
+ * Classifies the affected view closure and the catalog rows for one gated plan.
+ *
+ * The closure is computed over the merged stored-view map (tracked views plus
+ * untracked catalog views) and classified before the tracked names are
+ * subtracted, so a view's own references decide its class. The error order is
+ * the first-error-wins order of the control flow: the untracked manifest, then
+ * tracked dependents, then triggers, then column lists, then `createView`
+ * conflicts.
+ */
+function classifyCatalogPlan(
+  ctx: TranslatePlanContext,
+  surface: PlanSurface,
+  synthesis: ViewSynthesis | null,
+  catalog: ReadonlyArray<CatalogRow>
+): CatalogClassification {
+  const errors: Array<UnsupportedMigrationStepError> = []
+  const notes: Array<string> = []
+
+  // The recreate set: explicit `dropView`+`createView` pairs, plus the #58
+  // synthesis creates that the synthesis itself also drops.
+  const recreateSet = new Set<string>()
+  for (const normalized of surface.droppedViews) {
+    if (surface.explicitCreates.has(normalized)) recreateSet.add(normalized)
+  }
+  if (synthesis !== null) {
+    const synthesisDrops = new Set(
+      synthesis.drops.map((raw) => normalizeIdentifier(raw))
+    )
+    for (const create of synthesis.creates) {
+      const normalized = normalizeIdentifier(create.raw)
+      if (synthesisDrops.has(normalized)) recreateSet.add(normalized)
+    }
+  }
+
+  const displayName = new Map(surface.rawNames)
+
+  // The merged stored-view map: tracked views, sentinels for explicitly dropped
+  // views absent from the context, and untracked catalog views.
+  const mergedViews = new Map<string, ViewShape>()
+  for (const [name, shape] of ctx.views) {
+    mergedViews.set(normalizeIdentifier(name), shape)
+  }
+  for (const normalized of surface.droppedViews) {
+    if (mergedViews.has(normalized)) continue
+    mergedViews.set(normalized, { stored: { query: "" }, desired: null })
+  }
+  for (const row of catalog) {
+    if (row.type !== "view") continue
+    const normalized = normalizeIdentifier(row.name)
+    if (mergedViews.has(normalized)) continue
+    mergedViews.set(normalized, { stored: { query: row.sql }, desired: null })
+    if (!displayName.has(normalized)) displayName.set(normalized, row.name)
+  }
+  const rawOf = (normalized: string) => displayName.get(normalized) ?? normalized
+
+  // The affected closure, seeded with the breaking tables and every `dropView`
+  // step's view (removed or recreated). alterColumn-only tables are excluded:
+  // a pure type-change rebuild keeps every column name and cannot break a view.
+  const breakingTables = new Set<string>([
+    ...surface.rebuildDropTables,
+    ...surface.nativeDropTables,
+    ...surface.droppedTables
+  ])
+  const affected = affectedViews(mergedViews, surface.droppedViews, breakingTables)
+  const sortedAffected = [...affected].sort((left, right) => left.localeCompare(right))
+
+  const referenceSurface: ReferenceSurface = {
+    rebuildDropTables: surface.rebuildDropTables,
+    droppedTables: surface.droppedTables,
+    removedViews: surface.removedViews,
+    nativeDropTables: surface.nativeDropTables,
+    recreateSet
+  }
+
+  const matchedReferenceOf = (query: string, refs: ReferenceSurface): MatchedReference | null => {
+    const references = fromJoinReferences(query)
+    const firstIn = (names: ReadonlySet<string>): string | null => {
+      for (const reference of references) {
+        if (names.has(reference)) return reference
+      }
+      return null
+    }
+    const rebuildDrop = firstIn(refs.rebuildDropTables)
+    if (rebuildDrop !== null) return { kind: "rebuildDropTable", name: rebuildDrop }
+    const dropped = firstIn(refs.droppedTables)
+    if (dropped !== null) return { kind: "droppedTable", name: dropped }
+    const removed = firstIn(refs.removedViews)
+    if (removed !== null) return { kind: "removedView", name: removed }
+    const native = firstIn(refs.nativeDropTables)
+    if (native !== null) return { kind: "nativeDropTable", name: native }
+    const recreated = firstIn(refs.recreateSet)
+    if (recreated !== null) return { kind: "recreatedView", name: recreated }
+    return null
+  }
+
+  const untrackedClauses: Array<{ clause: string; step: MigrationStep["kind"] }> = []
+  const trackedErrors: Array<UnsupportedMigrationStepError> = []
+
+  for (const normalized of sortedAffected) {
+    const query = mergedViews.get(normalized)?.stored?.query
+    if (!hasQuery(query)) continue
+    const matched = matchedReferenceOf(query, referenceSurface)
+
+    if (surface.trackedViews.has(normalized)) {
+      // A tracked dependent fails only when the plan removes the object it
+      // reads and leaves the view in place: neither recreated nor dropped. A
+      // tracked view whose only match is a recreated view or a native table
+      // does not fail: the recreated view still exists after the plan, and the
+      // native drop fails safely at execution.
+      if (
+        matched !== null &&
+        (matched.kind === "droppedTable" || matched.kind === "removedView") &&
+        !recreateSet.has(normalized) &&
+        !surface.droppedViews.has(normalized)
+      ) {
+        const object = matched.kind === "droppedTable"
+          ? `dropped table "${rawOf(matched.name)}"`
+          : `dropped view "${rawOf(matched.name)}"`
+        trackedErrors.push(
+          new UnsupportedMigrationStepError({
+            step: matched.kind === "droppedTable" ? "dropTable" : "dropView",
+            detail: `tracked view "${rawOf(normalized)}" depends on ${object} and is neither recreated nor dropped; Mira would leave it broken. Remove the view collection, or recreate or drop it in this plan.`
+          })
+        )
+      }
+      continue
+    }
+
+    // The plan intends to remove an explicitly dropped view; never flag it.
+    if (surface.droppedViews.has(normalized)) continue
+
+    if (matched === null) continue
+    switch (matched.kind) {
+      case "rebuildDropTable":
+        untrackedClauses.push({
+          clause: `"${rawOf(normalized)}" depends on rebuilt table "${rawOf(matched.name)}"`,
+          step: "dropColumn"
+        })
+        break
+      case "droppedTable":
+        untrackedClauses.push({
+          clause: `"${rawOf(normalized)}" depends on dropped table "${rawOf(matched.name)}"`,
+          step: "dropTable"
+        })
+        break
+      case "removedView":
+        untrackedClauses.push({
+          clause: `"${rawOf(normalized)}" depends on dropped view "${rawOf(matched.name)}"`,
+          step: "dropView"
+        })
+        break
+      case "nativeDropTable":
+        notes.push(
+          `untracked view "${rawOf(normalized)}" may fail this native drop at execution if it reads the dropped column`
+        )
+        break
+      case "recreatedView":
+        notes.push(
+          `untracked view "${rawOf(normalized)}" depends on recreated view "${rawOf(matched.name)}"; a probe verifies it inside the migration`
+        )
+        break
+    }
+  }
+
+  // One aggregate error for every failing untracked view, clauses sorted by name.
+  const firstClause = untrackedClauses[0]
+  if (firstClause !== undefined) {
+    errors.push(
+      new UnsupportedMigrationStepError({
+        step: firstClause.step,
+        detail: `untracked views: ${untrackedClauses
+          .map((entry) => entry.clause)
+          .join("; ")}; they would be left broken. Track each view in Mira, or remove or rename it before migrating.`
+      })
+    )
+  }
+  errors.push(...trackedErrors)
+
+  // SQLite allows only INSTEAD OF triggers on views, so every trigger row whose
+  // `tbl_name` is a view is an INSTEAD OF trigger by construction.
+  const sortedTriggers = catalog
+    .filter((row) => row.type === "trigger")
+    .sort((left, right) => left.name.localeCompare(right.name))
+  for (const row of sortedTriggers) {
+    const normalized = normalizeIdentifier(row.tbl_name)
+    if (recreateSet.has(normalized)) {
+      errors.push(
+        new UnsupportedMigrationStepError({
+          step: "dropView",
+          detail: `view "${rawOf(normalized)}" has trigger "${row.name}"; SQLite allows only INSTEAD OF triggers on views and Mira cannot recreate them. Remove the trigger or migrate the view by hand.`
+        })
+      )
+    } else if (surface.rebuiltTables.has(normalized)) {
+      errors.push(
+        new UnsupportedMigrationStepError({
+          step: "alterColumn",
+          detail: `table "${rawOf(normalized)}" has trigger "${row.name}"; the rebuild would drop it. Remove the trigger or migrate by hand.`
+        })
+      )
+    } else if (surface.droppedTables.has(normalized)) {
+      notes.push(`dropping table "${rawOf(normalized)}" also removes trigger "${row.name}"`)
+    } else if (surface.removedViews.has(normalized)) {
+      notes.push(`dropping view "${rawOf(normalized)}" also removes trigger "${row.name}"`)
+    }
+  }
+
+  const sortedCatalogViews = catalog
+    .filter((row) => row.type === "view")
+    .sort((left, right) => left.name.localeCompare(right.name))
+  for (const row of sortedCatalogViews) {
+    const normalized = normalizeIdentifier(row.name)
+    if (!recreateSet.has(normalized) || row.sql === null) continue
+    if (!viewDeclaresColumnList(row.sql)) continue
+    errors.push(
+      new UnsupportedMigrationStepError({
+        step: "dropView",
+        detail: `stored view "${rawOf(normalized)}" declares an explicit column list; Mira recreates views from x-view-query only. Remove the column list or migrate the view by hand.`
+      })
+    )
+  }
+
+  const catalogNames = new Set(catalog.map((row) => normalizeIdentifier(row.name)))
+  const sortedNewCreates = [...surface.newCreateViews].sort((left, right) =>
+    left.localeCompare(right)
+  )
+  for (const normalized of sortedNewCreates) {
+    if (!catalogNames.has(normalized)) continue
+    errors.push(
+      new UnsupportedMigrationStepError({
+        step: "createView",
+        detail: `an object named "${rawOf(normalized)}" already exists and is not tracked; CREATE VIEW IF NOT EXISTS would not apply the desired query. Remove or rename the object, or track it in Mira.`
+      })
+    )
+  }
+
+  // One probe per affected view the plan does not itself drop or recreate,
+  // tracked or untracked; recreated views already receive the #58 validation.
+  const probes = sortedAffected
+    .filter((normalized) => !recreateSet.has(normalized) && !surface.droppedViews.has(normalized))
+    .map((normalized) => `SELECT 1 FROM ${quote(rawOf(normalized))} LIMIT 0`)
+
+  return { errors, notes, probes }
+}
+
 export const sqliteStoreSql: StoreSqlCapabilities = {
   bootstrapMode: "plain",
   columnExistsSql: sqliteColumnExistsSql,
@@ -642,12 +1063,33 @@ export const sqliteDialect: DialectType = {
       yield* validateUniqueChanges(steps, ctx)
 
       const analysis = analyzeViewPlan(steps, ctx)
+
+      // The scan runs on any plan whose steps can invalidate a catalog object;
+      // on any other plan the executor is never called. A scan failure fails
+      // the render with the SqlError unchanged and preempts everything below.
+      const surface = planSurfaceOf(steps, ctx)
+      const catalog: Array<CatalogRow> = []
+      if (surface.scanRequired) {
+        const rows = yield* ctx.readonlyQuery(CATALOG_STATEMENT)
+        for (const row of rows) {
+          const parsed = readCatalogRow(row)
+          if (parsed !== null) catalog.push(parsed)
+        }
+      }
+
       if (analysis !== null) {
         const errors = collectViewPreflightErrors(steps, analysis)
         const firstError = errors[0]
         if (firstError !== undefined) return yield* Effect.fail(firstError)
       }
+
       const synthesis = analysis === null ? null : buildViewSynthesis(analysis, ctx)
+
+      const classification = surface.scanRequired
+        ? classifyCatalogPlan(ctx, surface, synthesis, catalog)
+        : EMPTY_CLASSIFICATION
+      const classificationError = classification.errors[0]
+      if (classificationError !== undefined) return yield* Effect.fail(classificationError)
 
       const rebuilds = new Map<string, TableShapes>()
       for (const step of steps) {
@@ -706,11 +1148,21 @@ export const sqliteDialect: DialectType = {
         }
       }
 
+      // One probe per affected view the plan does not itself drop or recreate,
+      // tracked or untracked; a probe failure rolls the migration back.
+      for (const probe of classification.probes) {
+        validations.push(probe)
+      }
+
+      // The notes are built independently of the synthesis, so they exist and
+      // are returned even when the synthesis is null.
+      const notes = [...(synthesis === null ? [] : synthesis.notes), ...classification.notes]
+
       return {
         statements,
         ...(validations.length > 0 ? { validations } : {}),
         cleanup: [],
-        ...(synthesis !== null && synthesis.notes.length > 0 ? { notes: synthesis.notes } : {})
+        ...(notes.length > 0 ? { notes } : {})
       }
     }),
 

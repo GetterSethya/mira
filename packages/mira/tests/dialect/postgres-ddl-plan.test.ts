@@ -27,15 +27,20 @@ const views = (...entries: ReadonlyArray<readonly [string, ViewShape]>) =>
 const plan = (
   steps: ReadonlyArray<MigrationStep>,
   viewMap: ReadonlyMap<string, ViewShape> = new Map()
-) => postgresDdlSql.translatePlan(steps, { tables: new Map(), views: viewMap })
+) =>
+  postgresDdlSql.translatePlan(steps, {
+    tables: new Map(),
+    views: viewMap,
+    readonlyQuery: () => Effect.succeed([])
+  })
 
 const failureDetail = (
   steps: ReadonlyArray<MigrationStep>,
   viewMap: ReadonlyMap<string, ViewShape> = new Map()
 ) =>
   plan(steps, viewMap).pipe(
-    Effect.flip,
-    Effect.map((error) => error.detail)
+    Effect.catchTag("UnsupportedMigrationStepError", (error) => Effect.succeed(error.detail)),
+    Effect.orDie
   )
 
 const dropColumn: MigrationStep = {

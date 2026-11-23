@@ -4,7 +4,8 @@ import type { SqlError } from "effect/sql"
 import type { MigrationStep } from "./types.js"
 
 /**
- * A migration step the active dialect cannot render as SQL.
+ * A migration step the active dialect cannot render safely, or the database
+ * holds an object the plan would silently damage.
  *
  * Raised before the migration transaction opens, so an impossible step fails with
  * a readable reason instead of surfacing a driver-level error mid-plan.
