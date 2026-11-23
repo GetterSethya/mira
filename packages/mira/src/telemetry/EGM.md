@@ -27,8 +27,8 @@ its module graph.
 - `TelemetryStore` — the `Context.Service` the core depends on.
 - `TelemetryStoreError` — tagged persistence failure (`operation`, `cause`).
 - `TelemetryDuplicateEntryError` — tagged duplicate-key failure. The SQL store
-  normally resolves duplicates internally; the tag lets a non-SQL store tell the
-  core that a single row already exists.
+  never produces it because its insert ignores duplicate ids; the tag lets a
+  non-SQL store tell the core that a single row already exists.
 
 ### `core.ts`
 
@@ -93,9 +93,15 @@ its module graph.
   public span row, matching the current response JSON.
 - Counts and cursor values are coerced with `Number(...)` for drivers that
   return `int8` as strings.
-- Append duplicate handling filters existing ids and retries only the missing
-  rows in one insert. `TelemetryDuplicateEntryError` crosses the boundary only
-  when that retry still fails.
+- Append duplicate handling uses one insert with the dialect conflict clause,
+  by default `ON CONFLICT (<id>) DO NOTHING`. A duplicate id is a no-op, so the
+  SQL store never produces `TelemetryDuplicateEntryError` and never runs a
+  recovery query after a failed statement.
+- A direct store append inside a caller transaction commits or rolls back with
+  it. The core's forked consumers run outside the caller transaction.
+- The PostgreSQL transaction contract is covered by the environment-gated
+  `postgres-shared` test. The default suite guards the generated SQL shape and
+  SQLite transaction behavior.
 - Retention is a select-then-delete loop with a progress guard; result counts
   are actual deletes, not selected ids. A dialect with only `precheck` delete
   support fails with a descriptive error.

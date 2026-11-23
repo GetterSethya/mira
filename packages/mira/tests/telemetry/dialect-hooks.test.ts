@@ -14,12 +14,8 @@ const busyError = {
   reason: { _tag: "LockTimeoutError", cause: { code: "SQLITE_BUSY" } }
 }
 
-const uniqueError = {
-  reason: { _tag: "SqlError", cause: { code: "SQLITE_CONSTRAINT_UNIQUE" } }
-}
-
 describe("SQLite telemetry hooks", () => {
-  it("declares setup, cleanup, retry, and duplicate predicates", () => {
+  it("declares setup, cleanup, and retry predicates", () => {
     expect(sqliteDialect.telemetry?.setup).toEqual([
       "PRAGMA journal_mode = WAL",
       "PRAGMA synchronous = NORMAL",
@@ -28,8 +24,6 @@ describe("SQLite telemetry hooks", () => {
     expect(sqliteDialect.telemetry?.cleanup).toEqual(["PRAGMA wal_checkpoint(TRUNCATE)"])
     expect(sqliteDialect.telemetry?.isRetryable(busyError)).toBe(true)
     expect(sqliteDialect.telemetry?.isRetryable({ reason: { _tag: "Other" } })).toBe(false)
-    expect(sqliteDialect.telemetry?.isDuplicateKey(uniqueError)).toBe(true)
-    expect(sqliteDialect.telemetry?.isDuplicateKey(busyError)).toBe(false)
   })
 
   it("provides a placeholder and a quote-safe upsert", () => {
@@ -87,7 +81,7 @@ describe("libSQL telemetry hooks", () => {
     expect(libsqlDialect("remote").telemetry?.cleanup).toEqual([])
   })
 
-  it("retries nested network and SQLite lock errors, and keeps the duplicate classifier", () => {
+  it("retries nested network and SQLite lock errors", () => {
     const remote = libsqlDialect("remote").telemetry
     expect(remote).toBeDefined()
     if (remote === undefined) {
@@ -96,8 +90,6 @@ describe("libSQL telemetry hooks", () => {
     expect(remote.isRetryable({ reason: { cause: { code: "ECONNREFUSED" } } })).toBe(true)
     expect(remote.isRetryable({ cause: { cause: { code: "SQLITE_BUSY" } } })).toBe(true)
     expect(remote.isRetryable({ reason: { _tag: "Other" } })).toBe(false)
-    expect(remote.isDuplicateKey(uniqueError)).toBe(true)
-    expect(remote.isDuplicateKey(busyError)).toBe(false)
   })
 })
 

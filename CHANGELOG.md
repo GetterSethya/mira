@@ -15,6 +15,16 @@ published by CI.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Telemetry duplicate recovery is transaction-safe on PostgreSQL.** The SQL
+  store now appends with a dialect conflict clause, by default
+  `ON CONFLICT (id) DO NOTHING`, instead of catching a failed insert and running
+  a recovery `SELECT`. A duplicate id no longer aborts a caller transaction with
+  `25P02`, while at-least-once delivery and id-based deduplication are preserved.
+  SQLite and libSQL keep their externally observable behavior. An
+  environment-gated shared-mode test covers the PostgreSQL transaction contract.
+
 ### Changed
 
 - **Custom dialects must implement `StoreSqlCapabilities.isDuplicateKey`.**
@@ -66,7 +76,7 @@ published by CI.
   `_migrations`, so existing telemetry files upgrade without table re-creation.
 - **Dialect telemetry hooks.** `DialectType` now supplies placeholders, a
   portable upsert for the migrator, and optional setup, cleanup, retry, and
-  duplicate-key hooks. SQLite keeps its PRAGMAs and busy/unique classifiers in
+  insert-conflict hooks. SQLite keeps its PRAGMAs and busy classifier in
   `dialect-sqlite.ts`; the telemetry core never branches on a dialect name.
 - **Telemetry responses and schemas are unchanged.** The span response still
   omits `seqId`; the filtered span cursor is fixed internally. Logs keep their

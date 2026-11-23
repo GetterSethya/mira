@@ -115,10 +115,10 @@ export class TelemetryStoreError extends Data.TaggedError("TelemetryStoreError")
 /**
  * An append failed because at least one row id already exists.
  *
- * The SQL store normally resolves this internally by filtering existing ids and
- * retrying the missing rows. The error crosses the boundary when a non-SQL
- * store cannot resolve it, so the SQL-free core can treat a single duplicate row
- * as success.
+ * The SQL store does not produce this error: it inserts with a dialect
+ * conflict clause, so a duplicate id is a no-op. A non-SQL store that cannot
+ * ignore duplicates returns this error, and the SQL-free core treats a single
+ * duplicate row as success.
  */
 export class TelemetryDuplicateEntryError extends Data.TaggedError(
   "TelemetryDuplicateEntryError"
@@ -133,6 +133,10 @@ export class TelemetryDuplicateEntryError extends Data.TaggedError(
  * `appendLogs` and `appendSpans` are idempotent by entry `id`: a retry of a row
  * that already committed must be a no-op. A store that cannot enforce this must
  * return `TelemetryDuplicateEntryError` rather than appending the row twice.
+ *
+ * The SQL store enforces idempotency with a conflict-ignoring insert. A direct
+ * append in shared mode joins the caller transaction; the core's forked
+ * consumers run outside it.
  */
 export class TelemetryStore extends Context.Service<
   TelemetryStore,

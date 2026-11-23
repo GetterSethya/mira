@@ -184,11 +184,6 @@ describe("duplicate key classifiers", () => {
       true
     )
     expect(sqliteDialect.store.isDuplicateKey({ reason: { _tag: "UniqueViolation" } })).toBe(true)
-
-    expect(sqliteDialect.telemetry?.isDuplicateKey({ reason: { _tag: "UniqueViolation" } })).toBe(
-      false
-    )
-    expect(sqliteDialect.telemetry?.isDuplicateKey({ rawCode: 2067 })).toBe(false)
     expect(sqliteDialect.store.isDuplicateKey({ errstr: "constraint failed" })).toBe(false)
 
     expect(postgresStoreSql.isDuplicateKey({ code: "23505" })).toBe(true)
@@ -209,8 +204,5 @@ describe("duplicate key classifiers", () => {
     ).toBe(false)
 
     expect(libsqlDialect("remote").store.isDuplicateKey({ errno: 2067 })).toBe(true)
-    expect(
-      libsqlDialect("remote").telemetry?.isDuplicateKey({ reason: { _tag: "UniqueViolation" } })
-    ).toBe(false)
   })
 })

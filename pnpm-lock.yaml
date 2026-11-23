@@ -376,6 +376,9 @@ importers:
         specifier: ^10.5.0
         version: 10.5.0
     devDependencies:
+      '@effect/sql-pg':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@effect/vitest':
         specifier: ^4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.3(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.1)))
@@ -454,6 +457,11 @@ packages:
 
   '@effect/sql-libsql@4.0.0':
     resolution: {integrity: sha512-RgMr2gdhE4J3oEsIv1jQcgSoSrd4OCaAbbSPx3q4KvKWRjMFScpUKEa1SnjgmA/nyanmTW1p/SR1Xtynh8kfAA==}
+    peerDependencies:
+      effect: ^4.0.0
+
+  '@effect/sql-pg@4.0.0':
+    resolution: {integrity: sha512-w0sRMA08Tgz73aReYpFSxD+nz2LUKYhH/4zaRpo4G5b5YG+eqiAL7XYhqIjvGZ8MZacazbG71Jhprv6ccz9HDg==}
     peerDependencies:
       effect: ^4.0.0
 
@@ -3104,6 +3112,10 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@effect/sql-pg@4.0.0(effect@4.0.0)':
+    dependencies:
+      effect: 4.0.0
 
   '@effect/sql-sqlite-bun@4.0.0(effect@4.0.0)':
     dependencies:
