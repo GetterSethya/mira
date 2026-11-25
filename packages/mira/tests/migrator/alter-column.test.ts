@@ -2,7 +2,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
 import type { CollectionSchema } from "@gettersethya/mira-client"
 import { Effect, Exit, Layer } from "effect"
-import { SqlClient, SqlError } from "effect/sql"
+import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { Dialect } from "@/dialect/dialect.js"
@@ -832,45 +832,14 @@ describe("SQLite column changes (table recreation)", () => {
       expect(rows).toEqual([{ id: "t1" }])
     }).pipe(Effect.provide(testLayer)))
 
-  it.effect("rolls back the plan when the _collections upsert fails", () => {
-    const failingCollections = Layer.effect(
-      SqlClient.SqlClient,
-      Effect.gen(function* () {
-        const base = yield* SqlClient.SqlClient
-        return new Proxy(base, {
-          get(target, property, receiver) {
-            if (property === "unsafe") {
-              return (statement: string, params?: ReadonlyArray<unknown>) =>
-                statement.includes('INSERT INTO "_collections"')
-                  ? Effect.fail(
-                      new SqlError.SqlError({
-                        reason: new SqlError.UnknownError({
-                          cause: undefined,
-                          message: "forced _collections failure"
-                        })
-                      })
-                    )
-                  : target.unsafe(statement, params)
-            }
-            const value = Reflect.get(target, property, receiver)
-            return typeof value === "function" ? value.bind(target) : value
-          }
-        })
-      })
-    ).pipe(Layer.provide(sqliteLayer))
-
-    const layer = Layer.mergeAll(
-      MigratorLive.pipe(
-        Layer.provide(
-          Layer.mergeAll(Layer.succeed(Dialect, sqliteDialect), failingCollections)
-        )
-      ),
-      failingCollections
-    )
-
-    return Effect.gen(function* () {
+  it.effect("rolls back the plan when the _collections upsert fails", () =>
+    Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const migrator = yield* Migrator
+      yield* migrator.migrate([])
+      yield* sql.unsafe(
+        `CREATE TRIGGER "fail_collections_upsert" BEFORE INSERT ON "_collections" BEGIN SELECT RAISE(ABORT, 'forced _collections failure'); END`
+      )
       const exit = yield* Effect.exit(migrator.migrate([{ name: "todos", schema: todosSchema() }]))
       expect(Exit.isFailure(exit)).toBe(true)
       expect(yield* tableExists(sql, "todos")).toEqual([])
@@ -878,8 +847,8 @@ describe("SQLite column changes (table recreation)", () => {
       const collections = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM "_collections"`
       expect(Number(migrations[0]?.count)).toBe(0)
       expect(Number(collections[0]?.count)).toBe(0)
-    }).pipe(Effect.provide(layer))
-  })
+    }).pipe(Effect.provide(testLayer))
+  )
 })
 
 describe("SQLite untracked views and view-attached objects", () => {

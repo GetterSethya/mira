@@ -116,6 +116,25 @@ const app = Mira.builder()
 app.serve()
 ```
 
+To run the same app on PostgreSQL, keep the collections and rules and swap the
+database step:
+
+```typescript
+import { Redacted } from "effect"
+import { PostgresDatabase } from "@gettersethya/mira"
+
+Mira.builder()
+  .platform(NodePlatform)
+  .database(PostgresDatabase({
+    url: Redacted.make(process.env.DATABASE_URL!)
+  }))
+  .storage(LocalFileStorage({ directory: "./uploads" }))
+  .collections([Users, Posts])
+  .rules([userRules, postRules])
+  .build()
+  .serve()
+```
+
 On first boot Mira:
 - Auto-generates a `jwt_secret` and stores it in the database
 - Runs schema migrations (creates tables, indexes, views)
@@ -130,8 +149,8 @@ On first boot Mira:
 ```typescript
 Mira.builder()
   .platform(NodePlatform)                                            // required — Node.js runtime
-  .database(SqliteDatabase({ filename: "mira.db" }))                // required — SQLite backend
-  .storage(LocalFileStorage({ directory: "./uploads" }))            // required — local disk storage
+  .database(SqliteDatabase({ filename: "mira.db" }))                // required - database backend
+  .storage(LocalFileStorage({ directory: "./uploads" }))            // required - local disk storage
   .collections([Users, Posts])                                      // required — your collections
   .rules([userRules, postRules])                                    // optional — server-side access rules
   .crons([/* CronDef definitions */])                               // optional — cron jobs
@@ -150,7 +169,7 @@ Mira.builder()
 | Step | Required | Description |
 |---|---|---|
 | `.platform(p)` | yes | Runtime environment. `NodePlatform`, or `BunPlatform` from the `@gettersethya/mira/bun` entry. |
-| `.database(d)` | yes | SQL backend. `SqliteDatabase({ filename })`, `BunSqliteDatabase({ filename })` on Bun, or `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` / `TursoDatabase` on Node. |
+| `.database(d)` | yes | SQL backend. `SqliteDatabase({ filename })`, `BunSqliteDatabase({ filename })` on Bun, `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` / `TursoDatabase` on Node, or `PostgresDatabase({ url, maxConnections?, idleTimeout?, prepare?, ssl?, migrateAtStartup? })` on Node and Bun. |
 | `.storage(s)` | yes | File storage. `LocalFileStorage({ directory })` for local disk, or `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for S3-compatible buckets (AWS S3, MinIO, R2, LocalStack). |
 | `.email(e)` | no | Email transport. `SmtpEmail({ host, port, secure, auth, from })`. Without it, a no-op `EmailService` is used. |
 | `.emailTemplates(t)` | no | Auth email overrides: `{ defaults?, collections? }`. Resolution is per-collection → app-wide → built-in. |
@@ -166,8 +185,8 @@ Mira.builder()
 ### Databases
 
 SQLite is available on Node (`SqliteDatabase`) and Bun (`BunSqliteDatabase`).
-libSQL is available on Node as `LibsqlDatabase`, with `TursoDatabase` as an
-alias:
+PostgreSQL 15+ is available on Node and Bun through `PostgresDatabase`. libSQL
+is available on Node as `LibsqlDatabase`, with `TursoDatabase` as an alias:
 
 ```typescript
 import { LibsqlDatabase } from "@gettersethya/mira"
@@ -205,7 +224,129 @@ read-your-writes across the replica.
 `@libsql/client` ships platform-native binaries and is loaded only when the
 preset's layer is built. The driver is not loaded by importing
 `@gettersethya/mira`. libSQL works on Node and Bun; the Bun entry exports the
-same `LibsqlDatabase` and `TursoDatabase` names.
+same `LibsqlDatabase` and `TursoDatabase` names. PostgreSQL is available on both
+runtimes through `PostgresDatabase`, described below.
+
+#### PostgreSQL
+
+`PostgresDatabase` runs PostgreSQL 15+ on Node and Bun through
+`@effect/sql-pg`. PostgreSQL 17.12 is the validated version and the CI target;
+15+ is the support policy. Node 24 and Bun 1.4.2 are the tested runtimes.
+
+```typescript
+import { Redacted } from "effect"
+import { PostgresDatabase } from "@gettersethya/mira"
+
+const database = PostgresDatabase({
+  url: Redacted.make("postgres://mira:secret@db.internal:5432/mira"),
+  maxConnections: 20,
+  idleTimeout: "30 seconds",
+  prepare: true,
+  ssl: false
+})
+```
+
+The URL is `Redacted`, and the preset does not log it. The driver parses
+`connect_timeout`, `application_name`, `sslmode`, and `options` from the URL;
+`ssl: true` is a convenience for URLs that do not set `sslmode`. `maxConnections`
+defaults to the driver's 10 and must be a positive integer, `idleTimeout`
+controls pool idle retirement, and `prepare` defaults to true. Set
+`prepare: false` for a transaction-mode or statement-mode pooler such as
+PgBouncer that cannot keep named prepared statements. The preset acquires one
+pooled connection and runs `SELECT 1` at boot, so a malformed URL, bad password,
+refused TLS handshake, or unreachable host fails before the app serves.
+`connect_timeout` bounds the attempt.
+
+The schema uses `BIGINT GENERATED BY DEFAULT AS IDENTITY` for `seqId`, native
+`BOOLEAN` columns, `DOUBLE PRECISION` for `Field.number()`, and `TEXT`
+timestamps. A `BIGINT` `seqId` becomes a string in `nextCursor` and in admin
+view/update/expand responses; public list items still omit `seqId`. A JavaScript
+number is exact only below 2^53, so a PostgreSQL cursor above that limit is a
+canonical decimal string. Pass it back unchanged.
+
+`migrateAtStartup` defaults to true. Collection migrations run in one transaction
+with `SET LOCAL transaction_isolation = 'read committed'`, a transaction-scoped
+`pg_advisory_xact_lock(hashtextextended('mira.migrations', 0))`, and
+`SET LOCAL lock_timeout = '5s'`. Replicas booting together serialize on the
+advisory lock: the first applies the plan, and later replicas re-read the
+schema and apply nothing. The lock releases on commit or rollback. `Migrator.plan`
+and `Migrator.status` use a non-blocking `pg_try_advisory_xact_lock` preview and
+fail with `MigrationBusyError` while a migration is running. A role or URL
+`lock_timeout` set before the transaction can cancel the lock wait with SQLSTATE
+`55P03`; a `statement_timeout` can cancel it with `57014`. Give the migration
+role enough wait budget, and schedule migrations before traffic or in a
+maintenance window. Request transactions and shared telemetry use the app pool;
+check `pg_stat_activity` and pool sizing when a deployment approaches its
+connection limit.
+
+For a deploy job, set `migrateAtStartup: false` and run the exported `Migrator`
+before starting replicas. This disables collection migrations only: the internal
+stores and shared telemetry still run their idempotent bootstrap DDL on every
+boot.
+
+```typescript
+import { Effect, Redacted } from "effect"
+import { LocalFileStorage, Mira, Migrator, NodePlatform, PostgresDatabase } from "@gettersethya/mira"
+
+const app = Mira.builder()
+  .platform(NodePlatform)
+  .database(PostgresDatabase({
+    url: Redacted.make(process.env.DATABASE_URL!),
+    migrateAtStartup: false
+  }))
+  .storage(LocalFileStorage({ directory: "./uploads" }))
+  .collections([Users, Posts])
+  .build()
+
+const migrate = Effect.gen(function* () {
+  const migrator = yield* Migrator
+  yield* migrator.migrate(app.collections.map(({ name, schema }) => ({ name, schema })))
+}).pipe(Effect.provide(app.buildServiceLayer()))
+
+await Effect.runPromise(migrate)
+```
+
+`buildServiceLayer()` already includes the exported `MigratorLive`, so the job
+resolves only the `Migrator` tag. The snippet reads `app.collections`, which
+contains the app, plugin, and admin collections with rules applied, instead of a
+private collection list.
+
+PostgreSQL does not preflight untracked catalog objects the way SQLite's
+`sqlite_master` scan does. An untracked view that depends on a dropped column
+makes `DROP COLUMN` or `ALTER COLUMN TYPE` fail at the statement, the transaction
+rolls back, and the existing table and view survive. A desired view whose name
+already exists outside Mira fails `CREATE VIEW` for the same reason, because
+PostgreSQL has no `CREATE VIEW IF NOT EXISTS`. Resolve either failure by tracking
+the view in Mira, or by removing or renaming it before migrating. Table, column,
+view, and index-field names over 63 bytes fail preflight with
+`UnsupportedMigrationStepError` before any DDL. Generated index names over 63
+bytes are truncated deterministically with an FNV-1a suffix.
+
+Telemetry has two modes. Shared storage is the recommended PostgreSQL mode:
+`makeTelemetryLayer({ storage: { mode: "shared" } })` reuses the app `SqlClient`
+and `Dialect`, creates `_telemetry_collections` and `_telemetry_migrations`, and
+migrates `logs` and `spans` in the app database. Dedicated mode takes a second
+`PostgresDatabase` and requires a separate database or schema. Pointing dedicated
+mode at the app database can make the app migrator treat `logs` and `spans` as
+app collections. The telemetry read cursor stays numeric and is exact only below
+2^53; retention deletes by a `seqId` subquery, so retention is not affected by
+that ceiling.
+
+There is no built-in SQLite-to-PostgreSQL data migration. Use a dump and `COPY`
+(or an export/import tool): booleans move to `BOOLEAN`, timestamps stay `TEXT`,
+and `seqId` identity values restart rather than preserving the old SQLite
+values. Password hashes copy unchanged. Reverting the configuration does not copy
+PostgreSQL data back, so any rows written after cutover stay in PostgreSQL.
+
+The main and Bun entries keep SQLite, libSQL, and PostgreSQL. A PostgreSQL-only
+Node app can import `@gettersethya/mira/postgres` instead; that subpath exports
+the app builder, Node platform, local storage, `PostgresDatabase`, and `Migrator`
+without the SQLite/libSQL preset barrel. The Bun entry exports
+`PostgresDatabase` as well.
+
+The CI `postgres-e2e` job runs the gated PostgreSQL behavior, migration, cursor,
+batch, and shared telemetry suites against `postgres:17.12-alpine`, then runs
+`bun run packages/mira/tests/databases/postgres-bun.e2e.ts`.
 
 ### Storage
 
@@ -829,10 +970,12 @@ f.not(f.field("archived").eq(true))
 ```
 
 `like` matching is case-insensitive per dialect: SQLite uses ASCII `LIKE` under
-the default `PRAGMA case_sensitive_like`, and PostgreSQL uses `ILIKE` when a
-PostgreSQL dialect is available. Non-ASCII folding differs by engine and locale.
-This API adds no `ESCAPE` clause, so backslash and literal wildcard matching
-remain engine-dependent. No PostgreSQL preset ships in this change.
+the default `PRAGMA case_sensitive_like`, and PostgreSQL uses `ILIKE`. Both
+engines add an `ESCAPE` clause: `ESCAPE '\'` on SQLite and `ESCAPE E'\\'` on
+PostgreSQL. A backslash escapes `%` and `_`, and patterns without a backslash are
+unchanged. Non-ASCII folding and text `ORDER BY` follow the database collation:
+ASCII order matches SQLite, while mixed-case and non-ASCII order follow
+PostgreSQL's locale.
 
 ---
 
@@ -1386,6 +1529,8 @@ For libSQL, use `LibsqlDatabase` as the dedicated preset. Local `file:` telemetr
 
 A `syncUrl` replica sets `TelemetryDatabase.migrateAtStartup` to false, so dedicated telemetry does not create tables on the replica. Shared telemetry on a replica needs `{ mode: "shared", migrate: false }`; migrate the tables on the primary and sync first.
 
+For PostgreSQL, use shared storage to reuse the app `SqlClient`, `Dialect`, and pool. Dedicated mode opens a second pool from a `PostgresDatabase` and requires a separate database or schema; pointing it at the app database can make the app migrator treat `logs` and `spans` as app collections. PostgreSQL telemetry has no setup or cleanup statements and classifies `40001`, `40P01`, and `55P03` as retryable.
+
 Dedicated mode applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeout=5000` during construction, then migrates two collections into that database. Set `manageConnection: false` to keep a preset's explicit `synchronous` setting. Remote libSQL has no setup or cleanup statements; local libSQL gets `foreign_keys=OFF` as well.
 
 - **`logs`** — structured log entries from `Effect.log()`. Fields: `seqId`, `level`, `message`, `traceId?`, `spanId?`, `created`, `updated`.
@@ -1395,7 +1540,7 @@ Both tables index `created` for retention scans. Completed spans are offered to 
 
 `logCleanupCronDef` is a daily `0 0 * * *` job. It deletes rows older than `AppConfig.logRetentionDays` in batches of 1,000 through `TelemetryStore.deleteOlderThan`, then runs the dialect's cleanup hook (the SQLite checkpoint) and logs the deleted counts. Add it to `.crons([...])`. The default console telemetry does not provide a store, so the cron only works with `makeTelemetryLayer` or a custom `TelemetryStore`. Reading persisted telemetry needs a superadmin session; see the [HTTP API](../http-api/).
 
-The telemetry endpoints (`GET /api/_telemetry/logs` and `GET /api/_telemetry/spans`) require a session from a plugin-declared admin collection and support cursor-based pagination via `?after=<seqId>&limit=<n>`. Logs return `{ logs, total, limit, nextCursor }`; spans return `{ spans, total, limit, nextCursor }`. Spans also accept `traceId`, and a bad telemetry filter is a `400`, not a `422`. The dashboard's log/span viewer uses these routes for continuous pagination.
+The telemetry endpoints (`GET /api/_telemetry/logs` and `GET /api/_telemetry/spans`) require a session from a plugin-declared admin collection and support cursor-based pagination via `?after=<seqId>&limit=<n>`. Logs return `{ logs, total, limit, nextCursor }`; spans return `{ spans, total, limit, nextCursor }`. Spans also accept `traceId`, and a bad telemetry filter is a `400`, not a `422`. The dashboard's log/span viewer uses these routes for continuous pagination. The telemetry read cursor is numeric and exact only below 2^53. Retention deletes by a `seqId` subquery, so a high `seqId` cannot be rounded to the wrong row.
 
 ---
 

@@ -7,6 +7,7 @@ import { expect } from "vitest"
 
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { MigrationBusyError } from "@/migrator/errors.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
@@ -23,6 +24,13 @@ const migratorWithDeps = MigratorLive.pipe(
 const testLayer = Layer.mergeAll(migratorWithDeps, sqliteLayer)
 
 describe("migrator", () => {
+  it("MigrationBusyError carries the tag, operation, and message", () => {
+    const busy = new MigrationBusyError({ operation: "plan", message: "A migration is in progress" })
+    expect(busy._tag).toBe("MigrationBusyError")
+    expect(busy.operation).toBe("plan")
+    expect(busy.message).toBe("A migration is in progress")
+  })
+
   it.effect("creates table from collection schema", () =>
     Effect.gen(function* () {
       const migrator = yield* Migrator

@@ -277,14 +277,17 @@ const timestampDiffSql = (left: string, right: string, unit: TimestampUnit) => {
   return factor === 1 ? base : `(${base} * ${factor})`
 }
 
+/** One backslash that SQLite treats as the LIKE escape character. */
+const LIKE_ESCAPE = "ESCAPE '\\'"
+
 const caseInsensitiveLikeSql = (
   left: string,
   right: string,
   mode: "prefix" | "contains"
 ) =>
   mode === "prefix"
-    ? `${left} LIKE (${right} || '%')`
-    : `${left} LIKE ('%' || ${right} || '%')`
+    ? `${left} LIKE (${right} || '%') ${LIKE_ESCAPE}`
+    : `${left} LIKE ('%' || ${right} || '%') ${LIKE_ESCAPE}`
 
 const sqliteColumnExistsSql = (table: string, column: string) =>
   `SELECT 1 AS present FROM pragma_table_info(${quoteLiteral(table)}) WHERE name = ${quoteLiteral(column)} LIMIT 1`
@@ -1040,7 +1043,7 @@ export const sqliteDialect: DialectType = {
   timestampAdd: timestampAddSql,
   timestampDiff: timestampDiffSql,
   caseInsensitiveLike: caseInsensitiveLikeSql,
-  caseInsensitivePattern: (left, right) => `${left} LIKE ${right}`,
+  caseInsensitivePattern: (left, right) => `${left} LIKE ${right} ${LIKE_ESCAPE}`,
   castValue: (expr) => expr,
   quoteLiteral,
   nativeType: nativeTypeOf,
@@ -1057,6 +1060,7 @@ export const sqliteDialect: DialectType = {
     cleanup: ["PRAGMA wal_checkpoint(TRUNCATE)"],
     isRetryable: isSqliteBusy
   },
+  normalizesBigintSeqId: false,
 
   translatePlan: (steps, ctx) =>
     Effect.gen(function* () {

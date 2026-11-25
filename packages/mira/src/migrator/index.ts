@@ -4,6 +4,7 @@ export type { ColumnDef, ColumnType, MigrateOptions, MigrationPlan, MigrationSte
 export { toEffectLogLevel } from "./types.js"
 export type { DeleteResultStrategy, DialectType } from "@/dialect/dialect.js"
 export { Dialect } from "@/dialect/dialect.js"
+export { postgresDialect } from "@/dialect/dialect-postgres.js"
 export { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 export type { LibsqlConnectionMode } from "@/dialect/dialect-libsql.js"
 export { libsqlConnectionMode, libsqlDialect } from "@/dialect/dialect-libsql.js"

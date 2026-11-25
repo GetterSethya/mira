@@ -6,7 +6,7 @@ import type { DialectType, TranslatePlanContext, ViewShape } from "@/dialect/dia
 import { Dialect } from "@/dialect/dialect.js"
 
 import type { MigrationError } from "./errors.js"
-import { InvalidMigrationStatementError } from "./errors.js"
+import { InvalidMigrationStatementError, MigrationBusyError } from "./errors.js"
 import {
   computePlan,
   diffSchemas,
@@ -141,7 +141,7 @@ export class Migrator extends Context.Service<
     readonly status: (
       schemas: Array<NamedSchema>,
       options?: MigrateOptions
-    ) => Effect.Effect<Array<{ name: string; status: "current" | "ahead" | "behind" }>, SqlError.SqlError>
+    ) => Effect.Effect<Array<{ name: string; status: "current" | "ahead" | "behind" }>, MigrationError>
   }
 >()("Migrator") {}
 
@@ -198,9 +198,9 @@ function isExecutable(statement: string) {
 /**
  * Renders a plan and rejects anything that could not be executed.
  *
- * Both the dialect check and the statement check happen before the transaction
- * opens: an impossible plan must not reach the driver, and must not roll back a
- * transaction it never needed.
+ * Rendering runs inside the migration transaction, after the stored-schema read
+ * and plan computation. A dialect check or statement check failure rolls the
+ * transaction back, so no rendered statement executes.
  */
 function renderPlan(
   dialect: DialectType,
@@ -253,6 +253,37 @@ function runCleanup(sql: SqlClient.SqlClient, statements: ReadonlyArray<string>)
   )
 }
 
+const MIGRATION_BUSY_MESSAGE = "A migration is in progress"
+
+/**
+ * Takes the dialect's non-blocking migration preview lock when it declares one.
+ *
+ * `plan` and `status` run this first inside their transaction. SQLite and
+ * libSQL omit the lock, so their previews keep the existing behavior. A dialect
+ * that supplies the statement returns one boolean `acquired` column; false or
+ * an empty result means a migration holds the lock, and the preview fails
+ * instead of waiting or racing the bootstrap.
+ */
+function acquireMigrationPreviewLock(
+  sql: SqlClient.SqlClient,
+  dialect: DialectType,
+  operation: "plan" | "status"
+) {
+  const lockSql = dialect.migrationPreviewLockSql
+  if (lockSql === undefined) {
+    return Effect.void
+  }
+  return Effect.gen(function* () {
+    const rows = yield* sql.unsafe<{ acquired: boolean | null }>(lockSql)
+    const acquired = rows[0]?.acquired
+    if (acquired !== true) {
+      return yield* Effect.fail(
+        new MigrationBusyError({ operation, message: MIGRATION_BUSY_MESSAGE })
+      )
+    }
+  })
+}
+
 function migrateImplWith(
   sql: SqlClient.SqlClient,
   dialect: DialectType,
@@ -260,71 +291,82 @@ function migrateImplWith(
   options?: MigrateOptions
 ) {
   const { schemaTable, migrationsTable } = metadataFor(options)
+  // Rendering now happens inside the transaction, so the cleanup statements are
+  // only known once the plan translates. The finalizer reads them after the
+  // transaction settles on either the committed or the failed path.
+  let cleanupStatements: ReadonlyArray<string> = []
   return Effect.gen(function* () {
-    yield* Effect.logDebug("Creating system tables if not exist")
-    yield* runStatements(
-      sql,
-      systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
-    )
-
-    yield* Effect.logInfo(`Migrating ${schemas.length} collections...`)
-    const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
-      `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
-    )
-    const storedRecord: Record<string, CollectionSchema> = {}
-    for (const row of storedRows) {
-      storedRecord[row.name] = yield* decodeStoredSchema(row.schema)
-    }
-    yield* Effect.logDebug(`Stored schemas: ${Object.keys(storedRecord).length} found`)
-
-    const plan = computePlan(schemas, storedRecord, options)
-    yield* Effect.logDebug(`Diff: ${plan.steps.length} steps computed`)
-    if (plan.steps.length === 0) {
-      yield* Effect.logInfo("All collections up to date — nothing to migrate")
-      return
-    }
-    yield* Effect.logInfo(`Migration plan: ${plan.steps.length} steps (destructive: ${plan.destructive})`)
-
-    if (plan.destructive && !options?.allowDestructive) {
-      yield* Effect.logWarning(
-        "Destructive steps detected but allowDestructive is false — skipping. Re-run with allowDestructive: true to proceed."
-      )
-      for (const step of plan.steps.filter(isDestructiveStep)) {
-        const tableLabel = "table" in step ? step.table : "unknown"
-        yield* Effect.logWarning(`  Destructive step: ${step.kind} on ${tableLabel}`)
-      }
-      return
-    }
-
-    for (let i = 0; i < plan.steps.length; i++) {
-      const step = plan.steps[i]
-      yield* Effect.logInfo(
-        `Step [${i + 1}/${plan.steps.length}]: ${step.kind} on ${"table" in step ? step.table : ""}`
-      )
-    }
-
-    const { statements, validations, cleanup, notes } = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(sql)))
-
-    for (const note of notes ?? []) {
-      yield* Effect.logInfo(note)
-    }
-
-    const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
-      Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
-    )
-    const schemaJsonByName = new Map<string, string>()
-    for (const { name, schema } of schemas) {
-      schemaJsonByName.set(name, yield* encodeStoredSchema(schema))
-    }
-    const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const migrationName = schemas.map((s) => s.name).join(", ")
-
     const transaction = sql.withTransaction(
       Effect.gen(function* () {
         yield* Effect.logDebug("Starting migration transaction")
+        yield* runStatements(sql, dialect.migrationTransactionSetupSql ?? [])
+
+        yield* Effect.logDebug("Creating system tables if not exist")
+        yield* runStatements(
+          sql,
+          systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
+        )
+
+        yield* Effect.logInfo(`Migrating ${schemas.length} collections...`)
+        const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
+          `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
+        )
+        const storedRecord: Record<string, CollectionSchema> = {}
+        for (const row of storedRows) {
+          storedRecord[row.name] = yield* decodeStoredSchema(row.schema)
+        }
+        yield* Effect.logDebug(`Stored schemas: ${Object.keys(storedRecord).length} found`)
+
+        const plan = computePlan(schemas, storedRecord, options)
+        yield* Effect.logDebug(`Diff: ${plan.steps.length} steps computed`)
+        if (plan.steps.length === 0) {
+          yield* Effect.logInfo("All collections up to date - nothing to migrate")
+          return
+        }
+        yield* Effect.logInfo(`Migration plan: ${plan.steps.length} steps (destructive: ${plan.destructive})`)
+
+        if (plan.destructive && !options?.allowDestructive) {
+          yield* Effect.logWarning(
+            "Destructive steps detected but allowDestructive is false - skipping. Re-run with allowDestructive: true to proceed."
+          )
+          for (const step of plan.steps.filter(isDestructiveStep)) {
+            const tableLabel = "table" in step ? step.table : "unknown"
+            yield* Effect.logWarning(`  Destructive step: ${step.kind} on ${tableLabel}`)
+          }
+          return
+        }
+
+        for (let i = 0; i < plan.steps.length; i++) {
+          const step = plan.steps[i]
+          yield* Effect.logInfo(
+            `Step [${i + 1}/${plan.steps.length}]: ${step.kind} on ${"table" in step ? step.table : ""}`
+          )
+        }
+
+        const translated = yield* renderPlan(
+          dialect,
+          plan.steps,
+          buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(sql))
+        )
+        cleanupStatements = translated.cleanup
+
+        for (const note of translated.notes ?? []) {
+          yield* Effect.logInfo(note)
+        }
+
+        const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
+          Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
+        )
+        const schemaJsonByName = new Map<string, string>()
+        for (const { name, schema } of schemas) {
+          schemaJsonByName.set(name, yield* encodeStoredSchema(schema))
+        }
+        const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        const migrationName = schemas.map((s) => s.name).join(", ")
+
         yield* Effect.logDebug(`Steps: ${stepsJson}`)
-        yield* runStatements(sql, statements)
-        yield* runStatements(sql, validations ?? [])
+        yield* runStatements(sql, translated.statements)
+        yield* runStatements(sql, translated.validations ?? [])
         yield* sql`INSERT INTO ${sql(migrationsTable)} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
 
         for (const [name, schemaJson] of schemaJsonByName) {
@@ -348,11 +390,11 @@ function migrateImplWith(
           Effect.andThen(Effect.failCause(cause))
         )
       ),
-      Effect.ensuring(runCleanup(sql, cleanup))
+      Effect.ensuring(Effect.suspend(() => runCleanup(sql, cleanupStatements)))
     )
 
     yield* transaction
-    yield* Effect.logInfo(`Migration complete — ${schemas.length} collections migrated`)
+    yield* Effect.logInfo(`Migration complete - ${schemas.length} collections migrated`)
   })
 }
 
@@ -363,35 +405,42 @@ function planImplWith(
   options?: MigrateOptions
 ) {
   const { schemaTable, migrationsTable } = metadataFor(options)
-  return Effect.gen(function* () {
-    yield* Effect.logDebug("Computing migration plan (dry run)")
+  return sql.withTransaction(
+    Effect.gen(function* () {
+      yield* Effect.logDebug("Computing migration plan (dry run)")
+      yield* acquireMigrationPreviewLock(sql, dialect, "plan")
 
-    yield* runStatements(
-      sql,
-      systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
-    )
+      yield* runStatements(
+        sql,
+        systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
+      )
 
-    const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
-      `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
-    )
-    const storedRecord: Record<string, CollectionSchema> = {}
-    for (const row of storedRows) {
-      storedRecord[row.name] = yield* decodeStoredSchema(row.schema)
-    }
-    const plan = computePlan(schemas, storedRecord, options)
-    // Render (and reject) the plan here too, so a dry run surfaces an impossible plan
-    // instead of leaving it to the next boot.
-    const translated = yield* renderPlan(dialect, plan.steps, buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(sql)))
+      const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
+        `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
+      )
+      const storedRecord: Record<string, CollectionSchema> = {}
+      for (const row of storedRows) {
+        storedRecord[row.name] = yield* decodeStoredSchema(row.schema)
+      }
+      const plan = computePlan(schemas, storedRecord, options)
+      // Render (and reject) the plan here too, so a dry run surfaces an impossible plan
+      // instead of leaving it to the next boot.
+      const translated = yield* renderPlan(
+        dialect,
+        plan.steps,
+        buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(sql))
+      )
 
-    yield* Effect.logInfo(`Plan: ${plan.steps.length} steps`)
-    const planJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
-      Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
-    )
-    yield* Effect.logDebug(`Steps: ${planJson}`)
-    return translated.notes !== undefined && translated.notes.length > 0
-      ? { ...plan, notes: translated.notes }
-      : plan
-  })
+      yield* Effect.logInfo(`Plan: ${plan.steps.length} steps`)
+      const planJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
+        Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
+      )
+      yield* Effect.logDebug(`Steps: ${planJson}`)
+      return translated.notes !== undefined && translated.notes.length > 0
+        ? { ...plan, notes: translated.notes }
+        : plan
+    })
+  )
 }
 
 function statusImplWith(
@@ -401,52 +450,55 @@ function statusImplWith(
   options?: MigrateOptions
 ) {
   const { schemaTable, migrationsTable } = metadataFor(options)
-  return Effect.gen(function* () {
-    yield* Effect.logDebug("Checking migration status")
+  return sql.withTransaction(
+    Effect.gen(function* () {
+      yield* Effect.logDebug("Checking migration status")
+      yield* acquireMigrationPreviewLock(sql, dialect, "status")
 
-    yield* runStatements(
-      sql,
-      systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
-    )
+      yield* runStatements(
+        sql,
+        systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
+      )
 
-    const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
-      `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
-    )
-    const parsedEntries: Array<[string, CollectionSchema]> = []
-    for (const r of storedRows) {
-      parsedEntries.push([r.name, yield* decodeStoredSchema(r.schema)])
-    }
-    const stored = new Map(parsedEntries)
+      const storedRows = yield* sql.unsafe<{ name: string; schema: string }>(
+        `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
+      )
+      const parsedEntries: Array<[string, CollectionSchema]> = []
+      for (const r of storedRows) {
+        parsedEntries.push([r.name, yield* decodeStoredSchema(r.schema)])
+      }
+      const stored = new Map(parsedEntries)
 
-    const result: Array<{ name: string; status: "current" | "ahead" | "behind" }> = []
-    for (const { name, schema: desired } of schemas) {
-      const storedSchema = stored.get(name)
-      if (!storedSchema) {
-        result.push({ name, status: "behind" })
-        yield* Effect.logDebug(`${name}: behind (not in stored)`)
-      } else {
-        const steps = diffSchemas(name, storedSchema, desired)
-        if (steps.length === 0) {
-          result.push({ name, status: "current" })
+      const result: Array<{ name: string; status: "current" | "ahead" | "behind" }> = []
+      for (const { name, schema: desired } of schemas) {
+        const storedSchema = stored.get(name)
+        if (!storedSchema) {
+          result.push({ name, status: "behind" })
+          yield* Effect.logDebug(`${name}: behind (not in stored)`)
         } else {
-          const hasNew = steps.some(
-            (s) => s.kind === "addColumn" || s.kind === "createIndex" || s.kind === "createTable" || s.kind === "createView"
-          )
-          const hasRemoved = steps.some(
-            (s) => s.kind === "dropColumn" || s.kind === "dropIndex" || s.kind === "dropTable" || s.kind === "dropView"
-          )
-          if (hasNew && hasRemoved) {
-            result.push({ name, status: "behind" })
-          } else if (hasNew) {
-            result.push({ name, status: "behind" })
+          const steps = diffSchemas(name, storedSchema, desired)
+          if (steps.length === 0) {
+            result.push({ name, status: "current" })
           } else {
-            result.push({ name, status: "ahead" })
+            const hasNew = steps.some(
+              (s) => s.kind === "addColumn" || s.kind === "createIndex" || s.kind === "createTable" || s.kind === "createView"
+            )
+            const hasRemoved = steps.some(
+              (s) => s.kind === "dropColumn" || s.kind === "dropIndex" || s.kind === "dropTable" || s.kind === "dropView"
+            )
+            if (hasNew && hasRemoved) {
+              result.push({ name, status: "behind" })
+            } else if (hasNew) {
+              result.push({ name, status: "behind" })
+            } else {
+              result.push({ name, status: "ahead" })
+            }
           }
         }
       }
-    }
-    return result
-  })
+      return result
+    })
+  )
 }
 
 /**

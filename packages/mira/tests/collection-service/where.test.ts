@@ -319,4 +319,20 @@ describe("dialect-aware predicates and payload markers", () => {
     expect(resolved.sql).toBe("?::integer > ?::integer")
     expect(resolved.params).toEqual([20, 10])
   })
+
+  it("resolves a seqId payload rule with a large bigint value", () => {
+    const compiled = enforceRule(
+      Rule.field("seqId").gt(Rule.literal("9007199254740993")),
+      postgresRuleSql,
+      { fieldRefMode: "param", fieldType: (field) => field === "seqId" ? "bigint" : "text" }
+    )
+    expect(compiled.sql).toContain("@field_bigint_")
+    const resolved = resolveFieldRefs(
+      compiled,
+      { seqId: 9007199254740993n },
+      pgOptions
+    )
+    expect(resolved.sql).toBe("?::bigint > ?::bigint")
+    expect(resolved.params).toEqual([9007199254740993n, "9007199254740993"])
+  })
 })

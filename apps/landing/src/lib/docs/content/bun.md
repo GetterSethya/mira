@@ -126,6 +126,29 @@ Mira.builder()
 
 The local preset applies WAL, `foreign_keys=OFF`, `busy_timeout=5000`, and an optional `synchronous` mode. Remote libSQL skips writable pragmas. `TursoDatabase` is an alias. The Bun smoke covers a local libSQL file and the Docker sqld job covers a remote Bun connection.
 
+## PostgreSQL
+
+The Bun entry exports `PostgresDatabase`, backed by `@effect/sql-pg`. PostgreSQL 15+ is supported; 17.12 is the validated version. The preset runs a `SELECT 1` readiness probe at boot and supports `maxConnections`, `idleTimeout`, `prepare`, `ssl`, and `migrateAtStartup`:
+
+```typescript
+import { BunPlatform, LocalFileStorage, Mira, PostgresDatabase } from "@gettersethya/mira/bun"
+import { Redacted } from "effect"
+
+Mira.builder()
+  .platform(BunPlatform)
+  .database(PostgresDatabase({
+    url: Redacted.make(process.env.DATABASE_URL!),
+    maxConnections: 10,
+    prepare: false
+  }))
+  .storage(LocalFileStorage({ directory: "./bun-uploads" }))
+  .collections([Posts])
+  .build()
+  .serve()
+```
+
+Set `prepare: false` for a statement-mode pooler such as PgBouncer. The Bun smoke `packages/mira/tests/databases/postgres-bun.e2e.ts` runs the preset, migrates a collection, inserts, and asserts a native boolean and a restarted `BIGINT` sequence. It runs only when `MIRA_TEST_POSTGRES_URL` is set.
+
 ## Telemetry
 
 Console telemetry is the default and has no SQLite dependency. To persist logs and spans under Bun, use a Bun database preset for dedicated telemetry:
@@ -146,25 +169,28 @@ Dedicated mode applies WAL, `synchronous=NORMAL`, and `busy_timeout=5000`, migra
 
 ## Version pin
 
-The tested set is Bun `1.4.2`, `effect@4.0.0`, `@effect/platform-bun@4.0.0`, `@effect/sql-sqlite-bun@4.0.0`, `@effect/platform-node@4.0.0`, `@effect/sql-sqlite-node@4.0.0`, and `@effect/platform-node-shared@4.0.0`. The supported Bun floor is `1.3.14` (declared in `engines.bun`). The server package pins those platform/SQL packages and narrows its Effect peer range to `~4.0.0`, so a fresh install does not drift to Effect 4.1.x. The workspace also adds a `pnpm.overrides` entry. Keep the set aligned when upgrading.
+The tested set is Bun `1.4.2`, `effect@4.0.0`, `@effect/platform-bun@4.0.0`, `@effect/sql-sqlite-bun@4.0.0`, `@effect/sql-pg@4.0.0`, `@effect/platform-node@4.0.0`, `@effect/sql-sqlite-node@4.0.0`, and `@effect/platform-node-shared@4.0.0`. The supported Bun floor is `1.3.14` (declared in `engines.bun`). The server package pins those platform/SQL packages and narrows its Effect peer range to `~4.0.0`, so a fresh install does not drift to Effect 4.1.x. The workspace also adds a `pnpm.overrides` entry. Keep the set aligned when upgrading.
 
 ## Example and smoke
 
 The repository includes:
 
 - `apps/example-bun/src/index.ts`: a Bun app with `Posts` and the dashboard plugin.
-- `apps/example-bun/src/smoke.ts`: boots the real layer graph on an ephemeral SQLite file, runs migrations, exercises GET/POST collection routes, checks the dashboard status route, sends a real SMTP message through an in-process server, round-trips a file through local storage, verifies the native hash vectors, Argon2id hashing, legacy scrypt verification and rehash eligibility, UUIDv7, native contain/fill thumbnails with Photon disabled, and the pixel-budget guard, checks the rate-limit store, and proves port fallback by occupying the first port.
+- `packages/bun-e2e/src/smoke.ts`: boots the real layer graph on an ephemeral SQLite file, runs migrations, exercises GET/POST collection routes, checks the dashboard status route, sends a real SMTP message through an in-process server, round-trips a file through local storage, verifies the native hash vectors, Argon2id hashing, legacy scrypt verification and rehash eligibility, UUIDv7, native contain/fill thumbnails with Photon disabled, and the pixel-budget guard, checks the rate-limit store, and proves port fallback by occupying the first port.
+- `packages/bun-e2e/src/libsql-smoke.ts`: proves the Bun libSQL preset locally and remotely.
+- `packages/mira/tests/databases/postgres-bun.e2e.ts`: proves the Bun PostgreSQL preset against a real server.
 
 ```bash
 bun run apps/example-bun/src/index.ts
-bun run apps/example-bun/src/smoke.ts
+bun run packages/bun-e2e/src/smoke.ts
+bun run packages/bun-e2e/src/libsql-smoke.ts
 ```
 
-The smoke is the runtime proof. It does not replace the Node test suite. Run `pnpm -r test` for the shared behavior.
+The `packages/bun-e2e` smoke is the runtime proof. It does not replace the Node test suite. Run `pnpm -r test` for the shared behavior.
 
 ## What is not covered
 
-- Deno, Postgres, and MySQL.
+- Deno and MySQL.
 - Bun versions older than `1.3.14`. `BunPlatform` fails fast on them.
 - A Bun-native SMTP client. `nodemailer` uses Bun's native `node:net` and TLS implementation.
 - Native `cover` thumbnails. `Bun.Image` has no centre-crop operation yet, so `cover` uses Photon.

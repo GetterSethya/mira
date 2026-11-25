@@ -17,7 +17,7 @@ import {
   type ResolvedBatchMutationConfig
 } from "@/collection-service/mutation-batcher.js"
 import { Dialect, type DialectType, type TransactionProbeStrategy } from "@/dialect/dialect.js"
-import { postgresFilterSql, postgresRuleSql, postgresStoreSql } from "@/dialect/dialect-postgres.js"
+import { postgresDialect } from "@/dialect/dialect-postgres.js"
 
 /**
  * Environment-gated PostgreSQL test for issue #54: a mid-batch statement
@@ -34,33 +34,6 @@ if (postgresUrl === undefined) {
   })
 } else {
   const url = postgresUrl
-
-  /**
-   * The dialect spreads the exported PostgreSQL capability objects and fills
-   * the remaining stub members exactly as the telemetry gated fixture does;
-   * issue #29 owns the full dialect. `transactionProbe` is the member under
-   * test, and the negative control overrides it.
-   */
-  const postgresTestDialect: DialectType = {
-    ...postgresRuleSql,
-    ...postgresFilterSql,
-    translatePlan: () => Effect.succeed({ statements: [], cleanup: [] }),
-    translate: () => [],
-    nativeType: () => "text",
-    quoteLiteral: (value) => {
-      if (value === null) return "NULL"
-      if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
-      if (typeof value === "number") return String(value)
-      return `'${String(value).replaceAll("'", "''")}'`
-    },
-    indexName: (table, fields) => `${table}_${fields.join("_")}_idx`,
-    storesBooleanAsInteger: false,
-    deleteResult: { _tag: "returning" },
-    placeholder: (index) => `$${index}`,
-    upsert: () => "",
-    store: postgresStoreSql,
-    transactionProbe: "select-only"
-  }
 
   /**
    * Local copy of the SQLite test's `batchedConfig` (fixtures are not
@@ -87,10 +60,13 @@ if (postgresUrl === undefined) {
   /**
    * Each call builds a fresh layer value, so every test gets its own queue,
    * flusher, and stats instance and never observes another test's batch.
+   *
+   * The exported PostgreSQL dialect is used directly; the negative control
+   * overrides only `transactionProbe`, the member under test.
    */
   const makeLayer = (transactionProbe: TransactionProbeStrategy) => {
     const statsLayer = makeBatchMutationStatsLayer()
-    const dialect: DialectType = { ...postgresTestDialect, transactionProbe }
+    const dialect: DialectType = { ...postgresDialect, transactionProbe }
     return Layer.merge(
       makeMutationBatcherLayer(batchedConfig, statsLayer).pipe(
         Layer.provideMerge(

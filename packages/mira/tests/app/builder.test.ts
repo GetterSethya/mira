@@ -259,6 +259,36 @@ describe("MiraBuilder.cache()", () => {
   })
 })
 
+describe("MiraApp.collections", () => {
+  const notesDef = BaseCollection.define("app_notes", { title: Field.text() })
+  const widgetsDef = BaseCollection.define("plugin_widgets", { title: Field.text() })
+  const sessionsDef = AuthCollection.define("_admin_sessions", {})
+
+  it("includes app, plugin, and admin collections with app rules applied", () => {
+    const app = fullBuilder()
+      .collections([notesDef])
+      .rules([defineRule(notesDef, (R) => ({ list: R.public() }))])
+      .build()
+      .extend(
+        MiraPlugin.define({
+          collections: [widgetsDef],
+          adminCollections: [sessionsDef]
+        })
+      )
+
+    expect(app.collections.map((collection) => collection.name)).toEqual([
+      "app_notes",
+      "plugin_widgets",
+      "_admin_sessions"
+    ])
+    expect(
+      app.collections.find((collection) => collection.name === "app_notes")?.schema[
+        "x-rules"
+      ]
+    ).toBeDefined()
+  })
+})
+
 describe("MiraPlugin.adminCollections", () => {
   const adminDef = AuthCollection.define("_admin", {})
 

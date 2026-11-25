@@ -45,6 +45,10 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - `resolveFieldRefs(clause, record, options)` â€” replaces `t.<field>` with bound payload values: `[where.ts:resolveFieldRefs]`
 - Barrel re-exports (`CollectionService`, `CollectionServiceLive`, `makeCollectionServiceLayer`, `CursorPage`, `RequestCtx`, `CollectionError`, `ForbiddenError`, `NotFoundError`, `ReadOnlyError`, `ValidationError`): `[index.ts:CollectionService]`
 
+- `normalizeSeqId(record)` - converts a top-level or nested-`expand` `bigint` `seqId` to a canonical decimal string and returns the original record when no change is needed: `[decode.ts:normalizeSeqId]`
+- `decodeViewRow(record, colSchema)` - normalizes `seqId`, then maps declared view fields to `integer`, `number`, `boolean`, `text`, or JSON string shapes: `[decode.ts:decodeViewRow]`
+- The decode factories (`makeRowDecoder`, `makeRowDecoderSync`, `makeListRowMapper`, `makeProjectedListRowMapper`) take an optional `normalizesBigintSeqId` flag; `CollectionService` sets it from `dialect.normalizesBigintSeqId === true`: `[decode.ts:makeRowDecoder]` `[collection-service.ts:makeCollectionServiceLayer]`
+
 ## Invariants
 
 - View collections are read-only: `create`, `createMany`, `update`, `updateMany`, `delete`, and `deleteMany` fail with `ReadOnlyError`: `[collection-service.ts:create]`
@@ -87,8 +91,8 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - Before probing, a wrapper-failure guard compares the guarded exit's cause with the entry's own captured cause with `Equal.equals`; when they differ the batch aborts as transaction-fatal without probing, so a failed savepoint rollback can never commit partial writes: `[mutation-batcher.ts:runBatchBody]`
 - The failure policy keeps per-entry isolation for statement-level failures (404/403/422 and constraint violations) and a batch abort for transaction-fatal failures; a constraint failure at `COMMIT` maps to `BatchMutationConflictError` (409 `batch_conflict`) and is not a batcher defect: `[mutation-batcher.ts:collectionErrorOf]`
 - On the single-entry PostgreSQL fast path a failed statement aborts the transaction, so the probe reports not-usable and the batch aborts with the entry's cause; a statement-level violation settles as a raw `SqlError`, while `BatchMutationConflictError` (409) stays reserved for constraint defects detected at `COMMIT`: `[mutation-batcher.ts:runBatchBody]`
-- Two accepted guard deltas: a failed savepoint release after a successful entry now aborts the whole batch where previously only that entry failed while its row committed, and a fast-path failure after a successful write commits that row on PostgreSQL once the #29 preset ships, a hazard SQLite already had: `[mutation-batcher.ts:runBatchBody]`
-- The PostgreSQL transaction contract is covered by the environment-gated `tests/collection-service/postgres-batch.test.ts`, which self-skips unless `MIRA_TEST_POSTGRES_URL` is set; no PostgreSQL preset ships in this change
+- Two accepted guard deltas: a failed savepoint release after a successful entry now aborts the whole batch where previously only that entry failed while its row committed, and a fast-path failure after a successful write commits that row on PostgreSQL, a hazard SQLite already had: `[mutation-batcher.ts:runBatchBody]`
+- The PostgreSQL transaction contract is covered by the environment-gated `tests/collection-service/postgres-batch.test.ts`, which self-skips unless `MIRA_TEST_POSTGRES_URL` is set. The PostgreSQL preset ships in this change.
 - `submitInline` bypasses every queue guard for a non-enabled operation and for `ctx.internal` auth flows: `[mutation-batcher.ts:MutationBatcher]`
 - `updateMany`/`deleteMany` keep their all-or-nothing contract and bypass the queue; they call the same `updateOne`/`deleteOne` helpers with `deferCleanup: false`: `[collection-service.ts:updateMany]`
 
@@ -115,3 +119,12 @@ The business-logic layer between the HTTP router and schema-agnostic `Repository
 - esolveFieldRefs replaces typed @field_<type>_<base64url>@ markers with cast ? params. It never parses quoted identifiers [where.ts:resolveFieldRefs].
 - Create and canManagePayload compile with payloadEnforcerForAction and execute enderRuleCheck through sql.unsafe, so no raw ? reaches PostgreSQL [collection-service.ts:prepareCreate] [collection-service.ts:canManagePayload] [repository/sql.ts:renderRuleCheck].
 - Sorted-cursor lookup uses seqIdEqualsClause, not a raw 	.seqId = ? string [collection-service.ts:list].
+
+## PostgreSQL parity (issue #29)
+
+- The decoder normalizes a driver `bigint` `seqId` to a canonical decimal string only when `dialect.normalizesBigintSeqId` is true. SQLite and libSQL keep the identity fast path. The normalizer checks the `seqId` key and a nested `expand` object and returns the original record when nothing changed [decode.ts:normalizeSeqId].
+- `decodeViewRow` gives a view collection deterministic field types across engines. It normalizes `seqId` first, then converts declared `integer` and `number` fields from `bigint` or numeric strings, `boolean` fields from booleans or `0`/`1`, and `x-kind: "json"` values to JSON strings. Base and auth collections keep the boolean-only path [decode.ts:decodeViewRow].
+- The filter compiler receives `castValue: dialect.castValue` and a per-collection `encodeValue`. Booleans bind as `0`/`1` on SQLite when the dialect stores booleans as integers, and as native booleans on PostgreSQL. String values for integer, number, boolean, and bigint fields are validated before execution and return 422 with the field-specific message instead of a database 500 [collection-service.ts:filterNodeToWhereClause].
+- Rule-bearing reads and `renderRuleCheck` payload checks catch `SqlError` values with SQLSTATE `22P02` (invalid text representation) or `22003` (numeric value out of range) and return `ValidationError` (422). `42883` remains a 500 because it indicates a compiler or schema defect [collection-service.ts:CollectionService].
+- `create` returns a constructed record without `seqId`; `view`, `update`, `list`, `viewFilter`, and `viewWithAccess` responses pass through the normalizer. Admin view/update/expand responses expose `seqId` as a string on PostgreSQL and a number on SQLite/libSQL; public list items still strip `seqId` [collection-service.ts:CollectionService].
+- The view branch of the decoder runs for every collection whose `x-collection-kind` is `view`; the list mappers normalize the top-level record and leave expanded records to the `normalizeSeqId` path [decode.ts:decodeViewRow].

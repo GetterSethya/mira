@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { ValidationError } from "@/collection/errors.js"
 import type { CollectionSchema } from "@/collection/types.js"
 
-import type { FilterNode, WhereClause } from "./types.js"
+import type { FilterNode, FilterValueType, WhereClause } from "./types.js"
 
 /**
  * Options controlling how a `FilterNode` is compiled.
@@ -18,6 +18,12 @@ import type { FilterNode, WhereClause } from "./types.js"
  *   compiler invokes the renderer as a plain function, so a caller that
  *   supplies a dialect method must bind it with a closure, for example
  *   `(left, right) => dialect.caseInsensitivePattern(left, right)`.
+ * - `castValue` - casts a placeholder to the field's scalar type. Omitted,
+ *   placeholders stay uncast, which keeps SQLite SQL unchanged because its
+ *   `castValue` is the identity.
+ * - `encodeValue` - encodes a comparison value before binding, for example
+ *   converting a boolean to `0`/`1` on a dialect that stores booleans as
+ *   integers. Omitted, values bind unchanged.
  */
 export type FilterCompileOptions = {
   allowHiddenFields?: boolean
@@ -25,10 +31,104 @@ export type FilterCompileOptions = {
   quoteIdentifier: (field: string) => string
   /** Renders a complete case-insensitive pattern match for the dialect. */
   caseInsensitivePattern: (left: string, right: string) => string
+  /** Casts a placeholder expression to the field's scalar type. */
+  castValue?: (expr: string, type: FilterValueType) => string
+  /** Encodes a comparison value before it is bound. */
+  encodeValue?: (field: string, value: unknown) => unknown
 }
 
 const fieldRef = (field: string, options: FilterCompileOptions) =>
   `t.${options.quoteIdentifier(field)}`
+
+const INTEGER_PATTERN = /^[+-]?\d+$/
+const NUMBER_PATTERN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
+const INT64_MIN = -9223372036854775808n
+const INT64_MAX = 9223372036854775807n
+
+function fieldValueType(
+  schema: CollectionSchema,
+  field: string
+): FilterValueType | undefined {
+  const prop = schema.properties[field]
+  if (prop === undefined) return undefined
+  if (prop["x-kind"] === "seqId") return "bigint"
+  switch (prop.type) {
+    case "string":
+      return "text"
+    case "integer":
+      return "integer"
+    case "number":
+      return "number"
+    case "boolean":
+      return "boolean"
+    default:
+      return undefined
+  }
+}
+
+function isValidInteger(value: unknown) {
+  if (typeof value === "number") return Number.isInteger(value)
+  if (typeof value !== "string") return false
+  return INTEGER_PATTERN.test(value.trim())
+}
+
+function isValidNumber(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value)
+  if (typeof value !== "string") return false
+  const text = value.trim()
+  return NUMBER_PATTERN.test(text) && Number.isFinite(Number(text))
+}
+
+function isValidBoolean(value: unknown) {
+  if (typeof value === "boolean") return true
+  if (typeof value === "number") return value === 0 || value === 1
+  if (typeof value !== "string") return false
+  return value === "true" || value === "false" || value === "1" || value === "0"
+}
+
+function isValidBigint(value: unknown) {
+  if (typeof value === "bigint") return value >= INT64_MIN && value <= INT64_MAX
+  if (typeof value === "number") return Number.isSafeInteger(value)
+  if (typeof value !== "string") return false
+  const text = value.trim()
+  if (!INTEGER_PATTERN.test(text)) return false
+  const parsed = BigInt(text)
+  return parsed >= INT64_MIN && parsed <= INT64_MAX
+}
+
+function typedValueIssue(
+  field: string,
+  value: unknown,
+  type: FilterValueType | undefined
+): string | undefined {
+  switch (type) {
+    case "integer":
+      return isValidInteger(value)
+        ? undefined
+        : `Filter value for "${field}" must be an integer`
+    case "number":
+      return isValidNumber(value) ? undefined : `Filter value for "${field}" must be a number`
+    case "boolean":
+      return isValidBoolean(value) ? undefined : `Filter value for "${field}" must be a boolean`
+    case "bigint":
+      return isValidBigint(value) ? undefined : `Filter value for "${field}" must be a bigint`
+    case "text":
+      return typeof value === "boolean"
+        ? `Filter value for "${field}" must be a string or number`
+        : undefined
+    default:
+      return undefined
+  }
+}
+
+function castPlaceholder(options: FilterCompileOptions, type: FilterValueType | undefined) {
+  if (type === undefined || options.castValue === undefined) return "?"
+  return options.castValue("?", type)
+}
+
+function encodeValue(options: FilterCompileOptions, field: string, value: unknown) {
+  return options.encodeValue === undefined ? value : options.encodeValue(field, value)
+}
 
 /**
  * Compile a `FilterNode` AST into a `WhereClause` (`{ sql, params }`) suitable
@@ -38,13 +138,21 @@ const fieldRef = (field: string, options: FilterCompileOptions) =>
  * (including keys inherited from `Object.prototype` such as `constructor` /
  * `toString`) and, unless `options.allowHiddenFields` is set, `x-hidden` fields
  * produce a `ValidationError` in the Effect error channel. Non-scalar comparison
- * values (arrays, objects, booleans) are likewise rejected — only
- * `string | number | null` is accepted.
+ * values (arrays and objects) are likewise rejected; only
+ * `string | number | boolean | null` is accepted.
+ *
+ * A comparison against an `integer`, `number`, `boolean`, or `bigint` field
+ * validates the value before execution and rejects a malformed string. A
+ * `bigint` (or `seqId`) field rejects an unsafe JavaScript number; supply a
+ * decimal string above 2^53.
  *
  * Field names are SQL-identifier-quoted. The default is `t."fieldName"`; a
  * caller can pass `quoteIdentifier` for PostgreSQL/MySQL quoting. Values use
  * `?`-style positional placeholders with params in the returned array; the SQL
  * store rewrites the whole statement to numbered placeholders when needed.
+ * When `castValue` is supplied, comparison and `IN` placeholders are cast to
+ * the field type. `like` casts its pattern placeholder to text and casts a
+ * non-text column to text; the pattern itself stays verbatim.
  *
  * Edge cases:
  * - `IN ()` with an empty array produces `1 = 0` (always false) instead of
@@ -96,7 +204,12 @@ export function filterNodeToWhereClause(
 }
 
 function isScalar(value: unknown) {
-  return value === null || typeof value === "string" || typeof value === "number"
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  )
 }
 
 function compileNode(
@@ -170,9 +283,21 @@ function validateScalar(
   return Effect.fail(
     new ValidationError({
       collection,
-      issues: [`Filter value for "${field}" must be a string, number, or null`]
+      issues: [`Filter value for "${field}" must be a string, number, boolean, or null`]
     })
   )
+}
+
+function validateTypedValue(
+  collection: string,
+  field: string,
+  value: unknown,
+  type: FilterValueType | undefined
+): Effect.Effect<void, ValidationError> {
+  if (value === null) return Effect.void
+  const issue = typedValueIssue(field, value, type)
+  if (issue === undefined) return Effect.void
+  return Effect.fail(new ValidationError({ collection, issues: [issue] }))
 }
 
 function compileComparison(
@@ -192,7 +317,13 @@ function compileComparison(
   return Effect.gen(function* () {
     yield* validateField(node.field, collection, schema, options)
     yield* validateScalar(collection, node.field, node.value)
-    return { sql: `${fieldRef(node.field, options)} ${opMap[node.op]} ?`, params: [node.value] }
+    const type = fieldValueType(schema, node.field)
+    yield* validateTypedValue(collection, node.field, node.value, type)
+    const placeholder = node.value === null ? "?" : castPlaceholder(options, type)
+    return {
+      sql: `${fieldRef(node.field, options)} ${opMap[node.op]} ${placeholder}`,
+      params: [encodeValue(options, node.field, node.value)]
+    }
   })
 }
 
@@ -205,11 +336,18 @@ function compileIn(
   return Effect.gen(function* () {
     yield* validateField(node.field, collection, schema, options)
     if (node.values.length === 0) return { sql: "1 = 0", params: [] }
+    const type = fieldValueType(schema, node.field)
     for (const value of node.values) {
       yield* validateScalar(collection, node.field, value)
+      yield* validateTypedValue(collection, node.field, value, type)
     }
-    const placeholders = node.values.map(() => "?").join(", ")
-    return { sql: `${fieldRef(node.field, options)} IN (${placeholders})`, params: [...node.values] }
+    const placeholders = node.values
+      .map((value) => (value === null ? "?" : castPlaceholder(options, type)))
+      .join(", ")
+    return {
+      sql: `${fieldRef(node.field, options)} IN (${placeholders})`,
+      params: node.values.map((value) => encodeValue(options, node.field, value))
+    }
   })
 }
 
@@ -222,8 +360,14 @@ function compileLike(
   return Effect.gen(function* () {
     yield* validateField(node.field, collection, schema, options)
     const renderPattern = options.caseInsensitivePattern
+    const cast = options.castValue
+    const type = fieldValueType(schema, node.field)
+    const column = type !== undefined && type !== "text" && cast !== undefined
+      ? cast(fieldRef(node.field, options), "text")
+      : fieldRef(node.field, options)
+    const pattern = cast === undefined ? "?" : cast("?", "text")
     return {
-      sql: renderPattern(fieldRef(node.field, options), "?"),
+      sql: renderPattern(column, pattern),
       params: [node.value]
     }
   })

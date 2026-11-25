@@ -4,66 +4,57 @@ import { Data, Effect, Exit, Layer, Redacted } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
-import { Dialect, errorHasCode, type DialectType } from "@/dialect/dialect.js"
-import { postgresFilterSql, postgresRuleSql } from "@/dialect/dialect-postgres.js"
+import { Dialect } from "@/dialect/dialect.js"
+import { postgresDialect } from "@/dialect/dialect-postgres.js"
 import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
-import { type TelemetryLogEntry, TelemetryStore } from "@/telemetry/store.js"
+import {
+  type TelemetryLogEntry,
+  type TelemetrySpanEntry,
+  TelemetryStore
+} from "@/telemetry/store.js"
 
 const postgresUrl = process.env["MIRA_TEST_POSTGRES_URL"]
-
-const postgresTestDialect: DialectType = {
-  ...postgresRuleSql,
-  ...postgresFilterSql,
-  translatePlan: () => Effect.succeed({ statements: [], cleanup: [] }),
-  translate: () => [],
-  nativeType: () => "text",
-  quoteLiteral: (value) => {
-    if (value === null) return "NULL"
-    if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
-    if (typeof value === "number") return String(value)
-    return `'${String(value).replaceAll("'", "''")}'`
-  },
-  indexName: (table, fields) => `${table}_${fields.join("_")}_idx`,
-  storesBooleanAsInteger: false,
-  deleteResult: { _tag: "returning" },
-  transactionProbe: "select-only",
-  placeholder: (index) => `$${index}`,
-  upsert: () => "",
-  store: {
-    bootstrapMode: "plain",
-    columnExistsSql: (table, column) =>
-      `SELECT 1 FROM information_schema.columns WHERE table_name = '${table}' AND column_name = '${column}' LIMIT 1`,
-    isRetryable: (error) => errorHasCode(error, ["40P01", "40001"]),
-    isDuplicateKey: (error) => errorHasCode(error, ["23505"]),
-    transactionLockTimeoutSql: "SET LOCAL lock_timeout = '2s'"
-  },
-  telemetry: {
-    setup: [],
-    cleanup: [],
-    isRetryable: (error) => errorHasCode(error, ["40P01", "40001"])
-  }
-}
 
 const makeLayer = (url: string) =>
   makeSqlTelemetryStoreLayer({ dedicated: false, migrate: false }).pipe(
     Layer.provideMerge(
-      Layer.merge(PgClient.layer({ url: Redacted.make(url) }), Layer.succeed(Dialect, postgresTestDialect))
+      Layer.merge(PgClient.layer({ url: Redacted.make(url) }), Layer.succeed(Dialect, postgresDialect))
     )
   )
 
 // Local copy of the SQLite test fixture; test helpers are not exported.
-const log = (id: string, message = id): TelemetryLogEntry => {
-  const created = new Date().toISOString()
-  return {
-    id,
-    level: "INFO",
-    message,
-    created,
-    updated: created,
-    traceId: null,
-    spanId: null
-  }
-}
+const log = (
+  id: string,
+  message = id,
+  created = new Date().toISOString()
+): TelemetryLogEntry => ({
+  id,
+  level: "INFO",
+  message,
+  created,
+  updated: created,
+  traceId: null,
+  spanId: null
+})
+
+const span = (
+  id: string,
+  traceId: string,
+  created = new Date().toISOString()
+): TelemetrySpanEntry => ({
+  id,
+  name: id,
+  traceId,
+  spanId: `span-${id}`,
+  parentSpanId: null,
+  kind: "internal",
+  durationMs: 1,
+  status: "ok",
+  error: null,
+  attributes: { id },
+  created,
+  updated: created
+})
 
 class RollbackError extends Data.TaggedError("RollbackError")<Record<string, never>> {}
 
@@ -84,6 +75,34 @@ const createLogsTable = (sql: SqlClient.SqlClient) =>
     `)
   })
 
+const createSpansTable = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    yield* sql.unsafe(`DROP TABLE IF EXISTS "spans"`)
+    yield* sql.unsafe(`
+      CREATE TABLE "spans" (
+        "seqId" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        "id" text NOT NULL UNIQUE,
+        "name" text NOT NULL,
+        "traceId" text NOT NULL,
+        "spanId" text NOT NULL,
+        "parentSpanId" text,
+        "kind" text NOT NULL,
+        "durationMs" double precision NOT NULL,
+        "status" text NOT NULL,
+        "error" text,
+        "attributes" text NOT NULL,
+        "created" text NOT NULL,
+        "updated" text NOT NULL
+      )
+    `)
+  })
+
+const createTelemetryTables = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    yield* createLogsTable(sql)
+    yield* createSpansTable(sql)
+  })
+
 if (postgresUrl === undefined) {
   describe.skip("PostgreSQL shared telemetry", () => {
     it("requires MIRA_TEST_POSTGRES_URL", () => {})
@@ -97,7 +116,7 @@ if (postgresUrl === undefined) {
         const sql = yield* SqlClient.SqlClient
         const store = yield* TelemetryStore
 
-        yield* createLogsTable(sql)
+        yield* createTelemetryTables(sql)
 
         const constraints = yield* sql<{ column_name: string }>`
           SELECT kcu.column_name
@@ -128,7 +147,7 @@ if (postgresUrl === undefined) {
         const sql = yield* SqlClient.SqlClient
         const store = yield* TelemetryStore
 
-        yield* createLogsTable(sql)
+        yield* createTelemetryTables(sql)
 
         const exit = yield* Effect.exit(
           sql.withTransaction(
@@ -154,7 +173,7 @@ if (postgresUrl === undefined) {
         }
         const read = store.read
 
-        yield* createLogsTable(sql)
+        yield* createTelemetryTables(sql)
 
         const collationRows = yield* sql<{ collation: string }>`
           SELECT datcollate || '|' || datctype || '|' || datlocprovider::text AS collation
@@ -198,6 +217,55 @@ if (postgresUrl === undefined) {
           "pct",
           "x"
         ])
+      }).pipe(Effect.provide(makeLayer(url)))
+    )
+
+    it.effect("deletes only rows older than the cutoff and returns actual counts", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const store = yield* TelemetryStore
+        const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+        const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+
+        yield* createTelemetryTables(sql)
+        yield* store.appendLogs([log("old", "old", old), log("recent", "recent", recent)])
+        yield* store.appendSpans([
+          span("old-span", "trace-old", old),
+          span("recent-span", "trace-recent", recent)
+        ])
+
+        const deleted = yield* store.deleteOlderThan(recent)
+        expect(deleted.logs).toBe(1)
+        expect(deleted.spans).toBe(1)
+
+        const rows = yield* sql<{ id: string }>`SELECT "id" FROM "logs" ORDER BY "id"`
+        expect(rows.map((row) => row.id)).toEqual(["recent"])
+      }).pipe(Effect.provide(makeLayer(url)))
+    )
+
+    it.effect("deletes retention rows by seqId above 2^53 without rounding", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const store = yield* TelemetryStore
+        const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+        const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+
+        yield* createTelemetryTables(sql)
+        yield* sql.unsafe(
+          `ALTER TABLE "logs" ALTER COLUMN "seqId" RESTART WITH 9007199254740993`
+        )
+
+        yield* store.appendLogs([log("old", "old", old), log("recent", "recent", recent)])
+
+        const deleted = yield* store.deleteOlderThan(recent)
+        expect(deleted.logs).toBe(1)
+        expect(deleted.spans).toBe(0)
+
+        const rows = yield* sql<{ id: string; seqId: string }>`
+          SELECT "id", "seqId"::text AS "seqId" FROM "logs" ORDER BY "id"
+        `
+        expect(rows.map((row) => row.id)).toEqual(["recent"])
+        expect(rows.map((row) => row.seqId)).toEqual(["9007199254740994"])
       }).pipe(Effect.provide(makeLayer(url)))
     )
   })

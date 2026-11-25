@@ -8,8 +8,8 @@ The generated API reference lists every public symbol in every Mira package with
 |---|---|---|
 | [`@gettersethya/mira-collection`](../../api/modules/_gettersethya_mira-collection.html) | `packages/collection/src/index.ts` | Collection builders, fields, indexes, filter DSL, rule DSL, and inferred record types. Isomorphic. No server-only dependencies. |
 | [`@gettersethya/mira-client`](../../api/modules/_gettersethya_mira-client.html) | `packages/client/src/index.ts` | Typed client SDK, browser/server auth helpers, file clients, and schema types. Re-exports the collection package. |
-| [`@gettersethya/mira`](../../api/modules/_gettersethya_mira.html) | `packages/mira/src/index.ts` | Server library: `Mira.builder()`, platform presets, SQLite, storage, HTTP routing, auth, email, rate limits, thumbnails, and plugins. |
-| [`@gettersethya/mira/bun`](../../api/modules/_gettersethya_mira.index.bun.html) | `packages/mira/src/index.bun.ts` | The Bun entry point: `BunPlatform`, `BunSqliteDatabase`, `BunPortablePlatform`, native crypto, Argon2id, and `Bun.Image` thumbnail services. |
+| [`@gettersethya/mira`](../../api/modules/_gettersethya_mira.html) | `packages/mira/src/index.ts` | Server library: `Mira.builder()`, platform presets, SQLite, libSQL, PostgreSQL, storage, HTTP routing, auth, email, rate limits, thumbnails, and plugins. |
+| [`@gettersethya/mira/bun`](../../api/modules/_gettersethya_mira.index.bun.html) | `packages/mira/src/index.bun.ts` | The Bun entry point: `BunPlatform`, `BunSqliteDatabase`, `PostgresDatabase`, `BunPortablePlatform`, native crypto, Argon2id, and `Bun.Image` thumbnail services. |
 | [`@gettersethya/mira-tanstack-adapter`](../../api/modules/_gettersethya_mira-tanstack-adapter.html) | `packages/tanstack-adapter/src/index.ts` | Framework-agnostic TanStack Query adapter. Produces plain query/mutation option objects for React, Svelte, Solid, or Vue. |
 | [`@gettersethya/mira-dashboard`](../../api/modules/_gettersethya_mira-dashboard.html) | `packages/dashboard/src/index.ts` | Admin dashboard plugin: `MiraDashboard`, the superadmin collection, the registration route, and the schema-driven UI assets. |
 
@@ -23,7 +23,7 @@ To see how one request travels from a collection definition through rules and th
 - **Rules:** `Rule`, `defineRule`, `applyRulesToCollections`
 - **Client:** `createMiraClient`, `CollectionClient`, `BrowserAuth`, `ServerAuth`
 - **Adapter:** `collectionAdapter`, `createCollectionAdapter`, `withCollections`
-- **Runtime:** `NodePlatform`, `SqliteDatabase`, `BunPlatform`, `BunSqliteDatabase`
+- **Runtime:** `NodePlatform`, `SqliteDatabase`, `LibsqlDatabase`, `PostgresDatabase`, `BunPlatform`, `BunSqliteDatabase`
 - **Operations:** `SmtpEmail`, `RateLimiter`, `ThumbnailService`, `makeTelemetryLayer`
 
 ## Source and contracts

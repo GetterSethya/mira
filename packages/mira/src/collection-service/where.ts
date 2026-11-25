@@ -266,7 +266,7 @@ const decodeFieldToken = (token: string): string => {
 }
 
 const PAYLOAD_FIELD =
-  /@field_(text|integer|number|boolean)_([A-Za-z0-9_-]+)@|\?/g
+  /@field_(text|integer|number|boolean|bigint)_([A-Za-z0-9_-]+)@|\?/g
 
 /**
  * Replaces compiler payload markers with `?` params bound to `record`.

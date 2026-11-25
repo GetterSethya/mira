@@ -32,11 +32,13 @@ type OperandInfo = {
   type: FieldValueType | undefined
   isLiteral: boolean
   isColumn: boolean
+  isField: boolean
   isString: boolean
 }
 
 const literalType = (value: unknown): FieldValueType | undefined => {
   if (typeof value === "boolean") return "boolean"
+  if (typeof value === "bigint") return "bigint"
   if (typeof value === "number") return Number.isInteger(value) ? "integer" : "number"
   if (typeof value === "string") return "text"
   return undefined
@@ -54,13 +56,11 @@ const hintForComparison = (left: OperandInfo, right: OperandInfo) => {
 
   const columnType = left.isLiteral ? right.type : left.type
   const literals = [left, right].filter((operand) => operand.isLiteral)
+  const hasField = left.isField || right.isField
 
-  if (
-    columnType !== undefined &&
-    columnType !== "text" &&
-    literals.some((operand) => operand.isString)
-  ) {
-    return "text"
+  if (columnType !== undefined && literals.some((operand) => operand.isString)) {
+    if (hasField) return columnType
+    if (columnType !== "text") return "text"
   }
 
   if (columnType === "integer" && literals.some((operand) => operand.type === "number")) {
@@ -84,6 +84,7 @@ function operandInfo(node: OperandNode, ctx: CompileCtx): OperandInfo {
         type: ctx.fieldType?.(node.field),
         isLiteral: false,
         isColumn: ctx.fieldRefMode !== "param",
+        isField: true,
         isString: false
       }
     case "literal":
@@ -91,21 +92,22 @@ function operandInfo(node: OperandNode, ctx: CompileCtx): OperandInfo {
         type: literalType(node.value),
         isLiteral: true,
         isColumn: false,
+        isField: false,
         isString: typeof node.value === "string"
       }
     case "auth":
-      return { type: undefined, isLiteral: false, isColumn: false, isString: false }
+      return { type: undefined, isLiteral: false, isColumn: false, isField: false, isString: false }
     case "authId":
     case "authCollection":
     case "request":
-      return { type: "text", isLiteral: false, isColumn: false, isString: false }
+      return { type: "text", isLiteral: false, isColumn: false, isField: false, isString: false }
     case "now":
     case "dateAdd":
-      return { type: "text", isLiteral: false, isColumn: false, isString: false }
+      return { type: "text", isLiteral: false, isColumn: false, isField: false, isString: false }
     case "dateDiff":
-      return { type: "number", isLiteral: false, isColumn: false, isString: false }
+      return { type: "number", isLiteral: false, isColumn: false, isField: false, isString: false }
     case "subquery":
-      return { type: undefined, isLiteral: false, isColumn: false, isString: false }
+      return { type: undefined, isLiteral: false, isColumn: false, isField: false, isString: false }
   }
 }
 
@@ -158,6 +160,7 @@ export function compile(node: ExprNode, ctx: CompileCtx, dialect: RuleSqlDialect
                 type: firstType,
                 isLiteral: true,
                 isColumn: false,
+                isField: false,
                 isString: firstType === "text"
               }, ctx)
         const leftSql = compileOperand(node.left, ctx, dialect, hint)
