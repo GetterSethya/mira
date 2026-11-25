@@ -3,9 +3,10 @@ import type { FilterNode } from "@gettersethya/mira-client"
 import { filterNodeToWhereClause } from "@gettersethya/mira-client"
 import { Clock, Context, Effect, Layer, Option, References, Schema } from "effect"
 import { SqlClient } from "effect/sql"
+import { isSqlError } from "effect/sql/SqlError"
 
 import { AuthChallengeStore } from "@/auth/challenge-store.js"
-import { Dialect } from "@/dialect/dialect.js"
+import { Dialect, errorHasCode } from "@/dialect/dialect.js"
 import type { DialectType } from "@/dialect/dialect.js"
 import { AuthService } from "@/http/auth.js"
 import { Repository } from "@/repository/repository.js"
@@ -435,6 +436,27 @@ function makeCollectionServiceLayerWith(
         castValue: dialect.castValue
       }
 
+      // PostgreSQL reports an unparsable rule literal as a data exception
+      // (22P02/22003). That is a client-value problem, not a server fault, so it
+      // is surfaced as a 422 like any other validation failure. Every other SQL
+      // error keeps its original identity.
+      const mapRuleSqlError = <A>(
+        collection: AnyCollectionDef,
+        effect: Effect.Effect<A, CollectionError>
+      ): Effect.Effect<A, CollectionError> =>
+        effect.pipe(
+          Effect.catch((error) =>
+            isSqlError(error) && errorHasCode(error, ["22P02", "22003"])
+              ? Effect.fail(
+                  new ValidationError({
+                    collection: collection.name,
+                    issues: ["Rule comparison value is invalid for the column type"]
+                  })
+                )
+              : Effect.fail(error)
+          )
+        )
+
       // One-time dev warning: a `@request_body_` reference in a list/view/delete
       // rule can never match a submitted value — bodiless actions carry no body,
       // so the reference always resolves to null. Warn once per collection/action
@@ -475,10 +497,24 @@ function makeCollectionServiceLayerWith(
         })
 
       const decoderMap = new Map<string, RowDecoder>(
-        allCollections.map((c) => [c.name, makeRowDecoder(c.schema, dialect.storesBooleanAsInteger)])
+        allCollections.map((c) => [
+          c.name,
+          makeRowDecoder(
+            c.schema,
+            dialect.storesBooleanAsInteger,
+            dialect.normalizesBigintSeqId === true
+          )
+        ])
       )
       const listRowMapperMap = new Map<string, RowDecoderSync>(
-        allCollections.map((c) => [c.name, makeListRowMapper(c.schema, dialect.storesBooleanAsInteger)])
+        allCollections.map((c) => [
+          c.name,
+          makeListRowMapper(
+            c.schema,
+            dialect.storesBooleanAsInteger,
+            dialect.normalizesBigintSeqId === true
+          )
+        ])
       )
       const encoderMap = new Map<string, RowEncoder>(
         allCollections.map((c) => [c.name, makeRowEncoder(c.schema, dialect.storesBooleanAsInteger)])
@@ -489,7 +525,11 @@ function makeCollectionServiceLayerWith(
         (decoderMap.get(collection.name) ?? Effect.succeed)(record)
       const getListRowMapper = (collection: AnyCollectionDef): RowDecoderSync =>
         listRowMapperMap.get(collection.name) ??
-        makeListRowMapper(collection.schema, dialect.storesBooleanAsInteger)
+        makeListRowMapper(
+          collection.schema,
+          dialect.storesBooleanAsInteger,
+          dialect.normalizesBigintSeqId === true
+        )
       const projectedListMapperCache = new WeakMap<ReadonlyArray<string>, RowDecoderSync>()
       const getProjectedListMapper = (
         collection: AnyCollectionDef,
@@ -500,12 +540,17 @@ function makeCollectionServiceLayerWith(
         const mapper = makeProjectedListRowMapper(
           collection.schema,
           dialect.storesBooleanAsInteger,
-          projection
+          projection,
+          dialect.normalizesBigintSeqId === true
         )
         projectedListMapperCache.set(projection, mapper)
         return mapper
       }
       const getEncoder = (collection: AnyCollectionDef): RowEncoder => encoderMap.get(collection.name) ?? ((r) => r)
+      const encodeFilterValue = (collection: AnyCollectionDef) => {
+        const encoder = getEncoder(collection)
+        return (field: string, value: unknown): unknown => encoder({ [field]: value })[field]
+      }
 
       // create/update return the stored row directly (no `resolveFields` pass), so
       // hidden fields (auth password, seqId) must be stripped here for non-admin
@@ -575,7 +620,10 @@ function makeCollectionServiceLayerWith(
           const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage", resolveOptions)
           const bound = resolveFieldRefs(resolved, { ...payload, emailVerified: false }, resolveOptions)
           const check = renderRuleCheck(bound, dialect)
-          const rows = yield* sql.unsafe<{ ok: number }>(check.sql, check.params)
+          const rows = yield* mapRuleSqlError(
+            collection,
+            sql.unsafe<{ ok: number }>(check.sql, check.params)
+          )
           return rows.length > 0
         })
 
@@ -590,9 +638,12 @@ function makeCollectionServiceLayerWith(
           const rule = enforcerForAction(collection.schema, "manage", dialect)
           if (rule === null) return false
           const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage", resolveOptions)
-          const allowed = yield* repo.viewFilter(collection.name, {
-            where: andWhere(resolved, idClause(id, dialect.quoteIdentifier))
-          })
+          const allowed = yield* mapRuleSqlError(
+            collection,
+            repo.viewFilter(collection.name, {
+              where: andWhere(resolved, idClause(id, dialect.quoteIdentifier))
+            })
+          )
           return allowed.length > 0
         })
 
@@ -703,7 +754,9 @@ function makeCollectionServiceLayerWith(
                   allowHiddenFields: ctx.admin === true,
                   quoteIdentifier: dialect.quoteIdentifier,
                   caseInsensitivePattern: (left, right) =>
-                    dialect.caseInsensitivePattern(left, right)
+                    dialect.caseInsensitivePattern(left, right),
+                  castValue: dialect.castValue,
+                  encodeValue: encodeFilterValue(collection)
                 })
               : null
           const where: WhereClause | null =
@@ -770,10 +823,13 @@ function makeCollectionServiceLayerWith(
             expand: expandDefs
           }
 
-          const rows = yield* repo.list(
-            collection.name,
-            perPage + 1,
-            combined !== null ? { ...listOpts, where: combined } : listOpts
+          const rows = yield* mapRuleSqlError(
+            collection,
+            repo.list(
+              collection.name,
+              perPage + 1,
+              combined !== null ? { ...listOpts, where: combined } : listOpts
+            )
           )
 
           const hasMore = rows.items.length > perPage
@@ -833,11 +889,14 @@ function makeCollectionServiceLayerWith(
           )
           const fieldsWithExpand = [...new Set([...fields, ...expandDefs.map((e) => e.localField)])]
 
-          const rows = yield* repo.viewFilter(collection.name, {
-            where: combined,
-            fields: fieldsWithExpand,
-            expand: expandDefs
-          })
+          const rows = yield* mapRuleSqlError(
+            collection,
+            repo.viewFilter(collection.name, {
+              where: combined,
+              fields: fieldsWithExpand,
+              expand: expandDefs
+            })
+          )
 
           if (rows.length === 0) {
             return yield* new NotFoundError({ collection: collection.name, id })
@@ -887,7 +946,10 @@ function makeCollectionServiceLayerWith(
             // Pre-check: evaluate the create rule against the payload (no table needed).
             const payloadBound = resolveFieldRefs(ruleWhere, cleaned, resolveOptions)
             const check = renderRuleCheck(payloadBound, dialect)
-            const rows = yield* sql.unsafe<{ ok: number }>(check.sql, check.params)
+            const rows = yield* mapRuleSqlError(
+              collection,
+              sql.unsafe<{ ok: number }>(check.sql, check.params)
+            )
 
             if (rows.length === 0) {
               return yield* new ForbiddenError({ collection: collection.name, action: "create" })
@@ -1149,7 +1211,10 @@ function makeCollectionServiceLayerWith(
               predicates.push({ name: "manage", where: manageWhere })
             }
 
-            const accesses = yield* viewWithAccess(collection.name, prepared.id, predicates)
+            const accesses = yield* mapRuleSqlError(
+              collection,
+              viewWithAccess(collection.name, prepared.id, predicates)
+            )
             if (Option.isNone(accesses)) {
               return yield* new NotFoundError({ collection: collection.name, id: prepared.id })
             }
@@ -1182,9 +1247,12 @@ function makeCollectionServiceLayerWith(
                 "column",
                 resolveOptions
               )
-              const allowed = yield* repo.viewFilter(collection.name, {
-                where: andWhere(ruleWhere, idClause(prepared.id, dialect.quoteIdentifier))
-              })
+              const allowed = yield* mapRuleSqlError(
+                collection,
+                repo.viewFilter(collection.name, {
+                  where: andWhere(ruleWhere, idClause(prepared.id, dialect.quoteIdentifier))
+                })
+              )
               if (allowed.length === 0) {
                 return yield* new ForbiddenError({ collection: collection.name, action: "update" })
               }
@@ -1361,10 +1429,13 @@ function makeCollectionServiceLayerWith(
               "column",
               resolveOptions
             )
-            const accesses = yield* viewWithAccess(
-              prepared.collection.name,
-              prepared.id,
-              [{ name: "rule", where: ruleWhere }]
+            const accesses = yield* mapRuleSqlError(
+              prepared.collection,
+              viewWithAccess(
+                prepared.collection.name,
+                prepared.id,
+                [{ name: "rule", where: ruleWhere }]
+              )
             )
             if (Option.isNone(accesses)) {
               return yield* new NotFoundError({
@@ -1398,9 +1469,12 @@ function makeCollectionServiceLayerWith(
                 "column",
                 resolveOptions
               )
-              const allowed = yield* repo.viewFilter(prepared.collection.name, {
-                where: andWhere(ruleWhere, idClause(prepared.id, dialect.quoteIdentifier))
-              })
+              const allowed = yield* mapRuleSqlError(
+                prepared.collection,
+                repo.viewFilter(prepared.collection.name, {
+                  where: andWhere(ruleWhere, idClause(prepared.id, dialect.quoteIdentifier))
+                })
+              )
               if (allowed.length === 0) {
                 return yield* new ForbiddenError({
                   collection: prepared.collection.name,

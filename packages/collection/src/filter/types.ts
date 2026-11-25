@@ -21,6 +21,15 @@ export type WhereClause = {
 }
 
 /**
+ * Scalar type a filter field is compared as. Derived from the collection
+ * schema so a dialect can cast the placeholder to the column's type.
+ *
+ * `"bigint"` covers `x-kind: "seqId"` identity fields; a value above 2^53 must
+ * be supplied as a decimal string because a JavaScript number loses precision.
+ */
+export type FilterValueType = "text" | "integer" | "number" | "boolean" | "bigint"
+
+/**
  * AST node for filter expressions. Discriminated union with 6 variant groups:
  *
  * | Variants | Fields | Description |

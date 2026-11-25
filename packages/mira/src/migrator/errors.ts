@@ -7,8 +7,9 @@ import type { MigrationStep } from "./types.js"
  * A migration step the active dialect cannot render safely, or the database
  * holds an object the plan would silently damage.
  *
- * Raised before the migration transaction opens, so an impossible step fails with
- * a readable reason instead of surfacing a driver-level error mid-plan.
+ * Raised inside the migration transaction, because a plan is now rendered after
+ * the stored-schema read. An impossible step fails with a readable reason
+ * instead of surfacing a driver-level error mid-plan.
  */
 export class UnsupportedMigrationStepError extends Data.TaggedError("UnsupportedMigrationStepError")<{
   /** The step kind that could not be rendered. */
@@ -26,8 +27,22 @@ export class InvalidMigrationStatementError extends Data.TaggedError("InvalidMig
   readonly statement: string
 }> {}
 
+/**
+ * A `plan` or `status` preview could not take the dialect's non-blocking
+ * migration preview lock because a migration is in progress.
+ *
+ * SQLite and libSQL omit the preview lock and never raise this.
+ */
+export class MigrationBusyError extends Data.TaggedError("MigrationBusyError")<{
+  /** Which preview operation could not run. */
+  readonly operation: "plan" | "status"
+  /** A short explanation for logs and CLI output. */
+  readonly message: string
+}> {}
+
 /** Everything a migration can fail with. */
 export type MigrationError =
   | SqlError.SqlError
   | UnsupportedMigrationStepError
   | InvalidMigrationStatementError
+  | MigrationBusyError

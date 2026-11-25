@@ -41,5 +41,5 @@ synchronous `randomBytesSync` variant exists so callers that cannot `yield*` an 
 ## Verification
 
 - Run: `pnpm --filter @gettersethya/mira test`
-- Bun smoke (native vectors, UUIDv7): `bun run apps/example-bun/src/smoke.ts`
+- Bun smoke (native vectors, UUIDv7): `bun run packages/bun-e2e/src/smoke.ts`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`

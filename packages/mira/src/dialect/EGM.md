@@ -7,17 +7,19 @@ The dialect boundary of the migration engine. A `DialectType` translates abstrac
 reports whether booleans are stored as 0/1 integers. Because some engines cannot express a
 step on its own, translation is plan-scoped: `translatePlan` receives every step plus each
 touched table's stored/desired shape and may coalesce work there, so `MigrationStep`,
-schema-diff and `Migrator.plan()` stay dialect-agnostic. `sqliteDialect` is the shipped
-implementation. libSQL reuses it: only the connection-specific telemetry hooks differ.
-The `Dialect` tag is the runtime injection point used by the collection service,
-migrator and database preset.
+schema-diff and `Migrator.plan()` stay dialect-agnostic. `sqliteDialect` and
+`postgresDialect` are the shipped implementations; `postgresDialect` composes
+`postgresDdlSql`, `postgresRuleSql`, `postgresFilterSql`, `postgresStoreSql`, and
+`postgresTelemetry`. libSQL reuses SQLite: only the connection-specific telemetry
+hooks differ. The `Dialect` tag is the runtime injection point used by the
+collection service, migrator and database preset.
 
 ## Interface
 
 - `Dialect` - `Context.Service` tag over a `DialectType`; inject with `Layer.succeed(Dialect, sqliteDialect)` [dialect.ts:Dialect]
 - `StoreSqlCapabilities` - the nested `DialectType.store` value used by the internal SQL stores and the HTTP auth email path: bootstrap mode, optional bootstrap SQL, zero-or-one-row column probe, request lock timeout, retry classification, and duplicate-key classification [dialect.ts:StoreSqlCapabilities]
 - `withStoreBootstrap(sql, store, f)` - runs DDL in plain mode or in one transaction after `store.bootstrapSql`, retrying once for a retryable error [store-sql.ts:withStoreBootstrap]
-- `DialectType` (type) - the contract: `translatePlan`, `translate`, `nativeType`, `quoteIdentifier`, `currentTimestamp`, `timestampAdd`, `timestampDiff`, `caseInsensitiveLike`, `caseInsensitivePattern`, `castValue`, `quoteLiteral`, `indexName`, `storesBooleanAsInteger`, `deleteResult`, `transactionProbe`, `placeholder`, `upsert`, required `store`, optional `telemetry` [dialect.ts:DialectType]
+- `DialectType` (type) - the contract: `translatePlan`, `translate`, `nativeType`, `quoteIdentifier`, `currentTimestamp`, `timestampAdd`, `timestampDiff`, `caseInsensitiveLike`, `caseInsensitivePattern`, `castValue`, `quoteLiteral`, `indexName`, `storesBooleanAsInteger`, `deleteResult`, `transactionProbe`, `placeholder`, `upsert`, required `store`, optional `telemetry`, optional `migrationTransactionSetupSql`, optional `migrationPreviewLockSql`, and optional `normalizesBigintSeqId` [dialect.ts:DialectType]
 - `DialectType.caseInsensitivePattern(left, right)` - complete-pattern match: match `left` against a whole `LIKE` pattern in `right` with no added wildcards. Consumes `right` once, returns SQL, and leaves the pattern a bound parameter. The compiler invokes it as a plain function, so a call site passing a dialect method must bind it with a closure [dialect.ts:DialectType]
 - `DialectType.transactionProbe` (required `TransactionProbeStrategy`) - how the mutation batcher probes transaction liveness after a failed entry: `nested-begin` uses `SELECT 1` then `BEGIN` (SQLite family), `select-only` uses just `SELECT 1` (PostgreSQL). Neither strategy is verified for MySQL or SQL Server, so a custom dialect must verify its engine before choosing either; there is no silent default [dialect.ts:DialectType] [dialect.ts:TransactionProbeStrategy]
 - `DeleteResultStrategy` (type) - how a `DELETE` reports an affected row: `returning`, `affectedRows`, or `precheck` [dialect.ts:DeleteResultStrategy]
@@ -26,10 +28,12 @@ migrator and database preset.
 - `translateStep(translate, step)` - renders one step, failing when it yields no SQL [dialect.ts:translateStep]
 - `perStepPlan(translate)` - `translatePlan` implementation for dialects that can express every step alone [dialect.ts:perStepPlan]
 - `sqliteDialect` - the SQLite implementation of `DialectType` [dialect-sqlite.ts:sqliteDialect]
+- `postgresDialect` - the composed PostgreSQL `DialectType`; spreads the DDL, rule, and filter capabilities and adds `placeholder`, `upsert`, `deleteResult: returning`, `transactionProbe: select-only`, `store`, `telemetry`, `migrationTransactionSetupSql`, `migrationPreviewLockSql`, and `normalizesBigintSeqId: true` [dialect-postgres.ts:postgresDialect]
 - `postgresRuleSql` - pure PostgreSQL rule renderer, not a database preset [dialect-postgres.ts:postgresRuleSql]
-- `postgresFilterSql` - pure PostgreSQL user-filter capability, not a database preset; its `caseInsensitivePattern` renders `ILIKE` [dialect-postgres.ts:postgresFilterSql]
-- `postgresStoreSql` - PostgreSQL store capability for #29 to compose into the full dialect [dialect-postgres.ts:postgresStoreSql]
-- `postgresDdlSql` - pure PostgreSQL physical-schema renderer; #29 composes it [dialect-postgres.ts:postgresDdlSql]
+- `postgresFilterSql` - pure PostgreSQL user-filter capability, not a database preset; its `caseInsensitivePattern` renders `ILIKE` with `ESCAPE E'\\'` [dialect-postgres.ts:postgresFilterSql]
+- `postgresStoreSql` - PostgreSQL store capability composed into `postgresDialect` [dialect-postgres.ts:postgresStoreSql]
+- `postgresTelemetry` - PostgreSQL telemetry hooks: empty setup and cleanup, retry predicate reused from `postgresStoreSql` [dialect-postgres.ts:postgresTelemetry]
+- `postgresDdlSql` - pure PostgreSQL physical-schema renderer composed into `postgresDialect` [dialect-postgres.ts:postgresDdlSql]
 - `DdlSqlDialect` (type) - the narrow PostgreSQL DDL capability [dialect.ts:DdlSqlDialect]
 - `ViewShape` (type) - stored/desired query shape for one view collection [dialect.ts:ViewShape]
 - `fromJoinReferences(query)` - conservative `FROM`/`JOIN` table-reference scan [view-dependencies.ts:fromJoinReferences]
@@ -55,7 +59,7 @@ migrator and database preset.
 - SQLite stores booleans as integers (`storesBooleanAsInteger: true`) [dialect-sqlite.ts:sqliteDialect]
 - SQLite uses `bootstrapMode: "plain"` for store DDL. The column probe uses `pragma_table_info`, and `store.isRetryable` is the same `isSqliteBusy` predicate as telemetry [dialect-sqlite.ts:sqliteStoreSql].
 - SQLite's `store.isDuplicateKey` is `isSqliteStoreDuplicateKey`: it accepts the symbolic constraint codes `1555`/`2067`, the extended code fields `errcode`/`extendedCode`/`rawCode`, and an Effect `UniqueViolation` reason. Telemetry keeps the narrower `isSqliteUniqueViolation` predicate. The store classifier treats any unique violation on the confirmation update as `email_taken`; the update only writes `email` and `emailVerified` [dialect-sqlite.ts:isSqliteStoreDuplicateKey].
-- PostgreSQL `postgresStoreSql.isDuplicateKey` is `isPostgresUniqueViolation`: SQLSTATE `23505` or an Effect `UniqueViolation` reason. It is internal capability work for #29, not a shipped PostgreSQL route [dialect-postgres.ts:isPostgresUniqueViolation].
+- PostgreSQL `postgresStoreSql.isDuplicateKey` is `isPostgresUniqueViolation`: SQLSTATE `23505` or an Effect `UniqueViolation` reason. The shipped `postgresDialect` uses it for auth email duplicate classification [dialect-postgres.ts:isPostgresUniqueViolation].
 - A custom dialect must supply `store.isDuplicateKey`. A SQLite-like dialect can spread `sqliteDialect.store`; a new engine must provide its own structured classifier [dialect.ts:StoreSqlCapabilities].
 - `postgresStoreSql` uses `bootstrapMode: "transaction"`, `SET LOCAL lock_timeout = '5s'`, and `pg_advisory_xact_lock(hashtextextended('mira.system-tables', 0))`. Its probe is schema-qualified and returns one row; its retry predicate covers `40001`, `40P01`, and `55P03` [dialect-postgres.ts:postgresStoreSql].
 - SQLite reports `DELETE` results with `returning`; Node 24 and Bun 1.4 both return the deleted id from `DELETE ... RETURNING id` [dialect-sqlite.ts:sqliteDialect]
@@ -95,9 +99,10 @@ migrator and database preset.
   rule SQL and cache keys are untouched [dialect.ts:RuleSqlDialect].
 - `libsqlDialect` local mode returns `sqliteDialect` and remote mode spreads it,
   so both inherit the SQLite `LIKE` behavior [dialect-libsql.ts:libsqlDialect].
-- No `ESCAPE` clause is added. PostgreSQL gives backslash a default escape
-  meaning in `LIKE` and `ILIKE` while SQLite has none, so `100\%` is not
-  portable. Patterns pass through unchanged [dialect-postgres.ts:postgresFilterSql].
+- Both engines add an `ESCAPE` clause: `ESCAPE E'\\'` on PostgreSQL and
+  `ESCAPE '\'` on SQLite. A backslash escapes `%` and `_`, and patterns without a
+  backslash are unchanged. The pattern value stays a bound parameter
+  [dialect-postgres.ts:postgresFilterSql] [dialect-sqlite.ts:sqliteDialect].
 - SQLite folds ASCII only. PostgreSQL `ILIKE` follows the database locale and
   collation, including the ICU or libc provider, so non-ASCII matching can
   differ between engines and between PostgreSQL deployments. Pin a
@@ -116,7 +121,7 @@ migrator and database preset.
 
 ## PostgreSQL DDL capability (issue #49)
 
-- `postgresDdlSql` is a pure `DdlSqlDialect` capability, not a full `DialectType` and not a preset. #29 composes it with `postgresRuleSql`, `postgresStoreSql`, and the remaining dialect members [dialect-postgres.ts:postgresDdlSql].
+- `postgresDdlSql` is a pure `DdlSqlDialect` capability, not a full `DialectType` and not a preset. `postgresDialect` composes it with `postgresRuleSql`, `postgresStoreSql`, and the remaining dialect members [dialect-postgres.ts:postgresDdlSql] [dialect-postgres.ts:postgresDialect].
 - `seqId` renders as `BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY`. Normal integer columns still render as `INTEGER`; the signed 32-bit limit is a documented trade-off [dialect-postgres.ts:columnSql].
 - `real` renders as `DOUBLE PRECISION`, `boolean` as `BOOLEAN`, and `quoteLiteral` renders `TRUE`/`FALSE`. `storesBooleanAsInteger` is `false` [dialect-postgres.ts:nativeTypeOf] [dialect-postgres.ts:quoteLiteral].
 - `defaultLiteral` is the single default validation and coercion path. It range-checks integer defaults to signed 32-bit, coerces boolean `0`/`1` and numeric strings, and is used by `CREATE TABLE`, `ADD COLUMN`, `SET DEFAULT`, and the nullable-to-NOT NULL backfill [dialect-postgres.ts:defaultLiteral].
@@ -139,13 +144,13 @@ migrator and database preset.
 - `TranslatedPlan.validations` carries the read-only probes. The migrator runs them after `statements` and before the `_migrations` insert. A probe selects every declared property plus `seqId` when absent, or `seqId` alone when no properties are declared. A stale property or a view body that still names the dropped column fails and rolls back [dialect-sqlite.ts:validationQuery] [migrator.ts:migrateImplWith].
 - Explicit view steps are deduplicated by normalized name. The desired query wins over an explicit create query; the explicit step is a fallback for views absent from `ctx.views`. Synthesized creates use `CREATE VIEW IF NOT EXISTS` [dialect-sqlite.ts:buildViewSynthesis].
 - Preflight rejects case-colliding view names, duplicate explicit creates with different queries, unanalyzable stored views in a rebuild-subsumed plan, unanalyzable create candidates, blank explicit creates, and affected orphans without an explicit `dropView` [dialect-sqlite.ts:collectViewPreflightErrors].
-- Untracked views are covered by a read-only `sqlite_master` scan run during plan render, before the transaction opens. The dialect issues one static `SELECT` through `TranslatePlanContext.readonlyQuery` whenever the plan contains a step that can invalidate a catalog object, merges catalog view rows into the stored view graph, and fails preflight when a rebuilt or dropped object would leave a dependent view broken [dialect-sqlite.ts:translatePlan] [dialect.ts:TranslatePlanContext].
+- Untracked views are covered by a read-only `sqlite_master` scan run during plan render, inside the migration transaction before any plan DDL. The dialect issues one static `SELECT` through `TranslatePlanContext.readonlyQuery` whenever the plan contains a step that can invalidate a catalog object, merges catalog view rows into the stored view graph, and fails preflight when a rebuilt or dropped object would leave a dependent view broken [dialect-sqlite.ts:translatePlan] [dialect.ts:TranslatePlanContext].
 - `libsqlDialect` local mode returns `sqliteDialect` and remote mode spreads it, so both inherit this behavior [dialect-libsql.ts:libsqlDialect].
 
 ## Untracked views and view-attached objects (issue #59)
 
-- `TranslatePlanContext.readonlyQuery` is a required read-only catalog `SELECT` capability the dialect uses during render, before the migration transaction opens. The migrator builds it from the `SqlClient` and guards it mechanically: the statement is trimmed, its first token must be `SELECT`, and any semicolon is rejected. `WITH` is rejected because a CTE can lead into DML, and a semicolon lets a second statement ride along. The dialect interpolates no user data; its one scan statement is fully static [dialect.ts:TranslatePlanContext] [migrator.ts:makeReadonlyQueryGuard].
-- `translatePlan`'s error channel includes `SqlError.SqlError`, so a failed catalog read fails the render with the driver's own error before any DDL and before `BEGIN`. Narrower dialect implementations remain assignable because Effect is covariant in the error channel [dialect.ts:DialectType].
+- `TranslatePlanContext.readonlyQuery` is a required read-only catalog `SELECT` capability the dialect uses during render, inside the migration transaction before any plan DDL. The migrator builds it from the `SqlClient` and guards it mechanically: the statement is trimmed, its first token must be `SELECT`, and any semicolon is rejected. `WITH` is rejected because a CTE can lead into DML, and a semicolon lets a second statement ride along. The dialect interpolates no user data; its one scan statement is fully static [dialect.ts:TranslatePlanContext] [migrator.ts:makeReadonlyQueryGuard].
+- `translatePlan`'s error channel includes `SqlError.SqlError`, so a failed catalog read fails the render with the driver's own error inside the transaction and before any plan DDL. Narrower dialect implementations remain assignable because Effect is covariant in the error channel [dialect.ts:DialectType].
 - The scan is gated on the plan surface: it runs only when the plan contains `dropColumn`, `dropTable`, `dropView`, `createView`, or `alterColumn`; on any other plan `readonlyQuery` is never called. One static `SELECT "name", "sql", "tbl_name", "type" FROM "sqlite_master"` reads every catalog row type, and a typed reader accepts a row only when `name`, `tbl_name`, and `type` are strings and `sql` is a string or `null` [dialect-sqlite.ts:translatePlan].
 - The plan surface computes rebuilt tables from `alterColumn` steps, rebuild-subsumed drops from tables carrying both `dropColumn` and `alterColumn`, native drops from `dropColumn`-only tables, dropped tables, removed views (`dropView` without a matching `createView`), the recreate set (synthesis creates that are also dropped plus explicit `dropView`+`createView` pairs), and new `createView` names. Every catalog-to-plan name comparison uses `normalizeIdentifier`. An `alterColumn`-only rebuild never seeds the untracked check: it keeps every column name, so views survive it, even though attached triggers do not [dialect-sqlite.ts:translatePlan].
 - The untracked check merges catalog view rows into the stored `ViewShape` map (each untracked row contributes `{ stored: { query: sql }, desired: null }`) and computes one `affectedViews` closure over the union, seeded with the breaking tables and every `dropView` step's view, removed or recreated. The closure is classified before tracked names are subtracted, so tracked dependents are checked too, and transitive untracked chains are covered by the same #58 machinery [dialect-sqlite.ts:translatePlan] [view-dependencies.ts:affectedViews].
@@ -160,7 +165,7 @@ migrator and database preset.
   - Note: native drops, where an untracked dependent may fail the statement at execution if it reads the dropped column; the existing execution-time failure and rollback are unchanged.
   - Note: triggers on dropped tables and removed views, because the removal is explicit and the trigger cannot survive it.
 - `viewDeclaresColumnList` is a self-contained front-matter scanner over stored `CREATE VIEW` text: it skips `CREATE [TEMP] VIEW [IF NOT EXISTS]`, consumes one plain, quoted, or schema-qualified name, and reports whether `(` precedes `AS`. Unparsable front matter reports no column list [view-dependencies.ts:viewDeclaresColumnList].
-- For every affected view the plan neither drops nor recreates, tracked or untracked, the dialect appends `SELECT 1 FROM <quoted view> LIMIT 0` to `TranslatedPlan.validations`. The probes run inside the transaction after the statements, join the #58 validation channel, and cover the note-class branches plus a catalog change between the render and `BEGIN`. The probe set is the closure minus the recreate set and explicit drops, because recreated views already receive the #58 validation [dialect-sqlite.ts:translatePlan] [migrator.ts:migrateImplWith].
+- For every affected view the plan neither drops nor recreates, tracked or untracked, the dialect appends `SELECT 1 FROM <quoted view> LIMIT 0` to `TranslatedPlan.validations`. The probes run inside the migration transaction after the statements, join the #58 validation channel, and cover the note-class branches plus a catalog change between the render and the DDL. The probe set is the closure minus the recreate set and explicit drops, because recreated views already receive the #58 validation [dialect-sqlite.ts:translatePlan] [migrator.ts:migrateImplWith].
 - The probe set comes from the same `affectedViews` closure as the static scan, so both inherit the reference extractor's blind spots: a construct the tokenizer cannot understand escapes both. The probes narrow but do not eliminate that residual risk, which is accepted and shared with #58 [view-dependencies.ts:fromJoinReferences].
 - `libsqlDialect` local mode returns `sqliteDialect` and remote mode spreads it, so both inherit the scan, the checks, and the probes [dialect-libsql.ts:libsqlDialect].
 
@@ -171,4 +176,15 @@ migrator and database preset.
 - `select-only` is the PostgreSQL behavior: `SELECT 1` is the whole probe. Inside the flusher's outer transaction a successful `SELECT` means the transaction is usable and a failed `SELECT` means it is not; no transaction control statement is issued, so the probe cannot abort the outer transaction [mutation-batcher.ts:probeTransactionAlive].
 - libSQL inherits the SQLite declaration: local mode returns `sqliteDialect` and remote mode spreads it, so both use `nested-begin` [dialect-libsql.ts:libsqlDialect].
 - Neither strategy is verified for MySQL or SQL Server. `BEGIN` inside an open transaction implicitly commits in MySQL and nests in SQL Server, so `nested-begin` is known-unsafe there and the applicability of `select-only` is unverified; a custom dialect must verify its engine before choosing either [dialect.ts:TransactionProbeStrategy].
-- The PostgreSQL transaction contract is verified by the environment-gated `tests/collection-service/postgres-batch.test.ts`, which self-skips unless `MIRA_TEST_POSTGRES_URL` is set; no PostgreSQL preset ships in this change
+- The PostgreSQL transaction contract is verified by the environment-gated `tests/collection-service/postgres-batch.test.ts`, which self-skips unless `MIRA_TEST_POSTGRES_URL` is set. The PostgreSQL preset ships in this change.
+
+## PostgreSQL dialect (issue #29)
+
+- `postgresDialect` is one composed `DialectType`. It spreads `postgresDdlSql`, `postgresRuleSql`, and `postgresFilterSql`, and adds `placeholder(index) => "$" + index`, an `ON CONFLICT` upsert with a `DO NOTHING` fallback when every column is a conflict key, `deleteResult: returning`, `transactionProbe: select-only`, `store: postgresStoreSql`, `telemetry: postgresTelemetry`, and `normalizesBigintSeqId: true` [dialect-postgres.ts:postgresDialect].
+- `postgresTelemetry` has empty setup and cleanup lists because PostgreSQL has no PRAGMAs and no WAL checkpoint. Its `isRetryable` reuses `postgresStoreSql.isRetryable`, so `40001`, `40P01`, and `55P03` live in one predicate [dialect-postgres.ts:postgresTelemetry].
+- `migrationTransactionSetupSql` is `SET LOCAL transaction_isolation = 'read committed'`, then `SELECT pg_advisory_xact_lock(hashtextextended('mira.migrations', 0))`, then `SET LOCAL lock_timeout = '5s'`. The isolation level makes the post-wait re-read see the committed schema; the lock serializes replicas; the timeout is set after the lock, so it bounds the DDL table locks but not the advisory wait [dialect-postgres.ts:postgresDialect].
+- `migrationPreviewLockSql` is the non-blocking `pg_try_advisory_xact_lock` query returning one `acquired` column. `Migrator.plan` and `Migrator.status` fail with `MigrationBusyError` when it returns false instead of waiting for a running migration [dialect-postgres.ts:postgresDialect] [migrator.ts:planImplWith].
+- `normalizesBigintSeqId` tells the collection decoder to convert a driver `bigint` `seqId` to the canonical decimal cursor string. SQLite and libSQL omit it and keep the identity fast path [dialect-postgres.ts:postgresDialect] [decode.ts:normalizeSeqId].
+- `postgresDdlSql.quoteLiteral` renders text as `E'...'` with backslashes and single quotes escaped, independent of `standard_conforming_strings`. The `_collections` schema JSON is written through this path [dialect-postgres.ts:quoteLiteral].
+- `postgresRuleSql.castValue` handles `"bigint"` as `::bigint`. The rule compiler casts a string literal to the known column type and leaves the column uncast, so `age >= "18"` compares numerically instead of lexicographically [dialect-postgres.ts:postgresRuleSql] [rule/compiler.ts:hintForComparison].
+- The PostgreSQL DDL still performs the 63-byte identifier preflight for table, column, view, and index-field names, and truncates generated index names with a deterministic FNV-1a suffix. Untracked views and `CREATE VIEW` name conflicts fail at the statement and roll back; PostgreSQL has no `sqlite_master` scan and no `CREATE VIEW IF NOT EXISTS` [dialect-postgres.ts:postgresDdlSql].

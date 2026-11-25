@@ -7,6 +7,9 @@ import { expect } from "vitest"
 import { postgresFilterSql, postgresRuleSql } from "@/dialect/dialect-postgres.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
+const SQLITE_ESCAPE = "ESCAPE '\\'"
+const POSTGRES_ESCAPE = String.raw`ESCAPE E'\\'`
+
 const schema: CollectionSchema = {
   "x-collection-kind": "base",
   type: "object",
@@ -29,11 +32,13 @@ const postgresOptions = {
 }
 
 describe("dialect case-insensitive pattern", () => {
-  it.effect("SQLite renders LIKE and PostgreSQL renders ILIKE", () =>
+  it.effect("SQLite renders LIKE and PostgreSQL renders ILIKE with the escape clause", () =>
     Effect.sync(() => {
-      expect(sqliteDialect.caseInsensitivePattern('t."title"', "?")).toBe('t."title" LIKE ?')
+      expect(sqliteDialect.caseInsensitivePattern('t."title"', "?")).toBe(
+        `t."title" LIKE ? ${SQLITE_ESCAPE}`
+      )
       expect(postgresFilterSql.caseInsensitivePattern('t."title"', "?")).toBe(
-        't."title" ILIKE ?'
+        `t."title" ILIKE ? ${POSTGRES_ESCAPE}`
       )
     })
   )
@@ -41,16 +46,16 @@ describe("dialect case-insensitive pattern", () => {
   it.effect("caseInsensitiveLike keeps the prefix and contains output", () =>
     Effect.sync(() => {
       expect(sqliteDialect.caseInsensitiveLike('t."title"', "?", "prefix")).toBe(
-        `t."title" LIKE (? || '%')`
+        `t."title" LIKE (? || '%') ${SQLITE_ESCAPE}`
       )
       expect(sqliteDialect.caseInsensitiveLike('t."title"', "?", "contains")).toBe(
-        `t."title" LIKE ('%' || ? || '%')`
+        `t."title" LIKE ('%' || ? || '%') ${SQLITE_ESCAPE}`
       )
       expect(postgresRuleSql.caseInsensitiveLike('t."title"', "?", "prefix")).toBe(
-        `t."title" ILIKE (? || '%')`
+        `t."title" ILIKE (? || '%') ${POSTGRES_ESCAPE}`
       )
       expect(postgresRuleSql.caseInsensitiveLike('t."title"', "?", "contains")).toBe(
-        `t."title" ILIKE ('%' || ? || '%')`
+        `t."title" ILIKE ('%' || ? || '%') ${POSTGRES_ESCAPE}`
       )
     })
   )
@@ -62,14 +67,14 @@ describe("dialect case-insensitive pattern", () => {
       const sqlite = yield* filterNodeToWhereClause(node, schema, "posts", sqliteOptions)
       const postgres = yield* filterNodeToWhereClause(node, schema, "posts", postgresOptions)
 
-      expect(sqlite.sql).toBe('t."title" LIKE ?')
-      expect(postgres.sql).toBe('t."title" ILIKE ?')
+      expect(sqlite.sql).toBe(`t."title" LIKE ? ${SQLITE_ESCAPE}`)
+      expect(postgres.sql).toBe(`t."title" ILIKE ? ${POSTGRES_ESCAPE}`)
       expect(sqlite.params).toEqual(["%a%"])
       expect(postgres.params).toEqual(sqlite.params)
     })
   )
 
-  it.effect("a backslash pattern stays one parameter with no ESCAPE clause", () =>
+  it.effect("a backslash pattern stays one parameter with the engine escape clause", () =>
     Effect.gen(function* () {
       const node: FilterNode = { op: "like", field: "title", value: "100\\%_" }
 
@@ -80,8 +85,8 @@ describe("dialect case-insensitive pattern", () => {
       expect(postgres.params).toEqual(["100\\%_"])
       expect(sqlite.params).toHaveLength(1)
       expect(postgres.params).toHaveLength(1)
-      expect(sqlite.sql).not.toContain("ESCAPE")
-      expect(postgres.sql).not.toContain("ESCAPE")
+      expect(sqlite.sql).toBe(`t."title" LIKE ? ${SQLITE_ESCAPE}`)
+      expect(postgres.sql).toBe(`t."title" ILIKE ? ${POSTGRES_ESCAPE}`)
     })
   )
 })

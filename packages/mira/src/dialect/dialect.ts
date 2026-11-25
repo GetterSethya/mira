@@ -11,7 +11,7 @@ import { transformSqlCode } from "@/sql-text.js"
 export type Quote = (name: string) => string
 
 /** Schema value types used by typed rule comparisons. */
-export type FieldValueType = "text" | "integer" | "number" | "boolean"
+export type FieldValueType = "text" | "integer" | "number" | "boolean" | "bigint"
 
 /**
  * How a dialect reports whether a `DELETE` removed a row.
@@ -82,7 +82,7 @@ export type TranslatePlanContext = {
   views: ReadonlyMap<string, ViewShape>
   /**
    * Guarded read-only catalog `SELECT` capability, issued by the dialect during
-   * render, before the migration transaction opens.
+   * render, inside the migration transaction.
    *
    * The migrator's implementation requires a `SELECT` first token and rejects
    * semicolons, so a dialect cannot turn a render into a hidden mutation path.
@@ -275,6 +275,35 @@ export type DialectType = {
   readonly store: StoreSqlCapabilities
   /** Optional telemetry connection and error-classification hooks. */
   readonly telemetry?: TelemetryDialectHooks
+  /**
+   * Statements the migrator runs first inside the migration transaction,
+   * before it creates the system tables, reads the stored schemas, and renders
+   * the plan.
+   *
+   * A dialect uses these to pin an isolation level, take a transaction-scoped
+   * lock, or set a transaction-local timeout for the DDL that follows. SQLite
+   * and libSQL omit it because their write transaction already serializes the
+   * DDL it contains.
+   */
+  readonly migrationTransactionSetupSql?: ReadonlyArray<string>
+  /**
+   * A statement that acquires a non-blocking lock for `Migrator.plan` and
+   * `Migrator.status`.
+   *
+   * It must return one boolean column named `acquired`, and a false result
+   * fails with `MigrationBusyError` instead of waiting behind a running
+   * migration. SQLite and libSQL omit it.
+   */
+  readonly migrationPreviewLockSql?: string
+  /**
+   * Whether the collection decoder normalizes a `bigint` `seqId` to a
+   * canonical decimal string.
+   *
+   * A dialect that decodes `BIGINT` identity columns as JavaScript `bigint`
+   * sets this to true. SQLite and libSQL omit it, keeping the identity decode
+   * fast path.
+   */
+  readonly normalizesBigintSeqId?: boolean
 }
 
 /** Narrow dialect view used by rule compilation, caching, and cache tags. */

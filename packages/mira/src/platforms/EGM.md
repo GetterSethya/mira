@@ -55,5 +55,5 @@ No subdirectories.
 ## Verification
 
 - Run: `pnpm --filter @gettersethya/mira test`
-- Bun smoke: `bun run apps/example-bun/src/smoke.ts`
+- Bun smoke: `bun run packages/bun-e2e/src/smoke.ts`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`

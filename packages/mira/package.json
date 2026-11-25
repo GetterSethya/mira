@@ -28,6 +28,10 @@
     "./bun": {
       "types": "./dist/index.bun.d.ts",
       "default": "./dist/index.bun.js"
+    },
+    "./postgres": {
+      "types": "./dist/index.postgres.d.ts",
+      "default": "./dist/index.postgres.js"
     }
   },
   "scripts": {
@@ -42,6 +46,7 @@
     "@effect/platform-node": "4.0.0",
     "@effect/platform-node-shared": "4.0.0",
     "@effect/sql-libsql": "4.0.0",
+    "@effect/sql-pg": "4.0.0",
     "@effect/sql-sqlite-bun": "4.0.0",
     "@effect/sql-sqlite-node": "4.0.0",
     "@gettersethya/mira-client": "workspace:*",
@@ -56,7 +61,6 @@
     "effect": "~4.0.0"
   },
   "devDependencies": {
-    "@effect/sql-pg": "4.0.0",
     "@effect/vitest": "^4.0.0",
     "@types/bun": "^1.4.2",
     "@types/node": "^25.7.0",

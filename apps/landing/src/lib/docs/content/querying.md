@@ -26,9 +26,9 @@ Filter.and(
 
 The comparison surface is `.eq`, `.neq`, `.gt`, `.gte`, `.lt`, `.lte`, `.in`, `.like`, `.null`, `.notNull`, and `.between`. `.between(lo, hi)` is sugar for `.gte(lo)` and `.lte(hi)`. There is no `contains` or `startsWith` helper here: `.like` passes your pattern through untouched, so add the `%` wildcards yourself.
 
-The pattern is passed through unchanged, so `%` and `_` are the caller's responsibility. Matching is case-insensitive per dialect: SQLite keeps `LIKE` with ASCII folding, and PostgreSQL uses `ILIKE` when the dialect is available. Non-ASCII folding differs by engine and locale. This API adds no `ESCAPE` clause, so backslash and literal wildcard matching remain engine-dependent. No PostgreSQL preset ships in this change.
+The pattern is passed through unchanged, so `%` and `_` are the caller's responsibility. Both engines add an `ESCAPE` clause: SQLite uses `ESCAPE '\'` and PostgreSQL uses `ESCAPE E'\\'`. A backslash escapes `%` and `_`, and patterns without a backslash are unchanged. Matching is case-insensitive per dialect: SQLite keeps `LIKE` with ASCII folding, and PostgreSQL uses `ILIKE`. Non-ASCII folding and text ordering follow the database collation; ASCII order matches SQLite.
 
-Comparison values must be a string, a number, or `null`. Boolean values are rejected by the filter compiler. An empty `.in([])` list compiles to `1 = 0` and matches nothing. Unknown fields fail with 422. The same applies to fields marked hidden, unless the caller is an admin.
+Comparison values must be a string, a number, a boolean, or `null`. Boolean values bind as `0`/`1` on SQLite and as booleans on PostgreSQL. A string for an integer, number, boolean, or bigint field is validated, and a malformed value returns 422 instead of a database error. A bigint number must be a safe integer; supply a larger value as a decimal string. An empty `.in([])` list compiles to `1 = 0` and matches nothing. Unknown fields fail with 422. The same applies to fields marked hidden, unless the caller is an admin.
 
 ## Raw JSON shape
 
@@ -75,7 +75,9 @@ Expansion joins the target's `id` column. A relation declared with a different t
 
 `after` is a cursor, not an offset: pass the opaque value from the previous `nextCursor`. The default order is `seqId` ascending. Sorted pagination is also supported: the server resolves the cursor row's sort value and continues with a `(sortField, seqId)` keyset, using `seqId` as a stable tie-breaker. The sort field must be non-nullable. A sorted request that uses `after` on a nullable field returns `422 validation_failed` rather than silently skipping rows. If the cursor row has been deleted, the server also returns `422` so you can restart from the first page. `nextCursor` is the last returned row's `seqId` when another page exists, and `null` when it does not. A final page with exactly `limit` rows returns `null`. Keep requesting until `nextCursor` is `null`.
 
-The cursor is opaque. The shipped SQLite and libSQL presets return a JavaScript number. PostgreSQL returns a decimal string when `seqId` is a `BIGINT`, because a JSON number cannot represent every 64-bit value exactly. Pass the value back unchanged; do not convert a string cursor to a number.
+The cursor is opaque. The shipped SQLite and libSQL presets return a JavaScript number. PostgreSQL returns a decimal string when `seqId` is a `BIGINT`, because a JSON number cannot represent every 64-bit value exactly. The numeric form is exact only below 2^53, so a large PostgreSQL cursor must stay a string. Pass the value back unchanged; do not convert a string cursor to a number.
+
+Text sort order follows the database collation. ASCII values sort the same on SQLite and PostgreSQL; mixed case and non-ASCII values follow the database locale, so a sort that depends on exact ordering should use ASCII keys or accept the deployment's collation.
 
 ```json
 {

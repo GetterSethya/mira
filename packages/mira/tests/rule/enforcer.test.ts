@@ -263,6 +263,26 @@ describe("enforcerForAction", () => {
     expect(enforcerOrThrow(schema, "delete").sql).toBe("t.ownerId = ?")
   })
 
+  it("maps seqId to a bigint value type and integer columns to integer", () => {
+    const schema: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: {
+        seqId: { type: "integer", "x-kind": "seqId" },
+        count: { type: "integer" }
+      },
+      "x-rules": {
+        list: Rule.and(
+          Rule.field("seqId").gt(Rule.literal("9007199254740993")),
+          Rule.field("count").gte(Rule.literal("5"))
+        )
+      }
+    }
+    const result = requireValue(enforcerForActionRaw(schema, "list", postgresRuleSql))
+    expect(result.sql).toBe('(t."seqId" > ?::bigint) AND (t."count" >= ?::integer)')
+    expect(result.params).toEqual(["9007199254740993", "5"])
+  })
+
   it("params are extracted as array", () => {
     const schema: CollectionSchema = {
       "x-collection-kind": "base",

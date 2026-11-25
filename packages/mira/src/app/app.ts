@@ -213,6 +213,17 @@ export class MiraApp<R = never, Telemetry = never> {
     return this
   }
 
+  /**
+   * The final served collection set: app collections with rules applied, then
+   * plugin collections, then plugin admin collections, deduplicated by name.
+   *
+   * A `migrateAtStartup: false` migration job reads this to migrate exactly what
+   * the app serves without re-applying rules or reaching into a private list.
+   */
+  get collections(): ReadonlyArray<AnyCollectionDef> {
+    return this.#getAllCollections()
+  }
+
   #getAllCollections(): ReadonlyArray<AnyCollectionDef> {
     const configCollections = applyRulesToCollections(this.#config.collections, this.#config.rules ?? [])
     const all = [

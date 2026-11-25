@@ -54,7 +54,7 @@ export function enforceRule(
 const fieldTypeOf = (schema: CollectionSchema) => (field: string): FieldValueType | undefined => {
   const prop = schema.properties[field]
   if (prop === undefined) return undefined
-  if (prop["x-kind"] === "seqId") return "integer"
+  if (prop["x-kind"] === "seqId") return "bigint"
   if (prop.type === "boolean") return "boolean"
   if (prop.type === "integer") return "integer"
   if (prop.type === "number") return "number"

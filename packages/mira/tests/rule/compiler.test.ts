@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { postgresRuleSql } from "@/dialect/dialect-postgres.js"
-import type { RuleSqlDialect } from "@/dialect/dialect.js"
+import type { FieldValueType, RuleSqlDialect } from "@/dialect/dialect.js"
 import type { CompileCtx } from "@/rule/compiler.js"
 import { compile as compileRaw, compileOperand as compileOperandRaw } from "@/rule/compiler.js"
 
@@ -69,13 +69,13 @@ describe("compiler", () => {
   it("startsWith", () => {
     const ctx = makeCtx()
     const sql = compile(Rule.field("title").startsWith(Rule.literal("Hello")), ctx)
-    expect(sql).toBe("t.title LIKE (@p0 || '%')")
+    expect(sql).toBe("t.title LIKE (@p0 || '%') ESCAPE '\\'")
   })
 
   it("contains", () => {
     const ctx = makeCtx()
     const sql = compile(Rule.field("content").contains(Rule.literal("keyword")), ctx)
-    expect(sql).toBe("t.content LIKE ('%' || @p0 || '%')")
+    expect(sql).toBe("t.content LIKE ('%' || @p0 || '%') ESCAPE '\\'")
   })
 
   it("in with literal array", () => {
@@ -185,7 +185,7 @@ describe("compiler", () => {
     )
     const sql = compile(expr, ctx)
     expect(sql).toBe(
-      "(((t.isPublic = @p0) OR (t.ownerId = @auth_id)) AND (t.status != @p1)) AND (t.title LIKE ('%' || @p2 || '%'))"
+      "(((t.isPublic = @p0) OR (t.ownerId = @auth_id)) AND (t.status != @p1)) AND (t.title LIKE ('%' || @p2 || '%') ESCAPE '\\')"
     )
   })
 
@@ -239,10 +239,10 @@ describe("compiler", () => {
   it("contains and startsWith with field operands as right side", () => {
     const ctx = makeCtx()
     const sql1 = compile(Rule.field("title").startsWith(Rule.field("prefix")), ctx)
-    expect(sql1).toBe("t.title LIKE (t.prefix || '%')")
+    expect(sql1).toBe("t.title LIKE (t.prefix || '%') ESCAPE '\\'")
     const ctx2 = makeCtx()
     const sql2 = compile(Rule.field("title").contains(Rule.field("keyword")), ctx2)
-    expect(sql2).toBe("t.title LIKE ('%' || t.keyword || '%')")
+    expect(sql2).toBe("t.title LIKE ('%' || t.keyword || '%') ESCAPE '\\'")
   })
 
   it("dateAdd with field operand", () => {
@@ -375,6 +375,87 @@ describe("compiler dialect rendering", () => {
     )
     expect(compileOperandRaw(Rule.dateAdd(Rule.now(), 1, "day"), ctx, sentinel)).toContain(
       "SENTINEL_ADD"
+    )
+  })
+})
+
+describe("typed string literal comparisons", () => {
+  const fieldType = (field: string): FieldValueType | undefined => {
+    switch (field) {
+      case "age":
+        return "integer"
+      case "price":
+        return "number"
+      case "active":
+        return "boolean"
+      case "seqId":
+        return "bigint"
+      case "title":
+        return "text"
+      default:
+        return undefined
+    }
+  }
+
+  const compilePg = (node: Parameters<typeof compileRaw>[0], ctx: CompileCtx) =>
+    compileRaw(node, ctx, postgresRuleSql)
+
+  it("casts a string literal to an integer column type without casting the column", () => {
+    const ctx = makeCtx({ fieldType })
+    expect(compilePg(Rule.field("age").gte(Rule.literal("18")), ctx)).toBe(
+      't."age" >= @p0::integer'
+    )
+    expect(ctx.params).toEqual({ "@p0": "18" })
+  })
+
+  it("casts a string literal to a number column type", () => {
+    const ctx = makeCtx({ fieldType })
+    expect(compilePg(Rule.field("price").gt(Rule.literal("9.5")), ctx)).toBe(
+      't."price" > @p0::double precision'
+    )
+  })
+
+  it("casts a string literal to a boolean column type", () => {
+    const ctx = makeCtx({ fieldType })
+    expect(compilePg(Rule.field("active").eq(Rule.literal("true")), ctx)).toBe(
+      't."active" = @p0::boolean'
+    )
+  })
+
+  it("casts a string literal to a bigint column type", () => {
+    const ctx = makeCtx({ fieldType })
+    expect(compilePg(Rule.field("seqId").gt(Rule.literal("9007199254740993")), ctx)).toBe(
+      't."seqId" > @p0::bigint'
+    )
+    expect(ctx.params).toEqual({ "@p0": "9007199254740993" })
+  })
+
+  it("casts a bigint literal to a bigint column type", () => {
+    const ctx = makeCtx({ fieldType })
+    expect(compilePg(Rule.field("seqId").gt(Rule.literal(9007199254740993n)), ctx)).toBe(
+      't."seqId" > @p0::bigint'
+    )
+    expect(ctx.params).toEqual({ "@p0": 9007199254740993n })
+  })
+
+  it("casts a string literal to a text column type", () => {
+    const ctx = makeCtx({ fieldType })
+    expect(compilePg(Rule.field("title").eq(Rule.literal("hello")), ctx)).toBe(
+      't."title" = @p0::text'
+    )
+  })
+
+  it("casts IN placeholders to the column type", () => {
+    const ctx = makeCtx({ fieldType })
+    expect(compilePg(Rule.field("age").in(Rule.literal(["1", "2"])), ctx)).toBe(
+      't."age" IN (@p0::integer, @p1::integer)'
+    )
+  })
+
+  it("keeps SQLite SQL unchanged because its castValue is the identity", () => {
+    const ctx = makeCtx({ fieldType })
+    expect(compileRaw(Rule.field("age").gte(Rule.literal("18")), ctx, legacyDialect)).toBe(
+      "t.age >= @p0"
     )
   })
 })

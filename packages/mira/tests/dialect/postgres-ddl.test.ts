@@ -326,7 +326,7 @@ describe("postgresDdlSql ALTER COLUMN", () => {
           to: column("a", "text", { default: "x" })
         }
       ])
-      expect(set.statements).toEqual(['ALTER TABLE "t" ALTER COLUMN "a" SET DEFAULT \'x\''])
+      expect(set.statements).toEqual(['ALTER TABLE "t" ALTER COLUMN "a" SET DEFAULT E\'x\''])
     }))
 
   it.effect("drops NOT NULL when the column becomes nullable", () =>
@@ -454,6 +454,35 @@ describe("postgresDdlSql identifier limits", () => {
       const detail = yield* failureDetail([
         { kind: "dropView", view: "v".repeat(64) }
       ])
+      expect(detail).toContain("PostgreSQL identifiers must be at most 63 bytes")
+    }))
+
+  it.effect("rejects an overlong column name", () =>
+    Effect.gen(function* () {
+      const name = "c".repeat(64)
+      const detail = yield* failureDetail([
+        {
+          kind: "createTable",
+          table: "t",
+          columns: [column(name, "text")]
+        }
+      ])
+      expect(detail).toContain(`identifier "${name}" is 64 bytes`)
+      expect(detail).toContain("PostgreSQL identifiers must be at most 63 bytes")
+    }))
+
+  it.effect("rejects an overlong index field name", () =>
+    Effect.gen(function* () {
+      const field = "f".repeat(64)
+      const detail = yield* failureDetail([
+        {
+          kind: "createIndex",
+          table: "t",
+          fields: [field],
+          unique: false
+        }
+      ])
+      expect(detail).toContain(`identifier "${field}" is 64 bytes`)
       expect(detail).toContain("PostgreSQL identifiers must be at most 63 bytes")
     }))
 })

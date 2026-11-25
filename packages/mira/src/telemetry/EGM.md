@@ -98,8 +98,9 @@ its module graph.
   than a local hardcoded `LIKE` [sql-store.test.ts].
 - The SQL store selects `seqId` for span cursors but does not expose it in the
   public span row, matching the current response JSON.
-- Counts and cursor values are coerced with `Number(...)` for drivers that
-  return `int8` as strings.
+- Counts and read cursor values are coerced with `Number(...)` for drivers that
+  return `int8` as strings. The read cursor stays numeric and is exact only below
+  2^53; retention no longer depends on it.
 - Append duplicate handling uses one insert with the dialect conflict clause,
   by default `ON CONFLICT (<id>) DO NOTHING`. A duplicate id is a no-op, so the
   SQL store never produces `TelemetryDuplicateEntryError` and never runs a
@@ -109,9 +110,12 @@ its module graph.
 - The PostgreSQL transaction contract is covered by the environment-gated
   `postgres-shared` test. The default suite guards the generated SQL shape and
   SQLite transaction behavior.
-- Retention is a select-then-delete loop with a progress guard; result counts
-  are actual deletes, not selected ids. A dialect with only `precheck` delete
-  support fails with a descriptive error.
+- Retention is a batched delete with a progress guard; result counts are actual
+  deletes, not selected ids. A `returning` dialect deletes by a `seqId` subquery
+  with `RETURNING "seqId"` and counts the returned rows; an `affectedRows`
+  dialect runs the same delete without `RETURNING` and reads the affected count.
+  A dialect with only `precheck` delete support fails with a descriptive error.
+  The `seqId` never round-trips through a JavaScript number.
 - Dedicated and shared metadata tables are isolated. Dedicated keeps the
   defaults so an existing telemetry database upgrades without table
   re-creation. Shared uses the `_telemetry_*` pair.
@@ -132,6 +136,35 @@ its module graph.
   error on first use.
 - For remote libSQL, set `flushBatchSize` and `flushInterval`; each unbatched
   row is one network round trip. The store is otherwise unchanged.
+
+## PostgreSQL telemetry (issue #29)
+
+- `postgresTelemetry` has `setup: []` and `cleanup: []`; there are no PRAGMAs and
+  no WAL checkpoint. `isRetryable` reuses `postgresStoreSql.isRetryable` for
+  `40001`, `40P01`, and `55P03` [dialect-postgres.ts:postgresTelemetry].
+- The SQL store reads `Dialect.telemetry` and `Dialect.deleteResult`. PostgreSQL
+  supplies the default `ON CONFLICT ("id") DO NOTHING` append suffix, so duplicate
+  ids stay a no-op [sql-store.ts:deleteBatch].
+- Shared mode is the recommended PostgreSQL mode: `makeTelemetryLayer({ storage: { mode: "shared" } })`
+  reuses the app `SqlClient` and `Dialect`, creates `_telemetry_collections` and
+  `_telemetry_migrations`, and migrates `logs` and `spans` in the app database.
+  Dedicated mode opens a second pool and needs a separate database or schema
+  [layer.ts:makeTelemetryLayer].
+- Retention deletes by a `seqId` subquery:
+  `DELETE FROM "logs" WHERE "seqId" IN (SELECT "seqId" FROM "logs" WHERE "created" < ? ORDER BY "seqId" LIMIT ?) RETURNING "seqId"`.
+  The batch loop and progress guard stay. For `deleteResult: returning` the store
+  counts returned rows; for `affectedRows` it reads the raw affected count. The
+  cutoff and batch size are the only parameters, in that order
+  [sql-store.ts:deleteBatch].
+- The high-water retention test advances `logs.seqId` with
+  `ALTER TABLE logs ALTER COLUMN seqId RESTART WITH 9007199254740993`, inserts an
+  old and a recent row, and asserts only the old row is deleted. The numeric read
+  cursor is unchanged and remains exact only below 2^53
+  [postgres-shared.test.ts].
+- PostgreSQL appends run inside the caller transaction when a caller provides
+  one and outside it for the forked consumers. A failed append maps through the
+  dialect's retry and duplicate classifiers, never a SQLite error code
+  [sql-store.ts:appendLogs].
 
 ## Side Effects
 
@@ -155,3 +188,6 @@ its module graph.
 - Tests cover the fake-store boundary, SQL append/dedup, retention counts,
   filtering/cursors, span grouping, dialect hooks, metadata isolation, shared
   and dedicated wiring, batching, and shutdown drain.
+- The environment-gated `tests/telemetry/postgres-shared.test.ts` runs against
+  `MIRA_TEST_POSTGRES_URL`, creates both `logs` and `spans`, and covers the
+  high-water retention subquery. It self-skips without the URL.

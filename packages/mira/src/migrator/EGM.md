@@ -11,11 +11,13 @@ bring the database up to date. The components are deliberately layered:
 2. `types.ts` defines the step vocabulary and the `MigrationStep` variants that map
    1:1 to `DialectType.translate`, plus `TableShapes`, the per-table
    stored/desired context handed to `translatePlan`.
-3. `migrator.ts` owns the lifecycle: it bootstraps the `_collections` and
-   `_migrations` system tables, reads stored schemas, computes a plan, renders the
-   entire plan through the active dialect, and applies it inside a transaction.
-   Rendering and validation happen **before** the transaction opens, so an impossible plan never
-   reaches the driver.
+3. `migrator.ts` owns the lifecycle: it opens a transaction, runs the dialect's
+   migration setup statements, bootstraps the `_collections` and `_migrations`
+   system tables, reads stored schemas, computes a plan, renders and validates the
+   entire plan through the active dialect, and applies it. Rendering and
+   validation happen **inside** the transaction before any plan DDL, so an
+   impossible plan never reaches the driver and a PostgreSQL replica cannot race
+   the bootstrap.
 
 The stored schema in `_collections` is the source of truth for "what exists"; the
 desired schema passed by the app is "what should exist". The migrator only writes
@@ -23,7 +25,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 
 ## Interface
 
-- `Migrator` — `Context.Service` tag exposing `migrate`, `plan`, `status`; `status`'s error channel is `SqlError.SqlError` only [migrator.ts:Migrator]
+- `Migrator` — `Context.Service` tag exposing `migrate`, `plan`, `status`; `status`'s error channel is `MigrationError` so the PostgreSQL preview can report `MigrationBusyError` [migrator.ts:Migrator]
 - `MigratorLive` — `Layer.effect` implementation requiring `SqlClient` and `Dialect`; applies `References.MinimumLogLevel` from `options.logLevel` per call [migrator.ts:MigratorLive]
 - `SYSTEM_TABLE_STEPS` — the `createSystemTable` steps that bootstrap `_collections` (`name`, `schema`, `updated_at`) and `_migrations` (`id`, `name`, `steps`, `applied_at`) [migrator.ts:SYSTEM_TABLE_STEPS]
 - `computePlan` — builds the full `MigrationPlan` for a schema set, optionally dropping collections absent from the desired set [schema-diff.ts:computePlan]
@@ -35,7 +37,8 @@ desired schema passed by the app is "what should exist". The migrator only write
 - `toEffectLogLevel` — maps numeric verbosity (0=none … 4=debug, default info) to an Effect `LogLevel` [types.ts:toEffectLogLevel]
 - `UnsupportedMigrationStepError` — tagged error for a step the dialect cannot render (not re-exported by the barrel) [errors.ts:UnsupportedMigrationStepError]
 - `InvalidMigrationStatementError` — tagged error for a rendered statement that contains no SQL (not re-exported by the barrel) [errors.ts:InvalidMigrationStatementError]
-- (type) `MigrationError` — `SqlError.SqlError | UnsupportedMigrationStepError | InvalidMigrationStatementError` [errors.ts:MigrationError]
+- (type) `MigrationError` — `SqlError.SqlError | UnsupportedMigrationStepError | InvalidMigrationStatementError | MigrationBusyError` [errors.ts:MigrationError]
+- `MigrationBusyError` — tagged error (`operation: "plan" | "status"`) raised when a PostgreSQL preview cannot acquire the non-blocking advisory lock [errors.ts:MigrationBusyError]
 - (type) `ColumnType`, `ColumnDef` — physical column type and DDL description [types.ts:ColumnDef]
 - (type) `IndexShape`, `TableShape`, `TableShapes` — index identity, table columns+indexes, and the stored/desired pair given to `translatePlan` [types.ts:TableShapes]
 - (type) `MigrationStep` — the 12-kind DDL union (`createTable`, `dropTable`, `renameTable`, `addColumn`, `dropColumn`, `renameColumn`, `alterColumn`, `createIndex`, `dropIndex`, `createSystemTable`, `createView`, `dropView`) [types.ts:MigrationStep]
@@ -45,7 +48,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 
 ## Invariants
 
-- `migrate` and `plan` render the **whole** plan via `dialect.translatePlan` and reject every rendered statement that is empty or comment-only, both before a transaction is opened [migrator.ts:renderPlan]
+- `migrate` and `plan` render the **whole** plan via `dialect.translatePlan` and reject every rendered statement that is empty or comment-only, inside the migration transaction and before any plan DDL [migrator.ts:renderPlan]
 - A statement is executable only if stripping `--` and `/* */` comments leaves non-whitespace [migrator.ts:isExecutable]
 - System tables are created with per-step `dialect.translate` before any read in `migrate`, `plan`, **and** `status` [migrator.ts:migrateImplWith], [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
 - Stored schemas are decoded from JSON with Effect Schema; a corrupt stored row surfaces as `SqlError` naming `Invalid stored schema` rather than throwing [migrator.ts:decodeStoredSchema]
@@ -67,7 +70,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 
 - `buildPlanContext` populates `views` from both desired and stored view collections. A desired view has `stored` and `desired` query shapes plus the desired `properties` list; a stored-only orphan has `desired: null`; a view with no `x-view-query` records `{ query: null }` on that side [migrator.ts:buildPlanContext].
 - `plan` returns `MigrationPlan.notes` from the translated plan when the dialect supplies notes. Empty notes are omitted; SQLite's `plan()` shape changes only for a `dropColumn` plan with synthesized view operations [migrator.ts:planImplWith].
-- `migrate` logs every dialect note at info before the transaction. Notes describe intended operations, not committed ones; read them with the failure log [migrator.ts:migrateImplWith].
+- `migrate` logs every dialect note at info inside the transaction before the plan statements. Notes describe intended operations, not committed ones; read them with the failure log [migrator.ts:migrateImplWith].
 - The migrator runs `TranslatedPlan.validations` after `statements` and before the `_migrations` insert, inside the same transaction. Validation queries are read-only; a failure rolls back the DDL and metadata [migrator.ts:migrateImplWith].
 - `_migrations` still records the abstract `plan.steps`, not the synthesized statements. The notes and debug SQL log expose the synthesized operations [migrator.ts:migrateImplWith].
 
@@ -76,8 +79,17 @@ desired schema passed by the app is "what should exist". The migrator only write
 - PostgreSQL and SQLite can synthesize `DROP VIEW` and `CREATE VIEW` statements around a destructive table change. The migrator passes stored and desired view queries through `TranslatePlanContext.views` [dialect.ts:TranslatePlanContext].
 - The abstract plan still contains the schema differ's view steps. The dialect adds dependent-view statements that the differ does not emit, and returns their names in `TranslatedPlan.notes` [dialect-postgres.ts:translatePlan] [dialect-sqlite.ts:translatePlan].
 - SQLite synthesizes views only for a `dropColumn` plan. It drops affected tracked views in reverse dependency order, recreates desired views in dependency order, and validates declared properties plus `seqId` through `TranslatedPlan.validations`. A stale query or property fails and rolls back [dialect-sqlite.ts:translatePlan].
-- SQLite now detects untracked objects through a read-only `sqlite_master` scan during plan render, before the transaction opens. A rebuilt or dropped object with an untracked dependent view fails preflight naming the views, and so do a recreated view carrying a trigger or an explicit column list, a rebuilt table with a trigger, and a `createView` whose name already exists. A native drop only adds a note naming the untracked dependent: SQLite still fails the statement at execution if the view reads the dropped column and rolls back, and succeeds when it does not. Every connected surviving view, tracked or untracked, is probed inside the transaction through `TranslatedPlan.validations`, so a view broken by the plan or by a catalog change rolls the migration back [dialect-sqlite.ts:translatePlan] [migrator.ts:migrateImplWith].
+- SQLite now detects untracked objects through a read-only `sqlite_master` scan during plan render, inside the migration transaction before any plan DDL. A rebuilt or dropped object with an untracked dependent view fails preflight naming the views, and so do a recreated view carrying a trigger or an explicit column list, a rebuilt table with a trigger, and a `createView` whose name already exists. A native drop only adds a note naming the untracked dependent: SQLite still fails the statement at execution if the view reads the dropped column and rolls back, and succeeds when it does not. Every connected surviving view, tracked or untracked, is probed inside the transaction through `TranslatedPlan.validations`, so a view broken by the plan or by a catalog change rolls the migration back [dialect-sqlite.ts:translatePlan] [migrator.ts:migrateImplWith].
 - A collection kind change (base table to view or view to base table) is pre-existing and unhandled. The PostgreSQL preflight and the differ fail loudly rather than silently reclassifying [schema-diff.ts:diffViewSchemas].
+
+## PostgreSQL migration transaction (issue #29)
+
+- `migrateImplWith` wraps the migration setup, system-table bootstrap, stored-schema read, plan computation, plan render, statements, validations, `_migrations` insert, and `_collections` upsert in one `sql.withTransaction`. A failure rolls all of it back [migrator.ts:migrateImplWith].
+- The setup statements come from `dialect.migrationTransactionSetupSql`. PostgreSQL pins `READ COMMITTED`, takes `pg_advisory_xact_lock(hashtextextended('mira.migrations', 0))`, then sets a five-second transaction-local `lock_timeout` for the DDL. The advisory lock wait is intentional and is not bounded by that timeout; a URL or role `lock_timeout` or `statement_timeout` can cancel it with `55P03` or `57014` [dialect-postgres.ts:postgresDialect] [migrator.ts:migrateImplWith].
+- Two replicas can call `migrate` concurrently. The first takes the lock and applies the plan; the second waits, re-reads `_collections` inside its own transaction, computes no steps, and returns without a `createTable` collision. The lock releases when the transaction commits or rolls back [migrator.ts:migrateImplWith].
+- `planImplWith` and `statusImplWith` run in a transaction and take `dialect.migrationPreviewLockSql` first. A false `acquired` result fails with `MigrationBusyError`; neither preview applies plan steps. SQLite and libSQL omit the preview lock and keep their existing behavior [migrator.ts:planImplWith] [migrator.ts:statusImplWith].
+- `TranslatedPlan.cleanup` still runs after the transaction on both the committed and failed paths. PostgreSQL supplies no cleanup statements [migrator.ts:runCleanup] [dialect-postgres.ts:postgresDialect].
+- `PostgresDatabase.migrateAtStartup: false` disables collection migrations only. The internal stores and shared telemetry run their own idempotent bootstrap DDL on every boot, serialized by the dialect's store advisory lock [app.ts:buildServiceLayer] [dialect-postgres.ts:postgresStoreSql].
 
 ## Side Effects
 
@@ -86,7 +98,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 - Inserts a row into `_migrations` (`id`, `name`, `steps` JSON, `applied_at`) per applied plan [migrator.ts:migrateImplWith]
 - Upserts every desired schema into `_collections` (`name`, `schema` JSON, `updated_at`) inside the same transaction [migrator.ts:migrateImplWith]
 - Reads `SELECT name, schema FROM _collections` in `migrate`, `plan` and `status` [migrator.ts:migrateImplWith], [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
-- `plan` and `status` are read-only with respect to collections but still execute `createSystemTable` DDL, so they mutate the database schema on first use [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
+- `plan` and `status` are read-only with respect to collections but still execute `createSystemTable` DDL inside a transaction, so they mutate the database schema on first use. On PostgreSQL they first take the non-blocking `migrationPreviewLockSql`; a false `acquired` result fails with `MigrationBusyError` instead of waiting behind a running migration, and neither preview applies plan steps [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
 - Runs dialect-declared cleanup statements after the transaction; SQLite now returns an empty cleanup list [migrator.ts:runCleanup]
 - Writes structured log lines at debug/info/warn/error through `Effect.log*` [migrator.ts:migrateImplWith]
 

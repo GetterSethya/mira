@@ -11,6 +11,7 @@ import type {
   Quote,
   RuleSqlDialect,
   StoreSqlCapabilities,
+  TelemetryDialectHooks,
   TranslatePlanContext,
   ViewShape
 } from "./dialect.js"
@@ -32,6 +33,9 @@ const quote: Quote = (name) => `"${name.replaceAll('"', '""')}"`
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const isoFormat = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`
+
+/** One backslash that PostgreSQL treats as the LIKE escape character. */
+const ILIKE_ESCAPE = String.raw`ESCAPE E'\\'`
 
 const castValue = (expr: string, type: FieldValueType) =>
   `${expr}::${type === "number" ? "double precision" : type}`
@@ -65,8 +69,8 @@ export const postgresRuleSql: RuleSqlDialect = {
   timestampDiff,
   caseInsensitiveLike: (left, right, mode) =>
     mode === "prefix"
-      ? `${left} ILIKE (${right} || '%')`
-      : `${left} ILIKE ('%' || ${right} || '%')`,
+      ? `${left} ILIKE (${right} || '%') ${ILIKE_ESCAPE}`
+      : `${left} ILIKE ('%' || ${right} || '%') ${ILIKE_ESCAPE}`,
   castValue
 }
 
@@ -77,7 +81,7 @@ export const postgresRuleSql: RuleSqlDialect = {
  * filter `like` operator keeps the same meaning as on SQLite.
  */
 export const postgresFilterSql: Pick<DialectType, "caseInsensitivePattern"> = {
-  caseInsensitivePattern: (left, right) => `${left} ILIKE ${right}`
+  caseInsensitivePattern: (left, right) => `${left} ILIKE ${right} ${ILIKE_ESCAPE}`
 }
 
 const quoteLiteral = (value: unknown): string => {
@@ -86,7 +90,7 @@ const quoteLiteral = (value: unknown): string => {
   if (typeof value === "number") {
     return Number.isFinite(value) ? String(value) : "NULL"
   }
-  return `'${String(value).replaceAll("'", "''")}'`
+  return `E'${String(value).replaceAll("\\", "\\\\").replaceAll("'", "''")}'`
 }
 
 /** SQLSTATE 23505 is `unique_violation`; the reason tag is a driver fallback. */
@@ -100,6 +104,7 @@ export const isPostgresUniqueViolation = (error: unknown) =>
 export const postgresStoreSql: StoreSqlCapabilities = {
   bootstrapMode: "transaction",
   bootstrapSql: [
+    "SET LOCAL transaction_isolation = 'read committed'",
     "SET LOCAL lock_timeout = '5s'",
     "SELECT pg_advisory_xact_lock(hashtextextended('mira.system-tables', 0))"
   ],
@@ -676,4 +681,54 @@ export const postgresDdlSql: DdlSqlDialect = {
   quoteLiteral,
   indexName: indexNameOf,
   storesBooleanAsInteger: false
+}
+
+const upsertSql = (
+  table: string,
+  record: Readonly<Record<string, unknown>>,
+  conflictKeys: ReadonlyArray<string>
+) => {
+  const keys = Object.keys(record)
+  const columns = keys.map(quote).join(", ")
+  const values = keys.map((key) => quoteLiteral(record[key])).join(", ")
+  const updates = keys
+    .filter((key) => !conflictKeys.includes(key))
+    .map((key) => `${quote(key)} = excluded.${quote(key)}`)
+    .join(", ")
+  const conflict = conflictKeys.map(quote).join(", ")
+  return `INSERT INTO ${quote(table)} (${columns}) VALUES (${values}) ON CONFLICT (${conflict}) ${
+    updates.length > 0 ? `DO UPDATE SET ${updates}` : "DO NOTHING"
+  }`
+}
+
+/**
+ * PostgreSQL telemetry hooks. There are no PRAGMAs and no WAL checkpoint, so
+ * setup and cleanup are empty. The retry predicate is shared with the internal
+ * stores so the SQLSTATE list lives once.
+ */
+export const postgresTelemetry: TelemetryDialectHooks = {
+  setup: [],
+  cleanup: [],
+  isRetryable: postgresStoreSql.isRetryable
+}
+
+/** The composed PostgreSQL dialect used by the migrator and internal stores. */
+export const postgresDialect: DialectType = {
+  ...postgresDdlSql,
+  ...postgresRuleSql,
+  ...postgresFilterSql,
+  placeholder: (index) => `$${index}`,
+  upsert: upsertSql,
+  deleteResult: { _tag: "returning" },
+  transactionProbe: "select-only",
+  store: postgresStoreSql,
+  telemetry: postgresTelemetry,
+  migrationTransactionSetupSql: [
+    "SET LOCAL transaction_isolation = 'read committed'",
+    "SELECT pg_advisory_xact_lock(hashtextextended('mira.migrations', 0))",
+    "SET LOCAL lock_timeout = '5s'"
+  ],
+  migrationPreviewLockSql:
+    'SELECT pg_try_advisory_xact_lock(hashtextextended(\'mira.migrations\', 0)) AS "acquired"',
+  normalizesBigintSeqId: true
 }

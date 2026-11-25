@@ -15,6 +15,28 @@ published by CI.
 
 ## [Unreleased]
 
+### Added
+
+- **PostgreSQL database support.** `PostgresDatabase({ url, maxConnections?,
+  idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
+  Node and Bun through `@effect/sql-pg`. The preset validates `maxConnections`,
+  exposes pool and TLS options, defaults `prepare` to true with `prepare: false`
+  for statement-mode poolers such as PgBouncer, and runs a `SELECT 1` readiness
+  probe so an unreachable server, bad password, or refused TLS handshake fails
+  before the app serves. The composed `postgresDialect` supplies `$n` placeholders,
+  `ON CONFLICT` upserts, `DELETE ... RETURNING`, a `select-only` transaction probe,
+  the PostgreSQL store and telemetry capabilities, and `BIGINT` `seqId`
+  normalization. A driver-isolated `@gettersethya/mira/postgres` subpath exports
+  the app builder, Node platform, local storage, preset, and `Migrator` without
+  the SQLite/libSQL barrel; the main and Bun entries keep all three presets.
+- **PostgreSQL CI and Bun smoke.** A `postgres-e2e` CI job runs a
+  `postgres:17.12-alpine` service with `MIRA_TEST_POSTGRES_URL`, then runs the
+  gated behavior, migration, cursor, batch, and shared-telemetry suites
+  sequentially. `packages/mira/tests/databases/postgres-bun.e2e.ts`
+  (`bun run packages/mira/tests/databases/postgres-bun.e2e.ts`) runs the Bun
+  preset, migrates a collection, inserts, and asserts a native boolean and a
+  restarted `BIGINT` sequence.
+
 ### Fixed
 
 - **Destructive SQLite plans no longer silently break untracked views or discard
@@ -31,14 +53,16 @@ published by CI.
 - **User filter `like` is dialect-aware.** SQLite keeps its ASCII-insensitive
   `LIKE`, while PostgreSQL uses `ILIKE` so the same filter keeps its meaning
   across databases. Telemetry log and span reads share the behavior with
-  collection lists. The pattern stays a bound parameter with no added wildcards
-  or `ESCAPE` clause, and non-ASCII folding still follows the engine and locale.
+  collection lists. The pattern stays a bound parameter with no added wildcards,
+  and both engines add an `ESCAPE` clause (`ESCAPE '\'` on SQLite and
+  `ESCAPE E'\\'` on PostgreSQL) so a backslash escapes `%` and `_`. Non-ASCII
+  folding still follows the engine and locale.
 - **A mid-batch statement failure no longer rolls back already-succeeded entries
   on PostgreSQL.** A failing entry now isolates to its own savepoint instead of
   aborting the whole batch. The liveness probe no longer issues SQLite-specific
   `BEGIN`/`ROLLBACK` on that engine, so it can no longer abort the outer
-  transaction with its cleanup `ROLLBACK`. This is latent #29 contract work; no
-  PostgreSQL preset ships yet.
+  transaction with its cleanup `ROLLBACK`. The PostgreSQL preset ships in this
+  change.
 
 ### Changed
 
@@ -64,7 +88,7 @@ published by CI.
   This required classifier names how a dialect recognizes a primary-key or
   unique-key violation. SQLite-like dialects can spread `sqliteDialect.store`;
   new engines must supply a structured predicate. The PostgreSQL capability
-  object now classifies SQLSTATE `23505` for #29.
+  object now classifies SQLSTATE `23505` for the shipped dialect.
 - **The collection cursor is now opaque `number | string`.** The shipped SQLite
   and libSQL presets keep returning numbers. PostgreSQL `BIGINT` cursors are
   canonical decimal strings, because a JSON number cannot represent every
@@ -85,27 +109,67 @@ published by CI.
   unchanged because `CollectionServiceDeps` already includes `Dialect`.
 - **PostgreSQL batches now follow the documented per-entry failure policy.**
   A statement-level failure isolates to its entry instead of being accidentally
-  all-or-nothing, so entries that already succeeded still commit. No PostgreSQL
+  all-or-nothing, so entries that already succeeded still commit. The PostgreSQL
   preset ships in this change.
 - **A failed savepoint release after a successful entry now aborts the batch.**
   The wrapper-failure guard compares the guarded exit's cause with the entry's
   own cause; when they differ the batch aborts without probing instead of
   settling only that entry as a failure while its row commits.
-- **A fast-path failure after a successful write commits that row on PostgreSQL
-  once the preset ships.** This hazard already exists on SQLite and was
-  previously masked on PostgreSQL by the misfiring probe; the single-entry fast
-  path has no savepoint.
+- **A fast-path failure after a successful write commits that row on PostgreSQL.**
+  This hazard already exists on SQLite and was previously masked on PostgreSQL by
+  the misfiring probe; the single-entry fast path has no savepoint.
 - **libSQL inherits the SQLite probe declaration.** Local and remote libSQL use
   `nested-begin` through `sqliteDialect`, unchanged by this work.
+- **Rule, filter, and view types are PostgreSQL-safe without changing normal
+  SQLite rows.** Rule comparisons of non-text columns to string literals now cast
+  the literal to the column type and leave the column uncast, so `age >= "18"`
+  compares numerically; `FieldValueType` gains `"bigint"` for `seqId` and
+  PostgreSQL renders `::bigint`. The user filter compiler casts comparison and
+  `IN` values to the field type, casts `like` patterns and non-text `like` columns
+  to text, accepts booleans (encoded as `0`/`1` on SQLite), and validates
+  malformed integer, number, boolean, and bigint strings as 422. A view row is
+  decoded by its declared field types, including `BIGINT` `COUNT`/`SUM`, numeric
+  strings, booleans, and JSON. SQLite SQL is unchanged unless a filter value was
+  previously malformed and silently coerced.
+- **`seqId` normalization at the collection decode boundary.** PostgreSQL `BIGINT`
+  decodes to a JavaScript bigint, which `JSON.stringify` rejects. The decoder
+  converts a top-level or nested-`expand` `seqId` to a canonical decimal string
+  when the dialect sets `normalizesBigintSeqId`. SQLite and libSQL keep the number
+  and the identity fast path.
+- **PostgreSQL text literals render as `E'...'`.** Backslashes and single quotes
+  are escaped independently of `standard_conforming_strings`, so schema JSON in
+  `_collections` and any other DDL literal stay safe. Null, boolean, and numeric
+  literals are unchanged.
+- **`like` adds an `ESCAPE` clause on both engines.** SQLite renders
+  `ESCAPE '\'` and PostgreSQL renders `ESCAPE E'\\'`, so a backslash escapes `%`
+  and `_` instead of matching a literal backslash. Patterns without a backslash
+  are unchanged.
+- **Migrations run in one transaction with a PostgreSQL advisory lock.**
+  `Migrator.migrate` now runs `migrationTransactionSetupSql`, the system-table
+  bootstrap, the stored-schema read, the plan render, the labeled DDL, the
+  `_migrations` row, and the `_collections` upsert in one transaction. PostgreSQL
+  takes `pg_advisory_xact_lock` after pinning `READ COMMITTED`, so concurrent
+  replicas serialize. `Migrator.plan` and `Migrator.status` take a non-blocking
+  preview lock and fail with `MigrationBusyError` instead of waiting or racing
+  the bootstrap. SQLite and libSQL keep their behavior and omit the preview lock.
+  `PostgresDatabase.migrateAtStartup: false` supports a single collection
+  migration job; internal store and shared telemetry bootstrap DDL still runs on
+  each boot.
+- **Telemetry retention deletes by a `seqId` subquery.** Retention no longer
+  selects ids and converts them to `Number`. A `returning` dialect runs
+  `DELETE ... WHERE "seqId" IN (SELECT "seqId" ... LIMIT ?) RETURNING "seqId"`
+  and counts the returned rows; an `affectedRows` dialect runs the same delete
+  without `RETURNING` and reads the affected count. The read cursor stays numeric
+  and exact only below 2^53; retention is not affected by that ceiling.
 
 - **Internal PostgreSQL DDL capability and plan notes.** `TranslatePlanContext`
   gains a required `views` map with stored and desired query shapes.
   `MigrationPlan` and `TranslatedPlan` gain optional `notes`.
   `postgresDdlSql` renders identity columns, boolean and real types, native
   `ALTER COLUMN`, 63-byte-safe index names, and dependent-view drops and
-  recreates. This is internal plumbing for #29. SQLite and libSQL behavior is
-  unchanged for plans without a `dropColumn`; see the SQLite dependent-view fix
-  below.
+  recreates. This is the PostgreSQL DDL used by the shipped dialect. SQLite and
+  libSQL behavior is unchanged for plans without a `dropColumn`; see the SQLite
+  dependent-view fix below.
 - **Internal auth, session, rate-limit, config, and cron stores are dialect-aware.**
   `DialectType.store` supplies bootstrap locking, a zero-or-one-row column probe,
   request-path lock timeout, and retry classification. SQLite and libSQL keep

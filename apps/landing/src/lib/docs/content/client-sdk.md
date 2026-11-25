@@ -71,7 +71,7 @@ Use `isRateLimited(error)` or `error.status === 429` to detect a backoff respons
 
 ## Query options
 
-`getList` accepts `filter`, `sort`, `order`, `cursor`, `limit`, `select`, `expand`, and `retryOptions`. The filter is a **callback** that receives the typed builder, not a prebuilt node. The `cursor` value is whatever the previous page returned as `nextCursor`, and the client sends it as the `after` parameter. The cursor is opaque: the shipped SQLite and libSQL presets return a number, PostgreSQL returns a decimal string for `BIGINT`, and you pass it back unchanged. Sorted pagination is supported for non-nullable sort fields. Nullable sorted cursors and cursors whose row was deleted return a `422` validation error.
+`getList` accepts `filter`, `sort`, `order`, `cursor`, `limit`, `select`, `expand`, and `retryOptions`. The filter is a **callback** that receives the typed builder, not a prebuilt node. The `cursor` value is whatever the previous page returned as `nextCursor`, and the client sends it as the `after` parameter. The cursor is opaque: the shipped SQLite and libSQL presets return a number, PostgreSQL returns a decimal string for `BIGINT`, and you pass it back unchanged. A numeric cursor is exact only below 2^53. Sorted pagination is supported for non-nullable sort fields. Nullable sorted cursors and cursors whose row was deleted return a `422` validation error. Text sort order follows the database collation; ASCII values match SQLite, while mixed-case and non-ASCII order follow PostgreSQL's locale.
 
 ```ts
 let cursor: number | string | null = null

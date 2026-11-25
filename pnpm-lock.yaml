@@ -86,12 +86,6 @@ importers:
       '@types/bun':
         specifier: ^1.4.2
         version: 1.4.4
-      '@types/smtp-server':
-        specifier: ^3.5.13
-        version: 3.5.13
-      smtp-server:
-        specifier: ^3.21.4
-        version: 3.21.4
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -153,6 +147,34 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.2(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.3)(yaml@2.9.1)
+
+  packages/bun-e2e:
+    dependencies:
+      '@effect/sql-sqlite-bun':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
+      '@gettersethya/mira':
+        specifier: workspace:*
+        version: link:../mira
+      '@gettersethya/mira-dashboard':
+        specifier: workspace:*
+        version: link:../dashboard
+      effect:
+        specifier: 4.0.0
+        version: 4.0.0
+    devDependencies:
+      '@types/bun':
+        specifier: ^1.4.2
+        version: 1.4.4
+      '@types/smtp-server':
+        specifier: ^3.5.13
+        version: 3.5.13
+      smtp-server:
+        specifier: ^3.21.4
+        version: 3.21.4
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/client:
     dependencies:
@@ -348,6 +370,9 @@ importers:
       '@effect/sql-libsql':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
+      '@effect/sql-pg':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)
       '@effect/sql-sqlite-bun':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
@@ -376,9 +401,6 @@ importers:
         specifier: ^10.5.0
         version: 10.5.0
     devDependencies:
-      '@effect/sql-pg':
-        specifier: 4.0.0
-        version: 4.0.0(effect@4.0.0)
       '@effect/vitest':
         specifier: ^4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.3(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.1)))

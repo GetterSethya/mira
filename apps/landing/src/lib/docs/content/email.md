@@ -35,7 +35,7 @@ Mira.builder()
 
 Without `.email(...)` Mira uses a no-op `EmailService`: `enabled` is `false`, `send` fails with `EmailNotConfiguredError`, and email-dependent request endpoints return `503 email_not_configured`. A collection that requires login OTP fails at boot instead of silently downgrading to password-only.
 
-Every send also passes through the rate-limit engine. The default store is the SQL-backed store. Today it runs on SQLite and libSQL; PostgreSQL support lands with #29. The default budgets are listed under [Rate limits and cost controls](#rate-limits-and-cost-controls). To use another store, pass a self-contained `RateLimitStore` layer:
+Every send also passes through the rate-limit engine. The default store is the SQL-backed store. It runs on SQLite, libSQL, and PostgreSQL. The default budgets are listed under [Rate limits and cost controls](#rate-limits-and-cost-controls). To use another store, pass a self-contained `RateLimitStore` layer:
 
 ```typescript
 Mira.builder()
@@ -48,7 +48,7 @@ Mira.builder()
   })
 ```
 
-The email code depends on the `RateLimiter` service, not on a dialect. The in-memory store is for tests and isolated processes. Production should use the SQL-backed default or a shared store. On SQLite and libSQL the SQL store is single-node.
+The email code depends on the `RateLimiter` service, not on a dialect. The in-memory store is for tests and isolated processes. Production should use the SQL-backed default or a shared store. The SQL store is single-node on SQLite and libSQL; row-locked on PostgreSQL.
 
 `SmtpEmail` does not import a mail library into the core service. The platform supplies a `MailTransport`. The Node preset is the only implementation that imports `nodemailer`, so the `EmailService` contract stays portable.
 
@@ -245,7 +245,7 @@ Behind a plain L7 proxy every user shares the proxy's bucket. Preserve the peer 
 
 A missing peer address skips the IP policy and logs `rate_limit.ip_unavailable`. It never collapses all callers into one `"unknown"` bucket. IPv4-mapped IPv6 collapses to IPv4, and IPv6 buckets by `/64`.
 
-The SQL store is single-node on SQLite and libSQL. A multi-instance deployment needs a shared database or a shared `RateLimitStore`. The email code does not change when you swap it.
+The SQL store is single-node on SQLite and libSQL; row-locked on PostgreSQL. A multi-instance deployment needs a shared database or a shared `RateLimitStore`. The email code does not change when you swap it.
 
 ## Plugins
 

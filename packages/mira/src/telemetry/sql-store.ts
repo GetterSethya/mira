@@ -177,7 +177,9 @@ const filterParts = (
     const compiled = yield* filterNodeToWhereClause(filter, schema, collection, {
       quoteIdentifier: dialect.quoteIdentifier,
       caseInsensitivePattern: (left, right) =>
-        dialect.caseInsensitivePattern(left, right)
+        dialect.caseInsensitivePattern(left, right),
+      castValue: dialect.castValue,
+      encodeValue: (_field, value) => value
     })
     return { where: compiled.sql, params: compiled.params }
   })
@@ -360,30 +362,30 @@ const deleteBatch = (
       )
     }
 
+    const returning = strategy._tag === "returning" ? ` RETURNING ${q("seqId")}` : ""
+    const statement =
+      `DELETE FROM ${q(table)} WHERE ${q("seqId")} IN (` +
+      `SELECT ${q("seqId")} FROM ${q(table)} WHERE ${q("created")} < ? ` +
+      `ORDER BY ${q("seqId")} LIMIT ?)${returning}`
+    const params = [cutoff, RETENTION_BATCH_SIZE]
+
     let deleted = 0
     for (;;) {
-      const ids = yield* run<{ seqId: number | string }>(
-        sql,
-        dialect,
-        `SELECT ${q("seqId")} FROM ${q(table)} WHERE ${q("created")} < ? ORDER BY ${q("seqId")} LIMIT ${RETENTION_BATCH_SIZE}`,
-        [cutoff]
-      ).pipe(Effect.mapError((error) => mapStoreError("deleteOlderThan", error)))
-
-      if (ids.length === 0) break
-
-      const batchIds = ids.map((row) => asNumber(row.seqId))
-      const returning = strategy._tag === "returning" ? ` RETURNING ${q("seqId")}` : ""
-      const rows = yield* run<Record<string, unknown>>(
-        sql,
-        dialect,
-        `DELETE FROM ${q(table)} WHERE ${q("seqId")} IN (${inList(batchIds)})${returning}`,
-        batchIds
-      ).pipe(Effect.mapError((error) => mapStoreError("deleteOlderThan", error)))
-
-      const count =
-        strategy._tag === "returning"
-          ? rows.length
-          : Option.getOrElse(strategy.read(rows), () => 0)
+      let count = 0
+      if (strategy._tag === "returning") {
+        const rows = yield* run<{ seqId: number | string }>(
+          sql,
+          dialect,
+          statement,
+          params
+        ).pipe(Effect.mapError((error) => mapStoreError("deleteOlderThan", error)))
+        count = rows.length
+      } else {
+        const raw = yield* sql.unsafe(rewritePlaceholders(statement, dialect), params).raw.pipe(
+          Effect.mapError((error) => mapStoreError("deleteOlderThan", error))
+        )
+        count = Option.getOrElse(strategy.read(raw), () => 0)
+      }
 
       deleted += count
 
