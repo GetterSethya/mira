@@ -1,5 +1,8 @@
 import type { CollectionSchema } from "@gettersethya/mira-client"
-import type { LogLevel } from "effect"
+import type { Effect, LogLevel } from "effect"
+import type { SqlError } from "effect/sql"
+
+import type { ParameterizedStatement, TranslatePlanContext } from "@/dialect/dialect.js"
 
 /** SQL column type at the database level. Maps from the JSON Schema `type` field. */
 export type ColumnType = "text" | "integer" | "real" | "boolean"
@@ -87,6 +90,27 @@ export type MigrateOptions = {
    * Shared telemetry uses `_telemetry_migrations`.
    */
   migrationsTable?: string
+}
+
+/**
+ * The statement/query surface the migrator uses.
+ *
+ * Both modes build one: the transactional executor wraps the `SqlClient`, and
+ * the statement executor wraps the reserved connection.
+ */
+export type MigrationExecutor = {
+  readonly run: (statement: string) => Effect.Effect<void, SqlError.SqlError>
+  readonly runParameterized: (
+    statement: ParameterizedStatement
+  ) => Effect.Effect<void, SqlError.SqlError>
+  readonly query: TranslatePlanContext["readonlyQuery"]
+}
+
+/** A statement-mode executor that owns transaction control on one connection. */
+export type MigrationRunner = MigrationExecutor & {
+  readonly begin: () => Effect.Effect<void, SqlError.SqlError>
+  readonly commit: () => Effect.Effect<void, SqlError.SqlError>
+  readonly rollback: () => Effect.Effect<void, SqlError.SqlError>
 }
 
 /** Maps a numeric log level to an Effect `LogLevel`. Defaults to `Info` for unknown values. */

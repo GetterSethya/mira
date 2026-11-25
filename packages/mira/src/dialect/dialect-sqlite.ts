@@ -1031,6 +1031,7 @@ export const sqliteStoreSql: StoreSqlCapabilities = {
 }
 
 export const sqliteDialect: DialectType = {
+  migrationModel: { kind: "transaction" },
   storesBooleanAsInteger: true,
   // SQLite 3.35+ supports DELETE ... RETURNING on both the Node and Bun drivers.
   deleteResult: { _tag: "returning" },

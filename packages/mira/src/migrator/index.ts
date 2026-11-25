@@ -2,7 +2,14 @@ export { Migrator, MigratorLive, SYSTEM_TABLE_STEPS, systemTableSteps } from "./
 export { computePlan, diffSchemas, propertyToColumnType, schemaToColumns } from "./schema-diff.js"
 export type { ColumnDef, ColumnType, MigrateOptions, MigrationPlan, MigrationStep, NamedSchema } from "./types.js"
 export { toEffectLogLevel } from "./types.js"
-export type { DeleteResultStrategy, DialectType } from "@/dialect/dialect.js"
+export type {
+  DeleteResultStrategy,
+  DialectType,
+  MigrationDialect,
+  MigrationModel,
+  ParameterizedStatement,
+  StatementMigrationDialect
+} from "@/dialect/dialect.js"
 export { Dialect } from "@/dialect/dialect.js"
 export { postgresDialect } from "@/dialect/dialect-postgres.js"
 export { sqliteDialect } from "@/dialect/dialect-sqlite.js"
