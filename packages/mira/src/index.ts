@@ -98,8 +98,12 @@ export { sqliteDialect } from "./dialect/dialect-sqlite.js"
 export type {
   DialectType,
   FieldValueType,
+  MigrationDialect,
+  MigrationModel,
+  ParameterizedStatement,
   Quote,
   RuleSqlDialect,
+  StatementMigrationDialect,
   TransactionProbeStrategy
 } from "./dialect/dialect.js"
 export type { TimestampUnit } from "@gettersethya/mira-client"

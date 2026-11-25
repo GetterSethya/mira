@@ -66,6 +66,14 @@ published by CI.
 
 ### Changed
 
+- **The migrator has a catalog-guarded statement mode for engines where DDL
+  commits implicitly.** `DialectType.migrationModel` selects `transaction` or
+  `statement`. Statement mode reserves one connection, applies DDL outside a
+  transaction, checks `information_schema` before and after, retries transient
+  conflicts, and writes `_migrations` and `_collections` last in one
+  parameterized transaction. `plan` and `status` are read-only on those engines.
+  The required `migrationModel` field is a source-breaking addition for external
+  dialect implementations. MySQL/MariaDB support itself is still pending #30.
 - **`TranslatePlanContext` gains the guarded `readonlyQuery` executor and
   `translatePlan`'s error channel includes `SqlError`.** The context type is not
   root-exported; the change is source-compatible through the exported

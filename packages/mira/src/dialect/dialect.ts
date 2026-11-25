@@ -10,6 +10,12 @@ import { transformSqlCode } from "@/sql-text.js"
 /** Wraps an identifier in the dialect's quoting characters. */
 export type Quote = (name: string) => string
 
+/** A SQL string with bound parameters for a driver connection. */
+export type ParameterizedStatement = {
+  readonly sql: string
+  readonly params: ReadonlyArray<unknown>
+}
+
 /** Schema value types used by typed rule comparisons. */
 export type FieldValueType = "text" | "integer" | "number" | "boolean" | "bigint"
 
@@ -178,7 +184,51 @@ export type TranslatedPlan = {
    * the abstract plan does not list, such as dependent-view drops and creates.
    */
   readonly notes?: ReadonlyArray<string>
+  /**
+   * Indices into the input steps that the catalog already satisfies. A
+   * statement-mode dialect must supply it so the migrator can evaluate the
+   * destructive gate against pending steps only.
+   */
+  readonly skipped?: ReadonlyArray<number>
 }
+
+/**
+ * How the migrator applies a plan.
+ *
+ * `transaction` is the existing single-transaction path. `statement` is for
+ * engines that commit DDL implicitly: it reserves one connection, applies
+ * statements outside a transaction, verifies the catalog, and writes metadata
+ * last.
+ */
+export type MigrationModel =
+  | { readonly kind: "transaction" }
+  | {
+      readonly kind: "statement"
+      /** Returns one row when the table exists. */
+      readonly systemTableExistsSql: (table: string) => string
+      /** Classifies a failed statement as safe to retry after a fresh render. */
+      readonly isRetryableConflict: (error: unknown) => boolean
+      /** Transaction control statements for the reserved connection. */
+      readonly transaction: {
+        readonly beginSql: string
+        readonly commitSql: string
+        readonly rollbackSql: string
+      }
+      /**
+       * Session settings for the reserved migration connection. The migrator
+       * reads the previous values, applies `setupSql`, and runs `restoreSql` on
+       * the same connection in the cleanup path.
+       */
+      readonly session?: {
+        readonly readSql: string
+        readonly setupSql: ReadonlyArray<string>
+        /** Session settings for a read-only preview. */
+        readonly previewSetupSql?: ReadonlyArray<string>
+        readonly restoreSql: (
+          previous: Readonly<Record<string, unknown>>
+        ) => ReadonlyArray<string>
+      }
+    }
 
 /**
  * Interface a SQL dialect must implement to translate abstract `MigrationStep` values
@@ -271,10 +321,29 @@ export type DialectType = {
     record: Readonly<Record<string, unknown>>,
     conflictKeys: ReadonlyArray<string>
   ) => string
+  /**
+   * Parameterized form of {@link upsert}. A statement-mode dialect must supply
+   * it so metadata JSON is bound instead of escaped.
+   */
+  readonly upsertStatement?: (
+    table: string,
+    record: Readonly<Record<string, unknown>>,
+    conflictKeys: ReadonlyArray<string>
+  ) => ParameterizedStatement
+  /**
+   * Verifies the physical catalog after a statement-mode apply. A statement
+   * dialect must supply it; transactional dialects omit it.
+   */
+  readonly verifyPlan?: (
+    steps: ReadonlyArray<MigrationStep>,
+    ctx: TranslatePlanContext
+  ) => Effect.Effect<void, UnsupportedMigrationStepError | SqlError.SqlError>
   /** Capabilities used by the internal SQL stores. */
   readonly store: StoreSqlCapabilities
   /** Optional telemetry connection and error-classification hooks. */
   readonly telemetry?: TelemetryDialectHooks
+  /** How the migrator applies a plan. Required so no dialect inherits a model. */
+  readonly migrationModel: MigrationModel
   /**
    * Statements the migrator runs first inside the migration transaction,
    * before it creates the system tables, reads the stored schemas, and renders
@@ -296,6 +365,12 @@ export type DialectType = {
    */
   readonly migrationPreviewLockSql?: string
   /**
+   * Release statement for a session-scoped preview lock. A statement-mode
+   * dialect that supplies {@link migrationPreviewLockSql} must supply this so
+   * the preview can release the lock on the same connection.
+   */
+  readonly migrationPreviewUnlockSql?: string
+  /**
    * Whether the collection decoder normalizes a `bigint` `seqId` to a
    * canonical decimal string.
    *
@@ -304,6 +379,28 @@ export type DialectType = {
    * fast path.
    */
   readonly normalizesBigintSeqId?: boolean
+}
+
+/** The dialect surface the migrator needs. */
+export type MigrationDialect = Pick<
+  DialectType,
+  | "translatePlan"
+  | "translate"
+  | "quoteIdentifier"
+  | "upsert"
+  | "upsertStatement"
+  | "verifyPlan"
+  | "migrationModel"
+  | "migrationTransactionSetupSql"
+  | "migrationPreviewLockSql"
+  | "migrationPreviewUnlockSql"
+>
+
+/** A statement-mode dialect with the capabilities that mode requires. */
+export type StatementMigrationDialect = MigrationDialect & {
+  readonly migrationModel: Extract<MigrationModel, { kind: "statement" }>
+  readonly upsertStatement: NonNullable<DialectType["upsertStatement"]>
+  readonly verifyPlan: NonNullable<DialectType["verifyPlan"]>
 }
 
 /** Narrow dialect view used by rule compilation, caching, and cache tags. */

@@ -26,8 +26,11 @@ desired schema passed by the app is "what should exist". The migrator only write
 ## Interface
 
 - `Migrator` — `Context.Service` tag exposing `migrate`, `plan`, `status`; `status`'s error channel is `MigrationError` so the PostgreSQL preview can report `MigrationBusyError` [migrator.ts:Migrator]
-- `MigratorLive` — `Layer.effect` implementation requiring `SqlClient` and `Dialect`; applies `References.MinimumLogLevel` from `options.logLevel` per call [migrator.ts:MigratorLive]
-- `SYSTEM_TABLE_STEPS` — the `createSystemTable` steps that bootstrap `_collections` (`name`, `schema`, `updated_at`) and `_migrations` (`id`, `name`, `steps`, `applied_at`) [migrator.ts:SYSTEM_TABLE_STEPS]
+- `MigratorLive` - `Layer.effect` implementation requiring `SqlClient` and `Dialect`; applies `References.MinimumLogLevel` from `options.logLevel` per call [migrator.ts:MigratorLive]
+- `makeMigratorLive` - internal test factory for a narrow `MigrationDialect`; not re-exported by the barrel [migrator.ts:makeMigratorLive]
+- (type) `MigrationExecutor` - `run`, `runParameterized`, `query`; both modes build one [types.ts:MigrationExecutor]
+- (type) `MigrationRunner` - a statement-mode executor with `begin`, `commit`, `rollback` [types.ts:MigrationRunner]
+- `SYSTEM_TABLE_STEPS` - the `createSystemTable` steps that bootstrap `_collections` (`name`, `schema`, `updated_at`) and `_migrations` (`id`, `name`, `steps`, `applied_at`) [migrator.ts:SYSTEM_TABLE_STEPS]
 - `computePlan` — builds the full `MigrationPlan` for a schema set, optionally dropping collections absent from the desired set [schema-diff.ts:computePlan]
 - `diffSchemas` — per-collection diff; pass `stored = null` to get a `createTable` plus its `createIndex` steps [schema-diff.ts:diffSchemas]
 - `isDestructiveStep` — classifies one step as data-losing/rewriting (not re-exported by the barrel) [schema-diff.ts:isDestructiveStep]
@@ -38,7 +41,8 @@ desired schema passed by the app is "what should exist". The migrator only write
 - `UnsupportedMigrationStepError` — tagged error for a step the dialect cannot render (not re-exported by the barrel) [errors.ts:UnsupportedMigrationStepError]
 - `InvalidMigrationStatementError` — tagged error for a rendered statement that contains no SQL (not re-exported by the barrel) [errors.ts:InvalidMigrationStatementError]
 - (type) `MigrationError` — `SqlError.SqlError | UnsupportedMigrationStepError | InvalidMigrationStatementError | MigrationBusyError` [errors.ts:MigrationError]
-- `MigrationBusyError` — tagged error (`operation: "plan" | "status"`) raised when a PostgreSQL preview cannot acquire the non-blocking advisory lock [errors.ts:MigrationBusyError]
+- `MigrationBusyError` - tagged error (`operation: "plan" | "status"`) raised when a PostgreSQL preview cannot acquire the non-blocking advisory lock [errors.ts:MigrationBusyError]
+- `MigrationRollbackError` - tagged defect raised when a statement-mode metadata rollback fails; not part of `MigrationError` [errors.ts:MigrationRollbackError]
 - (type) `ColumnType`, `ColumnDef` — physical column type and DDL description [types.ts:ColumnDef]
 - (type) `IndexShape`, `TableShape`, `TableShapes` — index identity, table columns+indexes, and the stored/desired pair given to `translatePlan` [types.ts:TableShapes]
 - (type) `MigrationStep` — the 12-kind DDL union (`createTable`, `dropTable`, `renameTable`, `addColumn`, `dropColumn`, `renameColumn`, `alterColumn`, `createIndex`, `dropIndex`, `createSystemTable`, `createView`, `dropView`) [types.ts:MigrationStep]
@@ -54,9 +58,9 @@ desired schema passed by the app is "what should exist". The migrator only write
 - Stored schemas are decoded from JSON with Effect Schema; a corrupt stored row surfaces as `SqlError` naming `Invalid stored schema` rather than throwing [migrator.ts:decodeStoredSchema]
 - A plan with zero steps returns early and logs "nothing to migrate" — `_collections` is not rewritten [migrator.ts:migrateImplWith]
 - When `plan.destructive` is true and `allowDestructive` is falsy, the entire plan is skipped (all-or-nothing, never partially applied) and each destructive step is logged [migrator.ts:migrateImplWith]
-- `_migrations` insert, the `_collections` upsert, the plan statements, and the dialect validation queries run inside one `sql.withTransaction`; a failure rolls all of them back [migrator.ts:migrateImplWith]
+- In transactional mode, the `_migrations` insert, the `_collections` upsert, the plan statements, and the dialect validation queries run inside one `sql.withTransaction`; a failure rolls all of them back. Statement mode keeps only the metadata writes in one short transaction after the DDL [migrator.ts:migrateTransactional] [migrator.ts:writeStatementMetadata]
 - Cleanup statements run through `Effect.ensuring`, so they execute on both the committed and rolled-back path; cleanup failures are logged with `Effect.logWarning` and never propagated [migrator.ts:runCleanup]
-- The `_collections` upsert happens inside the transaction, after the `_migrations` insert, and only for a plan that was not skipped [migrator.ts:migrateImplWith]
+- In transactional mode, the `_collections` upsert happens inside the transaction, after the `_migrations` insert, and only for a plan that was not skipped. Statement mode writes both with `upsertStatement` in one parameterized transaction [migrator.ts:migrateTransactional] [migrator.ts:writeStatementMetadata]
 - Steps are ordered globally by `STEP_PRIORITY` — `dropView` → `dropIndex` → table changes → `createIndex` → `createView` — so plan ordering never depends on collection declaration order [schema-diff.ts:STEP_PRIORITY]
 - A column is considered changed when its `type`, `nullable`, or `default` differs; such a change emits a single `alterColumn` carrying both `from` and `to` [schema-diff.ts:diffSchemas]
 - `x-system` columns present in stored but absent from desired are never dropped [schema-diff.ts:diffSchemas]
@@ -84,21 +88,35 @@ desired schema passed by the app is "what should exist". The migrator only write
 
 ## PostgreSQL migration transaction (issue #29)
 
-- `migrateImplWith` wraps the migration setup, system-table bootstrap, stored-schema read, plan computation, plan render, statements, validations, `_migrations` insert, and `_collections` upsert in one `sql.withTransaction`. A failure rolls all of it back [migrator.ts:migrateImplWith].
+- `migrateTransactional` wraps the migration setup, system-table bootstrap, stored-schema read, plan computation, plan render, statements, validations, `_migrations` insert, and `_collections` upsert in one `sql.withTransaction`. A failure rolls all of it back [migrator.ts:migrateTransactional].
 - The setup statements come from `dialect.migrationTransactionSetupSql`. PostgreSQL pins `READ COMMITTED`, takes `pg_advisory_xact_lock(hashtextextended('mira.migrations', 0))`, then sets a five-second transaction-local `lock_timeout` for the DDL. The advisory lock wait is intentional and is not bounded by that timeout; a URL or role `lock_timeout` or `statement_timeout` can cancel it with `55P03` or `57014` [dialect-postgres.ts:postgresDialect] [migrator.ts:migrateImplWith].
 - Two replicas can call `migrate` concurrently. The first takes the lock and applies the plan; the second waits, re-reads `_collections` inside its own transaction, computes no steps, and returns without a `createTable` collision. The lock releases when the transaction commits or rolls back [migrator.ts:migrateImplWith].
 - `planImplWith` and `statusImplWith` run in a transaction and take `dialect.migrationPreviewLockSql` first. A false `acquired` result fails with `MigrationBusyError`; neither preview applies plan steps. SQLite and libSQL omit the preview lock and keep their existing behavior [migrator.ts:planImplWith] [migrator.ts:statusImplWith].
 - `TranslatedPlan.cleanup` still runs after the transaction on both the committed and failed paths. PostgreSQL supplies no cleanup statements [migrator.ts:runCleanup] [dialect-postgres.ts:postgresDialect].
 - `PostgresDatabase.migrateAtStartup: false` disables collection migrations only. The internal stores and shared telemetry run their own idempotent bootstrap DDL on every boot, serialized by the dialect's store advisory lock [app.ts:buildServiceLayer] [dialect-postgres.ts:postgresStoreSql].
 
+## Statement mode (issue #68)
+
+- `migrateImplWith` dispatches on `DialectType.migrationModel.kind`. Transactional dialects keep the existing path; `"statement"` dialects use `migrateStatement` [migrator.ts:migrateImplWith].
+- `migrateStatement` reserves one `SqlClient.reserve` connection for the whole migration, reads the previous session values, applies `session.setupSql`, acquires the #69 lock at that point when #69 supplies it, and runs every query, DDL statement, transaction control statement, and cleanup statement through a `MigrationRunner` built from that connection [migrator.ts:migrateStatement] [migrator.ts:connectionExecutor] [migrator.ts:makeRunner].
+- The system table bootstrap is rendered through `dialect.translatePlan` with an empty table and view map, so the catalog guard validates `_collections` and `_migrations` before the read [migrator.ts:migrateStatement].
+- The apply loop renders the plan up to six total times. A step whose catalog shape already matches is skipped and its index appears in `TranslatedPlan.skipped`. The destructive gate runs on the pending steps only, so an already-applied destructive step does not block a stale-metadata boot [migrator.ts:migrateStatement].
+- On a typed `SqlError`, the loop calls `dialect.migrationModel.isRetryableConflict`. A retry backs off 200 ms, 400 ms, 800 ms, 1.6 s, then 2 s, and re-renders. The growing gap lets a competing boot settle one more statement per attempt, because a retry converges at most one conflicting statement. A non-retryable error is surfaced [migrator.ts:migrateStatement] [migrator.ts:statementRetryBackoff].
+- After the loop, `dialect.verifyPlan` re-reads the catalog and rejects any pending step. `TranslatedPlan.validations` from the final render then run. Only after both does `writeStatementMetadata` open one parameterized `_migrations` + `_collections` transaction on the reserved connection [migrator.ts:writeStatementMetadata].
+- A failed metadata write always attempts `ROLLBACK`. A failed rollback dies with `MigrationRollbackError`; Effect SQL has no discard API, so the boot must fail and the pool must close [migrator.ts:writeStatementMetadata] [errors.ts:MigrationRollbackError].
+- Cleanup and `session.restoreSql` run in `Effect.ensuring` inside the reserved scope. Session restore failures log at error; cleanup failures log at warning [migrator.ts:migrateStatement] [migrator.ts:runSessionRestore] [migrator.ts:runCleanup].
+- `plan` and `status` reserve a connection, read `session.readSql`, apply `session.previewSetupSql`, take and release the preview lock pair when supplied, and never bootstrap `_collections` or `_migrations`. `status` catches a preview render failure and still returns the `diffSchemas` status [migrator.ts:withStatementPreview] [migrator.ts:planStatement] [migrator.ts:statusStatement].
+- `makeMigratorLive(dialect)` is the internal test seam for a narrow `MigrationDialect`; the barrel exports `MigratorLive` only [migrator.ts:makeMigratorLive].
+- #69 owns the session lock and the preview lock values. #71 owns the final text mapping and its physical reconciliation. #72 owns the runtime transaction probe.
+
 ## Side Effects
 
-- Executes each rendered DDL statement with `sql.unsafe`, logging `SQL:` at debug and the failing statement at error [migrator.ts:runStatements]
+- Executes each rendered DDL statement through the migration executor (`sql.unsafe` in transactional mode, the reserved connection in statement mode), logging `SQL:` at debug and the failing statement at error [migrator.ts:runStatements]
 - Uses `sql.withTransaction`; the migrator no longer issues raw `BEGIN`, `COMMIT`, or `ROLLBACK` statements [migrator.ts:migrateImplWith]
 - Inserts a row into `_migrations` (`id`, `name`, `steps` JSON, `applied_at`) per applied plan [migrator.ts:migrateImplWith]
 - Upserts every desired schema into `_collections` (`name`, `schema` JSON, `updated_at`) inside the same transaction [migrator.ts:migrateImplWith]
 - Reads `SELECT name, schema FROM _collections` in `migrate`, `plan` and `status` [migrator.ts:migrateImplWith], [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
-- `plan` and `status` are read-only with respect to collections but still execute `createSystemTable` DDL inside a transaction, so they mutate the database schema on first use. On PostgreSQL they first take the non-blocking `migrationPreviewLockSql`; a false `acquired` result fails with `MigrationBusyError` instead of waiting behind a running migration, and neither preview applies plan steps [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
+- In transactional mode, `plan` and `status` are read-only with respect to collections but still execute `createSystemTable` DDL inside a transaction, so they mutate the database schema on first use. In statement mode they reserve a connection, probe `_collections`, and never run DDL. On PostgreSQL they first take the non-blocking `migrationPreviewLockSql`; a false `acquired` result fails with `MigrationBusyError` instead of waiting behind a running migration, and neither preview applies plan steps [migrator.ts:planImplWith], [migrator.ts:statusImplWith]
 - Runs dialect-declared cleanup statements after the transaction; SQLite now returns an empty cleanup list [migrator.ts:runCleanup]
 - Writes structured log lines at debug/info/warn/error through `Effect.log*` [migrator.ts:migrateImplWith]
 

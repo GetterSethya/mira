@@ -40,6 +40,17 @@ export class MigrationBusyError extends Data.TaggedError("MigrationBusyError")<{
   readonly message: string
 }> {}
 
+/**
+ * A statement-mode metadata transaction could not be rolled back.
+ *
+ * This is a defect, not part of {@link MigrationError}: the connection may still
+ * hold an open transaction, and Effect SQL has no discard API. The migrator
+ * dies with this error so the boot fails and the pool closes.
+ */
+export class MigrationRollbackError extends Data.TaggedError("MigrationRollbackError")<{
+  readonly cause: unknown
+}> {}
+
 /** Everything a migration can fail with. */
 export type MigrationError =
   | SqlError.SqlError

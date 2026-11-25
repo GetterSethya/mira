@@ -714,6 +714,7 @@ export const postgresTelemetry: TelemetryDialectHooks = {
 
 /** The composed PostgreSQL dialect used by the migrator and internal stores. */
 export const postgresDialect: DialectType = {
+  migrationModel: { kind: "transaction" },
   ...postgresDdlSql,
   ...postgresRuleSql,
   ...postgresFilterSql,

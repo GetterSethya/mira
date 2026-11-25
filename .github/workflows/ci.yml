@@ -104,6 +104,62 @@ jobs:
       - name: Bun PostgreSQL smoke
         run: bun run packages/mira/tests/databases/postgres-bun.e2e.ts
 
+  mysql-e2e:
+    name: MySQL/MariaDB e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: mira
+          MYSQL_DATABASE: mira_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pmira --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: mira
+          MARIADB_DATABASE: mira_test
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "mariadb-admin ping -h 127.0.0.1 -uroot -pmira --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      MIRA_TEST_MYSQL_URL: "mysql://root:mira@127.0.0.1:3306/mira_test"
+      MIRA_TEST_MARIADB_URL: "mysql://root:mira@127.0.0.1:3307/mira_test"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Run MySQL/MariaDB e2e
+        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql-migrator.e2e.test.ts --no-file-parallelism
+
   bun-smoke:
     name: Bun smoke
     runs-on: ubuntu-latest

@@ -101,8 +101,12 @@ export { postgresDialect } from "./dialect/dialect-postgres.js"
 export type {
   DialectType,
   FieldValueType,
+  MigrationDialect,
+  MigrationModel,
+  ParameterizedStatement,
   Quote,
   RuleSqlDialect,
+  StatementMigrationDialect,
   TransactionProbeStrategy
 } from "./dialect/dialect.js"
 export type { TimestampUnit } from "@gettersethya/mira-client"
