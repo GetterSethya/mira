@@ -1651,12 +1651,16 @@ const migrationModel: Extract<MigrationModel, { kind: "statement" }> = {
   },
   session: {
     readSql:
-      "SELECT @@SESSION.sql_mode AS sql_mode, @@SESSION.lock_wait_timeout AS lock_wait_timeout",
+      "SELECT @@SESSION.sql_mode AS sql_mode, @@SESSION.lock_wait_timeout AS lock_wait_timeout, @@SESSION.wait_timeout AS wait_timeout",
     setupSql: [
       "SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'",
-      "SET SESSION lock_wait_timeout = 5"
+      "SET SESSION lock_wait_timeout = 5",
+      "SET SESSION wait_timeout = 600"
     ],
-    previewSetupSql: ["SET SESSION lock_wait_timeout = 5"],
+    previewSetupSql: [
+      "SET SESSION lock_wait_timeout = 5",
+      "SET SESSION wait_timeout = 600"
+    ],
     restoreSql: (previous) => {
       const restoreValue = (value: unknown) => {
         if (typeof value === "string") return quoteLiteral(value)
@@ -1667,9 +1671,37 @@ const migrationModel: Extract<MigrationModel, { kind: "statement" }> = {
       }
       return [
         `SET SESSION sql_mode = ${restoreValue(previous["sql_mode"])}`,
-        `SET SESSION lock_wait_timeout = ${restoreValue(previous["lock_wait_timeout"])}`
+        `SET SESSION lock_wait_timeout = ${restoreValue(previous["lock_wait_timeout"])}`,
+        `SET SESSION wait_timeout = ${restoreValue(previous["wait_timeout"])}`
       ]
     }
+  },
+  lock: {
+    databaseNameSql: "SELECT DATABASE() AS database_name",
+    namePrefix: "mira.migrations",
+    maxNameLength: 64,
+    defaultTimeoutSeconds: 60,
+    acquireStatement: (name, timeoutSeconds) => ({
+      sql: "SELECT GET_LOCK(?, ?) AS acquired",
+      params: [name, timeoutSeconds]
+    }),
+    releaseStatement: (name) => ({
+      sql: "SELECT RELEASE_LOCK(?) AS released",
+      params: [name]
+    }),
+    usedStatement: (name) => ({
+      sql: "SELECT IS_USED_LOCK(?) = CONNECTION_ID() AS held_by_me",
+      params: [name]
+    }),
+    holderStatement: (name) => ({
+      sql: "SELECT IS_USED_LOCK(?) AS holder",
+      params: [name]
+    }),
+    killSelfStatement: {
+      sql: "KILL CONNECTION_ID()",
+      params: []
+    },
+    heartbeatIntervalSeconds: 60
   }
 }
 

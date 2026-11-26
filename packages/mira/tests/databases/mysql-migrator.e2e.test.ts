@@ -17,13 +17,21 @@
 import { MysqlClient } from "@effect/sql-mysql2"
 import { describe, it } from "@effect/vitest"
 import type { CollectionSchema } from "@gettersethya/mira-client"
-import { Context, Effect, Exit, Layer, Redacted } from "effect"
-import { SqlClient } from "effect/sql"
+import { Cause, Context, Effect, Exit, Layer, Redacted } from "effect"
+import { SqlClient, SqlError } from "effect/sql"
+import mysql from "mysql2/promise"
+import type { RowDataPacket } from "mysql2"
 import { expect } from "vitest"
 
-import type { MigrationDialect, TranslatePlanContext } from "@/dialect/dialect.js"
+import type {
+  LockConnection,
+  LockExecutor,
+  MigrationDialect,
+  TranslatePlanContext
+} from "@/dialect/dialect.js"
 import { mysqlMigrationDialect } from "@/dialect/dialect-mysql-migrations.js"
 import type { MigrationError } from "@/migrator/errors.js"
+import { boundLockName } from "@/migrator/lock.js"
 import { Migrator, makeMigratorLive } from "@/migrator/migrator.js"
 import type { MigrateOptions, MigrationStep } from "@/migrator/types.js"
 
@@ -326,10 +334,12 @@ const defineSuite = (config: EngineConfig) => {
     const rows = yield* sql<{
       sql_mode: string
       lock_wait_timeout: number | string
+      wait_timeout: number | string
     }>`
       SELECT
         @@SESSION.sql_mode AS sql_mode,
-        @@SESSION.lock_wait_timeout AS lock_wait_timeout
+        @@SESSION.lock_wait_timeout AS lock_wait_timeout,
+        @@SESSION.wait_timeout AS wait_timeout
     `
     return rows[0]
   })
@@ -404,6 +414,216 @@ const defineSuite = (config: EngineConfig) => {
         return yield* body.pipe(Effect.provide(ctx))
       })
     )
+
+  const lockConfig = mysqlMigrationDialect.migrationModel.lock
+  if (lockConfig === undefined) {
+    throw new Error("mysqlMigrationDialect must declare a migration lock")
+  }
+
+  const toSqlError = (cause: unknown) =>
+    new SqlError.SqlError({
+      reason: new SqlError.UnknownError({
+        cause,
+        message: cause instanceof Error ? cause.message : String(cause)
+      })
+    })
+
+  const databaseName = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ db: string | null }>`SELECT DATABASE() AS db`
+    return rows[0]?.db ?? null
+  })
+
+  const expectedLockName = Effect.gen(function* () {
+    const db = yield* databaseName
+    return boundLockName(lockConfig, db ?? "")
+  })
+
+  const isUsedLock = (name: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const rows = yield* sql<{ holder: number | string | null }>`
+        SELECT IS_USED_LOCK(${name}) AS holder
+      `
+      return rows[0]?.holder ?? null
+    })
+
+  const rawIsUsedLock = (name: string) =>
+    Effect.promise(async () => {
+      const conn = await mysql.createConnection(url)
+      try {
+        const [rows] = await conn.query("SELECT IS_USED_LOCK(?) AS holder", [name])
+        const first = Array.isArray(rows) ? rows[0] : undefined
+        if (typeof first === "object" && first !== null && "holder" in first) {
+          return first.holder ?? null
+        }
+        return null
+      } finally {
+        conn.destroy()
+      }
+    })
+
+  const withHeldLock = <A, E>(
+    name: string,
+    body: Effect.Effect<A, E, Migrator | SqlClient.SqlClient>
+  ) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      return yield* Effect.scoped(
+        Effect.gen(function* () {
+          const conn = yield* sql.reserve
+          yield* conn.executeUnprepared("SELECT GET_LOCK(?, 0) AS acquired", [name], undefined)
+          const result = yield* body
+          yield* conn
+            .executeUnprepared("SELECT RELEASE_LOCK(?) AS released", [name], undefined)
+            .pipe(Effect.ignore)
+          return result
+        })
+      )
+    })
+
+  const dedicatedLockDialect = (settings?: {
+    readonly urlOverride?: string
+    readonly omitKill?: boolean
+    readonly releaseReturnsZero?: boolean
+    readonly heartbeatIntervalSeconds?: number
+    readonly lockWaitTimeoutSeconds?: number
+    readonly failHeartbeatAfter?: number
+  }): MigrationDialect => {
+    const baseModel = mysqlMigrationDialect.migrationModel
+    const targetUrl = settings?.urlOverride ?? url
+    const baseLock = baseModel.lock
+    if (baseLock === undefined) throw new Error("base dialect must declare a lock")
+
+    const openConnection = Effect.acquireRelease(
+      Effect.gen(function* () {
+        const conn = yield* Effect.tryPromise({
+          try: () => mysql.createConnection(targetUrl),
+          catch: toSqlError
+        })
+        yield* Effect.tryPromise({
+          try: async () => {
+            await conn.query("SET SESSION wait_timeout = ?", [
+              settings?.lockWaitTimeoutSeconds ?? 600
+            ])
+          },
+          catch: toSqlError
+        })
+
+        let destroyed = false
+        let heartbeatCalls = 0
+        const destroy = Effect.sync(() => {
+          if (!destroyed) {
+            destroyed = true
+            conn.destroy()
+          }
+        })
+        const executor: LockExecutor = {
+          run: (statement) =>
+            Effect.tryPromise({
+              try: async () => {
+                await conn.query(statement)
+              },
+              catch: toSqlError
+            }).pipe(Effect.asVoid),
+          runParameterized: (statement) =>
+            Effect.tryPromise({
+              try: async () => {
+                await conn.query(statement.sql, [...statement.params])
+              },
+              catch: toSqlError
+            }).pipe(Effect.asVoid),
+          query: (statement) =>
+            Effect.gen(function* () {
+              if (statement.includes("SELECT 1 AS ok")) {
+                heartbeatCalls++
+                if (
+                  settings?.failHeartbeatAfter !== undefined &&
+                  heartbeatCalls > settings.failHeartbeatAfter
+                ) {
+                  return yield* Effect.fail(toSqlError(new Error("heartbeat failed")))
+                }
+              }
+              const [rows] = yield* Effect.tryPromise({
+                try: () => conn.query<Array<RowDataPacket>>(statement),
+                catch: toSqlError
+              })
+              return rows
+            }),
+          queryParameterized: (statement) =>
+            Effect.gen(function* () {
+              const [rows] = yield* Effect.tryPromise({
+                try: () => conn.query<Array<RowDataPacket>>(statement.sql, [...statement.params]),
+                catch: toSqlError
+              })
+              return rows
+            })
+        }
+        const connection: LockConnection = { executor, destroy }
+        return connection
+      }),
+      (connection) => connection.destroy
+    )
+
+    const { killSelfStatement, ...lockWithoutKill } = baseLock
+    let releaseCalls = 0
+    const lock = {
+      ...lockWithoutKill,
+      ...(settings?.omitKill || killSelfStatement === undefined
+        ? {}
+        : { killSelfStatement }),
+      ...(settings?.releaseReturnsZero
+        ? {
+            releaseStatement: (name: string) => {
+              releaseCalls++
+              return releaseCalls === 1
+                ? { sql: "SELECT 0 AS released", params: [] }
+                : baseLock.releaseStatement(name)
+            }
+          }
+        : {}),
+      ...(settings?.heartbeatIntervalSeconds === undefined
+        ? {}
+        : { heartbeatIntervalSeconds: settings.heartbeatIntervalSeconds }),
+      openConnection
+    }
+
+    return {
+      ...mysqlMigrationDialect,
+      migrationModel: { ...baseModel, lock }
+    }
+  }
+
+  const slowPlanDialect = (base: MigrationDialect): MigrationDialect => ({
+    ...base,
+    translatePlan: (steps, ctx) =>
+      Effect.gen(function* () {
+        yield* Effect.sleep("3 seconds")
+        return yield* base.translatePlan(steps, ctx)
+      })
+  })
+
+  const releaseZeroDialect = (): MigrationDialect => {
+    const baseModel = mysqlMigrationDialect.migrationModel
+    const baseLock = baseModel.lock
+    if (baseLock === undefined) throw new Error("base dialect must declare a lock")
+    let releaseCalls = 0
+    return {
+      ...mysqlMigrationDialect,
+      migrationModel: {
+        ...baseModel,
+        lock: {
+          ...baseLock,
+          releaseStatement: (name) => {
+            releaseCalls++
+            return releaseCalls === 1
+              ? { sql: "SELECT 0 AS released", params: [] }
+              : baseLock.releaseStatement(name)
+          }
+        }
+      }
+    }
+  }
 
   const failingMetadataDialect = (targetTable: string): MigrationDialect => {
     let seen = 0
@@ -740,7 +960,7 @@ const defineSuite = (config: EngineConfig) => {
             yield* Effect.gen(function* () {
               expect(yield* tablesNamed([todosTable])).toHaveLength(1)
               expect(yield* countSchemaRows(todosTable)).toBe(1)
-              expect(yield* countRows(migrationsTable)).toBeGreaterThanOrEqual(1)
+              expect(yield* countRows(migrationsTable)).toBe(1)
             }).pipe(Effect.provide(first))
           })
         ),
@@ -886,6 +1106,7 @@ const defineSuite = (config: EngineConfig) => {
             expect(Number(after?.lock_wait_timeout)).toBe(
               Number(before?.lock_wait_timeout)
             )
+            expect(Number(after?.wait_timeout)).toBe(Number(before?.wait_timeout))
             const columns = yield* columnRows(todosTable)
             expect(columns.map((column) => column.column_name)).toContain(
               "seqId"
@@ -1039,7 +1260,7 @@ const defineSuite = (config: EngineConfig) => {
             yield* expectV2Physical
             yield* expectTodoRow(1)
             expect(yield* countSchemaRows(todosTable)).toBe(1)
-            expect(yield* countRows(migrationsTable)).toBeGreaterThanOrEqual(1)
+            expect(yield* countRows(migrationsTable)).toBe(2)
           })
         ),
       120_000
@@ -1065,6 +1286,7 @@ const defineSuite = (config: EngineConfig) => {
             expect(Number(after?.lock_wait_timeout)).toBe(
               Number(before?.lock_wait_timeout)
             )
+            expect(Number(after?.wait_timeout)).toBe(Number(before?.wait_timeout))
             expect(after?.sql_mode).toBe(before?.sql_mode)
             expect(yield* tablesNamed([schemaTable, migrationsTable])).toEqual(
               []
@@ -1144,6 +1366,278 @@ const defineSuite = (config: EngineConfig) => {
         ),
       120_000
     )
+    it.effect(
+      "releases the lock after a successful migrate",
+      () =>
+        runWithEngine(
+          2,
+          mysqlMigrationDialect,
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+
+            yield* migrator.migrate(v1Schemas(), options)
+            expect(yield* isUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "releases the lock after a failed render",
+      () =>
+        runWithEngine(
+          2,
+          mysqlMigrationDialect,
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const sql = yield* SqlClient.SqlClient
+            const name = yield* expectedLockName
+
+            yield* sql.unsafe(
+              `CREATE TABLE ${quoteName(driftTable)} (${quoteName("id")} INT PRIMARY KEY)`
+            )
+            const failure = yield* catchUnsupported(
+              migrator.migrate([{ name: driftTable, schema: simpleTable() }], options)
+            )
+            expect(failure).toBeDefined()
+            expect(yield* isUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "fails plan and status busy while the lock is held",
+      () =>
+        runWithEngine(
+          2,
+          mysqlMigrationDialect,
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+            const schemas = [{ name: todosTable, schema: todosV1() }]
+
+            yield* withHeldLock(
+              name,
+              Effect.gen(function* () {
+                const planResult = yield* migrator.plan(schemas, options).pipe(
+                  Effect.as("ok" as const),
+                  Effect.catchTag("MigrationBusyError", (error) => Effect.succeed(error))
+                )
+                expect(planResult).not.toBe("ok")
+                if (planResult !== "ok") expect(planResult.operation).toBe("plan")
+
+                const statusResult = yield* migrator.status(schemas, options).pipe(
+                  Effect.as("ok" as const),
+                  Effect.catchTag("MigrationBusyError", (error) => Effect.succeed(error))
+                )
+                expect(statusResult).not.toBe("ok")
+                if (statusResult !== "ok") expect(statusResult.operation).toBe("status")
+              })
+            )
+
+            const plan = yield* migrator.plan(schemas, options)
+            expect(plan.steps.length).toBeGreaterThan(0)
+          })
+        ),
+      120_000
+    )
+
+    it.live(
+      "waits and times out with a message naming the lock and timeout",
+      () =>
+        runWithEngine(
+          2,
+          mysqlMigrationDialect,
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+            const started = Date.now()
+
+            yield* withHeldLock(
+              name,
+              Effect.gen(function* () {
+                const result = yield* migrator
+                  .migrate(v1Schemas(), {
+                    ...options,
+                    migrationLockTimeoutSeconds: 1
+                  })
+                  .pipe(
+                    Effect.as("ok" as const),
+                    Effect.catchTag("MigrationBusyError", (error) => Effect.succeed(error))
+                  )
+                expect(result).not.toBe("ok")
+                if (result !== "ok") {
+                  expect(result.operation).toBe("migrate")
+                  expect(result.message).toContain(name)
+                  expect(result.message).toContain("1s")
+                }
+              })
+            )
+
+            expect(Date.now() - started).toBeGreaterThanOrEqual(900)
+            expect(yield* tablesNamed([todosTable])).toEqual([])
+            yield* migrator.migrate(v1Schemas(), options)
+            expect(yield* isUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "clears a recursive stale instance before acquiring",
+      () =>
+        runWithEngine(
+          1,
+          mysqlMigrationDialect,
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const sql = yield* SqlClient.SqlClient
+            const name = yield* expectedLockName
+
+            yield* Effect.scoped(
+              Effect.gen(function* () {
+                const conn = yield* sql.reserve
+                yield* conn.executeUnprepared("SELECT GET_LOCK(?, 0)", [name], undefined)
+                yield* conn.executeUnprepared("SELECT GET_LOCK(?, 0)", [name], undefined)
+              })
+            )
+
+            yield* migrator.migrate(v1Schemas(), options)
+            expect(yield* isUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "dedicated lock connection releases on success",
+      () =>
+        runWithEngine(
+          2,
+          dedicatedLockDialect(),
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+
+            yield* migrator.migrate(v1Schemas(), options)
+            expect(yield* isUsedLock(name)).toBeNull()
+            yield* migrator.migrate(v1Schemas(), options)
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "dedicated lock connection destroys on release failure",
+      () =>
+        runWithEngine(
+          2,
+          dedicatedLockDialect({ omitKill: true, releaseReturnsZero: true }),
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+
+            const exit = yield* Effect.exit(migrator.migrate(v1Schemas(), options))
+            expect(Exit.isFailure(exit)).toBe(true)
+            expect(yield* isUsedLock(name)).toBeNull()
+
+            yield* migrator.migrate(v1Schemas(), options)
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "rejects a dedicated lock connection on a different database",
+      () => {
+        const mismatchUrl = new URL(url)
+        mismatchUrl.pathname = "/mysql"
+        return runWithEngine(
+          2,
+          dedicatedLockDialect({ urlOverride: mismatchUrl.toString() }),
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const result = yield* migrator.migrate(v1Schemas(), options).pipe(
+              Effect.as("ok" as const),
+              Effect.catchTag("MigrationLockError", (error) => Effect.succeed(error))
+            )
+            expect(result).not.toBe("ok")
+            if (result !== "ok") {
+              expect(result.detail).toContain("targets database")
+            }
+            expect(yield* tablesNamed([todosTable])).toEqual([])
+          })
+        )
+      },
+      120_000
+    )
+
+    it.live(
+      "heartbeat keeps a long migration's lock alive",
+      () =>
+        runWithEngine(
+          2,
+          slowPlanDialect(
+            dedicatedLockDialect({ heartbeatIntervalSeconds: 1, lockWaitTimeoutSeconds: 2 })
+          ),
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+
+            yield* migrator.migrate(v1Schemas(), options)
+            expect(yield* countRows(migrationsTable)).toBe(1)
+            expect(yield* isUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
+
+    it.live(
+      "stops before metadata when the heartbeat fails",
+      () =>
+        runWithEngine(
+          2,
+          slowPlanDialect(
+            dedicatedLockDialect({
+              heartbeatIntervalSeconds: 1,
+              failHeartbeatAfter: 1
+            })
+          ),
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+
+            const exit = yield* Effect.exit(migrator.migrate(v1Schemas(), options))
+            expect(Exit.isFailure(exit)).toBe(true)
+            expect(yield* countRows(migrationsTable)).toBe(0)
+            expect(yield* isUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "kills the holder when the fallback release cannot be verified",
+      () =>
+        runWithEngine(
+          2,
+          releaseZeroDialect(),
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+
+            const exit = yield* Effect.exit(migrator.migrate(v1Schemas(), options))
+            expect(Exit.isFailure(exit)).toBe(true)
+            if (Exit.isFailure(exit)) {
+              expect(Cause.pretty(exit.cause)).toContain("MigrationLockReleaseError")
+            }
+            expect(yield* rawIsUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
   })
 }
 
@@ -1160,4 +1654,7 @@ defineSuite({
   fallbackUrl: "mysql://root:mira@127.0.0.1:53306/mira_test",
   prefix: "e2e_mariadb_"
 })
+
+
+
 

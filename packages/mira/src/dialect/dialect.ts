@@ -1,5 +1,5 @@
 import type { TimestampUnit } from "@gettersethya/mira-client"
-import type { Option } from "effect"
+import type { Option, Scope } from "effect"
 import type { SqlError } from "effect/sql"
 import { Context, Effect, Predicate } from "effect"
 
@@ -193,6 +193,70 @@ export type TranslatedPlan = {
 }
 
 /**
+ * The statement/query surface a migration lock needs.
+ *
+ * It mirrors `MigrationExecutor` but is declared here so an external statement
+ * dialect can implement a dedicated lock connection without importing the
+ * migrator internals.
+ */
+export type LockExecutor = {
+  readonly run: (statement: string) => Effect.Effect<void, SqlError.SqlError>
+  readonly runParameterized: (
+    statement: ParameterizedStatement
+  ) => Effect.Effect<void, SqlError.SqlError>
+  readonly query: (
+    statement: string
+  ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, SqlError.SqlError>
+  readonly queryParameterized: (
+    statement: ParameterizedStatement
+  ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, SqlError.SqlError>
+}
+
+/** A dedicated lock connection and the idempotent close the migrator calls. */
+export type LockConnection = {
+  readonly executor: LockExecutor
+  /** Force-close the underlying session. Must be idempotent. */
+  readonly destroy: Effect.Effect<void>
+}
+
+/**
+ * A session-scoped migration lock capability.
+ *
+ * Only statement-mode dialects declare it, because only engines that commit DDL
+ * implicitly need mutual exclusion outside a transaction. Every statement and
+ * column alias is part of the contract; the migrator reads exactly the named
+ * aliases.
+ */
+export type MigrationLock = {
+  /** Returns one row with `database_name`, which may be NULL. */
+  readonly databaseNameSql: string
+  /** Lowercase ASCII prefix without a trailing colon, for example `mira.migrations`. */
+  readonly namePrefix: string
+  /** Maximum characters Mira will emit. */
+  readonly maxNameLength: number
+  /** Wait used by `migrate` when the caller does not override it. */
+  readonly defaultTimeoutSeconds: number
+  /** Blocking up to timeoutSeconds; 0 is non-blocking. Returns one `acquired` column. */
+  readonly acquireStatement: (name: string, timeoutSeconds: number) => ParameterizedStatement
+  /** Returns one `released` column, which may be NULL. */
+  readonly releaseStatement: (name: string) => ParameterizedStatement
+  /** Returns one `held_by_me` column: whether this connection still owns the name. */
+  readonly usedStatement: (name: string) => ParameterizedStatement
+  /** Returns one `holder` column: the holder connection id or NULL, for busy diagnostics. */
+  readonly holderStatement: (name: string) => ParameterizedStatement
+  /** Kills the holder session as a last resort. Optional. */
+  readonly killSelfStatement?: ParameterizedStatement
+  /** Heartbeat interval for a dedicated lock connection. Defaults to 60. */
+  readonly heartbeatIntervalSeconds?: number
+  /**
+   * Optional dedicated lock connection. The returned `destroy` force-closes the
+   * underlying session and is idempotent. When present, the migrator uses this
+   * executor for the lock and the reserved connection only for DDL.
+   */
+  readonly openConnection?: Effect.Effect<LockConnection, SqlError.SqlError, Scope.Scope>
+}
+
+/**
  * How the migrator applies a plan.
  *
  * `transaction` is the existing single-transaction path. `statement` is for
@@ -228,6 +292,12 @@ export type MigrationModel =
           previous: Readonly<Record<string, unknown>>
         ) => ReadonlyArray<string>
       }
+      /**
+       * Session-scoped migration lock. Omitted when the engine needs none.
+       * Declaring it serializes `migrate` and makes `plan`/`status` fail busy
+       * while a migration or another preview holds the database lock.
+       */
+      readonly lock?: MigrationLock
     }
 
 /**

@@ -491,6 +491,55 @@ describe("mysqlMigrationDialect migration model", () => {
     expect(model.isRetryableConflict({ cause: { errno: 1213 } })).toBe(true)
     expect(model.isRetryableConflict(new Error("boom"))).toBe(false)
   })
+
+  it("declares a database-scoped session lock with parameterized statements", () => {
+    expect(model.kind).toBe("statement")
+    if (model.kind !== "statement") return
+    const lock = model.lock
+    expect(lock).toBeDefined()
+    if (lock === undefined) return
+
+    expect(lock.databaseNameSql).toBe("SELECT DATABASE() AS database_name")
+    expect(lock.namePrefix).toBe("mira.migrations")
+    expect(lock.maxNameLength).toBe(64)
+    expect(lock.defaultTimeoutSeconds).toBe(60)
+    expect(lock.heartbeatIntervalSeconds).toBe(60)
+    expect(lock.openConnection).toBeUndefined()
+    expect(Object.keys(mysqlMigrationDialect)).not.toContain("lock")
+
+    expect(lock.acquireStatement("mira.migrations:abc", 30)).toEqual({
+      sql: "SELECT GET_LOCK(?, ?) AS acquired",
+      params: ["mira.migrations:abc", 30]
+    })
+    expect(lock.releaseStatement("mira.migrations:abc")).toEqual({
+      sql: "SELECT RELEASE_LOCK(?) AS released",
+      params: ["mira.migrations:abc"]
+    })
+    expect(lock.usedStatement("mira.migrations:abc")).toEqual({
+      sql: "SELECT IS_USED_LOCK(?) = CONNECTION_ID() AS held_by_me",
+      params: ["mira.migrations:abc"]
+    })
+    expect(lock.holderStatement("mira.migrations:abc")).toEqual({
+      sql: "SELECT IS_USED_LOCK(?) AS holder",
+      params: ["mira.migrations:abc"]
+    })
+    expect(lock.killSelfStatement).toEqual({ sql: "KILL CONNECTION_ID()", params: [] })
+  })
+
+  it("bounds the migration session's wait_timeout", () => {
+    expect(model.kind).toBe("statement")
+    if (model.kind !== "statement") return
+    const session = model.session
+    expect(session).toBeDefined()
+    if (session === undefined) return
+
+    expect(session.readSql).toContain("@@SESSION.wait_timeout AS wait_timeout")
+    expect(session.setupSql).toContain("SET SESSION wait_timeout = 600")
+    expect(session.previewSetupSql).toContain("SET SESSION wait_timeout = 600")
+    expect(session.restoreSql({ wait_timeout: 4321, sql_mode: "STRICT", lock_wait_timeout: 5 })).toContain(
+      "SET SESSION wait_timeout = 4321"
+    )
+  })
 })
 
 describe("mysqlMigrationDialect translatePlan", () => {

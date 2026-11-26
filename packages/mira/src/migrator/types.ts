@@ -90,6 +90,14 @@ export type MigrateOptions = {
    * Shared telemetry uses `_telemetry_migrations`.
    */
   migrationsTable?: string
+  /**
+   * Seconds `migrate` waits for the migration lock on statement engines with a
+   * `MigrationLock`. Defaults to the dialect `defaultTimeoutSeconds` (60 for
+   * MySQL). `0` fails immediately. Fractional values are passed to the engine;
+   * MySQL may round a fractional wait up. Ignored by transactional dialects,
+   * previews, and statement models without a lock.
+   */
+  migrationLockTimeoutSeconds?: number
 }
 
 /**
@@ -104,6 +112,9 @@ export type MigrationExecutor = {
     statement: ParameterizedStatement
   ) => Effect.Effect<void, SqlError.SqlError>
   readonly query: TranslatePlanContext["readonlyQuery"]
+  readonly queryParameterized: (
+    statement: ParameterizedStatement
+  ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, SqlError.SqlError>
 }
 
 /** A statement-mode executor that owns transaction control on one connection. */
