@@ -28,7 +28,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 - `Migrator` — `Context.Service` tag exposing `migrate`, `plan`, `status`; `status`'s error channel is `MigrationError` so the PostgreSQL preview can report `MigrationBusyError` [migrator.ts:Migrator]
 - `MigratorLive` - `Layer.effect` implementation requiring `SqlClient` and `Dialect`; applies `References.MinimumLogLevel` from `options.logLevel` per call [migrator.ts:MigratorLive]
 - `makeMigratorLive` - internal test factory for a narrow `MigrationDialect`; not re-exported by the barrel [migrator.ts:makeMigratorLive]
-- (type) `MigrationExecutor` - `run`, `runParameterized`, `query`; both modes build one [types.ts:MigrationExecutor]
+- (type) `MigrationExecutor` - `run`, `runParameterized`, `query`, `queryParameterized`; both modes build one [types.ts:MigrationExecutor]
 - (type) `MigrationRunner` - a statement-mode executor with `begin`, `commit`, `rollback` [types.ts:MigrationRunner]
 - `SYSTEM_TABLE_STEPS` - the `createSystemTable` steps that bootstrap `_collections` (`name`, `schema`, `updated_at`) and `_migrations` (`id`, `name`, `steps`, `applied_at`) [migrator.ts:SYSTEM_TABLE_STEPS]
 - `computePlan` — builds the full `MigrationPlan` for a schema set, optionally dropping collections absent from the desired set [schema-diff.ts:computePlan]
@@ -40,15 +40,18 @@ desired schema passed by the app is "what should exist". The migrator only write
 - `toEffectLogLevel` — maps numeric verbosity (0=none … 4=debug, default info) to an Effect `LogLevel` [types.ts:toEffectLogLevel]
 - `UnsupportedMigrationStepError` — tagged error for a step the dialect cannot render (not re-exported by the barrel) [errors.ts:UnsupportedMigrationStepError]
 - `InvalidMigrationStatementError` — tagged error for a rendered statement that contains no SQL (not re-exported by the barrel) [errors.ts:InvalidMigrationStatementError]
-- (type) `MigrationError` — `SqlError.SqlError | UnsupportedMigrationStepError | InvalidMigrationStatementError | MigrationBusyError` [errors.ts:MigrationError]
-- `MigrationBusyError` - tagged error (`operation: "plan" | "status"`) raised when a PostgreSQL preview cannot acquire the non-blocking advisory lock [errors.ts:MigrationBusyError]
+- (type) `MigrationError` — `SqlError.SqlError | UnsupportedMigrationStepError | InvalidMigrationStatementError | MigrationBusyError | MigrationLockError` [errors.ts:MigrationError]
+- `MigrationBusyError` - tagged error (`operation: "plan" | "status" | "migrate"`) raised when a preview or a bounded `migrate` wait cannot take the migration lock [errors.ts:MigrationBusyError]
+- `MigrationLockError` - tagged error for a missing database, a mismatched dedicated lock connection, an invalid timeout, a failed clear or acquire, or an unexpected `GET_LOCK` result; part of `MigrationError` [errors.ts:MigrationLockError]
 - `MigrationRollbackError` - tagged defect raised when a statement-mode metadata rollback fails; not part of `MigrationError` [errors.ts:MigrationRollbackError]
+- `MigrationLockReleaseError` - tagged defect (`lockName`, `killed`, `destroyed`, `cause`) raised when a successful migration body could not verify that its lock was released; the dedicated lock connection has already been destroyed or the fallback has killed the holder [errors.ts:MigrationLockReleaseError]
+- `boundLockName`, `databaseNameFromRows`, `resolveLockTimeoutSeconds`, `classifyAcquire`, `isHeldByThisSession`, `isSessionLoss` - pure lock helpers in a new internal module [lock.ts]
 - (type) `ColumnType`, `ColumnDef` — physical column type and DDL description [types.ts:ColumnDef]
 - (type) `IndexShape`, `TableShape`, `TableShapes` — index identity, table columns+indexes, and the stored/desired pair given to `translatePlan` [types.ts:TableShapes]
 - (type) `MigrationStep` — the 12-kind DDL union (`createTable`, `dropTable`, `renameTable`, `addColumn`, `dropColumn`, `renameColumn`, `alterColumn`, `createIndex`, `dropIndex`, `createSystemTable`, `createView`, `dropView`) [types.ts:MigrationStep]
 - (type) `MigrationPlan` — `{ steps, destructive, notes? }` [types.ts:MigrationPlan]
 - (type) `NamedSchema` — collection name paired with its desired `CollectionSchema` [types.ts:NamedSchema]
-- (type) `MigrateOptions` — `{ allowDestructive?, logLevel? }` [types.ts:MigrateOptions]
+- (type) `MigrateOptions` — `{ allowDestructive?, logLevel?, schemaTable?, migrationsTable?, migrationLockTimeoutSeconds? }` [types.ts:MigrateOptions]
 
 ## Invariants
 
@@ -98,16 +101,29 @@ desired schema passed by the app is "what should exist". The migrator only write
 ## Statement mode (issue #68)
 
 - `migrateImplWith` dispatches on `DialectType.migrationModel.kind`. Transactional dialects keep the existing path; `"statement"` dialects use `migrateStatement` [migrator.ts:migrateImplWith].
-- `migrateStatement` reserves one `SqlClient.reserve` connection for the whole migration, reads the previous session values, applies `session.setupSql`, acquires the #69 lock at that point when #69 supplies it, and runs every query, DDL statement, transaction control statement, and cleanup statement through a `MigrationRunner` built from that connection [migrator.ts:migrateStatement] [migrator.ts:connectionExecutor] [migrator.ts:makeRunner].
+- `migrateStatement` reserves one `SqlClient.reserve` connection for the whole migration, reads the previous session values, applies `session.setupSql`, takes the migration lock (dedicated connection when `migrationModel.lock.openConnection` is present, otherwise the reserved connection), and runs every query, DDL statement, transaction control statement, and cleanup statement through a `MigrationRunner` built from that connection [migrator.ts:migrateStatement] [migrator.ts:connectionExecutor] [migrator.ts:makeRunner].
 - The system table bootstrap is rendered through `dialect.translatePlan` with an empty table and view map, so the catalog guard validates `_collections` and `_migrations` before the read [migrator.ts:migrateStatement].
 - The apply loop renders the plan up to six total times. A step whose catalog shape already matches is skipped and its index appears in `TranslatedPlan.skipped`. The destructive gate runs on the pending steps only, so an already-applied destructive step does not block a stale-metadata boot [migrator.ts:migrateStatement].
 - On a typed `SqlError`, the loop calls `dialect.migrationModel.isRetryableConflict`. A retry backs off 200 ms, 400 ms, 800 ms, 1.6 s, then 2 s, and re-renders. The growing gap lets a competing boot settle one more statement per attempt, because a retry converges at most one conflicting statement. A non-retryable error is surfaced [migrator.ts:migrateStatement] [migrator.ts:statementRetryBackoff].
 - After the loop, `dialect.verifyPlan` re-reads the catalog and rejects any pending step. `TranslatedPlan.validations` from the final render then run. Only after both does `writeStatementMetadata` open one parameterized `_migrations` + `_collections` transaction on the reserved connection [migrator.ts:writeStatementMetadata].
 - A failed metadata write always attempts `ROLLBACK`. A failed rollback dies with `MigrationRollbackError`; Effect SQL has no discard API, so the boot must fail and the pool must close [migrator.ts:writeStatementMetadata] [errors.ts:MigrationRollbackError].
-- Cleanup and `session.restoreSql` run in `Effect.ensuring` inside the reserved scope. Session restore failures log at error; cleanup failures log at warning [migrator.ts:migrateStatement] [migrator.ts:runSessionRestore] [migrator.ts:runCleanup].
-- `plan` and `status` reserve a connection, read `session.readSql`, apply `session.previewSetupSql`, take and release the preview lock pair when supplied, and never bootstrap `_collections` or `_migrations`. `status` catches a preview render failure and still returns the `diffSchemas` status [migrator.ts:withStatementPreview] [migrator.ts:planStatement] [migrator.ts:statusStatement].
+- Cleanup, lock release, and `session.restoreSql` run in one `Effect.uninterruptibleMask` finalizer inside the reserved scope. Each step is time-boxed at two seconds and errors are logged; a release that still cannot be verified dies with `MigrationLockReleaseError` only when the body succeeded, and a failed body keeps its original cause [migrator.ts:migrateStatement] [migrator.ts:releaseSessionLock] [migrator.ts:runSessionRestore] [migrator.ts:runCleanup].
+- `plan` and `status` reserve a connection, read `session.readSql`, apply `session.previewSetupSql`, take the migration lock with timeout `0`, and never bootstrap `_collections` or `_migrations`. A busy lock fails with `MigrationBusyError` naming the operation and the lock; the finalizer restores the preview session even on that path. `status` catches a preview render failure and still returns the `diffSchemas` status [migrator.ts:withStatementPreview] [migrator.ts:planStatement] [migrator.ts:statusStatement].
 - `makeMigratorLive(dialect)` is the internal test seam for a narrow `MigrationDialect`; the barrel exports `MigratorLive` only [migrator.ts:makeMigratorLive].
 - #69 owns the session lock and the preview lock values. #71 owns the final text mapping and its physical reconciliation. #72 owns the runtime transaction probe.
+
+## Session lock (issue #69)
+
+- A statement dialect may declare `migrationModel.lock`. `migrate` then serializes across processes and across concurrent boots; a dialect that omits it keeps the unguarded behavior [dialect.ts:MigrationLock] [migrator.ts:migrateStatement].
+- The lock name is always `namePrefix:<16 lowercase hex>` from FNV-1a 64-bit over the trimmed, lowercased database name, truncated to `maxNameLength` (64 for MySQL). It is ASCII, deterministic, and avoids the MySQL 4163 length and 3057 charset failures [lock.ts:boundLockName].
+- `openConnection` is the preferred path: a dedicated lock connection supplied by the database preset, held for the whole migration and destroyed on scope exit. The reserved connection is the fallback. A dedicated connection pointed at a different database than the DDL connection fails before acquire [migrator.ts:assertSameDatabase] [migrator.ts:openLockHandle].
+- Before acquire, the migrator clears only the Mira name, repeating `RELEASE_LOCK` while `held_by_me` is true, up to eight times. Other user locks on the session are never touched [migrator.ts:clearReservedName].
+- `migrate` waits up to `MigrateOptions.migrationLockTimeoutSeconds` (default 60; `0` fails immediately; an invalid supplied value fails `MigrationLockError`). A `0` result from `GET_LOCK` is `MigrationBusyError` naming the lock, timeout, holder id, and `migrate`; any other result is `MigrationLockError` [migrator.ts:acquireSessionLock] [lock.ts:resolveLockTimeoutSeconds].
+- On the dedicated path a heartbeat (`SELECT 1` every `heartbeatIntervalSeconds`, default 60) keeps the idle lock session alive during a long body. A failed heartbeat sets a flag; the statement loop checks it and `held_by_me` after each plan statement and stops before the next one, and a retention check runs before metadata. A lost lock fails with `MigrationLockError` and writes no metadata; the current statement is never interrupted [migrator.ts:startLockHeartbeat] [migrator.ts:runStatementsWithLockCheck] [migrator.ts:assertLockHeld].
+- Release is verified with `IS_USED_LOCK(name) = CONNECTION_ID()`. A held name on a reachable fallback connection triggers `KILL CONNECTION_ID()`; a lost session counts as released. A successful body whose release still cannot be verified destroys the dedicated connection or kills the holder and dies with `MigrationLockReleaseError`, so the boot fails instead of leaking the lock [migrator.ts:releaseSessionLock].
+- A half-open socket can block both the release and the kill. The migration session sets `wait_timeout = 600`, so the server reclaims an idle session in about ten minutes rather than eight hours; a live, querying holder must be killed by the operator. MySQL/MariaDB session setup and restore now include `wait_timeout` [dialect-mysql-migrations.ts:mysqlMigrationDialect].
+- `plan` and `status` take the same exclusive lock with timeout `0`; two concurrent previews exclude each other, and a preview during a migration fails busy. A preview on a one-connection pool can still wait for the pool before the lock attempt [migrator.ts:withStatementPreview].
+- Mixed-version ordering is out of scope. The lock serializes execution but does not decide which build's schema wins; run migrations as a separate step and stop older migrators before scaling a newer build. Shared telemetry uses the same database lock and the default 60-second wait.
 
 ## Side Effects
 

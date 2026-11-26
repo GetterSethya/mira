@@ -1,10 +1,13 @@
 ﻿import type { CollectionSchema } from "@gettersethya/mira-client"
-import { Cause, Context, Effect, Exit, Layer, Option, References, Schema } from "effect"
+import { Cause, Context, Duration, Effect, Exit, Layer, Option, Ref, References, Schema } from "effect"
+import type { Scope } from "effect"
 import { SqlClient, SqlError } from "effect/sql"
 import type { Connection } from "effect/sql/SqlConnection"
 
 import type {
+  LockConnection,
   MigrationDialect,
+  MigrationLock,
   MigrationModel,
   TranslatedPlan,
   TranslatePlanContext,
@@ -16,9 +19,19 @@ import type { MigrationError } from "./errors.js"
 import {
   InvalidMigrationStatementError,
   MigrationBusyError,
+  MigrationLockError,
+  MigrationLockReleaseError,
   MigrationRollbackError,
   UnsupportedMigrationStepError
 } from "./errors.js"
+import {
+  boundLockName,
+  classifyAcquire,
+  databaseNameFromRows,
+  isHeldByThisSession,
+  isSessionLoss,
+  resolveLockTimeoutSeconds
+} from "./lock.js"
 import {
   computePlan,
   diffSchemas,
@@ -305,6 +318,365 @@ function runSessionRestore(executor: MigrationExecutor, statements: ReadonlyArra
 }
 
 const MIGRATION_BUSY_MESSAGE = "A migration is in progress"
+const LOCK_STEP_TIMEOUT = "2 seconds"
+const HEARTBEAT_QUERY_TIMEOUT = "10 seconds"
+const MAX_LOCK_CLEAR_ATTEMPTS = 8
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === "object" && error !== null) {
+    if ("message" in error && typeof error.message === "string") return error.message
+    if ("cause" in error && typeof error.cause === "string") return error.cause
+  }
+  return String(error)
+}
+
+function readDatabaseNameRaw(executor: MigrationExecutor, lock: MigrationLock) {
+  return executor.query(lock.databaseNameSql).pipe(
+    Effect.map(databaseNameFromRows),
+    Effect.mapError(
+      (cause) =>
+        new MigrationLockError({
+          detail: `Could not read the current database: ${describeError(cause)}`
+        })
+    )
+  )
+}
+
+/** Reads the database name and fails before acquiring when none is selected. */
+export function readDatabaseName(
+  executor: MigrationExecutor,
+  lock: MigrationLock
+): Effect.Effect<string, MigrationLockError> {
+  return Effect.gen(function* () {
+    const name = yield* readDatabaseNameRaw(executor, lock)
+    if (name === null) {
+      return yield* Effect.fail(
+        new MigrationLockError({
+          detail: "No database is selected on the connection; include a database in the URL"
+        })
+      )
+    }
+    return name
+  })
+}
+
+/** Rejects a dedicated lock connection pointed at a different database than the DDL connection. */
+export function assertSameDatabase(
+  lockExecutor: MigrationExecutor,
+  ddlExecutor: MigrationExecutor,
+  lock: MigrationLock
+): Effect.Effect<void, MigrationLockError> {
+  return Effect.gen(function* () {
+    const lockDb = yield* readDatabaseNameRaw(lockExecutor, lock)
+    const ddlDb = yield* readDatabaseNameRaw(ddlExecutor, lock)
+    if (lockDb !== null && ddlDb !== null && lockDb !== ddlDb) {
+      return yield* Effect.fail(
+        new MigrationLockError({
+          detail:
+            `The dedicated lock connection targets database '${lockDb}' but the DDL connection ` +
+            `targets '${ddlDb}'; the lock would not protect the migration target.`
+        })
+      )
+    }
+  })
+}
+
+function isHeldByLock(
+  executor: MigrationExecutor,
+  lock: MigrationLock,
+  name: string
+): Effect.Effect<boolean, MigrationLockError> {
+  return executor.queryParameterized(lock.usedStatement(name)).pipe(
+    Effect.map((rows) => isHeldByThisSession(rows[0]?.["held_by_me"])),
+    Effect.mapError(
+      (cause) =>
+        new MigrationLockError({
+          detail: `Migration lock '${name}' could not be verified: ${describeError(cause)}`
+        })
+    )
+  )
+}
+
+/** Never fails; an unreadable state is treated as still held unless the session is gone. */
+function isHeldByLockSafe(
+  executor: MigrationExecutor,
+  lock: MigrationLock,
+  name: string
+): Effect.Effect<boolean> {
+  return Effect.exit(isHeldByLock(executor, lock, name)).pipe(
+    Effect.map((exit) => (Exit.isSuccess(exit) ? exit.value : !isSessionLoss(exit.cause)))
+  )
+}
+
+/** Reads the holder connection id for diagnostics; errors are ignored. */
+function holderId(
+  executor: MigrationExecutor,
+  lock: MigrationLock,
+  name: string
+): Effect.Effect<string | undefined> {
+  return executor.queryParameterized(lock.holderStatement(name)).pipe(
+    Effect.map((rows) => {
+      const value = rows[0]?.["holder"]
+      if (typeof value === "number") return String(value)
+      if (typeof value === "bigint") return value.toString()
+      if (typeof value === "string") return value
+      return undefined
+    }),
+    Effect.catchCause(() => Effect.succeed(undefined))
+  )
+}
+
+/**
+ * Acquires the session lock, failing busy on `0` and with a lock error on any
+ * other value. SQL failures are wrapped with an engine-support hint.
+ */
+export function acquireSessionLock(
+  executor: MigrationExecutor,
+  lock: MigrationLock,
+  name: string,
+  timeoutSeconds: number,
+  operation: "plan" | "status" | "migrate"
+): Effect.Effect<void, MigrationBusyError | MigrationLockError> {
+  return Effect.gen(function* () {
+    const rows = yield* executor.queryParameterized(lock.acquireStatement(name, timeoutSeconds)).pipe(
+      Effect.mapError(
+        (cause) =>
+          new MigrationLockError({
+            detail:
+              `Migration lock '${name}' could not be acquired: ${describeError(cause)}. ` +
+              "Check that the engine or proxy supports GET_LOCK."
+          })
+      )
+    )
+    const value = rows[0]?.["acquired"]
+    const result = classifyAcquire(value)
+    if (result === "acquired") return
+    if (result === "busy") {
+      const holder = yield* holderId(executor, lock, name)
+      const base =
+        operation === "migrate"
+          ? `A migration is in progress: migration lock '${name}' was not acquired within ${timeoutSeconds}s`
+          : `${operation} cannot run: a migration or preview holds lock '${name}'`
+      return yield* Effect.fail(
+        new MigrationBusyError({
+          operation,
+          message: holder === undefined ? base : `${base} (holder ${holder})`
+        })
+      )
+    }
+    return yield* Effect.fail(
+      new MigrationLockError({
+        detail: `Migration lock '${name}' returned an unexpected result: ${String(value)}`
+      })
+    )
+  })
+}
+
+/**
+ * Clears only the Mira lock name on the reserved connection, repeating while the
+ * same connection still holds it. Other user locks are never touched.
+ */
+export function clearReservedName(
+  executor: MigrationExecutor,
+  lock: MigrationLock,
+  name: string
+): Effect.Effect<number, MigrationLockError> {
+  return Effect.gen(function* () {
+    let cleared = 0
+    for (let attempt = 0; attempt < MAX_LOCK_CLEAR_ATTEMPTS; attempt++) {
+      const held = yield* isHeldByLock(executor, lock, name)
+      if (!held) return cleared
+      yield* executor.queryParameterized(lock.releaseStatement(name)).pipe(
+        Effect.mapError(
+          (cause) =>
+            new MigrationLockError({
+              detail: `Migration lock '${name}' could not be cleared: ${describeError(cause)}`
+            })
+        )
+      )
+      cleared++
+    }
+    const stillHeld = yield* isHeldByLock(executor, lock, name)
+    if (stillHeld) {
+      return yield* Effect.fail(
+        new MigrationLockError({
+          detail: `Migration lock '${name}' is still held by this connection after eight releases.`
+        })
+      )
+    }
+    return cleared
+  })
+}
+
+export type LockReleaseResult = {
+  readonly released: boolean
+  readonly killed: boolean
+}
+
+/**
+ * Releases the lock, verifies that this connection no longer owns it, and falls
+ * back to killing the holder session. Never fails; a lost session counts as
+ * released because the server has ended it.
+ */
+export function releaseSessionLock(
+  executor: MigrationExecutor,
+  lock: MigrationLock,
+  name: string
+): Effect.Effect<LockReleaseResult> {
+  return Effect.gen(function* () {
+    const releaseExit = yield* Effect.exit(executor.queryParameterized(lock.releaseStatement(name)))
+    if (Exit.isFailure(releaseExit) && isSessionLoss(releaseExit.cause)) {
+      return { released: true, killed: false }
+    }
+    const held = yield* isHeldByLockSafe(executor, lock, name)
+    if (!held) return { released: true, killed: false }
+    if (lock.killSelfStatement !== undefined) {
+      yield* Effect.exit(executor.queryParameterized(lock.killSelfStatement)).pipe(Effect.asVoid)
+      return { released: false, killed: true }
+    }
+    return { released: false, killed: false }
+  })
+}
+
+type LockHandle = {
+  readonly name: string
+  readonly executor: MigrationExecutor
+  readonly dedicated: LockConnection | undefined
+  readonly heartbeatStop: Ref.Ref<boolean>
+  readonly lockLost: Ref.Ref<boolean>
+}
+
+function resolveTimeoutSeconds(
+  lock: MigrationLock,
+  options: MigrateOptions | undefined
+): Effect.Effect<number, MigrationLockError> {
+  const resolved = resolveLockTimeoutSeconds(
+    options?.migrationLockTimeoutSeconds,
+    lock.defaultTimeoutSeconds
+  )
+  if ("detail" in resolved) {
+    return Effect.fail(new MigrationLockError({ detail: resolved.detail }))
+  }
+  return Effect.succeed(resolved.seconds)
+}
+
+function startLockHeartbeat(
+  executor: MigrationExecutor,
+  intervalSeconds: number,
+  stop: Ref.Ref<boolean>,
+  lost: Ref.Ref<boolean>
+): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    while (true) {
+      yield* Effect.sleep(Duration.seconds(intervalSeconds))
+      if (yield* Ref.get(stop)) return
+      const exit = yield* Effect.exit(
+        executor.query("SELECT 1 AS ok").pipe(Effect.timeout(HEARTBEAT_QUERY_TIMEOUT))
+      )
+      if (Exit.isFailure(exit)) {
+        yield* Ref.set(lost, true)
+        return
+      }
+    }
+  })
+}
+
+/**
+ * Opens the dedicated lock connection when the dialect supplies one, resolves
+ * the lock name, and clears a stale instance. It does not acquire; the caller
+ * records the handle before acquiring so an interrupted acquire can still be
+ * released by the finalizer.
+ */
+function prepareLockHandle(
+  lock: MigrationLock,
+  ddlExecutor: MigrationExecutor
+): Effect.Effect<LockHandle, MigrationError, Scope.Scope> {
+  return Effect.gen(function* () {
+    let dedicated: LockConnection | undefined
+    if (lock.openConnection !== undefined) {
+      dedicated = yield* lock.openConnection.pipe(
+        Effect.mapError(
+          (cause) =>
+            new MigrationLockError({
+              detail: `Could not open the dedicated lock connection: ${describeError(cause)}`
+            })
+        )
+      )
+    }
+    const lockExecutor = dedicated?.executor ?? ddlExecutor
+    if (dedicated !== undefined) {
+      yield* assertSameDatabase(lockExecutor, ddlExecutor, lock)
+    }
+    const databaseName = yield* readDatabaseName(lockExecutor, lock)
+    const name = boundLockName(lock, databaseName)
+    const cleared = yield* clearReservedName(lockExecutor, lock, name)
+    if (cleared > 0) {
+      yield* Effect.logWarning(
+        `Cleared ${cleared} stale instance(s) of migration lock '${name}' on the holder connection`
+      )
+    }
+    yield* Effect.logDebug(`Resolved migration lock '${name}' for database '${databaseName}'`)
+
+    const heartbeatStop = yield* Ref.make(false)
+    const lockLost = yield* Ref.make(false)
+    return { name, executor: lockExecutor, dedicated, heartbeatStop, lockLost }
+  })
+}
+
+function startHeartbeatFor(handle: LockHandle, lock: MigrationLock) {
+  if (handle.dedicated === undefined) return Effect.void
+  const interval = lock.heartbeatIntervalSeconds ?? 60
+  return Effect.forkScoped(
+    startLockHeartbeat(handle.executor, interval, handle.heartbeatStop, handle.lockLost)
+  ).pipe(Effect.asVoid)
+}
+
+function lockLost(name: string, where: string): MigrationLockError {
+  return new MigrationLockError({
+    detail: `Migration lock '${name}' was lost ${where}; the plan is not recorded.`
+  })
+}
+
+function assertLockHeld(
+  handle: LockHandle,
+  lock: MigrationLock,
+  where: string
+): Effect.Effect<void, MigrationError> {
+  return Effect.gen(function* () {
+    const lost = yield* Ref.get(handle.lockLost)
+    if (lost) return yield* Effect.fail(lockLost(handle.name, where))
+    const held = yield* isHeldByLock(handle.executor, lock, handle.name)
+    if (!held) return yield* Effect.fail(lockLost(handle.name, where))
+  })
+}
+
+/**
+ * Runs rendered statements in order and checks the heartbeat flag and holder
+ * after each one. The current statement is allowed to finish.
+ */
+function runStatementsWithLockCheck(
+  executor: MigrationExecutor,
+  statements: ReadonlyArray<string>,
+  check: (statementIndex: number) => Effect.Effect<void, MigrationError>
+) {
+  return Effect.gen(function* () {
+    for (let index = 0; index < statements.length; index++) {
+      const statement = statements[index]
+      if (statement === undefined) continue
+      yield* Effect.logDebug(`SQL: ${statement}`)
+      yield* executor.run(statement).pipe(
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            yield* Effect.logError(`Failed SQL: ${statement}`)
+            return yield* Effect.failCause(cause)
+          })
+        )
+      )
+      yield* check(index + 1)
+    }
+  })
+}
 
 /**
  * Takes the dialect's non-blocking migration preview lock when it declares one.
@@ -385,14 +757,18 @@ const transactionalExecutor = (sql: SqlClient.SqlClient): MigrationExecutor => (
   run: (statement) => sql.unsafe(statement).pipe(Effect.asVoid),
   runParameterized: (statement) =>
     sql.unsafe(statement.sql, [...statement.params]).pipe(Effect.asVoid),
-  query: (statement) => sql.unsafe<Record<string, unknown>>(statement)
+  query: (statement) => sql.unsafe<Record<string, unknown>>(statement),
+  queryParameterized: (statement) =>
+    sql.unsafe<Record<string, unknown>>(statement.sql, [...statement.params])
 })
 
 const connectionExecutor = (conn: Connection): MigrationExecutor => ({
   run: (statement) => conn.executeUnprepared(statement, [], undefined).pipe(Effect.asVoid),
   runParameterized: (statement) =>
     conn.executeUnprepared(statement.sql, [...statement.params], undefined).pipe(Effect.asVoid),
-  query: (statement) => conn.executeUnprepared(statement, [], undefined)
+  query: (statement) => conn.executeUnprepared(statement, [], undefined),
+  queryParameterized: (statement) =>
+    conn.executeUnprepared(statement.sql, [...statement.params], undefined)
 })
 
 const makeRunner = (
@@ -603,33 +979,50 @@ function migrateStatement(
   }
 
   const { schemaTable, migrationsTable } = metadataFor(options)
+  const lockConfig = model.lock
 
   return Effect.scoped(
     Effect.gen(function* () {
       const conn = yield* sql.reserve
-      const executor = connectionExecutor(conn)
-      const runner = makeRunner(executor, model)
+      const ddlExecutor = connectionExecutor(conn)
+      const runner = makeRunner(ddlExecutor, model)
       let cleanupStatements: ReadonlyArray<string> = []
       let previousSession: Record<string, unknown> | undefined
+      let handle: LockHandle | undefined
 
       const body = Effect.gen(function* () {
         const session = model.session
         if (session !== undefined) {
-          const rows = yield* executor.query(session.readSql)
+          const rows = yield* ddlExecutor.query(session.readSql)
           previousSession = rows[0] ?? {}
-          yield* runStatements(executor, session.setupSql)
+          yield* runStatements(ddlExecutor, session.setupSql)
+        }
+
+        if (lockConfig !== undefined) {
+          const timeoutSeconds = yield* resolveTimeoutSeconds(lockConfig, options)
+          const prepared = yield* prepareLockHandle(lockConfig, ddlExecutor)
+          handle = prepared
+          yield* acquireSessionLock(
+            prepared.executor,
+            lockConfig,
+            prepared.name,
+            timeoutSeconds,
+            "migrate"
+          )
+          yield* Effect.logDebug(`Acquired migration lock '${prepared.name}'`)
+          yield* startHeartbeatFor(prepared, lockConfig)
         }
 
         yield* Effect.logDebug("Creating system tables if not exist")
         const systemTranslated = yield* renderPlan(dialect, systemTableSteps(schemaTable, migrationsTable), {
           tables: new Map(),
           views: new Map(),
-          readonlyQuery: makeReadonlyQueryGuard(executor.query)
+          readonlyQuery: makeReadonlyQueryGuard(ddlExecutor.query)
         })
-        yield* runStatements(executor, systemTranslated.statements)
+        yield* runStatements(ddlExecutor, systemTranslated.statements)
 
         yield* Effect.logInfo(`Migrating ${schemas.length} collections...`)
-        const storedRecord = yield* readStoredSchemas(executor, dialect, schemaTable)
+        const storedRecord = yield* readStoredSchemas(ddlExecutor, dialect, schemaTable)
         yield* Effect.logDebug(`Stored schemas: ${Object.keys(storedRecord).length} found`)
 
         const plan = computePlan(schemas, storedRecord, options)
@@ -645,7 +1038,7 @@ function migrateStatement(
           const translated = yield* renderPlan(
             dialect,
             plan.steps,
-            buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(executor.query))
+            buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(ddlExecutor.query))
           )
           cleanupStatements = translated.cleanup
 
@@ -680,7 +1073,18 @@ function migrateStatement(
             break
           }
 
-          const exit = yield* Effect.exit(runStatements(executor, translated.statements))
+          const check = (statementIndex: number): Effect.Effect<void, MigrationError> =>
+            handle === undefined || lockConfig === undefined
+              ? Effect.void
+              : assertLockHeld(
+                  handle,
+                  lockConfig,
+                  `before statement ${statementIndex}; the plan is not recorded`
+                )
+
+          const exit = yield* Effect.exit(
+            runStatementsWithLockCheck(ddlExecutor, translated.statements, check)
+          )
           if (Exit.isSuccess(exit)) {
             applied = translated
             break
@@ -727,10 +1131,15 @@ function migrateStatement(
         const verifyContext = buildPlanContext(
           schemas,
           storedRecord,
-          makeReadonlyQueryGuard(executor.query)
+          makeReadonlyQueryGuard(ddlExecutor.query)
         )
         yield* verifyPlan(plan.steps, verifyContext)
-        yield* runStatements(executor, applied.validations ?? [])
+        yield* runStatements(ddlExecutor, applied.validations ?? [])
+
+        if (handle !== undefined && lockConfig !== undefined) {
+          yield* assertLockHeld(handle, lockConfig, "before metadata; the plan is not recorded")
+        }
+
         yield* writeStatementMetadata(
           runner,
           dialect,
@@ -741,15 +1150,75 @@ function migrateStatement(
         )
       })
 
-      const restore = Effect.gen(function* () {
-        yield* runCleanup(executor, cleanupStatements)
-        const session = model.session
-        if (session !== undefined && previousSession !== undefined) {
-          yield* runSessionRestore(executor, session.restoreSql(previousSession))
-        }
-      })
+      yield* Effect.onExit(body, (exit) =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            let outcome: LockReleaseResult = { released: true, killed: false }
+            let destroyed = false
 
-      yield* body.pipe(Effect.ensuring(restore))
+            const step = (effect: Effect.Effect<unknown, unknown>) =>
+              restore(effect).pipe(
+                Effect.timeout(LOCK_STEP_TIMEOUT),
+                Effect.catchCause((cause) =>
+                  Effect.logError(`Migration finalizer step failed: ${Cause.pretty(cause)}`)
+                )
+              )
+
+            if (handle !== undefined) {
+              yield* step(Ref.set(handle.heartbeatStop, true))
+            }
+            yield* step(runCleanup(ddlExecutor, cleanupStatements))
+            if (handle !== undefined && lockConfig !== undefined) {
+              outcome = yield* restore(
+                releaseSessionLock(handle.executor, lockConfig, handle.name)
+              ).pipe(
+                Effect.timeout(LOCK_STEP_TIMEOUT),
+                Effect.catchCause(() => Effect.succeed({ released: false, killed: false }))
+              )
+            }
+            if (handle?.dedicated !== undefined) {
+              destroyed = true
+              yield* step(handle.dedicated.destroy)
+            }
+
+            const shouldRestore =
+              lockConfig === undefined || handle?.dedicated !== undefined || outcome.released
+            if (shouldRestore && model.session !== undefined && previousSession !== undefined) {
+              yield* step(runSessionRestore(ddlExecutor, model.session.restoreSql(previousSession)))
+            }
+
+            if (Exit.isFailure(exit)) {
+              if (handle !== undefined && !outcome.released) {
+                yield* Effect.logError(
+                  `Migration lock '${handle.name}' could not be verified as released after the migration failed; ` +
+                    "the original error is preserved."
+                )
+              }
+              return
+            }
+
+            if (handle !== undefined && !outcome.released) {
+              yield* Effect.logError(
+                `Migration lock '${handle.name}' is still held after release; ` +
+                  (destroyed
+                    ? "the dedicated lock connection was destroyed."
+                    : outcome.killed
+                      ? "the same-session kill was issued."
+                      : "no kill or destroy path was available.")
+              )
+              return yield* Effect.die(
+                new MigrationLockReleaseError({
+                  lockName: handle.name,
+                  killed: outcome.killed,
+                  destroyed,
+                  cause: "the release could not be verified"
+                })
+              )
+            }
+          })
+        )
+      )
+
       yield* Effect.logInfo(`Migration complete - ${schemas.length} collections migrated`)
     })
   )
@@ -819,9 +1288,9 @@ function withStatementPreview<A>(
       })
     )
   }
-  const lock = dialect.migrationPreviewLockSql
-  const unlock = dialect.migrationPreviewUnlockSql
-  if ((lock === undefined) !== (unlock === undefined)) {
+  const legacyLock = dialect.migrationPreviewLockSql
+  const legacyUnlock = dialect.migrationPreviewUnlockSql
+  if ((legacyLock === undefined) !== (legacyUnlock === undefined)) {
     return Effect.fail(
       new UnsupportedMigrationStepError({
         step: "createView",
@@ -829,34 +1298,101 @@ function withStatementPreview<A>(
       })
     )
   }
+  const lockConfig = model.lock
 
   return Effect.scoped(
     Effect.gen(function* () {
       const conn = yield* sql.reserve
-      const executor = connectionExecutor(conn)
+      const ddlExecutor = connectionExecutor(conn)
       const session = model.session
       let previous: Record<string, unknown> | undefined
-      if (session !== undefined) {
-        const rows = yield* executor.query(session.readSql)
-        previous = rows[0] ?? {}
-        yield* runStatements(executor, session.previewSetupSql ?? [])
-      }
-      if (lock !== undefined) {
-        yield* acquireMigrationPreviewLock(executor, dialect, operation)
-      }
+      let handle: LockHandle | undefined
+      let result: { readonly value: A } | undefined
 
-      const restore = Effect.gen(function* () {
-        if (unlock !== undefined) {
-          yield* executor.run(unlock).pipe(
-            Effect.catchCause(() => Effect.logWarning("Migration preview lock release failed"))
-          )
+      const bodyEffect = Effect.gen(function* () {
+        if (session !== undefined) {
+          const rows = yield* ddlExecutor.query(session.readSql)
+          previous = rows[0] ?? {}
+          yield* runStatements(ddlExecutor, session.previewSetupSql ?? [])
         }
-        if (session !== undefined && previous !== undefined) {
-          yield* runSessionRestore(executor, session.restoreSql(previous))
+        if (lockConfig !== undefined) {
+          const prepared = yield* prepareLockHandle(lockConfig, ddlExecutor)
+          handle = prepared
+          yield* acquireSessionLock(prepared.executor, lockConfig, prepared.name, 0, operation)
+          yield* Effect.logDebug(`Acquired migration lock '${prepared.name}' for a preview`)
+          yield* startHeartbeatFor(prepared, lockConfig)
+        } else if (legacyLock !== undefined) {
+          yield* acquireMigrationPreviewLock(ddlExecutor, dialect, operation)
+        }
+
+        result = { value: yield* body(ddlExecutor) }
+
+        if (handle !== undefined && lockConfig !== undefined) {
+          yield* assertLockHeld(
+            handle,
+            lockConfig,
+            "before the preview returned; the preview result is not trustworthy"
+          )
         }
       })
 
-      return yield* body(executor).pipe(Effect.ensuring(restore))
+      yield* Effect.onExit(bodyEffect, (exit) =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            let outcome: LockReleaseResult = { released: true, killed: false }
+            let destroyed = false
+
+            const step = (effect: Effect.Effect<unknown, unknown>) =>
+              restore(effect).pipe(
+                Effect.timeout(LOCK_STEP_TIMEOUT),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning(`Migration preview finalizer step failed: ${Cause.pretty(cause)}`)
+                )
+              )
+
+            if (handle !== undefined) {
+              yield* step(Ref.set(handle.heartbeatStop, true))
+            }
+            if (handle !== undefined && lockConfig !== undefined) {
+              outcome = yield* restore(
+                releaseSessionLock(handle.executor, lockConfig, handle.name)
+              ).pipe(
+                Effect.timeout(LOCK_STEP_TIMEOUT),
+                Effect.catchCause(() => Effect.succeed({ released: false, killed: false }))
+              )
+            } else if (legacyUnlock !== undefined) {
+              yield* step(ddlExecutor.run(legacyUnlock))
+            }
+            if (handle?.dedicated !== undefined) {
+              destroyed = true
+              yield* step(handle.dedicated.destroy)
+            }
+
+            const shouldRestore =
+              handle === undefined || handle.dedicated !== undefined || outcome.released
+            if (shouldRestore && session !== undefined && previous !== undefined) {
+              yield* step(runSessionRestore(ddlExecutor, session.restoreSql(previous)))
+            }
+
+            if (Exit.isFailure(exit)) return
+            if (handle !== undefined && !outcome.released) {
+              return yield* Effect.die(
+                new MigrationLockReleaseError({
+                  lockName: handle.name,
+                  killed: outcome.killed,
+                  destroyed,
+                  cause: "the preview release could not be verified"
+                })
+              )
+            }
+          })
+        )
+      )
+
+      if (result === undefined) {
+        return yield* Effect.die(new Error("Migration preview body returned no result"))
+      }
+      return result.value
     })
   )
 }
@@ -1060,3 +1596,4 @@ export const makeMigratorLive = (dialect: MigrationDialect) =>
       return makeMigrator(sql, dialect)
     })
   )
+

@@ -17,6 +17,20 @@ published by CI.
 
 ### Added
 
+- **MySQL/MariaDB migration lock.** Statement-mode dialects can now declare a
+  session-scoped `MigrationLock`. `migrate` serializes on a database-scoped,
+  always-hashed ASCII name (`mira.migrations:<16 hex>` from stable FNV-1a), waits
+  up to `MigrateOptions.migrationLockTimeoutSeconds` (default 60), and names the
+  lock, timeout, and holder when the wait fails. `plan` and `status` take the same
+  lock with timeout 0 and fail `MigrationBusyError`. A dedicated lock connection
+  supplied by the database preset is held for the migration and destroyed on
+  scope exit; the reserved-connection fallback verifies release with
+  `IS_USED_LOCK(name) = CONNECTION_ID()` and kills the holder when needed. The
+  migration session sets `wait_timeout = 600` so an idle half-open holder is
+  reclaimed in about ten minutes. New public exports: `MigrationLock`,
+  `LockExecutor`, `LockConnection`, `MigrationLockError`,
+  `MigrationLockReleaseError`, and `MigrationError`. MySQL/MariaDB support itself
+  is still pending #30.
 - **PostgreSQL database support.** `PostgresDatabase({ url, maxConnections?,
   idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
   Node and Bun through `@effect/sql-pg`. The preset validates `maxConnections`,

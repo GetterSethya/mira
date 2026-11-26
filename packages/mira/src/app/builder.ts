@@ -349,7 +349,9 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    * Destructive steps (`dropTable`, `dropColumn`, `alterColumn`) are skipped
    * with a warning unless `allowDestructive: true` is set here.
    *
-   * @param m - A `MigrateOptions` object (`allowDestructive`, `logLevel`)
+   * @param m - A `MigrateOptions` object (`allowDestructive`, `logLevel`,
+   * `migrationLockTimeoutSeconds`). `migrationLockTimeoutSeconds` applies only to
+   * statement engines that declare a migration lock, and only to `migrate`.
    * @returns A new builder (same phantom type — migrations is optional)
    *
    * @example

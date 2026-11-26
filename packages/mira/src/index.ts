@@ -92,13 +92,25 @@ export { defaultCorsConfig, makeCorsMiddleware } from "./http/cors.js"
 export { catchCollectionErrors } from "./http/errors.js"
 export { TokenStore, TokenStoreLive } from "./http/token-store.js"
 export { Migrator, MigratorLive } from "./migrator/index.js"
+export type { MigrationError } from "./migrator/index.js"
+export {
+  InvalidMigrationStatementError,
+  MigrationBusyError,
+  MigrationLockError,
+  MigrationLockReleaseError,
+  MigrationRollbackError,
+  UnsupportedMigrationStepError
+} from "./migrator/index.js"
 export { Repository, RepositoryLive } from "./repository/index.js"
 export { Dialect } from "./dialect/dialect.js"
 export { sqliteDialect } from "./dialect/dialect-sqlite.js"
 export type {
   DialectType,
   FieldValueType,
+  LockConnection,
+  LockExecutor,
   MigrationDialect,
+  MigrationLock,
   MigrationModel,
   ParameterizedStatement,
   Quote,

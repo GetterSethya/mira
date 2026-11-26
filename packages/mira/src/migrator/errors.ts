@@ -28,16 +28,45 @@ export class InvalidMigrationStatementError extends Data.TaggedError("InvalidMig
 }> {}
 
 /**
- * A `plan` or `status` preview could not take the dialect's non-blocking
- * migration preview lock because a migration is in progress.
+ * A `plan`, `status`, or `migrate` call could not take the migration lock
+ * because a migration or another preview holds it.
  *
- * SQLite and libSQL omit the preview lock and never raise this.
+ * SQLite and libSQL omit the lock and never raise this.
  */
 export class MigrationBusyError extends Data.TaggedError("MigrationBusyError")<{
-  /** Which preview operation could not run. */
-  readonly operation: "plan" | "status"
+  /** Which operation could not run. */
+  readonly operation: "plan" | "status" | "migrate"
   /** A short explanation for logs and CLI output. */
   readonly message: string
+}> {}
+
+/**
+ * The migration lock could not be configured, resolved, cleared, or acquired.
+ *
+ * Raised for a missing database, a lock connection pointed at another
+ * database, an invalid `migrationLockTimeoutSeconds`, an engine that rejects
+ * the lock statements, or an unexpected `GET_LOCK` result.
+ */
+export class MigrationLockError extends Data.TaggedError("MigrationLockError")<{
+  /** Which lock, on which target, and why it failed. */
+  readonly detail: string
+}> {}
+
+/**
+ * A migration lock could not be verified as released.
+ *
+ * This is a defect, not part of {@link MigrationError}: the connection may still
+ * hold the lock, and the boot must fail instead of continuing after an
+ * unverified release. The dedicated path destroys the lock connection before
+ * dying; the fallback path kills the holder session.
+ */
+export class MigrationLockReleaseError extends Data.TaggedError("MigrationLockReleaseError")<{
+  readonly lockName: string
+  /** True when the same-session kill statement was issued. */
+  readonly killed: boolean
+  /** True when a dedicated lock connection was explicitly destroyed. */
+  readonly destroyed: boolean
+  readonly cause: unknown
 }> {}
 
 /**
@@ -57,3 +86,4 @@ export type MigrationError =
   | UnsupportedMigrationStepError
   | InvalidMigrationStatementError
   | MigrationBusyError
+  | MigrationLockError
