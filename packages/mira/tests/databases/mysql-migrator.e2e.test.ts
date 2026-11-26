@@ -866,6 +866,8 @@ const defineSuite = (config: EngineConfig) => {
               )
               expect(Exit.isFailure(exit)).toBe(true)
 
+              const name = yield* expectedLockName
+              expect(yield* isUsedLock(name)).toBeNull()
               expect(yield* countRows(migrationsTable)).toBe(0)
               expect(yield* storedSchema(todosTable)).not.toContain('"notes"')
               yield* expectV2Physical
@@ -922,6 +924,8 @@ const defineSuite = (config: EngineConfig) => {
               )
               expect(Exit.isFailure(exit)).toBe(true)
 
+              const name = yield* expectedLockName
+              expect(yield* isUsedLock(name)).toBeNull()
               expect(yield* countRows(migrationsTable)).toBe(0)
               expect(yield* storedSchema(todosTable)).not.toContain('"notes"')
               yield* expectV2Physical
@@ -1613,6 +1617,54 @@ const defineSuite = (config: EngineConfig) => {
             expect(Exit.isFailure(exit)).toBe(true)
             expect(yield* countRows(migrationsTable)).toBe(0)
             expect(yield* isUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
+
+    it.live(
+      "releases the lock when interrupted after acquire",
+      () =>
+        runWithEngine(
+          2,
+          slowPlanDialect(mysqlMigrationDialect),
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const name = yield* expectedLockName
+
+            const exit = yield* Effect.exit(
+              migrator.migrate(v1Schemas(), options).pipe(Effect.timeout("1 second"))
+            )
+            expect(Exit.isFailure(exit)).toBe(true)
+            expect(yield* isUsedLock(name)).toBeNull()
+          })
+        ),
+      120_000
+    )
+
+    it.live(
+      "preview fails when the lock session is lost",
+      () =>
+        runWithEngine(
+          2,
+          slowPlanDialect(
+            dedicatedLockDialect({
+              heartbeatIntervalSeconds: 1,
+              failHeartbeatAfter: 1
+            })
+          ),
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const schemas = [{ name: todosTable, schema: todosV1() }]
+
+            const result = yield* migrator.plan(schemas, options).pipe(
+              Effect.as("ok" as const),
+              Effect.catchTag("MigrationLockError", (error) => Effect.succeed(error))
+            )
+            expect(result).not.toBe("ok")
+            if (result !== "ok") {
+              expect(result.detail).toContain("was lost")
+            }
           })
         ),
       120_000

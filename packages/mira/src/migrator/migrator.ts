@@ -1150,70 +1150,73 @@ function migrateStatement(
         )
       })
 
-      yield* Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          const exit = yield* restore(Effect.exit(body))
-          let outcome: LockReleaseResult = { released: true, killed: false }
-          let destroyed = false
+      yield* Effect.onExit(body, (exit) =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            let outcome: LockReleaseResult = { released: true, killed: false }
+            let destroyed = false
 
-          const step = (effect: Effect.Effect<unknown, unknown>) =>
-            restore(effect).pipe(
-              Effect.timeout(LOCK_STEP_TIMEOUT),
-              Effect.catchCause((cause) =>
-                Effect.logError(`Migration finalizer step failed: ${Cause.pretty(cause)}`)
+            const step = (effect: Effect.Effect<unknown, unknown>) =>
+              restore(effect).pipe(
+                Effect.timeout(LOCK_STEP_TIMEOUT),
+                Effect.catchCause((cause) =>
+                  Effect.logError(`Migration finalizer step failed: ${Cause.pretty(cause)}`)
+                )
               )
-            )
 
-          if (handle !== undefined) {
-            yield* step(Ref.set(handle.heartbeatStop, true))
-          }
-          yield* step(runCleanup(ddlExecutor, cleanupStatements))
-          if (handle !== undefined && lockConfig !== undefined) {
-            outcome = yield* restore(releaseSessionLock(handle.executor, lockConfig, handle.name)).pipe(
-              Effect.timeout(LOCK_STEP_TIMEOUT),
-              Effect.catchCause(() => Effect.succeed({ released: false, killed: false }))
-            )
-          }
-          if (handle?.dedicated !== undefined) {
-            destroyed = true
-            yield* step(handle.dedicated.destroy)
-          }
-
-          const shouldRestore =
-            lockConfig === undefined || handle?.dedicated !== undefined || outcome.released
-          if (shouldRestore && model.session !== undefined && previousSession !== undefined) {
-            yield* step(runSessionRestore(ddlExecutor, model.session.restoreSql(previousSession)))
-          }
-
-          if (Exit.isFailure(exit)) {
-            if (handle !== undefined && !outcome.released) {
-              yield* Effect.logError(
-                `Migration lock '${handle.name}' could not be verified as released after the migration failed; ` +
-                  "the original error is preserved."
+            if (handle !== undefined) {
+              yield* step(Ref.set(handle.heartbeatStop, true))
+            }
+            yield* step(runCleanup(ddlExecutor, cleanupStatements))
+            if (handle !== undefined && lockConfig !== undefined) {
+              outcome = yield* restore(
+                releaseSessionLock(handle.executor, lockConfig, handle.name)
+              ).pipe(
+                Effect.timeout(LOCK_STEP_TIMEOUT),
+                Effect.catchCause(() => Effect.succeed({ released: false, killed: false }))
               )
             }
-            return yield* Effect.failCause(exit.cause)
-          }
+            if (handle?.dedicated !== undefined) {
+              destroyed = true
+              yield* step(handle.dedicated.destroy)
+            }
 
-          if (handle !== undefined && !outcome.released) {
-            yield* Effect.logError(
-              `Migration lock '${handle.name}' is still held after release; ` +
-                (destroyed
-                  ? "the dedicated lock connection was destroyed."
-                  : outcome.killed
-                    ? "the same-session kill was issued."
-                    : "no kill or destroy path was available.")
-            )
-            return yield* Effect.die(
-              new MigrationLockReleaseError({
-                lockName: handle.name,
-                killed: outcome.killed,
-                destroyed,
-                cause: "the release could not be verified"
-              })
-            )
-          }
-        })
+            const shouldRestore =
+              lockConfig === undefined || handle?.dedicated !== undefined || outcome.released
+            if (shouldRestore && model.session !== undefined && previousSession !== undefined) {
+              yield* step(runSessionRestore(ddlExecutor, model.session.restoreSql(previousSession)))
+            }
+
+            if (Exit.isFailure(exit)) {
+              if (handle !== undefined && !outcome.released) {
+                yield* Effect.logError(
+                  `Migration lock '${handle.name}' could not be verified as released after the migration failed; ` +
+                    "the original error is preserved."
+                )
+              }
+              return
+            }
+
+            if (handle !== undefined && !outcome.released) {
+              yield* Effect.logError(
+                `Migration lock '${handle.name}' is still held after release; ` +
+                  (destroyed
+                    ? "the dedicated lock connection was destroyed."
+                    : outcome.killed
+                      ? "the same-session kill was issued."
+                      : "no kill or destroy path was available.")
+              )
+              return yield* Effect.die(
+                new MigrationLockReleaseError({
+                  lockName: handle.name,
+                  killed: outcome.killed,
+                  destroyed,
+                  cause: "the release could not be verified"
+                })
+              )
+            }
+          })
+        )
       )
 
       yield* Effect.logInfo(`Migration complete - ${schemas.length} collections migrated`)
@@ -1333,63 +1336,63 @@ function withStatementPreview<A>(
         }
       })
 
-      return yield* Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          const exit = yield* restore(Effect.exit(bodyEffect))
-          let outcome: LockReleaseResult = { released: true, killed: false }
-          let destroyed = false
+      yield* Effect.onExit(bodyEffect, (exit) =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            let outcome: LockReleaseResult = { released: true, killed: false }
+            let destroyed = false
 
-          const step = (effect: Effect.Effect<unknown, unknown>) =>
-            restore(effect).pipe(
-              Effect.timeout(LOCK_STEP_TIMEOUT),
-              Effect.catchCause((cause) =>
-                Effect.logWarning(`Migration preview finalizer step failed: ${Cause.pretty(cause)}`)
+            const step = (effect: Effect.Effect<unknown, unknown>) =>
+              restore(effect).pipe(
+                Effect.timeout(LOCK_STEP_TIMEOUT),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning(`Migration preview finalizer step failed: ${Cause.pretty(cause)}`)
+                )
               )
-            )
 
-          if (handle !== undefined) {
-            yield* step(Ref.set(handle.heartbeatStop, true))
-          }
-          if (handle !== undefined && lockConfig !== undefined) {
-            outcome = yield* restore(releaseSessionLock(handle.executor, lockConfig, handle.name)).pipe(
-              Effect.timeout(LOCK_STEP_TIMEOUT),
-              Effect.catchCause(() => Effect.succeed({ released: false, killed: false }))
-            )
-          } else if (legacyUnlock !== undefined) {
-            yield* step(ddlExecutor.run(legacyUnlock))
-          }
-          if (handle?.dedicated !== undefined) {
-            destroyed = true
-            yield* step(handle.dedicated.destroy)
-          }
+            if (handle !== undefined) {
+              yield* step(Ref.set(handle.heartbeatStop, true))
+            }
+            if (handle !== undefined && lockConfig !== undefined) {
+              outcome = yield* restore(
+                releaseSessionLock(handle.executor, lockConfig, handle.name)
+              ).pipe(
+                Effect.timeout(LOCK_STEP_TIMEOUT),
+                Effect.catchCause(() => Effect.succeed({ released: false, killed: false }))
+              )
+            } else if (legacyUnlock !== undefined) {
+              yield* step(ddlExecutor.run(legacyUnlock))
+            }
+            if (handle?.dedicated !== undefined) {
+              destroyed = true
+              yield* step(handle.dedicated.destroy)
+            }
 
-          const shouldRestore =
-            handle === undefined || handle.dedicated !== undefined || outcome.released
-          if (shouldRestore && session !== undefined && previous !== undefined) {
-            yield* step(runSessionRestore(ddlExecutor, session.restoreSql(previous)))
-          }
+            const shouldRestore =
+              handle === undefined || handle.dedicated !== undefined || outcome.released
+            if (shouldRestore && session !== undefined && previous !== undefined) {
+              yield* step(runSessionRestore(ddlExecutor, session.restoreSql(previous)))
+            }
 
-          if (Exit.isFailure(exit)) {
-            return yield* Effect.failCause(exit.cause)
-          }
-          if (handle !== undefined && !outcome.released) {
-            return yield* Effect.die(
-              new MigrationLockReleaseError({
-                lockName: handle.name,
-                killed: outcome.killed,
-                destroyed,
-                cause: "the preview release could not be verified"
-              })
-            )
-          }
-          if (result === undefined) {
-            return yield* Effect.die(
-              new Error("Migration preview body returned no result")
-            )
-          }
-          return result.value
-        })
+            if (Exit.isFailure(exit)) return
+            if (handle !== undefined && !outcome.released) {
+              return yield* Effect.die(
+                new MigrationLockReleaseError({
+                  lockName: handle.name,
+                  killed: outcome.killed,
+                  destroyed,
+                  cause: "the preview release could not be verified"
+                })
+              )
+            }
+          })
+        )
       )
+
+      if (result === undefined) {
+        return yield* Effect.die(new Error("Migration preview body returned no result"))
+      }
+      return result.value
     })
   )
 }
