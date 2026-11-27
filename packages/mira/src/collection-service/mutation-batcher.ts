@@ -5,7 +5,7 @@ import type { SqlError } from "effect/sql"
 import { isSqlError } from "effect/sql/SqlError"
 
 import { Dialect } from "@/dialect/dialect.js"
-import type { TransactionProbeStrategy } from "@/dialect/dialect.js"
+import type { TransactionProbeStrategy, TransactionProbeVerdict } from "@/dialect/dialect.js"
 import type { RepoRecord } from "@/repository/types.js"
 import { annotateCurrentSpanWhenEnabled, withSpanWhenEnabled } from "@/telemetry/span.js"
 
@@ -625,11 +625,12 @@ function collectionErrorOf(
 }
 
 /**
- * The verdict of a transaction-liveness probe, plus the `SqlError` reason tag
- * of the probe statement that failed when the probe reported not-usable.
+ * The verdict of a transaction-probe decision, plus the `SqlError` reason tag
+ * of the probe statement that failed when `SELECT 1` reported not-usable.
  */
 export interface TransactionProbeResult {
   readonly alive: boolean
+  readonly verdict: TransactionProbeVerdict
   readonly probeFailureTag?: string
 }
 
@@ -642,17 +643,69 @@ const probeFailureTagOf = (cause: Cause.Cause<SqlError.SqlError>): string | unde
 }
 
 /**
- * Probe whether the current SQL transaction is still usable.
+ * The stable string label for a probe strategy.
+ *
+ * Span attributes must not receive an object with a function. The object
+ * strategy contributes its `_tag`; the string strategies contribute themselves.
+ *
+ * @internal
+ */
+export const probeStrategyName = (strategy: TransactionProbeStrategy): string =>
+  typeof strategy === "string" ? strategy : strategy._tag
+
+/**
+ * Extract the representative error from a failed entry's cause.
+ *
+ * Fail-first is deliberate. A guarded deadlock cause contains the original
+ * `1213` as a typed failure and the savepoint `1305` as a defect. Handing the
+ * defect to the classifier would miss the deadlock and reopen the fail-open
+ * hole this contract closes.
+ *
+ * @internal
+ */
+export const probeFailureOf = <E>(cause: Cause.Cause<E>): unknown => {
+  const fail = Cause.findFail(cause)
+  if (Result.isSuccess(fail)) return fail.success.error
+  const defect = Cause.findDefect(cause)
+  if (Result.isSuccess(defect)) return defect.success
+  return cause
+}
+
+/**
+ * Classify a failed entry's error before the savepoint guard and before any
+ * probe SQL.
+ *
+ * A string strategy has no classifier, so it is never transaction-fatal here.
+ * A throwing classifier fails closed: the batch aborts rather than trusting a
+ * predicate that could not decide.
+ *
+ * @internal
+ */
+export const classifyTransactionFailure = (
+  strategy: TransactionProbeStrategy,
+  failure: unknown
+): Effect.Effect<boolean> =>
+  typeof strategy === "string"
+    ? Effect.succeed(false)
+    : Effect.try({
+        try: () => strategy.isTransactionFatal(failure),
+        catch: () => true
+      }).pipe(Effect.orElseSucceed(() => true))
+
+/**
+ * Probe whether the current SQL transaction is still usable after a
+ * non-fatal entry failure.
  *
  * The caller must already be inside a transaction: the batch body runs inside
  * the flusher's outer `sql.withTransaction`, and the probe executes on that
- * same transaction connection.
+ * same transaction connection. The caller must also have classified the
+ * entry's error first; a transaction-fatal verdict aborts before this function
+ * runs.
  *
  * `SELECT 1` runs first. On a dead connection, or inside an aborted
- * transaction, every statement fails, so the probe reports not-usable and
- * carries the `SqlError` reason tag of the failed `SELECT 1` as
- * `probeFailureTag`. The strategy then decides how to classify the remaining
- * states, and the strategies fail differently:
+ * transaction, every statement fails, so the probe reports `"probe-failed"`
+ * and carries the `SqlError` reason tag of the failed `SELECT 1` as
+ * `probeFailureTag`. The strategy then decides the remaining states:
  *
  * - `select-only`: `SELECT 1` is the whole probe. A successful `SELECT 1`
  *   means the transaction is usable; a failed one means it is not. The
@@ -663,7 +716,12 @@ const probeFailureTagOf = (cause: Cause.Cause<SqlError.SqlError>): string | unde
  *   outer transaction is alive (the alive signal, not a death), and succeeds
  *   (starting a throwaway transaction) once the engine has implicitly rolled
  *   the outer transaction back. A successful `BEGIN` is undone with a
- *   throwaway `ROLLBACK`, and the probe then reports not-usable.
+ *   throwaway `ROLLBACK`, and the probe then reports
+ *   `"nested-begin-committed"`.
+ * - `error-classified`: the classifier already ran and returned non-fatal.
+ *   `SELECT 1` is the whole probe, exactly like `select-only`. The object
+ *   branch is checked before the string comparisons so it can never fall
+ *   through to `BEGIN`.
  *
  * Exported for the focused probe tests.
  *
@@ -679,14 +737,18 @@ export const probeTransactionAlive = (
       const probeFailureTag = probeFailureTagOf(select.cause)
       return {
         alive: false,
+        verdict: "probe-failed",
         ...(probeFailureTag !== undefined ? { probeFailureTag } : {})
       }
     }
-    if (strategy === "select-only") return { alive: true }
+    // The object strategy stops at SELECT 1. Check it before any string
+    // comparison so a classified strategy can never fall through to BEGIN.
+    if (typeof strategy !== "string") return { alive: true, verdict: "alive" }
+    if (strategy === "select-only") return { alive: true, verdict: "alive" }
     const begin = yield* Effect.exit(sql`${sql.literal("BEGIN")}`)
-    if (Exit.isFailure(begin)) return { alive: true }
+    if (Exit.isFailure(begin)) return { alive: true, verdict: "alive" }
     yield* Effect.exit(sql`${sql.literal("ROLLBACK")}`)
-    return { alive: false }
+    return { alive: false, verdict: "nested-begin-committed" }
   })
 
 /** The probe outcome for one flush, recorded for the batch span annotation. */
@@ -974,13 +1036,37 @@ export function makeMutationBatcherLayer(
 
             const originalCause = Option.getOrElse(observed.cause, () => result.cause)
 
+            // Classify before the savepoint guard and before any probe SQL. A
+            // deadlock destroys the savepoint, so the guarded exit carries the
+            // original 1213 as a failure and a 1305 rollback defect. The guard
+            // would abort either way, but the classifier makes the probe
+            // contract itself sound and keeps the real 1213 as the abort cause
+            // on the single-entry path where no savepoint exists.
+            const fatal = yield* classifyTransactionFailure(
+              transactionProbe,
+              probeFailureOf(originalCause)
+            )
+            if (fatal) {
+              yield* Ref.set(
+                probeRecord,
+                Option.some({
+                  strategy: transactionProbe,
+                  result: { alive: false, verdict: "classified-fatal" }
+                })
+              )
+              yield* Ref.set(aborted, Option.some(originalCause))
+              yield* Ref.set(outcomes, settled)
+              return yield* Effect.failCause(result.cause)
+            }
+
             // The savepoint wrapper (`@effect/sql` renders the driver's nested
             // transaction as savepoint statements wrapped in `Effect.orDie`)
             // replaces a failed rollback or release with a defect. If the
             // guarded exit does not carry the entry's own cause, the wrapper
             // injected a failure: abort the batch as transaction-fatal with
             // the captured cause without probing, so a failed entry can never
-            // commit its partial writes.
+            // commit its partial writes. This is the backstop for wrapper
+            // failures the classifier did not name.
             if (Option.isNone(observed.cause) || !Equal.equals(result.cause, observed.cause.value)) {
               yield* Ref.set(aborted, Option.some(originalCause))
               yield* Ref.set(outcomes, settled)
@@ -1056,11 +1142,11 @@ export function makeMutationBatcherLayer(
               const probe = yield* Ref.get(probeRecord)
               if (Option.isNone(probe)) return
               yield* annotateCurrentSpanWhenEnabled((span) => {
-                span.attribute("batch.probeStrategy", probe.value.strategy)
                 span.attribute(
-                  "batch.probeVerdict",
-                  probe.value.result.alive ? "alive" : "not-usable"
+                  "batch.probeStrategy",
+                  probeStrategyName(probe.value.strategy)
                 )
+                span.attribute("batch.probeVerdict", probe.value.result.verdict)
                 if (probe.value.result.probeFailureTag !== undefined) {
                   span.attribute("batch.probeFailureTag", probe.value.result.probeFailureTag)
                 }
@@ -1160,14 +1246,27 @@ export function makeMutationBatcherLayer(
 
       const loop = Effect.forever(
         flushOnce.pipe(
-          Effect.catchCause((cause) => {
-            if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-            // A constraint abort at COMMIT was already settled as a 409 by
-            // `settle`; it is not a batcher defect and must not count toward
-            // the three-strike close.
-            if (isConstraintCause(cause)) return Effect.void
-            return degraded(cause)
-          })
+          Effect.catchCause((cause) =>
+            Effect.gen(function* () {
+              if (Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause)
+              // A constraint abort at COMMIT was already settled as a 409 by
+              // `settle`; it is not a batcher defect and must not count toward
+              // the three-strike close.
+              if (isConstraintCause(cause)) return
+              // A classified transaction-fatal abort is an engine conflict,
+              // not a batcher defect. Three deadlocks in a row must not close
+              // the batcher for the life of the process.
+              if (
+                yield* classifyTransactionFailure(transactionProbe, probeFailureOf(cause))
+              ) {
+                yield* Effect.logWarning("mutation-batch.transaction_fatal", {
+                  cause: Cause.pretty(cause)
+                })
+                return
+              }
+              return yield* degraded(cause)
+            })
+          )
         )
       )
 
