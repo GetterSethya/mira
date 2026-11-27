@@ -44,12 +44,12 @@ export type DeleteResultStrategy =
   | { readonly _tag: "precheck" }
 
 /**
- * How the mutation batcher probes transaction liveness after a failed entry.
+ * How the mutation batcher decides whether a failed entry ended the batch
+ * transaction.
  *
  * The caller must already be inside the batch's outer transaction; a probe
  * outside one cannot tell a live transaction from a usable autocommit
- * connection. Both strategies run `SELECT 1` first and treat its failure as
- * not-usable.
+ * connection.
  *
  * - `"nested-begin"`: the SQLite-family probe. After `SELECT 1` succeeds, the
  *   probe issues `BEGIN`. A failing `BEGIN` is the alive signal, because a
@@ -61,13 +61,54 @@ export type DeleteResultStrategy =
  *   including a statement timeout or an admin cancel, aborts the batch. No
  *   transaction control statement is issued, so the probe cannot end the
  *   outer transaction.
+ * - `{ _tag: "error-classified" }`: the engine cannot answer "is my
+ *   transaction open?" through SQL. The batcher classifies the failed entry's
+ *   own error **before** the savepoint guard and before any probe SQL. A
+ *   transaction-fatal error aborts the batch without issuing a statement.
+ *   A non-fatal error falls through to the guard and then to `SELECT 1` as a
+ *   connection-liveness check. This is the MySQL and MariaDB strategy.
  *
- * MySQL and SQL Server must verify either strategy against their engine before
- * choosing one. A nested `BEGIN` implicitly commits in MySQL and nests in SQL
- * Server, so `"nested-begin"` is known-unsafe there, and the applicability of
- * `"select-only"` is unverified.
+ * The string strategies are not usable on MySQL or MariaDB. A `BEGIN` either
+ * fails at the prepared-statement protocol layer (`ER_UNSUPPORTED_PS`, 1295)
+ * or implicitly commits, and `SELECT 1` succeeds after InnoDB has rolled the
+ * whole transaction back, so it cannot distinguish a dead transaction from a
+ * fresh one.
  */
-export type TransactionProbeStrategy = "nested-begin" | "select-only"
+export type TransactionProbeStrategy =
+  | "nested-begin"
+  | "select-only"
+  | {
+      readonly _tag: "error-classified"
+      /**
+       * True when the engine has already rolled back the whole transaction
+       * because of this error. The batcher calls this with the failed entry's
+       * own error, not the savepoint wrapper's error. A thrown predicate is
+       * treated as fatal.
+       */
+      readonly isTransactionFatal: (error: unknown) => boolean
+    }
+
+/**
+ * The stable outcome label for one transaction probe.
+ *
+ * - `"alive"`: the transaction is usable.
+ * - `"probe-failed"`: `SELECT 1` failed; the connection or transaction is not
+ *   usable.
+ * - `"nested-begin-committed"`: the nested `BEGIN` succeeded, so the engine had
+ *   already ended the outer transaction.
+ * - `"classified-fatal"`: the dialect's error classifier decided the engine
+ *   already ended the transaction. No probe SQL was issued. The batch aborts
+ *   and the abort is exempt from the three-strike degradation counter.
+ * - `"classifier-failed"`: the classifier threw. The batch still aborts (fail
+ *   closed), but the abort is a batcher defect and counts toward the
+ *   three-strike close.
+ */
+export type TransactionProbeVerdict =
+  | "alive"
+  | "probe-failed"
+  | "nested-begin-committed"
+  | "classified-fatal"
+  | "classifier-failed"
 
 /**
  * The stored and desired query for one view collection.
@@ -382,14 +423,17 @@ export type DialectType = {
    */
   placeholder: (index: number) => string
   /**
-   * How the mutation batcher probes transaction liveness after a failed entry
-   * in a multi-entry batch.
+   * How the mutation batcher decides whether a failed entry ended the batch
+   * transaction.
    *
-   * The batcher reads this once at layer build and runs the probe only while
-   * the outer transaction is open. Omission is a compile error because no
-   * strategy is safe to inherit on an engine that has not verified it. See
-   * {@link TransactionProbeStrategy} for both strategies and their failure
-   * rules.
+   * The batcher reads this once at layer build. For the `error-classified`
+   * object it runs `isTransactionFatal` on the failed entry's own error before
+   * the savepoint guard and before any probe SQL; a non-fatal verdict, and
+   * every string strategy, then runs the liveness probe while the outer
+   * transaction is open. Omission is a compile error because no strategy is
+   * safe to inherit on an engine that has not verified it. See
+   * {@link TransactionProbeStrategy} for the three strategies, their failure
+   * rules, and the classify-before-guard order.
    */
   readonly transactionProbe: TransactionProbeStrategy
   /**

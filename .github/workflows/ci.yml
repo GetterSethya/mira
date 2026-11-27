@@ -158,7 +158,7 @@ jobs:
         run: pnpm build
 
       - name: Run MySQL/MariaDB e2e
-        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql-migrator.e2e.test.ts tests/databases/mysql-retention.e2e.test.ts --no-file-parallelism
+        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql-migrator.e2e.test.ts tests/databases/mysql-retention.e2e.test.ts tests/databases/mysql-batch.e2e.test.ts --no-file-parallelism
 
   bun-smoke:
     name: Bun smoke
