@@ -774,7 +774,7 @@ describe("create batching", () => {
 
       expect(result.alive).toBe(false)
       expect(result.verdict).toBe("probe-failed")
-      expect(typeof result.probeFailureTag).toBe("string")
+      if (!result.alive) expect(typeof result.probeFailureTag).toBe("string")
     })
   )
 

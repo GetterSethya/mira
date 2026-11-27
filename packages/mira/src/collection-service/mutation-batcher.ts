@@ -628,11 +628,13 @@ function collectionErrorOf(
  * The verdict of a transaction-probe decision, plus the `SqlError` reason tag
  * of the probe statement that failed when `SELECT 1` reported not-usable.
  */
-export interface TransactionProbeResult {
-  readonly alive: boolean
-  readonly verdict: TransactionProbeVerdict
-  readonly probeFailureTag?: string
-}
+export type TransactionProbeResult =
+  | { readonly alive: true; readonly verdict: "alive" }
+  | {
+      readonly alive: false
+      readonly verdict: Exclude<TransactionProbeVerdict, "alive">
+      readonly probeFailureTag?: string
+    }
 
 /** Extracts the `SqlError` reason tag from a probe statement's failure cause. */
 const probeFailureTagOf = (cause: Cause.Cause<SqlError.SqlError>): string | undefined => {
@@ -1141,6 +1143,11 @@ export function makeMutationBatcherLayer(
         })
 
       const flushOnce = Effect.gen(function* () {
+        // Clear the previous flush's classification before any failure-prone
+        // phase. A defect during the take/drain phase must not inherit a stale
+        // fatal verdict from the flush before it.
+        yield* Ref.set(lastClassification, Option.none())
+
         // Atomic take + publish: an interrupt must not land after the queue
         // hands over the entry but before `inFlight` owns it, or shutdown
         // cannot fail it.
@@ -1175,7 +1182,6 @@ export function makeMutationBatcherLayer(
           operationCounts.set(entry.operation, (operationCounts.get(entry.operation) ?? 0) + 1)
         }
         const startedAt = yield* Clock.currentTimeMillis
-        yield* Ref.set(lastClassification, Option.none())
 
         yield* sql
           .withTransaction(
@@ -1193,13 +1199,14 @@ export function makeMutationBatcherLayer(
               const probe = yield* Ref.get(probeRecord)
               if (Option.isNone(probe)) return
               yield* annotateCurrentSpanWhenEnabled((span) => {
+                const result = probe.value.result
                 span.attribute(
                   "batch.probeStrategy",
                   probeStrategyName(probe.value.strategy)
                 )
-                span.attribute("batch.probeVerdict", probe.value.result.verdict)
-                if (probe.value.result.probeFailureTag !== undefined) {
-                  span.attribute("batch.probeFailureTag", probe.value.result.probeFailureTag)
+                span.attribute("batch.probeVerdict", result.verdict)
+                if (!result.alive && result.probeFailureTag !== undefined) {
+                  span.attribute("batch.probeFailureTag", result.probeFailureTag)
                 }
               })
             })
@@ -1300,16 +1307,23 @@ export function makeMutationBatcherLayer(
           Effect.catchCause((cause) =>
             Effect.gen(function* () {
               if (Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause)
+              // Read the recorded classification before the constraint
+              // exemption. A broken predicate on a constraint error must still
+              // count as a defect, not be swallowed as a client conflict.
+              const classification = yield* Ref.get(lastClassification)
+              if (
+                Option.isSome(classification) &&
+                classification.value._tag === "classifier-failed"
+              ) {
+                return yield* degraded(cause)
+              }
               // A constraint abort at COMMIT was already settled as a 409 by
               // `settle`; it is not a batcher defect and must not count toward
               // the three-strike close.
               if (isConstraintCause(cause)) return
               // A classified transaction-fatal abort is an engine conflict,
               // not a batcher defect. Three deadlocks in a row must not close
-              // the batcher for the life of the process. Read the recorded
-              // classification instead of re-running the predicate: a throwing
-              // predicate must fall through to `degraded`, not be swallowed.
-              const classification = yield* Ref.get(lastClassification)
+              // the batcher for the life of the process.
               if (
                 Option.isSome(classification) &&
                 classification.value._tag === "fatal"

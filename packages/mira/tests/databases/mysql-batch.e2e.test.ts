@@ -93,6 +93,7 @@ const waitForAdmitted = (count: number) =>
       if ((yield* stats.snapshot).admitted >= count) return
       yield* Effect.sleep(10)
     }
+    return yield* Effect.die(`waitForAdmitted timed out at ${count}`)
   })
 
 const waitForFlush = Effect.gen(function* () {
@@ -479,6 +480,7 @@ const defineSuite = (config: EngineConfig) => {
 
               const exits = [yield* Fiber.await(first), yield* Fiber.await(second)]
               expect(exits.every(Exit.isFailure)).toBe(true)
+              expect(classified.length).toBeGreaterThan(0)
               expect(classified.every((error) => !isMysqlTransactionFatal(error))).toBe(true)
               expect(yield* readMarker.pipe(Effect.provide(ctx))).toEqual([])
               expect((yield* stats.snapshot).commits).toBe(0)

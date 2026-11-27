@@ -30,7 +30,9 @@ published by CI.
   `batch.probeStrategy` stays a string. Classified fatal aborts are engine
   conflicts, not batcher defects, so three consecutive deadlocks no longer
   close the batcher; a throwing predicate still counts toward the three-strike
-  close. MySQL/MariaDB support itself is still pending #30.
+  close. A consumer that exhaustively switches on `TransactionProbeStrategy`
+  must add the `error-classified` arm; a dialect that assigns a string is
+  unaffected. MySQL/MariaDB support itself is still pending #30.
 - **MySQL/MariaDB text length and collation strategy.** Indexed, unique, and
   primary-key text now carries `Field.text({ maxLength })` into the physical
   column as `VARCHAR(n)` (`1 <= n <= 768`); unindexed text stays `LONGTEXT`.
