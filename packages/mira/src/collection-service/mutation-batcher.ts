@@ -672,25 +672,62 @@ export const probeFailureOf = <E>(cause: Cause.Cause<E>): unknown => {
 }
 
 /**
+ * The probe observation for a classified transaction-fatal verdict.
+ *
+ * The classification runs before any probe SQL, so the result is constructed
+ * rather than produced by `probeTransactionAlive`.
+ *
+ * @internal
+ */
+export const classifiedFatalProbeResult = (
+  classification: "fatal" | "classifier-failed"
+): TransactionProbeResult => ({
+  alive: false,
+  verdict: classification === "fatal" ? "classified-fatal" : "classifier-failed"
+})
+
+/**
+ * The outcome of classifying a failed entry's error.
+ *
+ * - `statement`: the transaction is still usable.
+ * - `fatal`: the engine already rolled the whole transaction back.
+ * - `classifier-failed`: the predicate threw. The batch still aborts (fail
+ *   closed), but the failure is a batcher defect and must count toward the
+ *   three-strike close rather than being exempted like a real deadlock.
+ */
+export type TransactionFailureClassification =
+  | { readonly _tag: "statement" }
+  | { readonly _tag: "fatal" }
+  | { readonly _tag: "classifier-failed" }
+
+/**
  * Classify a failed entry's error before the savepoint guard and before any
  * probe SQL.
  *
  * A string strategy has no classifier, so it is never transaction-fatal here.
- * A throwing classifier fails closed: the batch aborts rather than trusting a
- * predicate that could not decide.
+ * A throwing classifier fails closed with `classifier-failed`; it does not
+ * escape as a defect.
  *
  * @internal
  */
 export const classifyTransactionFailure = (
   strategy: TransactionProbeStrategy,
   failure: unknown
-): Effect.Effect<boolean> =>
+): Effect.Effect<TransactionFailureClassification> =>
   typeof strategy === "string"
-    ? Effect.succeed(false)
+    ? Effect.succeed({ _tag: "statement" })
     : Effect.try({
         try: () => strategy.isTransactionFatal(failure),
-        catch: () => true
-      }).pipe(Effect.orElseSucceed(() => true))
+        catch: () => "classifier-failed" as const
+      }).pipe(
+        Effect.map(
+          (fatal): TransactionFailureClassification =>
+            fatal ? { _tag: "fatal" } : { _tag: "statement" }
+        ),
+        Effect.orElseSucceed(
+          (): TransactionFailureClassification => ({ _tag: "classifier-failed" })
+        )
+      )
 
 /**
  * Probe whether the current SQL transaction is still usable after a
@@ -825,6 +862,13 @@ export function makeMutationBatcherLayer(
         bytes: 0
       })
       const inFlight = yield* Ref.make<ReadonlyArray<QueuedEntry>>([])
+      // The flusher is single-threaded, so one slot is enough to carry the
+      // classification from `runBatchBody` to the loop's degradation decision.
+      // The loop must not re-run the predicate: a throwing predicate would
+      // otherwise be swallowed as an exemption.
+      const lastClassification = yield* Ref.make<
+        Option.Option<TransactionFailureClassification>
+      >(Option.none())
 
       // Serializes admission against shutdown/degradation: an entry can never
       // be admitted while the finalizer is draining, so every admitted entry
@@ -980,7 +1024,8 @@ export function makeMutationBatcherLayer(
         taken: ReadonlyArray<QueuedEntry>,
         outcomes: Ref.Ref<ReadonlyArray<EntryOutcome>>,
         aborted: Ref.Ref<Option.Option<Cause.Cause<CollectionError>>>,
-        probeRecord: Ref.Ref<Option.Option<ProbeObservation>>
+        probeRecord: Ref.Ref<Option.Option<ProbeObservation>>,
+        classificationRecord: Ref.Ref<Option.Option<TransactionFailureClassification>>
       ) =>
         Effect.gen(function* () {
           const settled: Array<EntryOutcome> = []
@@ -1042,16 +1087,17 @@ export function makeMutationBatcherLayer(
             // would abort either way, but the classifier makes the probe
             // contract itself sound and keeps the real 1213 as the abort cause
             // on the single-entry path where no savepoint exists.
-            const fatal = yield* classifyTransactionFailure(
+            const classification = yield* classifyTransactionFailure(
               transactionProbe,
               probeFailureOf(originalCause)
             )
-            if (fatal) {
+            if (classification._tag !== "statement") {
+              yield* Ref.set(classificationRecord, Option.some(classification))
               yield* Ref.set(
                 probeRecord,
                 Option.some({
                   strategy: transactionProbe,
-                  result: { alive: false, verdict: "classified-fatal" }
+                  result: classifiedFatalProbeResult(classification._tag)
                 })
               )
               yield* Ref.set(aborted, Option.some(originalCause))
@@ -1129,8 +1175,13 @@ export function makeMutationBatcherLayer(
           operationCounts.set(entry.operation, (operationCounts.get(entry.operation) ?? 0) + 1)
         }
         const startedAt = yield* Clock.currentTimeMillis
+        yield* Ref.set(lastClassification, Option.none())
 
-        yield* sql.withTransaction(runBatchBody(taken, outcomes, aborted, probeRecord)).pipe(
+        yield* sql
+          .withTransaction(
+            runBatchBody(taken, outcomes, aborted, probeRecord, lastClassification)
+          )
+          .pipe(
           // Annotated here, between the driver's transaction and the batch
           // span wrapper, so the probe outcome lands on the current
           // `collection.mutationBatch` span: inside the body the current span
@@ -1255,9 +1306,13 @@ export function makeMutationBatcherLayer(
               if (isConstraintCause(cause)) return
               // A classified transaction-fatal abort is an engine conflict,
               // not a batcher defect. Three deadlocks in a row must not close
-              // the batcher for the life of the process.
+              // the batcher for the life of the process. Read the recorded
+              // classification instead of re-running the predicate: a throwing
+              // predicate must fall through to `degraded`, not be swallowed.
+              const classification = yield* Ref.get(lastClassification)
               if (
-                yield* classifyTransactionFailure(transactionProbe, probeFailureOf(cause))
+                Option.isSome(classification) &&
+                classification.value._tag === "fatal"
               ) {
                 yield* Effect.logWarning("mutation-batch.transaction_fatal", {
                   cause: Cause.pretty(cause)

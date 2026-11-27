@@ -97,13 +97,18 @@ export type TransactionProbeStrategy =
  * - `"nested-begin-committed"`: the nested `BEGIN` succeeded, so the engine had
  *   already ended the outer transaction.
  * - `"classified-fatal"`: the dialect's error classifier decided the engine
- *   already ended the transaction. No probe SQL was issued.
+ *   already ended the transaction. No probe SQL was issued. The batch aborts
+ *   and the abort is exempt from the three-strike degradation counter.
+ * - `"classifier-failed"`: the classifier threw. The batch still aborts (fail
+ *   closed), but the abort is a batcher defect and counts toward the
+ *   three-strike close.
  */
 export type TransactionProbeVerdict =
   | "alive"
   | "probe-failed"
   | "nested-begin-committed"
   | "classified-fatal"
+  | "classifier-failed"
 
 /**
  * The stored and desired query for one view collection.
@@ -418,14 +423,17 @@ export type DialectType = {
    */
   placeholder: (index: number) => string
   /**
-   * How the mutation batcher probes transaction liveness after a failed entry
-   * in a multi-entry batch.
+   * How the mutation batcher decides whether a failed entry ended the batch
+   * transaction.
    *
-   * The batcher reads this once at layer build and runs the probe only while
-   * the outer transaction is open. Omission is a compile error because no
-   * strategy is safe to inherit on an engine that has not verified it. See
-   * {@link TransactionProbeStrategy} for both strategies and their failure
-   * rules.
+   * The batcher reads this once at layer build. For the `error-classified`
+   * object it runs `isTransactionFatal` on the failed entry's own error before
+   * the savepoint guard and before any probe SQL; a non-fatal verdict, and
+   * every string strategy, then runs the liveness probe while the outer
+   * transaction is open. Omission is a compile error because no strategy is
+   * safe to inherit on an engine that has not verified it. See
+   * {@link TransactionProbeStrategy} for the three strategies, their failure
+   * rules, and the classify-before-guard order.
    */
   readonly transactionProbe: TransactionProbeStrategy
   /**

@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest"
 import { expect } from "vitest"
 
+import type { TransactionProbeStrategy } from "@/dialect/dialect.js"
 import {
   isMysqlTransactionFatal,
   MYSQL_DEADLOCK_CODES,
@@ -75,5 +76,11 @@ describe("mysqlTransactionProbe", () => {
 
   it("exports the exact deadlock code set", () => {
     expect(MYSQL_DEADLOCK_CODES).toEqual([1213, "ER_LOCK_DEADLOCK"])
+  })
+
+  it("requires a classifier on the error-classified form", () => {
+    // @ts-expect-error - the object form must carry isTransactionFatal
+    const incomplete: TransactionProbeStrategy = { _tag: "error-classified" }
+    void incomplete
   })
 })

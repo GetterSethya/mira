@@ -33,7 +33,10 @@ import {
 } from "@/collection-service/mutation-batcher.js"
 import { Dialect } from "@/dialect/dialect.js"
 import type { DialectType, TransactionProbeStrategy } from "@/dialect/dialect.js"
-import { isMysqlTransactionFatal } from "@/dialect/dialect-mysql-transactions.js"
+import {
+  isMysqlTransactionFatal,
+  mysqlTransactionProbe
+} from "@/dialect/dialect-mysql-transactions.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 
 type EngineConfig = {
@@ -167,10 +170,10 @@ const defineSuite = (config: EngineConfig) => {
           Effect.gen(function* () {
             const classified: Array<unknown> = []
             const probe = {
-              _tag: "error-classified",
+              ...mysqlTransactionProbe,
               isTransactionFatal: (error: unknown) => {
                 classified.push(error)
-                return isMysqlTransactionFatal(error)
+                return mysqlTransactionProbe.isTransactionFatal(error)
               }
             } as const satisfies TransactionProbeStrategy
 
@@ -240,6 +243,8 @@ const defineSuite = (config: EngineConfig) => {
               expect(snapshot.commits).toBe(0)
               expect(snapshot.applied).toBe(0)
               expect(snapshot.batches).toBe(0)
+              // The fatal classification is exempt from the three-strike close.
+              expect(snapshot.consecutiveDefects).toBe(0)
             }).pipe(Effect.provide(ctx))
 
             yield* Fiber.await(interferer)
@@ -261,10 +266,10 @@ const defineSuite = (config: EngineConfig) => {
           Effect.gen(function* () {
             const classified: Array<unknown> = []
             const probe = {
-              _tag: "error-classified",
+              ...mysqlTransactionProbe,
               isTransactionFatal: (error: unknown) => {
                 classified.push(error)
-                return isMysqlTransactionFatal(error)
+                return mysqlTransactionProbe.isTransactionFatal(error)
               }
             } as const satisfies TransactionProbeStrategy
 
@@ -298,6 +303,7 @@ const defineSuite = (config: EngineConfig) => {
 
             yield* Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
+              const stats = yield* BatchMutationStats
               yield* Deferred.await(bReady)
 
               const entry = yield* Effect.forkChild(
@@ -322,6 +328,10 @@ const defineSuite = (config: EngineConfig) => {
               expect(Exit.isFailure(exit)).toBe(true)
               expect(classified.length).toBeGreaterThan(0)
               expect(classified.some(isMysqlTransactionFatal)).toBe(true)
+              // A non-fatal verdict would let the empty transaction commit and
+              // record one batch. The fatal path skips COMMIT entirely.
+              expect((yield* stats.snapshot).commits).toBe(0)
+              expect((yield* stats.snapshot).batches).toBe(0)
             }).pipe(Effect.provide(ctx))
 
             yield* Fiber.await(interferer)
@@ -343,10 +353,10 @@ const defineSuite = (config: EngineConfig) => {
           Effect.gen(function* () {
             const classified: Array<unknown> = []
             const probe = {
-              _tag: "error-classified",
+              ...mysqlTransactionProbe,
               isTransactionFatal: (error: unknown) => {
                 classified.push(error)
-                return isMysqlTransactionFatal(error)
+                return mysqlTransactionProbe.isTransactionFatal(error)
               }
             } as const satisfies TransactionProbeStrategy
 
@@ -410,10 +420,10 @@ const defineSuite = (config: EngineConfig) => {
           Effect.gen(function* () {
             const classified: Array<unknown> = []
             const probe = {
-              _tag: "error-classified",
+              ...mysqlTransactionProbe,
               isTransactionFatal: (error: unknown) => {
                 classified.push(error)
-                return isMysqlTransactionFatal(error)
+                return mysqlTransactionProbe.isTransactionFatal(error)
               }
             } as const satisfies TransactionProbeStrategy
 

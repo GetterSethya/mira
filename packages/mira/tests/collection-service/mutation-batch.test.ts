@@ -19,11 +19,13 @@ import {
 import type { RequestCtx } from "@/collection-service/context.js"
 import type {
   BatchMutationStatsSnapshot,
-  ResolvedBatchMutationConfig
+  ResolvedBatchMutationConfig,
+  TransactionProbeResult
 } from "@/collection-service/mutation-batcher.js"
 import {
   MutationBatcher,
   BatchMutationStats,
+  classifiedFatalProbeResult,
   classifyTransactionFailure,
   estimateRowBytes,
   makeMutationBatcherLayer,
@@ -725,8 +727,8 @@ describe("create batching", () => {
         END
       `)
 
-      const selectOnly = yield* Ref.make(Option.none<boolean>())
-      const nestedBegin = yield* Ref.make(Option.none<boolean>())
+      const selectOnly = yield* Ref.make(Option.none<TransactionProbeResult>())
+      const nestedBegin = yield* Ref.make(Option.none<TransactionProbeResult>())
       yield* sql
         .withTransaction(
           Effect.gen(function* () {
@@ -736,8 +738,8 @@ describe("create batching", () => {
             // SQLite has already rolled the transaction back, so `SELECT 1`
             // succeeds and only the nested `BEGIN` can tell the transaction is
             // gone. Both strategies probe the same connection state.
-            yield* Ref.set(selectOnly, Option.some((yield* probeTransactionAlive(sql, "select-only")).alive))
-            yield* Ref.set(nestedBegin, Option.some((yield* probeTransactionAlive(sql, "nested-begin")).alive))
+            yield* Ref.set(selectOnly, Option.some(yield* probeTransactionAlive(sql, "select-only")))
+            yield* Ref.set(nestedBegin, Option.some(yield* probeTransactionAlive(sql, "nested-begin")))
             // Leave the (already rolled back) transaction: the driver skips
             // ROLLBACK when `isTransaction` is false.
             return yield* Effect.fail(new ProbeAbort())
@@ -745,8 +747,12 @@ describe("create batching", () => {
         )
         .pipe(Effect.exit)
 
-      expect(Option.getOrUndefined(yield* Ref.get(selectOnly))).toBe(true)
-      expect(Option.getOrUndefined(yield* Ref.get(nestedBegin))).toBe(false)
+      const selectResult = Option.getOrUndefined(yield* Ref.get(selectOnly))
+      const nestedResult = Option.getOrUndefined(yield* Ref.get(nestedBegin))
+      expect(selectResult?.alive).toBe(true)
+      expect(selectResult?.verdict).toBe("alive")
+      expect(nestedResult?.alive).toBe(false)
+      expect(nestedResult?.verdict).toBe("nested-begin-committed")
     }).pipe(Effect.provide(batcherOnlyLayer()))
   )
 
@@ -767,6 +773,7 @@ describe("create batching", () => {
       const result = yield* probeTransactionAlive(sql, "select-only")
 
       expect(result.alive).toBe(false)
+      expect(result.verdict).toBe("probe-failed")
       expect(typeof result.probeFailureTag).toBe("string")
     })
   )
@@ -1120,6 +1127,17 @@ describe("transaction probe wiring", () => {
     ).toBe("error-classified")
   })
 
+  it("uses the classified verdicts", () => {
+    expect(classifiedFatalProbeResult("fatal")).toEqual({
+      alive: false,
+      verdict: "classified-fatal"
+    })
+    expect(classifiedFatalProbeResult("classifier-failed")).toEqual({
+      alive: false,
+      verdict: "classifier-failed"
+    })
+  })
+
   it("prefers the typed failure over a savepoint defect", () => {
     const failure = { _tag: "TestFailure" }
     const defect = { _tag: "TestDefect" }
@@ -1127,9 +1145,9 @@ describe("transaction probe wiring", () => {
     expect(probeFailureOf(cause)).toBe(failure)
   })
 
-  it.effect("treats a throwing classifier as fatal", () =>
+  it.effect("classifies a throwing predicate as a classifier failure", () =>
     Effect.gen(function* () {
-      const fatal = yield* classifyTransactionFailure(
+      const classification = yield* classifyTransactionFailure(
         {
           _tag: "error-classified",
           isTransactionFatal: () => {
@@ -1138,7 +1156,25 @@ describe("transaction probe wiring", () => {
         },
         {}
       )
-      expect(fatal).toBe(true)
+      expect(classification._tag).toBe("classifier-failed")
+    })
+  )
+
+  it.effect("classifies fatal and statement outcomes", () =>
+    Effect.gen(function* () {
+      const fatal = yield* classifyTransactionFailure(
+        { _tag: "error-classified", isTransactionFatal: () => true },
+        {}
+      )
+      const statement = yield* classifyTransactionFailure(
+        { _tag: "error-classified", isTransactionFatal: () => false },
+        {}
+      )
+      const stringStrategy = yield* classifyTransactionFailure("select-only", {})
+
+      expect(fatal._tag).toBe("fatal")
+      expect(statement._tag).toBe("statement")
+      expect(stringStrategy._tag).toBe("statement")
     })
   )
 
@@ -1203,6 +1239,66 @@ describe("transaction probe wiring", () => {
       const okExit = yield* Fiber.await(ok)
       expect(Exit.isSuccess(okExit)).toBe(true)
       if (Exit.isSuccess(okExit)) expect(okExit.value.id).toBe("ok")
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("three classifier failures still close the batcher", () => {
+    const statsLayer = makeBatchMutationStatsLayer()
+    const layer = Layer.merge(
+      makeMutationBatcherLayer(batchedConfig, statsLayer).pipe(
+        Layer.provideMerge(
+          Layer.merge(
+            sqliteLayer,
+            Layer.succeed(Dialect, {
+              ...sqliteDialect,
+              transactionProbe: {
+                _tag: "error-classified",
+                isTransactionFatal: () => {
+                  throw new Error("classifier failed")
+                }
+              }
+            })
+          )
+        )
+      ),
+      statsLayer
+    )
+
+    return Effect.gen(function* () {
+      yield* setupPostsTable
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(`CREATE UNIQUE INDEX "posts_title_unique" ON "posts" ("title")`)
+      yield* sql.unsafe(`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('seed', 'same', 'x', 'x')`)
+      const stats = yield* BatchMutationStats
+      const batcher = yield* MutationBatcher
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const duplicate = yield* Effect.forkChild(
+          batcher.submit({
+            operation: "create",
+            collection: Posts,
+            execute: sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('dup', 'same', 'x', 'x')`.pipe(
+              Effect.as({ value: { id: "dup" }, afterCommit: Effect.void })
+            ),
+            estimatedBytes: 10
+          })
+        )
+        yield* waitForAdmitted(attempt)
+        yield* stats.flushNow
+        expect(failureTag(yield* Fiber.await(duplicate))).toBe("SqlError")
+      }
+
+      const closed = yield* Effect.exit(
+        batcher.submit({
+          operation: "create",
+          collection: Posts,
+          execute: sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('late', 'late', 'x', 'x')`.pipe(
+            Effect.as({ value: { id: "late" }, afterCommit: Effect.void })
+          ),
+          estimatedBytes: 10
+        })
+      )
+      expect(Exit.isFailure(closed)).toBe(true)
     }).pipe(Effect.provide(layer))
   })
 })

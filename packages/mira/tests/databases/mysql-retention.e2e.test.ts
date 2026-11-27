@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest"
 import type { DialectType } from "@/dialect/dialect.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { mysqlMigrationDialect } from "@/dialect/dialect-mysql-migrations.js"
+import { mysqlTransactionProbe } from "@/dialect/dialect-mysql-transactions.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
 import { type TelemetryStoreShape, TelemetryStore } from "@/telemetry/store.js"
@@ -51,7 +52,7 @@ const mysqlRetentionDialect = {
     insertConflictClause: (quotedId: string) =>
       `ON DUPLICATE KEY UPDATE ${quotedId} = ${quotedId}`
   },
-  transactionProbe: "select-only"
+  transactionProbe: mysqlTransactionProbe
 } satisfies DialectType
 
 const mysqlReturningDialect = {
