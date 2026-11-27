@@ -17,6 +17,19 @@ published by CI.
 
 ### Added
 
+- **MySQL/MariaDB transaction probe.** `TransactionProbeStrategy` gains an
+  `error-classified` object form that carries a dialect-supplied
+  `isTransactionFatal` predicate. The batcher runs the classifier on the failed
+  entry's own error before the savepoint guard and before any probe SQL, so a
+  real InnoDB deadlock (`1213` / `DeadlockError`) aborts the batch without
+  issuing a statement. A duplicate key and a default `1205` lock wait timeout
+  stay statement-level. `mysqlTransactionProbe` in
+  `dialect-mysql-transactions.ts` is the ready-made strategy for #30.
+  `batch.probeVerdict` records `alive`, `probe-failed`,
+  `nested-begin-committed`, or `classified-fatal`, while `batch.probeStrategy`
+  stays a string. Classified fatal aborts are engine conflicts, not batcher
+  defects, so three consecutive deadlocks no longer close the batcher.
+  MySQL/MariaDB support itself is still pending #30.
 - **MySQL/MariaDB text length and collation strategy.** Indexed, unique, and
   primary-key text now carries `Field.text({ maxLength })` into the physical
   column as `VARCHAR(n)` (`1 <= n <= 768`); unindexed text stays `LONGTEXT`.
@@ -67,6 +80,12 @@ published by CI.
 
 ### Fixed
 
+- **The MySQL/MariaDB transaction probe could report a dead transaction as
+  usable.** `select-only` succeeds after InnoDB rolls a deadlock back, and
+  `nested-begin` is unusable on MySQL (`ER_UNSUPPORTED_PS` on the prepared
+  protocol) and destructive on MariaDB (implicit commit). The
+  classify-before-guard order makes `1213` the deciding signal and keeps the
+  savepoint guard as the backstop for uncoded wrapper failures.
 - **Destructive SQLite plans no longer silently break untracked views or discard
   view-attached objects.** The preflight scan names the object it would damage,
   native drops log a note, and every connected surviving view is probed inside

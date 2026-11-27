@@ -124,7 +124,8 @@ export type {
   Quote,
   RuleSqlDialect,
   StatementMigrationDialect,
-  TransactionProbeStrategy
+  TransactionProbeStrategy,
+  TransactionProbeVerdict
 } from "./dialect/dialect.js"
 export type { TimestampUnit } from "@gettersethya/mira-client"
 export {
