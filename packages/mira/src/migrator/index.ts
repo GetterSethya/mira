@@ -1,5 +1,6 @@
 export { Migrator, MigratorLive, SYSTEM_TABLE_STEPS, systemTableSteps } from "./migrator.js"
-export { computePlan, diffSchemas, propertyToColumnType, schemaToColumns } from "./schema-diff.js"
+export { computePlan, diffSchemas, keyedFieldNames, propertyToColumnType, schemaToColumns } from "./schema-diff.js"
+export type { PlanOptions, SchemaDiffOptions } from "./schema-diff.js"
 export type {
   ColumnDef,
   ColumnType,

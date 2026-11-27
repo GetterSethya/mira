@@ -105,6 +105,12 @@ export type TranslatePlanContext = {
   readonly readonlyQuery: (
     statement: string
   ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, SqlError.SqlError>
+  /**
+   * Skip the dialect's data-reading preflight layer. `status` sets this so a
+   * cheap metadata probe does not run full table scans. The pure preflight
+   * still runs. `plan` and `migrate` leave it false.
+   */
+  readonly skipDataPreflight?: boolean
 }
 
 /**
@@ -457,6 +463,27 @@ export type DialectType = {
    * fast path.
    */
   readonly normalizesBigintSeqId?: boolean
+  /**
+   * Whether a declared text length is a physical DDL property that the
+   * migrator must compare and reconcile. SQLite and PostgreSQL omit it.
+   */
+  readonly reconcilesTextLength?: boolean
+  /**
+   * Pure preflight that runs before the metadata bootstrap. A statement-mode
+   * dialect can reject a shape before any DDL exists. Optional; transactional
+   * dialects omit it because their plan rolls back.
+   */
+  readonly preflightPlan?: (
+    steps: ReadonlyArray<MigrationStep>,
+    ctx: TranslatePlanContext
+  ) => Effect.Effect<void, UnsupportedMigrationStepError | SqlError.SqlError>
+  /**
+   * Read-only catalog audit of every desired collection's text shape. Returns
+   * human-readable drift strings. The audit never repairs.
+   */
+  readonly auditTextShape?: (
+    ctx: TranslatePlanContext
+  ) => Effect.Effect<ReadonlyArray<string>, SqlError.SqlError>
 }
 
 /** The dialect surface the migrator needs. */
@@ -472,6 +499,9 @@ export type MigrationDialect = Pick<
   | "migrationTransactionSetupSql"
   | "migrationPreviewLockSql"
   | "migrationPreviewUnlockSql"
+  | "reconcilesTextLength"
+  | "preflightPlan"
+  | "auditTextShape"
 >
 
 /** A statement-mode dialect with the capabilities that mode requires. */

@@ -17,6 +17,20 @@ published by CI.
 
 ### Added
 
+- **MySQL/MariaDB text length and collation strategy.** Indexed, unique, and
+  primary-key text now carries `Field.text({ maxLength })` into the physical
+  column as `VARCHAR(n)` (`1 <= n <= 768`); unindexed text stays `LONGTEXT`.
+  Ordinary text uses the NO PAD `utf8mb4_0900_bin` collation, while the auth
+  email identity keeps case-insensitive matching with
+  `utf8mb4_0900_as_ci`. Composite indexes are checked against the 3072-byte
+  key limit, and narrowing or adding a unique index runs a data preflight
+  before any target-table DDL. A touched table's legacy text columns are
+  reconciled with a batched `ALTER TABLE ... ALGORITHM=COPY, LOCK=SHARED`,
+  and `status`/`plan` can run a read-only `auditTextShape` scan. Case-insensitive
+  rule and filter `LIKE` renders with `LOWER`/`CONCAT`. This is a validation
+  change on every dialect: email/date/relation/file values are now bounded by
+  `maxLength` (320/64/320/255 by default, overridable), matching the physical
+  MySQL/MariaDB column. MySQL/MariaDB support itself is still pending #30.
 - **MySQL/MariaDB migration lock.** Statement-mode dialects can now declare a
   session-scoped `MigrationLock`. `migrate` serializes on a database-scoped,
   always-hashed ASCII name (`mira.migrations:<16 hex>` from stable FNV-1a), waits

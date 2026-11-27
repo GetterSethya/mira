@@ -33,8 +33,8 @@ describe("BaseCollection", () => {
         title: { type: "string", maxLength: 200 },
         content: { type: "string" },
         published: { type: "boolean", default: false },
-        userId: { type: "string", "x-kind": "relation", "x-collection": "users", "x-field": "id" },
-        avatar: { type: "string", "x-kind": "file", "x-maxSize": 5_242_880, "x-mimeTypes": ["image/*"] },
+        userId: { type: "string", "x-kind": "relation", maxLength: 320, "x-collection": "users", "x-field": "id" },
+        avatar: { type: "string", "x-kind": "file", maxLength: 255, "x-maxSize": 5_242_880, "x-mimeTypes": ["image/*"] },
         created: CREATED_PROPERTY,
         updated: UPDATED_PROPERTY
       },

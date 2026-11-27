@@ -165,7 +165,7 @@ export const Field = {
    * @example
    * Field.date({ required: true })
    */
-  date: <O extends BaseFieldOptions>(
+  date: <O extends BaseFieldOptions & { maxLength?: number }>(
     opts?: O & { error?: (kind: SimpleConstraintKind) => string | undefined }
   ) => makeField("date", opts),
 
@@ -177,7 +177,7 @@ export const Field = {
    * @example
    * Field.email({ required: false })
    */
-  email: <O extends BaseFieldOptions>(
+  email: <O extends BaseFieldOptions & { maxLength?: number }>(
     opts?: O & { error?: (kind: EmailConstraintKind) => string | undefined }
   ) => makeField("email", opts),
 
@@ -228,7 +228,7 @@ export const Field = {
    *
    * @see Bytes — byte size helpers for maxSize
    */
-  file: <O extends BaseFieldOptions & { maxSize?: number; mimeTypes?: Array<string>; protected?: boolean }>(
+  file: <O extends BaseFieldOptions & { maxSize?: number; mimeTypes?: Array<string>; protected?: boolean; maxLength?: number }>(
     opts?: O & { error?: (kind: SimpleConstraintKind) => string | undefined }
   ) => makeField("file", opts),
 
@@ -250,7 +250,7 @@ export const Field = {
    *
    * @see WithExpand — uses _target to type expanded related records
    */
-  relation: <C extends AnyCollectionDef, O extends BaseFieldOptions>(
+  relation: <C extends AnyCollectionDef, O extends BaseFieldOptions & { maxLength?: number }>(
     collection: C,
     opts?: O & { field?: (keyof C["fields"] & string) | "id" | "created" | "updated"; error?: (kind: SimpleConstraintKind) => string | undefined }
   ) => {

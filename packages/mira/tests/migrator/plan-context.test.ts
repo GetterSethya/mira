@@ -7,7 +7,7 @@ import { expect } from "vitest"
 import type { DialectType, TranslatePlanContext } from "@/dialect/dialect.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
-import { Migrator, MigratorLive } from "@/migrator/migrator.js"
+import { Migrator, MigratorLive, buildPlanContext } from "@/migrator/migrator.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 
@@ -158,5 +158,17 @@ describe("buildPlanContext views", () => {
         expect(error._tag).toBe("SqlError")
       }
     }).pipe(Effect.provide(testLayer(capturingDialect(captured))))
+  })
+})
+
+describe("buildPlanContext skipDataPreflight", () => {
+  it("copies the status flag into the context", () => {
+    const ctx = buildPlanContext(
+      [{ name: "todos", schema: baseSchema }],
+      {},
+      () => Effect.succeed([]),
+      true
+    )
+    expect(ctx.skipDataPreflight).toBe(true)
   })
 })

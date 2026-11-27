@@ -43,7 +43,7 @@ export type AuthCollectionBuilder<F extends FieldsMap> = {
 }
 
 const AUTH_SYSTEM_PROPERTIES: Record<string, JsonSchemaProperty> = {
-  email: { type: "string", format: "email", "x-system": true },
+  email: { type: "string", format: "email", maxLength: 320, "x-system": true },
   password: { type: "string", "x-system": true, "x-hidden": true, "x-kind": "password" },
   emailVerified: { type: "boolean", "x-system": true, default: false }
 }

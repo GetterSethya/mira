@@ -17,7 +17,7 @@
 import { MysqlClient } from "@effect/sql-mysql2"
 import { describe, it } from "@effect/vitest"
 import type { CollectionSchema } from "@gettersethya/mira-client"
-import { Cause, Context, Effect, Exit, Layer, Redacted } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Redacted, Result } from "effect"
 import { SqlClient, SqlError } from "effect/sql"
 import mysql from "mysql2/promise"
 import type { RowDataPacket } from "mysql2"
@@ -88,9 +88,16 @@ const todosV2 = (): CollectionSchema => {
   }
 }
 
-const todosV2WithTitleIndex = (): CollectionSchema => {
+const todosV2WithTitleIndex = (maxLength?: number): CollectionSchema => {
   const schema = todosV2()
-  return { ...schema, "x-indexes": [{ fields: ["title"], unique: false }] }
+  const title = maxLength === undefined
+    ? { type: "string" as const }
+    : { type: "string" as const, maxLength }
+  return {
+    ...schema,
+    properties: { ...schema.properties, title },
+    "x-indexes": [{ fields: ["title"], unique: false }]
+  }
 }
 
 const requiredV1 = (): CollectionSchema => {
@@ -119,6 +126,18 @@ const requiredV2 = (): CollectionSchema => {
     required: ["id", "title", "code", "created", "updated"]
   }
 }
+
+const textTableSchema = (maxLength: number): CollectionSchema => ({
+  "x-collection-kind": "base",
+  type: "object",
+  properties: {
+    ...baseProperties(),
+    name: { type: "string", maxLength },
+    note: { type: "string", maxLength: 100, default: "" }
+  },
+  required: ["id", "name", "created", "updated"],
+  "x-indexes": [{ fields: ["name"], unique: true }]
+})
 
 const simpleTable = (): CollectionSchema => {
   const properties: CollectionSchema["properties"] = {
@@ -181,6 +200,8 @@ type ColumnRow = {
   readonly column_name: string
   readonly column_type: string
   readonly is_nullable: string
+  readonly collation_name: string | null
+  readonly column_default: string | null
 }
 
 type IndexRow = {
@@ -203,6 +224,7 @@ const defineSuite = (config: EngineConfig) => {
   const driftTable = `${config.prefix}drift`
   const freshTable = `${config.prefix}fresh`
   const untrackedView = `${config.prefix}untracked`
+  const textTable = `${config.prefix}text`
 
   const options: MigrateOptions = {
     schemaTable,
@@ -245,6 +267,7 @@ const defineSuite = (config: EngineConfig) => {
     yield* dropTable(requiredTable)
     yield* dropTable(driftTable)
     yield* dropTable(freshTable)
+    yield* dropTable(textTable)
     yield* dropTable(schemaTable)
     yield* dropTable(migrationsTable)
   })
@@ -255,7 +278,9 @@ const defineSuite = (config: EngineConfig) => {
       return yield* sql<ColumnRow>`
         SELECT COLUMN_NAME AS column_name,
                COLUMN_TYPE AS column_type,
-               IS_NULLABLE AS is_nullable
+               IS_NULLABLE AS is_nullable,
+               COLLATION_NAME AS collation_name,
+               COLUMN_DEFAULT AS column_default
         FROM information_schema.columns
         WHERE table_schema = DATABASE()
           AND table_name = ${table}
@@ -1143,7 +1168,8 @@ const defineSuite = (config: EngineConfig) => {
             )
             expect(failure).toBeDefined()
             if (failure !== undefined) {
-              expect(failure.detail).toContain("#71")
+              expect(failure.detail).toContain("has no maxLength")
+              expect(failure.detail).toContain("768")
             }
 
             const columns = yield* columnRows(todosTable)
@@ -1164,6 +1190,94 @@ const defineSuite = (config: EngineConfig) => {
             expect(indexNames.has(`idx_${todosTable}_title`)).toBe(false)
             expect(indexNames.has(`idx_${todosTable}_priority`)).toBe(true)
             expect(yield* storedSchema(todosTable)).not.toContain('"notes"')
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "migrates indexed text with a declared length and binary collation",
+      () =>
+        runWithEngine(
+          2,
+          mysqlMigrationDialect,
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+
+            yield* migrator.migrate(
+              [{ name: todosTable, schema: todosV1() }],
+              options
+            )
+            yield* insertTodo("1")
+
+            yield* migrator.migrate(
+              [{ name: todosTable, schema: todosV2WithTitleIndex(200) }],
+              { ...options, allowDestructive: true }
+            )
+
+            const columns = yield* columnRows(todosTable)
+            const title = columns.find((column) => column.column_name === "title")
+            expect(title?.column_type).toBe("varchar(200)")
+            expect(title?.collation_name).toBe("utf8mb4_0900_bin")
+
+            const indexNames = new Set(
+              (yield* indexRows(todosTable)).map((index) => index.index_name)
+            )
+            expect(indexNames.has(`idx_${todosTable}_title`)).toBe(true)
+          })
+        ),
+      120_000
+    )
+
+    it.effect(
+      "keeps long unique values distinct and rejects an unsafe narrowing",
+      () =>
+        runWithEngine(
+          2,
+          mysqlMigrationDialect,
+          Effect.gen(function* () {
+            const migrator = yield* Migrator
+            const sql = yield* SqlClient.SqlClient
+
+            yield* migrator.migrate(
+              [{ name: textTable, schema: textTableSchema(768) }],
+              options
+            )
+
+            const row = (id: string, name: string) => ({
+              id,
+              name,
+              created: "2026-01-01",
+              updated: "2026-01-01"
+            })
+            yield* insertRow(textTable, row("1", "Admin"))
+            yield* insertRow(textTable, row("2", "admin"))
+            yield* insertRow(textTable, row("3", "a"))
+            yield* insertRow(textTable, row("4", "a "))
+            expect(yield* countRows(textTable)).toBe(4)
+
+            const duplicate = yield* sql`
+              INSERT INTO ${sql(textTable)} ${sql.insert(row("5", "Admin"))}
+            `.pipe(Effect.result)
+            expect(Result.isFailure(duplicate)).toBe(true)
+
+            const prefix = "x".repeat(767)
+            yield* insertRow(textTable, row("6", prefix + "a"))
+            yield* insertRow(textTable, row("7", prefix + "b"))
+            expect(yield* countRows(textTable)).toBe(6)
+
+            const failure = yield* catchUnsupported(
+              migrator.migrate(
+                [{ name: textTable, schema: textTableSchema(100) }],
+                { ...options, allowDestructive: true }
+              )
+            )
+            expect(failure?.detail).toContain("cannot narrow")
+
+            const name = (yield* columnRows(textTable)).find(
+              (column) => column.column_name === "name"
+            )
+            expect(name?.column_type).toBe("varchar(768)")
           })
         ),
       120_000

@@ -24,7 +24,7 @@ describe("ViewCollection", () => {
         id: { type: "string", "x-view-only": true },
         seqId: { type: "integer", "x-view-only": true },
         title: { type: "string", "x-view-only": true },
-        authorEmail: { type: "string", format: "email", "x-view-only": true }
+        authorEmail: { type: "string", format: "email", maxLength: 320, "x-view-only": true }
       },
       required: ["id", "seqId", "title", "authorEmail"]
     })

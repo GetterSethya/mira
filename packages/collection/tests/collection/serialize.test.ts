@@ -150,6 +150,7 @@ describe("serialize", () => {
     expect(schema.properties.userId).toEqual({
       type: "string",
       "x-kind": "relation",
+      maxLength: 320,
       "x-collection": "users",
       "x-field": "id"
     })
@@ -218,7 +219,7 @@ describe("serialize", () => {
       {}
     )
 
-    expect(schema.properties.createdAt).toEqual({ type: "string", "x-kind": "date" })
+    expect(schema.properties.createdAt).toEqual({ type: "string", "x-kind": "date", maxLength: 64 })
   })
 
   it("email field produces format email", () => {
@@ -231,7 +232,7 @@ describe("serialize", () => {
       {}
     )
 
-    expect(schema.properties.author).toEqual({ type: "string", format: "email" })
+    expect(schema.properties.author).toEqual({ type: "string", format: "email", maxLength: 320 })
   })
 
   it("no x-rules key when no rules", () => {

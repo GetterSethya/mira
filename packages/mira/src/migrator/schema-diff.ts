@@ -19,6 +19,47 @@ export function propertyToColumnType(prop: JsonSchemaProperty) {
   return "text"
 }
 
+/**
+ * The declared character length for a text property. Explicit `maxLength`
+ * wins; otherwise Mira fills the lengths it already controls. JSON has no
+ * safe implicit length and stays unbounded.
+ */
+function textMaxLength(prop: JsonSchemaProperty): number | undefined {
+  if (prop.maxLength !== undefined) return prop.maxLength
+  if (prop["x-kind"] === "literalText") {
+    const values = prop["x-literal"] ?? []
+    if (values.length === 0) return undefined
+    return Math.max(1, ...values.map((value) => [...value].length))
+  }
+  if (prop.format === "email") return 320
+  switch (prop["x-kind"]) {
+    case "relation":
+      return 320
+    case "date":
+      return 64
+    case "file":
+      return 255
+    case "json":
+      return undefined
+    default:
+      break
+  }
+  if (prop["x-system"] === true) return 255
+  return undefined
+}
+
+/** The field names used as keys: column flags plus every index field. */
+export function keyedFieldNames(
+  columns: ReadonlyArray<ColumnDef>,
+  indexes: ReadonlyArray<IndexShape>
+): Set<string> {
+  const names = new Set(indexes.flatMap((index) => index.fields))
+  for (const column of columns) {
+    if (column.primaryKey === true || column.unique === true) names.add(column.name)
+  }
+  return names
+}
+
 /** Converts a `CollectionSchema` to the flat list of `ColumnDef`s that the dialect will render as DDL. */
 export function schemaToColumns(schema: CollectionSchema) {
   const requiredSet = new Set(schema.required ?? [])
@@ -49,6 +90,13 @@ export function schemaToColumns(schema: CollectionSchema) {
           col.autoIncrement = true
         }
       }
+      if (col.type === "text") {
+        const maxLength = textMaxLength(prop)
+        if (maxLength !== undefined) col.maxLength = maxLength
+        if (prop.format === "email") col.collation = "utf8mb4_0900_as_ci"
+      }
+      if (prop["x-collection"] !== undefined) col.xCollection = prop["x-collection"]
+      if (prop["x-field"] !== undefined) col.xField = prop["x-field"]
       return col
     })
 }
@@ -90,11 +138,30 @@ function diffViewSchemas(
   return []
 }
 
+/** Options that make text length a physical property on an opt-in dialect. */
+export type SchemaDiffOptions = {
+  /**
+   * Compare the physical text shape. Despite the name, this gates both the
+   * keyed-status alter and the length alter. SQLite/PostgreSQL leave it false.
+   */
+  compareTextLength?: boolean
+}
+
+/** Full plan options: diff options plus destructive-plan control. */
+export type PlanOptions = SchemaDiffOptions & {
+  allowDestructive?: boolean
+}
+
 /**
  * Computes the `MigrationStep`s needed to bring `stored` up to `desired` for a single collection.
  * Pass `null` for `stored` to generate a full `createTable`.
  */
-export function diffSchemas(name: string, stored: CollectionSchema | null, desired: CollectionSchema) {
+export function diffSchemas(
+  name: string,
+  stored: CollectionSchema | null,
+  desired: CollectionSchema,
+  options?: SchemaDiffOptions
+) {
   if (desired["x-collection-kind"] === "view") {
     return diffViewSchemas(name, stored, desired)
   }
@@ -112,11 +179,30 @@ export function diffSchemas(name: string, stored: CollectionSchema | null, desir
     const storedMap = new Map(storedCols.map((c) => [c.name, c]))
     const desiredMap = new Map(desiredCols.map((c) => [c.name, c]))
 
+    const storedIndexes = schemaToIndexEntries(stored)
+    const desiredIndexes = schemaToIndexEntries(desired)
+    const storedKeyed = keyedFieldNames(storedCols, storedIndexes)
+    const desiredKeyed = keyedFieldNames(desiredCols, desiredIndexes)
+
     for (const dc of desiredCols) {
       const sc = storedMap.get(dc.name)
       if (!sc) {
         steps.push({ kind: "addColumn", table: name, column: dc })
-      } else if (sc.type !== dc.type || sc.nullable !== dc.nullable || jsonKeysDiffer(sc.default, dc.default)) {
+        continue
+      }
+      const physicalTextChange =
+        options?.compareTextLength === true &&
+        dc.type === "text" &&
+        (
+          storedKeyed.has(dc.name) !== desiredKeyed.has(dc.name) ||
+          ((storedKeyed.has(dc.name) || desiredKeyed.has(dc.name)) && sc.maxLength !== dc.maxLength)
+        )
+      if (
+        sc.type !== dc.type ||
+        sc.nullable !== dc.nullable ||
+        jsonKeysDiffer(sc.default, dc.default) ||
+        physicalTextChange
+      ) {
         steps.push({ kind: "alterColumn", table: name, from: sc, to: dc })
       }
     }
@@ -127,8 +213,6 @@ export function diffSchemas(name: string, stored: CollectionSchema | null, desir
       }
     }
 
-    const storedIndexes = schemaToIndexEntries(stored)
-    const desiredIndexes = schemaToIndexEntries(desired)
     const storedKeys = new Set(storedIndexes.map(indexKey))
     const desiredKeys = new Set(desiredIndexes.map(indexKey))
 
@@ -197,12 +281,12 @@ export function isDestructiveStep(step: MigrationStep): boolean {
 export function computePlan(
   schemas: Array<NamedSchema>,
   stored: Record<string, CollectionSchema>,
-  options?: { allowDestructive?: boolean }
+  options?: PlanOptions
 ): MigrationPlan {
   const steps: Array<MigrationStep> = []
 
   for (const { name, schema } of schemas) {
-    steps.push(...diffSchemas(name, stored[name] ?? null, schema))
+    steps.push(...diffSchemas(name, stored[name] ?? null, schema, options))
   }
 
   if (options?.allowDestructive) {
