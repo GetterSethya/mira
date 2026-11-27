@@ -177,12 +177,16 @@ published by CI.
   `PostgresDatabase.migrateAtStartup: false` supports a single collection
   migration job; internal store and shared telemetry bootstrap DDL still runs on
   each boot.
-- **Telemetry retention deletes by a `seqId` subquery.** Retention no longer
-  selects ids and converts them to `Number`. A `returning` dialect runs
-  `DELETE ... WHERE "seqId" IN (SELECT "seqId" ... LIMIT ?) RETURNING "seqId"`
-  and counts the returned rows; an `affectedRows` dialect runs the same delete
-  without `RETURNING` and reads the affected count. The read cursor stays numeric
-  and exact only below 2^53; retention is not affected by that ceiling.
+- **Telemetry retention uses a portable derived-table delete.** MySQL 8.4 and
+  MariaDB 11.4 reject a `LIMIT` directly inside an `IN` subquery, so retention
+  now deletes through a derived table. A `returning` dialect runs
+  `DELETE ... RETURNING 1` and counts the returned rows; an `affectedRows`
+  dialect runs the same delete without `RETURNING` and reads the affected count.
+  The `seqId` list stays server-side, so a large `seqId` never crosses into
+  JavaScript. An unreadable or impossible affected-row count now fails instead
+  of silently stalling after a partial batch; a 1,000-batch cap stops a wrong
+  reader with a partial-run warning. The daily cleanup cron marks a failed
+  retention run as an error instead of logging a zero-count success.
 
 - **Internal PostgreSQL DDL capability and plan notes.** `TranslatePlanContext`
   gains a required `views` map with stored and desired query shapes.

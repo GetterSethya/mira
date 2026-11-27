@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { describe, it } from "@effect/vitest"
 import type { Duration } from "effect"
-import { Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Effect, Exit, Layer, Option, Redacted, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect, vi } from "vitest"
 
@@ -17,7 +17,8 @@ import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
 import {
   type TelemetryLogEntry,
   type TelemetryStoreShape,
-  TelemetryStore
+  TelemetryStore,
+  TelemetryStoreError
 } from "@/telemetry/store.js"
 
 function makeLayer(
@@ -278,4 +279,39 @@ describe("logCleanupCronDef", () => {
       expect(page.items.map((row) => row.id)).toEqual(["new-log"])
     }).pipe(Effect.provide(makeCleanupLayer()))
   )
+
+  it.effect("fails the cron run when retention fails", () => {
+    const failingStore: TelemetryStoreShape = {
+      appendLogs: () => Effect.void,
+      appendSpans: () => Effect.void,
+      deleteOlderThan: () =>
+        Effect.fail(
+          new TelemetryStoreError({
+            operation: "deleteOlderThan",
+            cause: "boom"
+          })
+        ),
+      read: null
+    }
+    const layer = Layer.merge(
+      Layer.succeed(TelemetryStore, failingStore),
+      Layer.succeed(
+        AppConfig,
+        AppConfig.of({
+          appName: "test",
+          port: 8080,
+          applicationUrl: "http://localhost:8080",
+          jwtSecret: Redacted.make("test"),
+          useS3: false,
+          s3Config: Option.none(),
+          logRetentionDays: 7
+        })
+      )
+    )
+
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(logCleanupCronDef.handler())
+      expect(Exit.isFailure(exit)).toBe(true)
+    }).pipe(Effect.provide(layer))
+  })
 })

@@ -84,8 +84,8 @@ export function makeTelemetryLayer(
 
 /**
  * Daily retention job. It contains no SQL, no PRAGMA, and no driver reference:
- * the store owns both. A failed purge is logged with the actual counts and the
- * scheduler continues.
+ * the store owns both. A failed purge is logged with its cause and the run is
+ * marked failed; the scheduler still schedules the next run.
  */
 export const logCleanupCronDef: CronDef<TelemetryStore | AppConfig> = {
   name: "mira:log-cleanup",
@@ -99,9 +99,9 @@ export const logCleanupCronDef: CronDef<TelemetryStore | AppConfig> = {
         Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000
       ).toISOString()
       const deleted = yield* store.deleteOlderThan(cutoff).pipe(
-        Effect.catchTag("TelemetryStoreError", (error) =>
-          Effect.logError(`[mira:log-cleanup] delete failed: ${String(error)}`).pipe(
-            Effect.as({ logs: 0, spans: 0 })
+        Effect.tapError((error) =>
+          Effect.logError(
+            `[mira:log-cleanup] delete failed: ${error._tag} cause=${String(error.cause)}`
           )
         )
       )

@@ -26,6 +26,14 @@ export type FieldValueType = "text" | "integer" | "number" | "boolean" | "bigint
  * removed id, so the repository gets an affected-row signal from the same
  * statement. `affectedRows` is for drivers that expose a row count on the raw
  * result. `precheck` is the portable fallback: `SELECT 1` before the delete.
+ *
+ * Telemetry retention uses a constant `RETURNING 1` because it only needs a
+ * row count. An `affectedRows` reader must return `Some(n)` for a non-negative
+ * integer no larger than the retention batch size, or `None` when the raw
+ * result is unreadable. `None` is fatal: the telemetry store fails with
+ * `TelemetryStoreError`, and the repository dies with `DeleteResultUnknownError`.
+ * Readers should return `None` instead of throwing; only the telemetry store
+ * wraps a throw in `TelemetryStoreError`.
  */
 export type DeleteResultStrategy =
   | { readonly _tag: "returning" }
