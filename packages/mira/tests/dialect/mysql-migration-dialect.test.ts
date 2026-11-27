@@ -28,7 +28,7 @@ const seqId = column("seqId", "integer", {
   autoIncrement: true,
   xSystem: true
 })
-const id = column("id", "text", { unique: true, xSystem: true })
+const id = column("id", "text", { unique: true, xSystem: true, maxLength: 255 })
 const title = column("title", "text")
 
 const tableShapes = (
@@ -45,6 +45,11 @@ type CatalogColumnSpec = {
   readonly nullable?: boolean
   readonly defaultValue?: string | number | null
   readonly autoIncrement?: boolean
+  readonly collationName?: string | null
+  readonly characterSetName?: string | null
+  readonly columnComment?: string | null
+  readonly extra?: string
+  readonly generationExpression?: string | null
 }
 
 type CatalogIndexFieldSpec =
@@ -74,6 +79,14 @@ type ContextOptions = {
   readonly catalogViews?: ReadonlyArray<CatalogViewSpec>
   readonly shapes?: ReadonlyMap<string, TableShapes>
   readonly viewShapes?: ReadonlyMap<string, ViewShape>
+  /** Maximum character length returned by a narrowing probe. */
+  readonly maxLength?: number
+  /** Whether a duplicate probe should return one hit row. */
+  readonly duplicate?: boolean
+  /** Number of rows returned by an existence probe. */
+  readonly rows?: number
+  /** Drift strings returned by an audit. */
+  readonly audit?: ReadonlyArray<string>
 }
 
 /**
@@ -91,7 +104,9 @@ const makeContext = (
   for (const table of options.catalogTables ?? []) {
     tableRows.push({
       table_name: table.name,
-      table_type: table.kind === "view" ? "VIEW" : "BASE TABLE"
+      table_type: table.kind === "view" ? "VIEW" : "BASE TABLE",
+      data_length: 0,
+      index_length: 0
     })
     for (const columnSpec of table.columns ?? []) {
       columnRows.push({
@@ -101,7 +116,23 @@ const makeContext = (
         is_nullable: columnSpec.nullable === true ? "YES" : "NO",
         column_default:
           columnSpec.defaultValue === undefined ? null : columnSpec.defaultValue,
-        extra: columnSpec.autoIncrement === true ? "auto_increment" : ""
+        extra:
+          columnSpec.extra ??
+          (columnSpec.autoIncrement === true ? "auto_increment" : ""),
+        character_set_name:
+          columnSpec.characterSetName === undefined
+            ? columnSpec.type.includes("text") || columnSpec.type.startsWith("varchar")
+              ? "utf8mb4"
+              : null
+            : columnSpec.characterSetName,
+        collation_name:
+          columnSpec.collationName === undefined
+            ? columnSpec.type.includes("text") || columnSpec.type.startsWith("varchar")
+              ? "utf8mb4_0900_bin"
+              : null
+            : columnSpec.collationName,
+        column_comment: columnSpec.columnComment ?? "",
+        generation_expression: columnSpec.generationExpression ?? ""
       })
     }
     for (const index of table.indexes ?? []) {
@@ -136,7 +167,26 @@ const makeContext = (
     if (statement.includes("information_schema.views")) {
       return Effect.succeed(viewRows)
     }
-    return Effect.succeed(tableRows)
+    if (statement.includes("information_schema.tables")) {
+      return Effect.succeed(tableRows)
+    }
+    if (statement.includes("MAX(CHAR_LENGTH")) {
+      return Effect.succeed([{ c0: options.maxLength ?? 0 }])
+    }
+    if (statement.includes("GROUP BY")) {
+      return Effect.succeed(options.duplicate === true ? [{ hit: 1 }] : [])
+    }
+    if (statement.includes("LIMIT 2")) {
+      return Effect.succeed(
+        Array.from({ length: options.rows ?? 0 }, () => ({ hit: 1 }))
+      )
+    }
+    if (statement.includes("bin_padded")) {
+      return Effect.succeed([
+        { bin_padded: 0, email_padded: 0, email_case_equal: 1 }
+      ])
+    }
+    return Effect.succeed([])
   }
 
   return {
@@ -182,7 +232,11 @@ const indexNameFromSql = (statement: string) => {
   return match[1] ?? ""
 }
 
-const catalogTypeOf = (type: ColumnDef["type"], keyed = false) => {
+const catalogTypeOf = (
+  type: ColumnDef["type"],
+  keyed = false,
+  maxLength = 255
+) => {
   switch (type) {
     case "boolean":
       return "tinyint(1)"
@@ -191,7 +245,7 @@ const catalogTypeOf = (type: ColumnDef["type"], keyed = false) => {
     case "real":
       return "double"
     case "text":
-      return keyed ? "varchar(255)" : "longtext"
+      return keyed ? `varchar(${maxLength})` : "longtext"
   }
 }
 
@@ -206,7 +260,11 @@ const createTableWithCatalogDefault = (
         columns: [
           {
             name: desired.name,
-            type: catalogTypeOf(desired.type, desired.unique === true),
+            type: catalogTypeOf(
+              desired.type,
+              desired.unique === true,
+              desired.maxLength ?? 255
+            ),
             nullable: desired.nullable,
             defaultValue: catalogDefault
           }
@@ -274,8 +332,8 @@ describe("mysqlMigrationDialect createTable", () => {
     const statement = statements[0]
     expect(statement).toContain("CREATE TABLE `todos` (")
     expect(statement).toContain("`seqId` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY")
-    expect(statement).toContain("`id` VARCHAR(255) NOT NULL UNIQUE")
-    expect(statement).toContain("`title` LONGTEXT NOT NULL")
+    expect(statement).toContain("`id` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL UNIQUE")
+    expect(statement).toContain("`title` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL")
     expect(statement).toContain("`score` DOUBLE NOT NULL")
     expect(statement).toContain("`done` BOOLEAN NOT NULL")
     expect(statement).toContain("`count` INT NOT NULL")
@@ -286,11 +344,11 @@ describe("mysqlMigrationDialect createTable", () => {
     const statements = mysqlMigrationDialect.translate({
       kind: "createSystemTable",
       table: "_collections",
-      columns: [column("name", "text", { primaryKey: true })]
+      columns: [column("name", "text", { primaryKey: true, maxLength: 255 })]
     })
 
     expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS `_collections`")
-    expect(statements[0]).toContain("`name` VARCHAR(255) NOT NULL PRIMARY KEY")
+    expect(statements[0]).toContain("`name` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL PRIMARY KEY")
   })
 })
 
@@ -302,7 +360,7 @@ describe("mysqlMigrationDialect addColumn", () => {
       column: column("note", "text", { nullable: true })
     })
 
-    expect(statements).toEqual(["ALTER TABLE `t` ADD COLUMN `note` LONGTEXT"])
+    expect(statements).toEqual(["ALTER TABLE `t` ADD COLUMN `note` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin"])
   })
 
   it("renders a non-null column with a declared default in one statement", () => {
@@ -325,9 +383,9 @@ describe("mysqlMigrationDialect addColumn", () => {
     })
 
     expect(statements).toEqual([
-      "ALTER TABLE `t` ADD COLUMN `code` LONGTEXT",
+      "ALTER TABLE `t` ADD COLUMN `code` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin",
       "UPDATE `t` SET `code` = ('') WHERE `code` IS NULL",
-      "ALTER TABLE `t` MODIFY COLUMN `code` LONGTEXT NOT NULL"
+      "ALTER TABLE `t` MODIFY COLUMN `code` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL"
     ])
   })
 
@@ -564,7 +622,7 @@ describe("mysqlMigrationDialect translatePlan", () => {
       )
 
       expect(result.statements).toEqual([
-        "CREATE TABLE `todos` (\n  `id` VARCHAR(255) NOT NULL UNIQUE,\n  `priority` INT NOT NULL\n) ENGINE=InnoDB",
+        "CREATE TABLE `todos` (\n  `id` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL UNIQUE,\n  `priority` INT NOT NULL\n) ENGINE=InnoDB",
         "CREATE INDEX `idx_todos_priority` ON `todos` (`priority`)"
       ])
       expect(result.cleanup).toEqual([])
@@ -789,14 +847,14 @@ describe("mysqlMigrationDialect translatePlan", () => {
         ]
       })
       const result = yield* plan(
-        [{ kind: "addColumn", table: "t", column: column("code", "text") }],
+        [{ kind: "addColumn", table: "t", column: column("code", "text", { maxLength: 255 }) }],
         ctx
       )
 
       expect(result.skipped).toEqual([])
       expect(result.statements).toEqual([
         "UPDATE `t` SET `code` = ('') WHERE `code` IS NULL",
-        "ALTER TABLE `t` MODIFY COLUMN `code` LONGTEXT NOT NULL"
+        "ALTER TABLE `t` MODIFY COLUMN `code` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL"
       ])
     }))
 
@@ -811,7 +869,7 @@ describe("mysqlMigrationDialect translatePlan", () => {
         ]
       })
       const result = yield* plan(
-        [{ kind: "addColumn", table: "t", column: column("code", "text") }],
+        [{ kind: "addColumn", table: "t", column: column("code", "text", { maxLength: 255 }) }],
         ctx
       )
 
@@ -822,7 +880,7 @@ describe("mysqlMigrationDialect translatePlan", () => {
   it.effect("drifts an addColumn with a different type or default", () =>
     Effect.gen(function* () {
       const wrongType = yield* failureDetail(
-        [{ kind: "addColumn", table: "t", column: column("code", "text") }],
+        [{ kind: "addColumn", table: "t", column: column("code", "text", { maxLength: 255 }) }],
         makeContext({
           catalogTables: [
             { name: "t", columns: [{ name: "code", type: "varchar(255)" }] }
@@ -832,7 +890,7 @@ describe("mysqlMigrationDialect translatePlan", () => {
       expect(wrongType).toContain('column "t"."code" differs')
 
       const wrongDefault = yield* failureDetail(
-        [{ kind: "addColumn", table: "t", column: column("code", "text") }],
+        [{ kind: "addColumn", table: "t", column: column("code", "text", { maxLength: 255 }) }],
         makeContext({
           catalogTables: [
             {
@@ -852,20 +910,23 @@ describe("mysqlMigrationDialect translatePlan", () => {
       expect(wrongDefault).toContain('column "t"."code" differs')
     }))
 
-  it.effect("fails a createIndex on an unbounded text column with the #71 detail", () =>
+  it.effect("rejects indexed text without a declared length", () =>
     Effect.gen(function* () {
       const { ctx } = makeContext({
         catalogTables: [
           { name: "t", columns: [{ name: "body", type: "longtext" }] }
-        ]
+        ],
+        shapes: new Map([
+          ["t", tableShapes([column("body", "text")], [{ fields: ["body"], unique: false }])]
+        ])
       })
       const detail = yield* failureDetail(
         [{ kind: "createIndex", table: "t", fields: ["body"], unique: false }],
         ctx
       )
 
-      expect(detail).toContain("longtext")
-      expect(detail).toContain("#71")
+      expect(detail).toContain("has no maxLength")
+      expect(detail).toContain("768")
     }))
 
   it.effect("drifts a system table that is missing a column", () =>
@@ -885,7 +946,7 @@ describe("mysqlMigrationDialect translatePlan", () => {
             kind: "createSystemTable",
             table: "_collections",
             columns: [
-              column("name", "text", { primaryKey: true }),
+              column("name", "text", { primaryKey: true, maxLength: 255 }),
               column("schema", "text"),
               column("updated_at", "text")
             ]
@@ -977,14 +1038,14 @@ describe("mysqlMigrationDialect translatePlan", () => {
           [
             "t",
             tableShapes(
-              [column("code", "text")],
+              [column("code", "text", { maxLength: 255 })],
               [{ fields: ["code"], unique: true }]
             )
           ]
         ])
       })
       const detail = yield* failureDetail(
-        [{ kind: "addColumn", table: "t", column: column("code", "text") }],
+        [{ kind: "addColumn", table: "t", column: column("code", "text", { maxLength: 255 }) }],
         ctx
       )
 
@@ -1017,7 +1078,7 @@ describe("mysqlMigrationDialect translatePlan", () => {
         column("a", "integer"),
         column("b", "integer", { autoIncrement: true }),
         column("c", "boolean"),
-        column("d", "text", { unique: true })
+        column("d", "text", { unique: true, maxLength: 255 })
       ]
       const { ctx } = makeContext({
         catalogTables: [
@@ -1189,28 +1250,29 @@ describe("mysqlMigrationDialect translatePlan", () => {
       )
 
       expect(translatedPlan.statements).toEqual(translated)
-      expect(translated[0]).toContain("`title` LONGTEXT NOT NULL")
+      expect(translated[0]).toContain("`title` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL")
 
+      const indexedTitle = column("title", "text", { maxLength: 200 })
       const indexed = yield* plan(
-        [{ kind: "createTable", table: "todos", columns: [title] }],
+        [{ kind: "createTable", table: "todos", columns: [indexedTitle] }],
         makeContext({
           shapes: new Map([
             [
               "todos",
-              tableShapes([title], [{ fields: ["title"], unique: false }])
+              tableShapes([indexedTitle], [{ fields: ["title"], unique: false }])
             ]
           ])
         }).ctx
       )
 
-      expect(indexed.statements[0]).toContain("`title` VARCHAR(255) NOT NULL")
+      expect(indexed.statements[0]).toContain("`title` VARCHAR(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL")
       expect(
         mysqlMigrationDialect.translate({
           kind: "createTable",
           table: "todos",
           columns: [title]
         })[0]
-      ).toContain("`title` LONGTEXT NOT NULL")
+      ).toContain("`title` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL")
     }))
 })
 
@@ -1308,5 +1370,170 @@ describe("mysqlMigrationDialect normalizeDefault through translatePlan", () => {
       )
 
       expect(detail).toContain('column "t"."n" differs')
+    }))
+})
+
+describe("mysqlMigrationDialect text strategy", () => {
+  it.effect("rejects a keyed text column without a length", () =>
+    Effect.gen(function* () {
+      const detail = yield* failureDetail(
+        [{ kind: "createTable", table: "t", columns: [column("title", "text")] }],
+        makeContext({
+          shapes: new Map([
+            ["t", tableShapes([column("title", "text")], [{ fields: ["title"], unique: false }])]
+          ])
+        }).ctx
+      )
+      expect(detail).toContain("has no maxLength")
+      expect(detail).toContain("768")
+    }))
+
+  it.effect("rejects a keyed text column over 768 characters", () =>
+    Effect.gen(function* () {
+      const detail = yield* failureDetail(
+        [{ kind: "createTable", table: "t", columns: [column("title", "text", { maxLength: 769 })] }],
+        makeContext({
+          shapes: new Map([
+            ["t", tableShapes([column("title", "text", { maxLength: 769 })], [{ fields: ["title"], unique: false }])]
+          ])
+        }).ctx
+      )
+      expect(detail).toContain("768")
+    }))
+
+  it.effect("rejects a composite index over 3072 bytes", () =>
+    Effect.gen(function* () {
+      const columns = [
+        column("a", "text", { maxLength: 500 }),
+        column("b", "text", { maxLength: 500 })
+      ]
+      const detail = yield* failureDetail(
+        [{ kind: "createTable", table: "t", columns }],
+        makeContext({
+          shapes: new Map([
+            ["t", tableShapes(columns, [{ fields: ["a", "b"], unique: false }])]
+          ])
+        }).ctx
+      )
+      expect(detail).toContain("3072")
+    }))
+
+  it.effect("renders the email collation and probes with it", () =>
+    Effect.gen(function* () {
+      const email = column("email", "text", { maxLength: 320, collation: "utf8mb4_0900_as_ci", unique: true })
+      const { ctx, queries } = makeContext({
+        catalogTables: [{ name: "users", columns: [{ name: "email", type: "varchar(320)", collationName: "utf8mb4_0900_as_ci" }] }],
+        shapes: new Map([["users", tableShapes([email])]])
+      })
+      const result = yield* plan(
+        [{ kind: "createIndex", table: "users", fields: ["email"], unique: true }],
+        ctx
+      )
+      expect(result.statements[0]).toContain("CREATE UNIQUE INDEX")
+      expect(queries.some((query) => query.includes("utf8mb4_0900_as_ci"))).toBe(true)
+    }))
+
+  it.effect("reconciles a legacy text shape before an index", () =>
+    Effect.gen(function* () {
+      const title = column("title", "text", { maxLength: 200 })
+      const other = column("other", "integer")
+      const { ctx, queries } = makeContext({
+        catalogTables: [
+          { name: "t", columns: [{ name: "title", type: "varchar(255)" }, { name: "other", type: "int" }] }
+        ],
+        shapes: new Map([
+          ["t", { stored: { columns: [column("title", "text"), other], indexes: [] }, desired: { columns: [title, other], indexes: [{ fields: ["title"], unique: false }, { fields: ["other"], unique: false }] } }]
+        ])
+      })
+      const result = yield* plan(
+        [{ kind: "createIndex", table: "t", fields: ["other"], unique: false }],
+        ctx
+      )
+      expect(result.statements[0]).toContain("MODIFY COLUMN")
+      expect(result.statements[0]).toContain("VARCHAR(200)")
+      expect(result.statements[0]).toContain("ALGORITHM=COPY, LOCK=SHARED")
+      expect(result.notes?.some((note) => note.includes("reconcile text shape"))).toBe(true)
+      expect(queries.length).toBeGreaterThan(0)
+    }))
+
+  it.effect("rejects duplicate rows before a unique index", () =>
+    Effect.gen(function* () {
+      const title = column("title", "text", { maxLength: 200 })
+      const detail = yield* failureDetail(
+        [{ kind: "createIndex", table: "t", fields: ["title"], unique: true }],
+        makeContext({
+          catalogTables: [{ name: "t", columns: [{ name: "title", type: "varchar(200)" }] }],
+          shapes: new Map([["t", tableShapes([title])]]),
+          duplicate: true
+        }).ctx
+      )
+      expect(detail).toContain("would collapse")
+    }))
+
+  it.effect("audits a legacy text shape without repairing it", () =>
+    Effect.gen(function* () {
+      const title = column("title", "text", { maxLength: 200 })
+      const { ctx } = makeContext({
+        catalogTables: [
+          { name: "t", columns: [{ name: "title", type: "varchar(255)" }] }
+        ],
+        shapes: new Map([["t", tableShapes([title])]])
+      })
+      const audit = mysqlMigrationDialect.auditTextShape
+      if (audit === undefined) return yield* Effect.die(new Error("auditTextShape missing"))
+      const drift = yield* audit(ctx)
+      expect(drift.some((detail) => detail.includes("title"))).toBe(true)
+    }))
+
+  it.effect("rejects a rename combined with a same-plan index step", () =>
+    Effect.gen(function* () {
+      const detail = yield* failureDetail(
+        [
+          { kind: "renameColumn", table: "t", from: "title", to: "name" },
+          { kind: "createIndex", table: "t", fields: ["name"], unique: false }
+        ],
+        makeContext({
+          shapes: new Map([
+            ["t", tableShapes([column("name", "text", { maxLength: 200 })])]
+          ])
+        }).ctx
+      )
+      expect(detail).toContain("split the rename")
+    }))
+
+  it.effect("does not preflight an unchanged latent shape", () =>
+    Effect.gen(function* () {
+      const ctx = makeContext({
+        shapes: new Map([
+          [
+            "t",
+            tableShapes([column("title", "text")], [{ fields: ["title"], unique: false }])
+          ]
+        ])
+      }).ctx
+      const preflight = mysqlMigrationDialect.preflightPlan
+      if (preflight === undefined) return yield* Effect.die(new Error("preflightPlan missing"))
+      yield* preflight([], ctx)
+    }))
+
+  it.effect("fails the collation sanity preflight on a PAD SPACE alias", () =>
+    Effect.gen(function* () {
+      const ctx: TranslatePlanContext = {
+        tables: new Map(),
+        views: new Map(),
+        readonlyQuery: () =>
+          Effect.succeed([{ bin_padded: 1, email_padded: 0, email_case_equal: 1 }])
+      }
+      const preflight = mysqlMigrationDialect.preflightPlan
+      if (preflight === undefined) return yield* Effect.die(new Error("preflightPlan missing"))
+      const result = yield* preflight([], ctx).pipe(Effect.result)
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        const failure = result.failure
+        expect(failure._tag).toBe("UnsupportedMigrationStepError")
+        if (failure._tag === "UnsupportedMigrationStepError") {
+          expect(failure.detail).toContain("PAD SPACE")
+        }
+      }
     }))
 })

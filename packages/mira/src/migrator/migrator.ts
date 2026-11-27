@@ -1,4 +1,4 @@
-﻿import type { CollectionSchema } from "@gettersethya/mira-client"
+import type { CollectionSchema } from "@gettersethya/mira-client"
 import { Cause, Context, Duration, Effect, Exit, Layer, Option, Ref, References, Schema } from "effect"
 import type { Scope } from "effect"
 import { SqlClient, SqlError } from "effect/sql"
@@ -36,6 +36,7 @@ import {
   computePlan,
   diffSchemas,
   isDestructiveStep,
+  keyedFieldNames,
   schemaToColumns,
   schemaToIndexEntries
 } from "./schema-diff.js"
@@ -133,13 +134,13 @@ function encodeStoredSchema(schema: CollectionSchema) {
 }
 
 const collectionsColumns: Array<ColumnDef> = [
-  { name: "name", type: "text", nullable: false, primaryKey: true },
+  { name: "name", type: "text", nullable: false, primaryKey: true, maxLength: 255 },
   { name: "schema", type: "text", nullable: false },
   { name: "updated_at", type: "text", nullable: false }
 ]
 
 const migrationsColumns: Array<ColumnDef> = [
-  { name: "id", type: "text", nullable: false, primaryKey: true },
+  { name: "id", type: "text", nullable: false, primaryKey: true, maxLength: 255 },
   { name: "name", type: "text", nullable: false },
   { name: "steps", type: "text", nullable: false },
   { name: "applied_at", type: "text", nullable: false }
@@ -172,6 +173,28 @@ const metadataFor = (options?: MigrateOptions) => ({
   migrationsTable: options?.migrationsTable ?? "_migrations"
 })
 
+const compareTextFor = (dialect: MigrationDialect) =>
+  dialect.reconcilesTextLength === true
+
+const planOptionsFor = (dialect: MigrationDialect, options?: MigrateOptions) => ({
+  ...options,
+  compareTextLength: compareTextFor(dialect)
+})
+
+const auditTextShapeSafe = (
+  dialect: MigrationDialect,
+  ctx: TranslatePlanContext
+): Effect.Effect<ReadonlyArray<string>> =>
+  dialect.auditTextShape === undefined
+    ? Effect.succeed([])
+    : dialect.auditTextShape(ctx).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning(`Text-shape audit failed: ${Cause.pretty(cause)}`).pipe(
+            Effect.as([])
+          )
+        )
+      )
+
 /**
  * Effect `Context.Tag` for the migration service.
  * Provides three operations:
@@ -194,10 +217,11 @@ export class Migrator extends Context.Service<
 >()("Migrator") {}
 
 /** The stored and desired shape of every physical collection a plan may touch. */
-function buildPlanContext(
+export function buildPlanContext(
   schemas: Array<NamedSchema>,
   stored: Record<string, CollectionSchema>,
-  readonlyQuery: TranslatePlanContext["readonlyQuery"]
+  readonlyQuery: TranslatePlanContext["readonlyQuery"],
+  skipDataPreflight = false
 ): TranslatePlanContext {
   const tables = new Map<string, TableShapes>()
   for (const { name, schema } of schemas) {
@@ -234,7 +258,7 @@ function buildPlanContext(
     })
   }
 
-  return { tables, views, readonlyQuery }
+  return { tables, views, readonlyQuery, skipDataPreflight }
 }
 
 /** A statement is only worth executing when it contains SQL, not just comments or whitespace. */
@@ -806,7 +830,7 @@ function migrateTransactional(
         const storedRecord = yield* readStoredSchemas(executor, dialect, schemaTable)
         yield* Effect.logDebug(`Stored schemas: ${Object.keys(storedRecord).length} found`)
 
-        const plan = computePlan(schemas, storedRecord, options)
+        const plan = computePlan(schemas, storedRecord, planOptionsFor(dialect, options))
         yield* Effect.logDebug(`Diff: ${plan.steps.length} steps computed`)
         if (plan.steps.length === 0) {
           yield* Effect.logInfo("All collections up to date - nothing to migrate")
@@ -1013,11 +1037,47 @@ function migrateStatement(
           yield* startHeartbeatFor(prepared, lockConfig)
         }
 
+        if (dialect.preflightPlan !== undefined) {
+          const exists = yield* tableExists(ddlExecutor, dialect, schemaTable)
+          let preflightStored: Record<string, CollectionSchema> = {}
+          let runPreflight = true
+          if (exists) {
+            const read = yield* Effect.result(
+              readStoredSchemas(ddlExecutor, dialect, schemaTable)
+            )
+            if (read._tag === "Success") {
+              preflightStored = read.success
+            } else {
+              // A malformed metadata table is diagnosed by the system-table
+              // bootstrap below. Do not turn its SQL error into a preflight
+              // error or skip the bootstrap.
+              runPreflight = false
+            }
+          }
+          if (runPreflight) {
+            const preflightSteps = computePlan(
+              schemas,
+              preflightStored,
+              planOptionsFor(dialect, options)
+            ).steps
+            yield* dialect.preflightPlan(
+              preflightSteps,
+              buildPlanContext(
+                schemas,
+                preflightStored,
+                makeReadonlyQueryGuard(ddlExecutor.query),
+                true
+              )
+            )
+          }
+        }
+
         yield* Effect.logDebug("Creating system tables if not exist")
         const systemTranslated = yield* renderPlan(dialect, systemTableSteps(schemaTable, migrationsTable), {
           tables: new Map(),
           views: new Map(),
-          readonlyQuery: makeReadonlyQueryGuard(ddlExecutor.query)
+          readonlyQuery: makeReadonlyQueryGuard(ddlExecutor.query),
+          skipDataPreflight: true
         })
         yield* runStatements(ddlExecutor, systemTranslated.statements)
 
@@ -1025,8 +1085,20 @@ function migrateStatement(
         const storedRecord = yield* readStoredSchemas(ddlExecutor, dialect, schemaTable)
         yield* Effect.logDebug(`Stored schemas: ${Object.keys(storedRecord).length} found`)
 
-        const plan = computePlan(schemas, storedRecord, options)
+        const plan = computePlan(schemas, storedRecord, planOptionsFor(dialect, options))
         yield* Effect.logDebug(`Diff: ${plan.steps.length} steps computed`)
+        if (options?.auditTextShape === true && dialect.auditTextShape !== undefined) {
+          const drift = yield* auditTextShapeSafe(
+            dialect,
+            buildPlanContext(
+              schemas,
+              storedRecord,
+              makeReadonlyQueryGuard(ddlExecutor.query),
+              true
+            )
+          )
+          for (const detail of drift) yield* Effect.logWarning(detail)
+        }
         if (plan.steps.length === 0) {
           yield* Effect.logInfo("All collections up to date - nothing to migrate")
           return
@@ -1254,7 +1326,7 @@ function migrateTransactionalPlan(
       )
 
       const storedRecord = yield* readStoredSchemas(executor, dialect, schemaTable)
-      const plan = computePlan(schemas, storedRecord, options)
+      const plan = computePlan(schemas, storedRecord, planOptionsFor(dialect, options))
       const translated = yield* renderPlan(
         dialect,
         plan.steps,
@@ -1407,23 +1479,63 @@ function planStatement(
   return withStatementPreview(sql, dialect, "plan", (executor) =>
     Effect.gen(function* () {
       const storedRecord = yield* readStoredSchemasIfPresent(executor, dialect, schemaTable)
-      const plan = computePlan(schemas, storedRecord, options)
-      const translated = yield* renderPlan(
-        dialect,
-        plan.steps,
-        buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(executor.query))
+      const plan = computePlan(schemas, storedRecord, planOptionsFor(dialect, options))
+      const ctx = buildPlanContext(
+        schemas,
+        storedRecord,
+        makeReadonlyQueryGuard(executor.query)
       )
+      const translated = yield* renderPlan(dialect, plan.steps, ctx)
+      const audit =
+        options?.auditTextShape === true && dialect.auditTextShape !== undefined
+          ? yield* auditTextShapeSafe(dialect, ctx)
+          : []
+      const notes = [...(translated.notes ?? []), ...audit]
       yield* Effect.logInfo(`Plan: ${plan.steps.length} steps`)
-      return translated.notes !== undefined && translated.notes.length > 0
-        ? { ...plan, notes: translated.notes }
-        : plan
+      return notes.length > 0 ? { ...plan, notes } : plan
     })
   )
 }
 
+const keyedForSchema = (schema: CollectionSchema) =>
+  keyedFieldNames(schemaToColumns(schema), schemaToIndexEntries(schema))
+
+/**
+ * Classifies one collection's steps. The only text-specific rule is a keyed
+ * text length increase: the stored column is physically too narrow, so the
+ * collection is `behind`. A decrease is `ahead`. Every other alter keeps the
+ * existing behavior.
+ */
+export function classifyStatus(
+  steps: ReadonlyArray<MigrationStep>,
+  compareTextLength: boolean,
+  storedKeyed: ReadonlySet<string>,
+  desiredKeyed: ReadonlySet<string>
+): "current" | "ahead" | "behind" {
+  if (steps.length === 0) return "current"
+  const hasNew = steps.some(
+    (step) =>
+      step.kind === "addColumn" ||
+      step.kind === "createIndex" ||
+      step.kind === "createTable" ||
+      step.kind === "createView"
+  )
+  const textIncrease =
+    compareTextLength &&
+    steps.some(
+      (step) =>
+        step.kind === "alterColumn" &&
+        step.to.type === "text" &&
+        (storedKeyed.has(step.to.name) || desiredKeyed.has(step.to.name)) &&
+        (step.to.maxLength ?? 255) > (step.from.maxLength ?? 255)
+    )
+  return hasNew || textIncrease ? "behind" : "ahead"
+}
+
 function statusFor(
   schemas: Array<NamedSchema>,
-  stored: Record<string, CollectionSchema>
+  stored: Record<string, CollectionSchema>,
+  dialect: MigrationDialect
 ) {
   const storedMap = new Map(Object.entries(stored))
   const result: Array<{ name: string; status: "current" | "ahead" | "behind" }> = []
@@ -1432,19 +1544,18 @@ function statusFor(
     if (!storedSchema) {
       result.push({ name, status: "behind" })
     } else {
-      const steps = diffSchemas(name, storedSchema, desired)
-      if (steps.length === 0) {
-        result.push({ name, status: "current" })
-      } else {
-        const hasNew = steps.some(
-          (s) =>
-            s.kind === "addColumn" ||
-            s.kind === "createIndex" ||
-            s.kind === "createTable" ||
-            s.kind === "createView"
+      const steps = diffSchemas(name, storedSchema, desired, {
+        compareTextLength: compareTextFor(dialect)
+      })
+      result.push({
+        name,
+        status: classifyStatus(
+          steps,
+          compareTextFor(dialect),
+          keyedForSchema(storedSchema),
+          keyedForSchema(desired)
         )
-        result.push({ name, status: hasNew ? "behind" : "ahead" })
-      }
+      })
     }
   }
   return result
@@ -1476,19 +1587,18 @@ function statusTransactional(
           result.push({ name, status: "behind" })
           yield* Effect.logDebug(`${name}: behind (not in stored)`)
         } else {
-          const steps = diffSchemas(name, storedSchema, desired)
-          if (steps.length === 0) {
-            result.push({ name, status: "current" })
-          } else {
-            const hasNew = steps.some(
-              (s) =>
-                s.kind === "addColumn" ||
-                s.kind === "createIndex" ||
-                s.kind === "createTable" ||
-                s.kind === "createView"
+          const steps = diffSchemas(name, storedSchema, desired, {
+            compareTextLength: compareTextFor(dialect)
+          })
+          result.push({
+            name,
+            status: classifyStatus(
+              steps,
+              compareTextFor(dialect),
+              keyedForSchema(storedSchema),
+              keyedForSchema(desired)
             )
-            result.push({ name, status: hasNew ? "behind" : "ahead" })
-          }
+          })
         }
       }
       return result
@@ -1506,12 +1616,12 @@ function statusStatement(
   return withStatementPreview(sql, dialect, "status", (executor) =>
     Effect.gen(function* () {
       const storedRecord = yield* readStoredSchemasIfPresent(executor, dialect, schemaTable)
-      const plan = computePlan(schemas, storedRecord, options)
+      const plan = computePlan(schemas, storedRecord, planOptionsFor(dialect, options))
       if (plan.steps.length > 0) {
         yield* renderPlan(
           dialect,
           plan.steps,
-          buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(executor.query))
+          buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(executor.query), true)
         ).pipe(
           Effect.tap((translated) =>
             (translated.skipped?.length ?? 0) > 0
@@ -1523,7 +1633,23 @@ function statusStatement(
           )
         )
       }
-      return statusFor(schemas, storedRecord)
+      const result = statusFor(schemas, storedRecord, dialect)
+      if (options?.auditTextShape === true && dialect.auditTextShape !== undefined) {
+        const drift = yield* auditTextShapeSafe(
+          dialect,
+          buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(executor.query), true)
+        )
+        for (const detail of drift) yield* Effect.logWarning(detail)
+        const driftTables = new Set<string>()
+        for (const detail of drift) {
+          const match = /^(?:table|text column) "([^"]+)"/.exec(detail)
+          if (match?.[1] !== undefined) driftTables.add(match[1])
+        }
+        return result.map((entry) =>
+          driftTables.has(entry.name) ? { ...entry, status: "behind" as const } : entry
+        )
+      }
+      return result
     })
   )
 }

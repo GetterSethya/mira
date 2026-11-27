@@ -135,9 +135,9 @@ function fieldToProperty(field: FieldDef): JsonSchemaProperty {
         ...(field.default !== undefined ? { default: field.default } : {})
       }
     case "email":
-      return { type: "string", format: "email" }
+      return { type: "string", format: "email", maxLength: field.maxLength ?? 320 }
     case "date":
-      return { type: "string", "x-kind": "date" }
+      return { type: "string", "x-kind": "date", maxLength: field.maxLength ?? 64 }
     case "json":
       return { "x-kind": "json" }
     case "relation": {
@@ -145,6 +145,7 @@ function fieldToProperty(field: FieldDef): JsonSchemaProperty {
       return {
         type: "string",
         "x-kind": "relation",
+        maxLength: field.maxLength ?? 320,
         ...(targetCollection !== undefined ? { "x-collection": targetCollection } : {}),
         "x-field": field.targetField ?? "id"
       }
@@ -155,6 +156,7 @@ function fieldToProperty(field: FieldDef): JsonSchemaProperty {
       return {
         type: "string",
         "x-kind": "file",
+        maxLength: field.maxLength ?? 255,
         ...(field.maxSize !== undefined ? { "x-maxSize": field.maxSize } : {}),
         ...(field.mimeTypes !== undefined ? { "x-mimeTypes": field.mimeTypes } : {}),
         ...(field.protected === true ? { "x-protected": true } : {})

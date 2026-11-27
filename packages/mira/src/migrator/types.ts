@@ -19,6 +19,14 @@ export type ColumnDef = {
   xSystem?: boolean
   xHidden?: boolean
   xKind?: string
+  /** Declared character length for a text column, when the schema fixes one. */
+  maxLength?: number
+  /** Internal physical collation hint; only the email identity sets it today. */
+  collation?: string
+  /** Relation target collection, copied from the JSON Schema. */
+  xCollection?: string
+  /** Relation target field, copied from the JSON Schema. */
+  xField?: string
 }
 
 /** An index on a table: the fields it covers and whether it is unique. Dialects derive the SQL name from these. */
@@ -98,6 +106,13 @@ export type MigrateOptions = {
    * previews, and statement models without a lock.
    */
   migrationLockTimeoutSeconds?: number
+  /**
+   * Run the dialect's read-only text-shape audit over every desired
+   * collection. `status` reports `behind` and `plan`/`migrate` add a warning
+   * note when a legacy physical shape differs from the schema. The audit does
+   * not repair; it is the #30 release gate input. Defaults to false.
+   */
+  auditTextShape?: boolean
 }
 
 /**

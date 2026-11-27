@@ -46,11 +46,6 @@ function propertyToSchema(prop: JsonSchemaProperty, fieldDef: FieldDef | undefin
   }
 
   if (prop["x-kind"] === "json") return Schema.Unknown
-  if (
-    prop["x-kind"] === "date" ||
-    prop["x-kind"] === "relation" ||
-    prop["x-kind"] === "file"
-  ) return Schema.String
 
   if (prop.type === "string") {
     const typeMsg = errorFn?.("type")

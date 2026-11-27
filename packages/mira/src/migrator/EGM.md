@@ -31,8 +31,9 @@ desired schema passed by the app is "what should exist". The migrator only write
 - (type) `MigrationExecutor` - `run`, `runParameterized`, `query`, `queryParameterized`; both modes build one [types.ts:MigrationExecutor]
 - (type) `MigrationRunner` - a statement-mode executor with `begin`, `commit`, `rollback` [types.ts:MigrationRunner]
 - `SYSTEM_TABLE_STEPS` - the `createSystemTable` steps that bootstrap `_collections` (`name`, `schema`, `updated_at`) and `_migrations` (`id`, `name`, `steps`, `applied_at`) [migrator.ts:SYSTEM_TABLE_STEPS]
-- `computePlan` — builds the full `MigrationPlan` for a schema set, optionally dropping collections absent from the desired set [schema-diff.ts:computePlan]
-- `diffSchemas` — per-collection diff; pass `stored = null` to get a `createTable` plus its `createIndex` steps [schema-diff.ts:diffSchemas]
+- `computePlan` - builds the full `MigrationPlan` for a schema set, optionally dropping collections absent from the desired set; `PlanOptions` adds `compareTextLength` [schema-diff.ts:computePlan]
+- `diffSchemas` - per-collection diff; pass `stored = null` to get a `createTable` plus its `createIndex` steps; `SchemaDiffOptions` controls physical text-shape comparison [schema-diff.ts:diffSchemas]
+- `keyedFieldNames` - the shared definition of a keyed column: column `unique`/`primaryKey` plus every `x-indexes` field [schema-diff.ts:keyedFieldNames]
 - `isDestructiveStep` — classifies one step as data-losing/rewriting (not re-exported by the barrel) [schema-diff.ts:isDestructiveStep]
 - `propertyToColumnType` — maps a JSON Schema property to `"text" | "integer" | "real" | "boolean"` [schema-diff.ts:propertyToColumnType]
 - `schemaToColumns` — flattens `properties` into `ColumnDef[]`, skipping `x-view-only` and marking `id` unique, `x-system`/`x-hidden`, and `seqId` as primary-key auto-increment [schema-diff.ts:schemaToColumns]
@@ -46,12 +47,12 @@ desired schema passed by the app is "what should exist". The migrator only write
 - `MigrationRollbackError` - tagged defect raised when a statement-mode metadata rollback fails; not part of `MigrationError` [errors.ts:MigrationRollbackError]
 - `MigrationLockReleaseError` - tagged defect (`lockName`, `killed`, `destroyed`, `cause`) raised when a successful migration body could not verify that its lock was released; the dedicated lock connection has already been destroyed or the fallback has killed the holder [errors.ts:MigrationLockReleaseError]
 - `boundLockName`, `databaseNameFromRows`, `resolveLockTimeoutSeconds`, `classifyAcquire`, `isHeldByThisSession`, `isSessionLoss` - pure lock helpers in a new internal module [lock.ts]
-- (type) `ColumnType`, `ColumnDef` — physical column type and DDL description [types.ts:ColumnDef]
+- (type) `ColumnType`, `ColumnDef` - physical column type and DDL description, including `maxLength`, the internal `collation` hint, and `xCollection`/`xField` relation targets [types.ts:ColumnDef]
 - (type) `IndexShape`, `TableShape`, `TableShapes` — index identity, table columns+indexes, and the stored/desired pair given to `translatePlan` [types.ts:TableShapes]
 - (type) `MigrationStep` — the 12-kind DDL union (`createTable`, `dropTable`, `renameTable`, `addColumn`, `dropColumn`, `renameColumn`, `alterColumn`, `createIndex`, `dropIndex`, `createSystemTable`, `createView`, `dropView`) [types.ts:MigrationStep]
 - (type) `MigrationPlan` — `{ steps, destructive, notes? }` [types.ts:MigrationPlan]
 - (type) `NamedSchema` — collection name paired with its desired `CollectionSchema` [types.ts:NamedSchema]
-- (type) `MigrateOptions` — `{ allowDestructive?, logLevel?, schemaTable?, migrationsTable?, migrationLockTimeoutSeconds? }` [types.ts:MigrateOptions]
+- (type) `MigrateOptions` - `{ allowDestructive?, logLevel?, schemaTable?, migrationsTable?, migrationLockTimeoutSeconds?, auditTextShape? }` [types.ts:MigrateOptions]
 
 ## Invariants
 
@@ -65,7 +66,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 - Cleanup statements run through `Effect.ensuring`, so they execute on both the committed and rolled-back path; cleanup failures are logged with `Effect.logWarning` and never propagated [migrator.ts:runCleanup]
 - In transactional mode, the `_collections` upsert happens inside the transaction, after the `_migrations` insert, and only for a plan that was not skipped. Statement mode writes both with `upsertStatement` in one parameterized transaction [migrator.ts:migrateTransactional] [migrator.ts:writeStatementMetadata]
 - Steps are ordered globally by `STEP_PRIORITY` — `dropView` → `dropIndex` → table changes → `createIndex` → `createView` — so plan ordering never depends on collection declaration order [schema-diff.ts:STEP_PRIORITY]
-- A column is considered changed when its `type`, `nullable`, or `default` differs; such a change emits a single `alterColumn` carrying both `from` and `to` [schema-diff.ts:diffSchemas]
+- A column is considered changed when its `type`, `nullable`, or `default` differs; when `compareTextLength` is on, a keyed-status change or a keyed `maxLength` change also emits a single `alterColumn` carrying both `from` and `to` [schema-diff.ts:diffSchemas]
 - `x-system` columns present in stored but absent from desired are never dropped [schema-diff.ts:diffSchemas]
 - `seqId` (`x-kind: "seqId"`) is always `integer` and becomes the primary key with auto-increment; `id` is marked `unique` [schema-diff.ts:schemaToColumns]
 - Properties flagged `x-view-only` never produce physical columns [schema-diff.ts:schemaToColumns]
@@ -73,7 +74,7 @@ desired schema passed by the app is "what should exist". The migrator only write
 - Index identity is `(unique?, fields joined)` — dialects derive the SQL name from the same two inputs, so the differ never depends on a dialect's naming scheme [schema-diff.ts:indexKey]
 - Destructiveness is per change: `dropTable`/`dropColumn` always, `alterColumn` only on a type change or `nullable → NOT NULL`; nullable relaxation and default changes are non-destructive [schema-diff.ts:isDestructiveStep]
 - Collections present in stored but absent from desired are dropped only when `allowDestructive` is set, and the step kind matches the collection kind (`dropView` vs `dropTable`) [schema-diff.ts:computePlan]
-- `status` reports `"behind"` for any collection missing from stored or any diff containing an add/create step (mixed add+drop included); `"ahead"` for any other non-empty diff, including drop-only and `alterColumn`-only changes; `"current"` for an empty diff [migrator.ts:statusImplWith]
+- `status` reports `"behind"` for any collection missing from stored or any diff containing an add/create step (mixed add+drop included) or, when `compareTextLength` is on, a keyed text length increase; `"ahead"` for any other non-empty diff, including drop-only, keyed length decreases, and other `alterColumn`-only changes; `"current"` for an empty diff. `status`, `plan`, and `migrate` report current/no-op for an untouched legacy shape unless `auditTextShape` is set [migrator.ts:classifyStatus] [migrator.ts:statusImplWith]
 
 - `buildPlanContext` populates `views` from both desired and stored view collections. A desired view has `stored` and `desired` query shapes plus the desired `properties` list; a stored-only orphan has `desired: null`; a view with no `x-view-query` records `{ query: null }` on that side [migrator.ts:buildPlanContext].
 - `plan` returns `MigrationPlan.notes` from the translated plan when the dialect supplies notes. Empty notes are omitted; SQLite's `plan()` shape changes only for a `dropColumn` plan with synthesized view operations [migrator.ts:planImplWith].
@@ -140,3 +141,12 @@ desired schema passed by the app is "what should exist". The migrator only write
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+
+## Text shape preflight and reconciliation (issue #71)
+
+- uildPlanContext accepts skipDataPreflight and puts it on TranslatePlanContext. status sets it; plan and migrate leave it false. uildPlanContext is exported for the context test [migrator.ts:buildPlanContext].
+- In statement mode, migrate calls dialect.preflightPlan before the metadata bootstrap. It reads _collections when it exists and uses the desired-only plan only when it does not, so an already-applied latent shape does not block an unrelated migration. A malformed metadata table skips the preflight and is diagnosed by the system-table bootstrap [migrator.ts:migrateStatement].
+- computePlan and statusTransactional pass compareTextLength from dialect.reconcilesTextLength. SQLite and PostgreSQL leave the flag off and keep their existing plans [migrator.ts:planOptionsFor] [migrator.ts:statusTransactional].
+- classifyStatus is the shared status rule for statement and transactional paths. The new keyed text length increase is the only extra ehind condition; a decrease is head [migrator.ts:classifyStatus].
+- MigrateOptions.auditTextShape calls dialect.auditTextShape from statusStatement and planStatement. The scan is read-only: status reports ehind, plan adds a note, and neither synthesizes a repair. #30 uses it as the release gate for untouched legacy tables [migrator.ts:statusStatement] [migrator.ts:planStatement].
+- The metadata tables declare maxLength: 255 on their text primary keys. The MySQL bootstrap renders them through 	ranslatePlan with skipDataPreflight, so a legacy _collections/_migrations pair is reconciled before the stored read [migrator.ts:collectionsColumns] [migrator.ts:migrateStatement].

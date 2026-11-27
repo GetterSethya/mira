@@ -575,3 +575,48 @@ describe("AuthCollection input schema", () => {
     })
   )
 })
+
+describe("text-kind validation bounds", () => {
+  it.effect("Field.email() rejects a value over 320 characters", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { email: Field.email() })
+      const result = yield* createDecode(col, { email: "a".repeat(321) + "@b.com" }).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+    })
+  )
+
+  it.effect("Field.date() rejects a value over 64 characters", () =>
+    Effect.gen(function* () {
+      const col = BaseCollection.define("t", { day: Field.date() })
+      const result = yield* createDecode(col, { day: "2".repeat(65) }).pipe(Effect.result)
+      expect(Result.isFailure(result)).toBe(true)
+    })
+  )
+
+  it.effect("Field.file() rejects a value over 255 characters and accepts a raised bound", () =>
+    Effect.gen(function* () {
+      const narrow = BaseCollection.define("t", { asset: Field.file() })
+      const tooLong = yield* createDecode(narrow, { asset: "a".repeat(256) }).pipe(Effect.result)
+      expect(Result.isFailure(tooLong)).toBe(true)
+
+      const wide = BaseCollection.define("t", { asset: Field.file({ maxLength: 300 }) })
+      const accepted = yield* createDecode(wide, { asset: "a".repeat(256) }).pipe(Effect.result)
+      expect(Result.isSuccess(accepted)).toBe(true)
+    })
+  )
+
+  it.effect("Field.relation() rejects a value wider than the target and accepts a raised bound", () =>
+    Effect.gen(function* () {
+      const users = BaseCollection.define("users", { code: Field.text({ maxLength: 500, unique: true }) })
+      const narrow = BaseCollection.define("t", { userId: Field.relation(users, { field: "code" }) })
+      const tooLong = yield* createDecode(narrow, { userId: "a".repeat(400) }).pipe(Effect.result)
+      expect(Result.isFailure(tooLong)).toBe(true)
+
+      const wide = BaseCollection.define("t", {
+        userId: Field.relation(users, { field: "code", maxLength: 500 })
+      })
+      const accepted = yield* createDecode(wide, { userId: "a".repeat(400) }).pipe(Effect.result)
+      expect(Result.isSuccess(accepted)).toBe(true)
+    })
+  )
+})

@@ -350,3 +350,90 @@ describe("computePlan", () => {
     expect(plan.destructive).toBe(false)
   })
 })
+
+describe("text length and collation", () => {
+  it("carries explicit maxLength and email collation", () => {
+    const schema: CollectionSchema = {
+      "x-collection-kind": "auth",
+      type: "object",
+      properties: {
+        id: { type: "string", "x-system": true },
+        email: { type: "string", format: "email", maxLength: 320, "x-system": true },
+        title: { type: "string", maxLength: 200 }
+      }
+    }
+    const cols = schemaToColumns(schema)
+    expect(cols.find((c) => c.name === "id")?.maxLength).toBe(255)
+    expect(cols.find((c) => c.name === "email")?.maxLength).toBe(320)
+    expect(cols.find((c) => c.name === "email")?.collation).toBe("utf8mb4_0900_as_ci")
+    expect(cols.find((c) => c.name === "title")?.maxLength).toBe(200)
+  })
+
+  it("fills relation, date, file, and literal lengths in code points", () => {
+    const schema: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: {
+        userId: { type: "string", "x-kind": "relation", "x-collection": "users", "x-field": "id" },
+        day: { type: "string", "x-kind": "date" },
+        asset: { type: "string", "x-kind": "file" },
+        status: { type: "string", "x-kind": "literalText", "x-literal": ["a", "😀😀"] }
+      }
+    }
+    const cols = schemaToColumns(schema)
+    expect(cols.find((c) => c.name === "userId")).toMatchObject({
+      maxLength: 320,
+      xCollection: "users",
+      xField: "id"
+    })
+    expect(cols.find((c) => c.name === "day")?.maxLength).toBe(64)
+    expect(cols.find((c) => c.name === "asset")?.maxLength).toBe(255)
+    expect(cols.find((c) => c.name === "status")?.maxLength).toBe(2)
+  })
+
+  it("emits a keyed length alter only with compareTextLength", () => {
+    const stored: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: { title: { type: "string", maxLength: 100 } },
+      "x-indexes": [{ fields: ["title"], unique: false }]
+    }
+    const desired: CollectionSchema = {
+      ...stored,
+      properties: { title: { type: "string", maxLength: 200 } }
+    }
+    expect(diffSchemas("posts", stored, desired)).toEqual([])
+    const steps = diffSchemas("posts", stored, desired, { compareTextLength: true })
+    expect(steps).toHaveLength(1)
+    expect(steps[0]).toMatchObject({ kind: "alterColumn", table: "posts" })
+  })
+
+  it("emits an alter when an index appears or disappears", () => {
+    const base: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: { title: { type: "string", maxLength: 200 } }
+    }
+    const indexed: CollectionSchema = {
+      ...base,
+      "x-indexes": [{ fields: ["title"], unique: false }]
+    }
+    const added = diffSchemas("posts", base, indexed, { compareTextLength: true })
+    expect(added.some((s) => s.kind === "alterColumn")).toBe(true)
+    const removed = diffSchemas("posts", indexed, base, { compareTextLength: true })
+    expect(removed.some((s) => s.kind === "alterColumn")).toBe(true)
+  })
+
+  it("ignores an unindexed length change", () => {
+    const stored: CollectionSchema = {
+      "x-collection-kind": "base",
+      type: "object",
+      properties: { body: { type: "string", maxLength: 100 } }
+    }
+    const desired: CollectionSchema = {
+      ...stored,
+      properties: { body: { type: "string", maxLength: 200 } }
+    }
+    expect(diffSchemas("posts", stored, desired, { compareTextLength: true })).toEqual([])
+  })
+})
