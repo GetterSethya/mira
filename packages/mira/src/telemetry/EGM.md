@@ -111,18 +111,28 @@ its module graph.
   `postgres-shared` test. The default suite guards the generated SQL shape and
   SQLite transaction behavior.
 - Retention is a batched delete with a progress guard; result counts are actual
-  deletes, not selected ids. A `returning` dialect deletes by a `seqId` subquery
-  with `RETURNING "seqId"` and counts the returned rows; an `affectedRows`
-  dialect runs the same delete without `RETURNING` and reads the affected count.
-  A dialect with only `precheck` delete support fails with a descriptive error.
-  The `seqId` never round-trips through a JavaScript number.
+  deletes, not selected ids. The shared statement wraps the limited `seqId`
+  selection in a derived table, because MySQL 8.4 and MariaDB 11.4 reject a
+  `LIMIT` directly inside an `IN` subquery. A `returning` dialect uses
+  `RETURNING 1` and counts the returned rows; an `affectedRows` dialect runs the
+  same delete without `RETURNING` and reads the affected count. A dialect with
+  only `precheck` delete support fails with a descriptive error. The `seqId`
+  never round-trips through a JavaScript number.
+- An `affectedRows` reader must return `Some(n)` for a non-negative safe
+  integer no larger than the 1,000-row batch, or `None` when the raw result is
+  unreadable. `None`, a throw, and an impossible value fail with
+  `TelemetryStoreError` naming the table, deleted-before count, and batch. A
+  reader that keeps returning a positive count stops after 1,000 batches with a
+  partial-run warning and returns the partial count.
 - Dedicated and shared metadata tables are isolated. Dedicated keeps the
   defaults so an existing telemetry database upgrades without table
   re-creation. Shared uses the `_telemetry_*` pair.
 - The SQL store builds a local `Migrator` from the resolved `SqlClient` and
   `Dialect`; it does not require the app-bound `Migrator`.
 - `logCleanupCronDef` contains no SQL or PRAGMA. It logs actual deleted counts
-  and completes on `TelemetryStoreError`.
+  on success. On `TelemetryStoreError` it logs the cause and lets the error
+  propagate, so `CronService` records `lastStatus: "error"` and fires the cron
+  error hook instead of logging a zero-count success.
 - Dedicated libSQL on a local `file:` reuses the SQLite setup and checkpoint.
   Remote libSQL uses `setup: []` and `cleanup: []`; sqld rejects writable
   pragmas. Retention still uses `DELETE ... RETURNING`.
@@ -150,12 +160,13 @@ its module graph.
   `_telemetry_migrations`, and migrates `logs` and `spans` in the app database.
   Dedicated mode opens a second pool and needs a separate database or schema
   [layer.ts:makeTelemetryLayer].
-- Retention deletes by a `seqId` subquery:
-  `DELETE FROM "logs" WHERE "seqId" IN (SELECT "seqId" FROM "logs" WHERE "created" < ? ORDER BY "seqId" LIMIT ?) RETURNING "seqId"`.
+- Retention deletes through a derived table:
+  `DELETE FROM "logs" WHERE "seqId" IN (SELECT "seqId" FROM (SELECT "seqId" FROM "logs" WHERE "created" < ? ORDER BY "seqId" LIMIT ?) AS "doomed") RETURNING 1`.
   The batch loop and progress guard stay. For `deleteResult: returning` the store
-  counts returned rows; for `affectedRows` it reads the raw affected count. The
-  cutoff and batch size are the only parameters, in that order
-  [sql-store.ts:deleteBatch].
+  counts returned rows; for `affectedRows` it reads the raw affected count,
+  requires a non-negative safe integer no larger than the batch, and stops a
+  stuck reader at 1,000 batches with a partial warning. The cutoff and batch
+  size are the only parameters, in that order [sql-store.ts:deleteBatch].
 - The high-water retention test advances `logs.seqId` with
   `ALTER TABLE logs ALTER COLUMN seqId RESTART WITH 9007199254740993`, inserts an
   old and a recent row, and asserts only the old row is deleted. The numeric read

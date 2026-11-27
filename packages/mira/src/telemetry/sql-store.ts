@@ -22,6 +22,7 @@ import {
 } from "./store.js"
 
 const RETENTION_BATCH_SIZE = 1_000
+const MAX_RETENTION_BATCHES = 1_000
 const SPAN_ATTRIBUTE_VALUE = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
 const SpanAttributesSchema = Schema.fromJsonString(
   Schema.Record(Schema.String, SPAN_ATTRIBUTE_VALUE)
@@ -344,13 +345,42 @@ const cleanup = (
     { discard: true }
   )
 
+/** The SQL and bound values for one retention batch. */
+export type RetentionDeleteStatement = {
+  readonly sql: string
+  readonly params: ReadonlyArray<unknown>
+}
+
+/**
+ * Builds the portable retention delete.
+ *
+ * The derived table is required because MySQL and MariaDB reject a `LIMIT`
+ * directly inside an `IN` subquery. The returning form uses `RETURNING 1`
+ * because the store only needs a row count; libSQL cannot decode a returned
+ * `seqId` above 2^53.
+ */
+export const makeRetentionDeleteStatement = (
+  dialect: Pick<DialectType, "quoteIdentifier">,
+  table: string,
+  returning: boolean,
+  cutoff: string
+): RetentionDeleteStatement => {
+  const q = dialect.quoteIdentifier
+  const sql =
+    `DELETE FROM ${q(table)} WHERE ${q("seqId")} IN (` +
+    `SELECT ${q("seqId")} FROM (` +
+    `SELECT ${q("seqId")} FROM ${q(table)} WHERE ${q("created")} < ? ` +
+    `ORDER BY ${q("seqId")} LIMIT ?) AS ${q("doomed")})` +
+    (returning ? " RETURNING 1" : "")
+  return { sql, params: [cutoff, RETENTION_BATCH_SIZE] }
+}
+
 const deleteBatch = (
   sql: SqlClient.SqlClient,
   dialect: DialectType,
   table: string,
   cutoff: string
 ): Effect.Effect<number, TelemetryStoreError> => {
-  const q = dialect.quoteIdentifier
   return Effect.gen(function* () {
     const strategy = dialect.deleteResult
     if (strategy._tag === "precheck") {
@@ -362,41 +392,78 @@ const deleteBatch = (
       )
     }
 
-    const returning = strategy._tag === "returning" ? ` RETURNING ${q("seqId")}` : ""
-    const statement =
-      `DELETE FROM ${q(table)} WHERE ${q("seqId")} IN (` +
-      `SELECT ${q("seqId")} FROM ${q(table)} WHERE ${q("created")} < ? ` +
-      `ORDER BY ${q("seqId")} LIMIT ?)${returning}`
-    const params = [cutoff, RETENTION_BATCH_SIZE]
+    const statement = makeRetentionDeleteStatement(
+      dialect,
+      table,
+      strategy._tag === "returning",
+      cutoff
+    )
 
     let deleted = 0
-    for (;;) {
+    for (let batch = 1; batch <= MAX_RETENTION_BATCHES; batch++) {
       let count = 0
       if (strategy._tag === "returning") {
-        const rows = yield* run<{ seqId: number | string }>(
+        const rows = yield* run<Record<string, unknown>>(
           sql,
           dialect,
-          statement,
-          params
+          statement.sql,
+          statement.params
         ).pipe(Effect.mapError((error) => mapStoreError("deleteOlderThan", error)))
         count = rows.length
       } else {
-        const raw = yield* sql.unsafe(rewritePlaceholders(statement, dialect), params).raw.pipe(
-          Effect.mapError((error) => mapStoreError("deleteOlderThan", error))
-        )
-        count = Option.getOrElse(strategy.read(raw), () => 0)
-      }
+        const raw = yield* sql
+          .unsafe(rewritePlaceholders(statement.sql, dialect), [...statement.params])
+          .raw.pipe(Effect.mapError((error) => mapStoreError("deleteOlderThan", error)))
 
-      deleted += count
+        const context = `table=${table} deleted_before=${deleted} batch=${batch}`
+        const read = yield* Effect.try({
+          try: () => strategy.read(raw),
+          catch: (cause) =>
+            mapStoreError(
+              "deleteOlderThan",
+              `${context}: the affected-row reader threw; the current batch may already be committed: ${String(cause)}`
+            )
+        })
+        if (Option.isNone(read)) {
+          return yield* Effect.fail(
+            new TelemetryStoreError({
+              operation: "deleteOlderThan",
+              cause: `${context}: the affected-row count was unreadable; the current batch may already be committed`
+            })
+          )
+        }
+
+        const value = read.value
+        if (
+          !Number.isSafeInteger(value) ||
+          value < 0 ||
+          value > RETENTION_BATCH_SIZE
+        ) {
+          return yield* Effect.fail(
+            new TelemetryStoreError({
+              operation: "deleteOlderThan",
+              cause: `${context}: the affected-row count was ${String(value)}; the current batch may already have committed`
+            })
+          )
+        }
+        count = value
+      }
 
       if (count === 0) {
         yield* Effect.logWarning(
           `[telemetry] ${table} retention made no progress at cutoff ${cutoff}`
         )
-        break
+        return deleted
       }
 
+      deleted += count
       yield* Effect.yieldNow
+
+      if (batch === MAX_RETENTION_BATCHES) {
+        yield* Effect.logWarning(
+          `[telemetry] ${table} retention stopped after ${MAX_RETENTION_BATCHES} batches at cutoff ${cutoff} with ${deleted} rows deleted; the run is partial. Rerun to continue, or inspect the affected-row count.`
+        )
+      }
     }
 
     return deleted

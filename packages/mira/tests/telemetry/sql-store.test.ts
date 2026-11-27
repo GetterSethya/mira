@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Data, Effect, Exit, Layer } from "effect"
+import { Data, Effect, Exit, Layer, Option } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -8,6 +8,7 @@ import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import {
   makeInsertStatement,
+  makeRetentionDeleteStatement,
   makeSqlTelemetryStoreLayer
 } from "@/telemetry/sql-store.js"
 import {
@@ -88,6 +89,21 @@ const requireRead = (store: TelemetryStoreShape) => {
   }
   return store.read
 }
+
+const chunk = <A,>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A>> => {
+  const chunks: Array<ReadonlyArray<A>> = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+const affectedRowsDialect = (
+  read: (raw: unknown) => Option.Option<number>
+) => ({
+  ...sqliteDialect,
+  deleteResult: { _tag: "affectedRows" as const, read }
+})
 
 describe("SqlTelemetryStore", () => {
   it.effect("appends and reads logs without changing the public shape", () =>
@@ -229,6 +245,181 @@ describe("SqlTelemetryStore", () => {
       })
       expect(logs.items.map((row) => row.id)).toEqual(["recent"])
     }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it("builds the portable derived-table retention statement", () => {
+    const cutoff = "2026-11-25T00:00:00.000Z"
+    const returning = makeRetentionDeleteStatement(sqliteDialect, "logs", true, cutoff)
+    expect(returning).toEqual({
+      sql:
+        'DELETE FROM "logs" WHERE "seqId" IN (' +
+        'SELECT "seqId" FROM (' +
+        'SELECT "seqId" FROM "logs" WHERE "created" < ? ' +
+        'ORDER BY "seqId" LIMIT ?) AS "doomed") RETURNING 1',
+      params: [cutoff, 1_000]
+    })
+
+    const mysqlQuoteDialect = {
+      quoteIdentifier: (name: string) => `\`${name.replaceAll("`", "``")}\``
+    }
+    const affected = makeRetentionDeleteStatement(mysqlQuoteDialect, "logs", false, cutoff)
+    expect(affected.sql).toBe(
+      "DELETE FROM `logs` WHERE `seqId` IN (" +
+        "SELECT `seqId` FROM (" +
+        "SELECT `seqId` FROM `logs` WHERE `created` < ? " +
+        "ORDER BY `seqId` LIMIT ?) AS `doomed`)"
+    )
+    expect(affected.params).toEqual([cutoff, 1_000])
+  })
+
+  it.effect("deletes a large backlog in batches and keeps the cutoff row", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const sql = yield* SqlClient.SqlClient
+      const old = "2026-11-20T00:00:00.000Z"
+      const cutoff = "2026-11-25T00:00:00.000Z"
+      const recent = "2026-11-26T00:00:00.000Z"
+      const rows = Array.from({ length: 2_500 }, (_, index) =>
+        log(`old-${index}`, `old-${index}`, old)
+      )
+
+      for (const batch of chunk(rows, 1_000)) {
+        yield* store.appendLogs([...batch])
+      }
+      yield* store.appendLogs([
+        log("recent", "recent", recent),
+        log("cutoff", "cutoff", cutoff)
+      ])
+
+      const deleted = yield* store.deleteOlderThan(cutoff)
+      expect(deleted).toEqual({ logs: 2_500, spans: 0 })
+
+      const remaining = yield* sql.unsafe<{ id: string }>(
+        'SELECT "id" FROM "logs" ORDER BY "id"'
+      )
+      expect(remaining.map((row) => row.id)).toEqual(["cutoff", "recent"])
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("deletes by seqId above 2^53 without returning the seqId", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const sql = yield* SqlClient.SqlClient
+      const old = "2026-11-20T00:00:00.000Z"
+      const cutoff = "2026-11-25T00:00:00.000Z"
+      const recent = "2026-11-26T00:00:00.000Z"
+
+      yield* sql.unsafe(
+        `INSERT INTO "logs" ("seqId", "id", "level", "message", "created", ` +
+          `"updated", "traceId", "spanId") VALUES ` +
+          `(9007199254740993, 'big-old', 'INFO', 'old', ?, ?, NULL, NULL), ` +
+          `(9007199254740994, 'big-recent', 'INFO', 'recent', ?, ?, NULL, NULL)`,
+        [old, old, recent, recent]
+      )
+
+      const deleted = yield* store.deleteOlderThan(cutoff)
+      expect(deleted).toEqual({ logs: 1, spans: 0 })
+
+      const remaining = yield* sql.unsafe<{ seqId: string; id: string }>(
+        'SELECT CAST("seqId" AS TEXT) AS "seqId", "id" FROM "logs"'
+      )
+      expect(remaining).toEqual([{ seqId: "9007199254740994", id: "big-recent" }])
+    }).pipe(Effect.provide(makeLayer()))
+  )
+
+  it.effect("uses the affectedRows count and stops on zero", () => {
+    let calls = 0
+    const dialect = affectedRowsDialect(() => {
+      calls++
+      return calls === 1 ? Option.some(1) : Option.some(0)
+    })
+
+    return Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const old = "2026-11-20T00:00:00.000Z"
+      const cutoff = "2026-11-25T00:00:00.000Z"
+
+      yield* store.appendLogs([log("old", "old", old)])
+      const deleted = yield* store.deleteOlderThan(cutoff)
+      expect(deleted).toEqual({ logs: 1, spans: 0 })
+      expect(yield* count("logs")).toBe(0)
+    }).pipe(Effect.provide(makeLayer(dialect)))
+  })
+
+  it.effect("treats Some(0) as a valid terminal count", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const cutoff = "2026-11-25T00:00:00.000Z"
+      const recent = "2026-11-26T00:00:00.000Z"
+
+      yield* store.appendLogs([log("recent", "recent", recent)])
+      const deleted = yield* store.deleteOlderThan(cutoff)
+      expect(deleted).toEqual({ logs: 0, spans: 0 })
+      expect(yield* count("logs")).toBe(1)
+    }).pipe(Effect.provide(makeLayer(affectedRowsDialect(() => Option.some(0)))))
+  )
+
+  it.effect("rejects unsafe affected-row counts", () => {
+    let current = 0
+    const dialect = affectedRowsDialect(() => Option.some(current))
+
+    return Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const cutoff = "2026-11-25T00:00:00.000Z"
+
+      for (const value of [Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5, 1_001]) {
+        current = value
+        const error = yield* store.deleteOlderThan(cutoff).pipe(Effect.flip)
+        expect(error).toBeInstanceOf(TelemetryStoreError)
+      }
+    }).pipe(Effect.provide(makeLayer(dialect)))
+  })
+
+  it.effect(
+    "stops a stuck reader at the batch cap and returns a partial count",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* TelemetryStore
+        const cutoff = "2026-11-25T00:00:00.000Z"
+
+        const deleted = yield* store.deleteOlderThan(cutoff)
+        expect(deleted).toEqual({ logs: 1_000_000, spans: 1_000_000 })
+      }).pipe(Effect.provide(makeLayer(affectedRowsDialect(() => Option.some(1_000))))),
+    120_000
+  )
+
+  it.effect("fails on an unreadable count after the logs batch, leaving spans untouched", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const old = "2026-11-20T00:00:00.000Z"
+      const cutoff = "2026-11-25T00:00:00.000Z"
+
+      yield* store.appendLogs([log("old-log", "old", old)])
+      yield* store.appendSpans([span("old-span", "trace-old", old)])
+
+      const error = yield* store.deleteOlderThan(cutoff).pipe(Effect.flip)
+      expect(error).toBeInstanceOf(TelemetryStoreError)
+      expect(yield* count("logs")).toBe(0)
+      expect(yield* count("spans")).toBe(1)
+    }).pipe(Effect.provide(makeLayer(affectedRowsDialect(() => Option.none()))))
+  )
+
+  it.effect("wraps a throwing affected-row reader", () =>
+    Effect.gen(function* () {
+      const store = yield* TelemetryStore
+      const cutoff = "2026-11-25T00:00:00.000Z"
+
+      const error = yield* store.deleteOlderThan(cutoff).pipe(Effect.flip)
+      expect(error).toBeInstanceOf(TelemetryStoreError)
+    }).pipe(
+      Effect.provide(
+        makeLayer(
+          affectedRowsDialect(() => {
+            throw new Error("bad raw")
+          })
+        )
+      )
+    )
   )
 
   it.effect("rejects retention when the dialect cannot report affected rows", () =>
