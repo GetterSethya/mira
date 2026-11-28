@@ -58,7 +58,7 @@ published by CI.
   close the batcher; a throwing predicate still counts toward the three-strike
   close. A consumer that exhaustively switches on `TransactionProbeStrategy`
   must add the `error-classified` arm; a dialect that assigns a string is
-  unaffected. MySQL/MariaDB support itself is still pending #30.
+  unaffected.
 - **MySQL/MariaDB text length and collation strategy.** Indexed, unique, and
   primary-key text now carries `Field.text({ maxLength })` into the physical
   column as `VARCHAR(n)` (`1 <= n <= 768`); unindexed text stays `LONGTEXT`.
@@ -72,7 +72,7 @@ published by CI.
   rule and filter `LIKE` renders with `LOWER`/`CONCAT`. This is a validation
   change on every dialect: email/date/relation/file values are now bounded by
   `maxLength` (320/64/320/255 by default, overridable), matching the physical
-  MySQL/MariaDB column. MySQL/MariaDB support itself is still pending #30.
+  MySQL/MariaDB column.
 - **MySQL/MariaDB migration lock.** Statement-mode dialects can now declare a
   session-scoped `MigrationLock`. `migrate` serializes on a database-scoped,
   always-hashed ASCII name (`mira.migrations:<16 hex>` from stable FNV-1a), waits
@@ -85,8 +85,7 @@ published by CI.
   migration session sets `wait_timeout = 600` so an idle half-open holder is
   reclaimed in about ten minutes. New public exports: `MigrationLock`,
   `LockExecutor`, `LockConnection`, `MigrationLockError`,
-  `MigrationLockReleaseError`, and `MigrationError`. MySQL/MariaDB support itself
-  is still pending #30.
+  `MigrationLockReleaseError`, and `MigrationError`.
 - **PostgreSQL database support.** `PostgresDatabase({ url, maxConnections?,
   idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
   Node and Bun through `@effect/sql-pg`. The preset validates `maxConnections`,

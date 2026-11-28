@@ -191,6 +191,41 @@ for (const engine of engines) {
                   spanId: null
                 }
               ])
+
+              const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+              const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+              yield* store.appendLogs([
+                {
+                  id: "e2e-mysql-old",
+                  level: "INFO",
+                  message: "old",
+                  created: old,
+                  updated: old,
+                  traceId: null,
+                  spanId: null
+                },
+                {
+                  id: "e2e-mysql-recent",
+                  level: "INFO",
+                  message: "recent",
+                  created: recent,
+                  updated: recent,
+                  traceId: null,
+                  spanId: null
+                }
+              ])
+              const deleted = yield* store.deleteOlderThan(recent)
+              expect(deleted.logs).toBeGreaterThanOrEqual(1)
+
+              const afterDelete = yield* read.listLogs({
+                limit: 100,
+                after: null,
+                filter: null,
+                traceId: null
+              })
+              expect(
+                afterDelete.items.filter((row) => row.id === "e2e-mysql-dup")
+              ).toHaveLength(1)
             }).pipe(Effect.provide(appInstance.buildServiceLayer()))
           })
         ),

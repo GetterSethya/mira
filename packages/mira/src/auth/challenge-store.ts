@@ -355,7 +355,7 @@ export const AuthChallengeStoreLive = Layer.effect(
               SELECT attempts, consumed_at, expires_at
               FROM ${sql("_auth_challenges")}
               WHERE id = ${id}
-              FOR UPDATE NOWAIT
+              FOR UPDATE
             `
             const row = rows[0]
             if (row === undefined) return null
@@ -463,3 +463,4 @@ export const AuthChallengeStoreLive = Layer.effect(
     }
   })
 )
+

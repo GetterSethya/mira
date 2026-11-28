@@ -10,7 +10,7 @@ import {
   Field,
   ViewCollection
 } from "@gettersethya/mira-client"
-import { Effect, Layer, Redacted, Schema } from "effect"
+import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import mysql from "mysql2/promise"
@@ -18,6 +18,7 @@ import { expect } from "vitest"
 
 import { applyRulesToCollections, defineRule, Mira } from "@/app/index.js"
 import { MysqlDatabase } from "@/databases/mysql.js"
+import { readMysqlAffectedRows } from "@/dialect/dialect-mysql-core.js"
 import { makeCollectionRouter } from "@/http/router.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { LocalFileStorage } from "@/storage/local-preset.js"
@@ -158,7 +159,7 @@ const PostItem = Schema.Struct({
 })
 const ListBody = Schema.Struct({
   items: Schema.Array(PostItem),
-  nextCursor: Schema.NullOr(Schema.String)
+  nextCursor: Schema.NullOr(Schema.Union([Schema.String, Schema.Number]))
 })
 const ViewList = Schema.Struct({
   items: Schema.Array(
@@ -172,6 +173,10 @@ const ViewList = Schema.Struct({
 })
 const BulkBody = Schema.Struct({
   records: Schema.Array(Schema.Struct({ id: Schema.String }))
+})
+const CursorListBody = Schema.Struct({
+  items: Schema.Array(Schema.Struct({ id: Schema.String })),
+  nextCursor: Schema.NullOr(Schema.Union([Schema.String, Schema.Number]))
 })
 
 const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
@@ -297,6 +302,37 @@ for (const engine of engines) {
               expect(post.published).toBe(true)
               expect(post.views).toBe(3)
 
+              const second = yield* HttpClient.execute(
+                HttpClientRequest.post("/api/collections/e2e_mysql_posts").pipe(
+                  HttpClientRequest.bodyJsonUnsafe({
+                    title: "Alpha",
+                    published: false,
+                    views: 1,
+                    age: 30
+                  })
+                )
+              )
+              expect(second.status).toBe(201)
+
+              const firstPage = yield* HttpClient.execute(
+                HttpClientRequest.get("/api/collections/e2e_mysql_posts?limit=1")
+              )
+              expect(firstPage.status).toBe(200)
+              const firstPageBody = yield* json(firstPage, ListBody)
+              expect(firstPageBody.items).toHaveLength(1)
+              expect(firstPageBody.nextCursor).not.toBeNull()
+              if (firstPageBody.nextCursor === null) {
+                return yield* Effect.die("expected a next cursor")
+              }
+              const secondPage = yield* HttpClient.execute(
+                HttpClientRequest.get(
+                  `/api/collections/e2e_mysql_posts?limit=1&after=${encodeURIComponent(String(firstPageBody.nextCursor))}`
+                )
+              )
+              expect(secondPage.status).toBe(200)
+              const secondPageBody = yield* json(secondPage, ListBody)
+              expect(secondPageBody.items[0]?.id).not.toBe(firstPageBody.items[0]?.id)
+
               const listed = yield* HttpClient.execute(
                 HttpClientRequest.get("/api/collections/e2e_mysql_posts?limit=10")
               )
@@ -346,7 +382,7 @@ for (const engine of engines) {
                   })
                 )
               )
-              expect([200, 201]).toContain(bulk.status)
+              expect(bulk.status).toBe(201)
               const bulkBody = yield* json(bulk, BulkBody)
               expect(bulkBody.records).toHaveLength(2)
 
@@ -371,6 +407,10 @@ for (const engine of engines) {
                 HttpClientRequest.delete(`/api/collections/e2e_mysql_posts/${post.id}`)
               )
               expect(removed.status).toBe(204)
+              const secondDelete = yield* HttpClient.execute(
+                HttpClientRequest.delete(`/api/collections/e2e_mysql_posts/${post.id}`)
+              )
+              expect(secondDelete.status).toBe(404)
 
               const logout = yield* HttpClient.execute(
                 HttpClientRequest.post("/api/auth/logout").pipe(
@@ -441,7 +481,44 @@ for (const engine of engines) {
                 SELECT \`seqId\` FROM \`e2e_mysql_cursor\` ORDER BY \`seqId\` ASC
               `
               expect(String(rows[0]?.seqId)).toBe("9007199254740993")
+
+              const migrations = yield* sql<{ n: number }>`
+                SELECT COUNT(*) AS n FROM \`_migrations\`
+              `
+              expect(Number(migrations[0]?.n)).toBeGreaterThan(0)
+
+              const now = new Date().toISOString()
+              yield* sql`INSERT INTO ${sql("e2e_mysql_posts")} ${sql.insert({
+                id: "direct-delete",
+                title: "Direct",
+                published: 0,
+                views: 0,
+                created: now,
+                updated: now
+              })}`
+              const deletedRaw = yield* sql
+                .unsafe("DELETE FROM `e2e_mysql_posts` WHERE `id` = ?", ["direct-delete"])
+                .raw
+              expect(readMysqlAffectedRows(deletedRaw)).toEqual(Option.some(1))
+              const deletedAgain = yield* sql
+                .unsafe("DELETE FROM `e2e_mysql_posts` WHERE `id` = ?", ["direct-delete"])
+                .raw
+              expect(readMysqlAffectedRows(deletedAgain)).toEqual(Option.some(0))
             }).pipe(Effect.provide(app.buildServiceLayer()))
+
+            yield* Effect.gen(function* () {
+              yield* serveRouter
+              const res = yield* HttpClient.execute(
+                HttpClientRequest.get("/api/collections/e2e_mysql_cursor?limit=1")
+              )
+              expect(res.status).toBe(200)
+              const body = yield* json(res, CursorListBody)
+              expect(body.nextCursor).toBe("9007199254740993")
+            }).pipe(
+              Effect.provide(
+                Layer.merge(app.buildServiceLayer(), NodeHttpServer.layerTest)
+              )
+            )
           })
         ),
       180_000

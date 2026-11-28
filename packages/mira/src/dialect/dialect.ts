@@ -287,6 +287,11 @@ export type StoreSqlCapabilities = {
    */
   readonly bootstrapSetupSql?: ReadonlyArray<string>
   /**
+   * Statements that restore the bootstrap connection before it returns to the
+   * pool. Run on the same connection after the callback, on success or failure.
+   */
+  readonly bootstrapRestoreSql?: ReadonlyArray<string>
+  /**
    * Optional transaction-local lock timeout for request-path write
    * transactions. SQLite omits it. PostgreSQL uses
    * `SET LOCAL lock_timeout = '2s'`.

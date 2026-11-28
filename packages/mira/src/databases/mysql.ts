@@ -51,7 +51,12 @@ export interface MysqlDatabaseConfig {
  * `ssl` and `connectTimeout` are explicit config fields.
  */
 export const mysqlPoolOptions = (config: MysqlDatabaseConfig) => {
-  const parsed = new URL(Redacted.value(config.url))
+  let parsed: URL
+  try {
+    parsed = new URL(Redacted.value(config.url))
+  } catch (cause) {
+    throw new MysqlConfigError(`invalid MySQL url: ${String(cause)}`)
+  }
   if (parsed.protocol !== "mysql:" && parsed.protocol !== "mysql2:") {
     throw new MysqlConfigError("url must use the mysql: scheme")
   }
@@ -59,7 +64,16 @@ export const mysqlPoolOptions = (config: MysqlDatabaseConfig) => {
     throw new MysqlConfigError("url must include a host")
   }
 
-  const database = decodeURIComponent(parsed.pathname.replace(/^\//, ""))
+  let database: string
+  let username: string
+  let password: string
+  try {
+    database = decodeURIComponent(parsed.pathname.replace(/^\//, ""))
+    username = decodeURIComponent(parsed.username)
+    password = decodeURIComponent(parsed.password)
+  } catch (cause) {
+    throw new MysqlConfigError(`invalid MySQL url encoding: ${String(cause)}`)
+  }
   if (database === "") {
     throw new MysqlConfigError("url must include a database name")
   }
@@ -85,8 +99,8 @@ export const mysqlPoolOptions = (config: MysqlDatabaseConfig) => {
     host,
     port,
     database,
-    username: decodeURIComponent(parsed.username),
-    password: Redacted.make(decodeURIComponent(parsed.password)),
+    username,
+    password: Redacted.make(password),
     ...(config.maxConnections === undefined
       ? {}
       : { maxConnections: config.maxConnections }),
@@ -125,11 +139,41 @@ export const MysqlDatabase = (config: MysqlDatabaseConfig): MiraDatabase => {
     Layer.tap((ctx) => {
       const sql = Context.get(ctx, SqlClient.SqlClient)
       return Effect.gen(function* () {
-        const rows = yield* sql<{ version: string; db: string }>`
-          SELECT VERSION() AS version, DATABASE() AS db
+        const rows = yield* sql<{
+          version: string
+          db: string
+          collation_present: number
+        }>`
+          SELECT VERSION() AS version, DATABASE() AS db,
+            (SELECT COUNT(*) FROM information_schema.collations
+             WHERE collation_name = 'utf8mb4_0900_bin') AS collation_present
         `
+        const version = rows[0]?.version ?? ""
+        const parsed = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
+        if (parsed !== null) {
+          const major = Number(parsed[1])
+          const minor = Number(parsed[2])
+          const patch = Number(parsed[3])
+          const supported =
+            (major === 8 && minor >= 4) ||
+            (major === 11 && (minor > 4 || (minor === 4 && patch >= 6)))
+          if (!supported) {
+            return yield* Effect.die(
+              new MysqlConfigError(
+                `unsupported MySQL/MariaDB version ${version}; use MySQL 8.4+ or MariaDB 11.4.6+`
+              )
+            )
+          }
+        }
+        if (Number(rows[0]?.collation_present) === 0) {
+          return yield* Effect.die(
+            new MysqlConfigError(
+              "the server does not provide utf8mb4_0900_bin; MariaDB 11.4.6+ is required"
+            )
+          )
+        }
         yield* Effect.logInfo("mysql.ready", {
-          version: rows[0]?.version,
+          version,
           database: rows[0]?.db,
           maxConnections: config.maxConnections ?? 10
         })

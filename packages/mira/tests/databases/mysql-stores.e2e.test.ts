@@ -1,6 +1,6 @@
 import { MysqlClient } from "@effect/sql-mysql2"
 import { describe, it } from "@effect/vitest"
-import { Effect, Layer, Redacted, Schedule } from "effect"
+import { Effect, Exit, Layer, Redacted, Schedule } from "effect"
 import { SqlClient } from "effect/sql"
 import mysql from "mysql2/promise"
 import { expect } from "vitest"
@@ -170,6 +170,121 @@ for (const engine of engines) {
             ])
             expect(blocked.ok).toBe(false)
 
+            const mixed = yield* limits.increment([
+              { bucket: "e2e-mixed-a", limit: 5, cost: 1, expiresAt: now + 60_000 },
+              { bucket: "e2e-mixed-b", limit: 1, cost: 2, expiresAt: now + 60_000 }
+            ])
+            expect(mixed.ok).toBe(false)
+            const mixedAfter = yield* limits.increment([
+              { bucket: "e2e-mixed-a", limit: 5, cost: 1, expiresAt: now + 60_000 }
+            ])
+            expect(mixedAfter).toEqual({ ok: true, counts: [1] })
+
+            const duplicateBuckets = yield* limits.increment([
+              { bucket: "e2e-dup", limit: 2, cost: 1, expiresAt: now + 60_000 },
+              { bucket: "e2e-dup", limit: 2, cost: 1, expiresAt: now + 60_000 }
+            ])
+            expect(duplicateBuckets).toEqual({ ok: true, counts: [1, 2] })
+
+            const expired = now - 10 * 60_000
+            yield* limits.increment([
+              { bucket: "e2e-prune", limit: 1, cost: 1, expiresAt: expired }
+            ])
+            yield* limits.prune(now)
+            const afterPrune = yield* limits.increment([
+              { bucket: "e2e-prune", limit: 1, cost: 1, expiresAt: now + 60_000 }
+            ])
+            expect(afterPrune).toEqual({ ok: true, counts: [1] })
+
+            const concurrent = yield* Effect.all(
+              Array.from({ length: 2 }, () =>
+                limits.increment([
+                  { bucket: "e2e-race", limit: 1, cost: 1, expiresAt: now + 60_000 }
+                ])
+              ),
+              { concurrency: "unbounded" }
+            )
+            expect(concurrent.filter((result) => result.ok)).toHaveLength(1)
+
+            const raceChallenge = {
+              id: "e2e-challenge-race",
+              collection: "users",
+              userId: "u2",
+              purpose: "login_otp" as const,
+              tokenHash: "hash-race",
+              expiresAt: now + 60_000,
+              consumedAt: null,
+              attempts: 1,
+              createdAt: now,
+              newEmail: null
+            }
+            yield* challenges.create(raceChallenge)
+            const raceResults = yield* Effect.all(
+              [
+                challenges.attemptAndConsume("e2e-challenge-race", 2, now + 1),
+                challenges.attemptAndConsume("e2e-challenge-race", 2, now + 1)
+              ],
+              { concurrency: "unbounded" }
+            )
+            expect(raceResults.filter((result) => result?.consumed === true)).toHaveLength(1)
+
+            const liveChallenge = {
+              id: "e2e-challenge-live",
+              collection: "users",
+              userId: "u3",
+              purpose: "login_otp" as const,
+              tokenHash: "hash-live-1",
+              expiresAt: now + 60_000,
+              consumedAt: null,
+              attempts: 0,
+              createdAt: now,
+              newEmail: null
+            }
+            yield* challenges.create(liveChallenge)
+            const duplicateLive = yield* Effect.exit(
+              challenges.create({ ...liveChallenge, id: "e2e-challenge-live-2", tokenHash: "hash-live-2" })
+            )
+            expect(Exit.isFailure(duplicateLive)).toBe(true)
+
+            const consumeChallenge = {
+              id: "e2e-challenge-consume",
+              collection: "users",
+              userId: "u4",
+              purpose: "login_otp" as const,
+              tokenHash: "hash-consume",
+              expiresAt: now + 60_000,
+              consumedAt: null,
+              attempts: 0,
+              createdAt: now,
+              newEmail: null
+            }
+            yield* challenges.create(consumeChallenge)
+            expect(yield* challenges.consumeById("e2e-challenge-consume", now + 1)).toBe(true)
+            expect(yield* challenges.consumeById("e2e-challenge-consume", now + 2)).toBe(false)
+
+            const tokenChallenge = {
+              ...consumeChallenge,
+              id: "e2e-challenge-token",
+              tokenHash: "hash-token"
+            }
+            yield* challenges.create(tokenChallenge)
+            expect(
+              yield* challenges.consumeToken(
+                "users",
+                "login_otp",
+                "hash-token",
+                now + 1
+              )
+            ).toBe(true)
+            expect(
+              yield* challenges.consumeToken(
+                "users",
+                "login_otp",
+                "hash-token",
+                now + 2
+              )
+            ).toBe(false)
+
             const cron = yield* CronService
             yield* cron.runNow("e2e-mysql-cron")
             let rows: ReadonlyArray<{ value: string }> = []
@@ -198,6 +313,14 @@ for (const engine of engines) {
                 AND TABLE_NAME IN ('_config', '_auth_challenges', '_rate_limits', '_revoked_tokens', '_auth_generations')
             `
             expect(tables.length).toBe(5)
+            for (let attempt = 0; attempt < 5; attempt++) {
+              const lockWait = yield* sql<{ value: number }>`
+                SELECT @@SESSION.innodb_lock_wait_timeout AS value
+              `
+              expect(Number(lockWait[0]?.value)).not.toBe(5)
+            }
+
+            yield* Effect.scoped(Layer.build(layer))
           }).pipe(Effect.provide(layer))
         ),
       120_000

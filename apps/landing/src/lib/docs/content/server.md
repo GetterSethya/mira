@@ -210,7 +210,7 @@ Migrations use the statement model from `#68` because MySQL commits DDL implicit
 
 `migrateAtStartup: false` skips collection migrations only. The internal config, token, rate-limit, auth-challenge, and cron stores still run idempotent DDL at boot, so the runtime role needs `CREATE`, `ALTER`, and `INDEX` on the app database. The bootstrap sets a five-second metadata-lock timeout on its connection.
 
-The dialect does not enable `NO_BACKSLASH_ESCAPES`; user data is always bound. Do not enable that mode on an app connection. Request-path locking reads use `FOR UPDATE NOWAIT`, retry once, then return a typed store error instead of waiting for the server's default lock timeout. Lower `innodb_lock_wait_timeout` at the server for latency-sensitive deployments.
+The dialect does not enable `NO_BACKSLASH_ESCAPES`; user data is always bound. Do not enable that mode on an app connection. Request-path locking reads use `FOR UPDATE` inside a short transaction; the store retries once on `1205`/`1213`. The bootstrap sets a five-second metadata-lock timeout and restores the session values before the connection returns to the pool, so request connections keep the server default. Lower `innodb_lock_wait_timeout` at the server for latency-sensitive deployments.
 
 ## Email transport
 

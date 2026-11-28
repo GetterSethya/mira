@@ -179,27 +179,41 @@ export const SqlRateLimitStoreLive = Layer.effect(
         // any entry blocks so every earlier write rolls back.
         const transaction = sql.withTransaction(
           Effect.gen(function* () {
-            const locked = yield* sql<{ bucket: string; used: number }>`
+            const existing = yield* sql<{ bucket: string; used: number }>`
               SELECT bucket, used FROM ${sql("_rate_limits")}
               WHERE bucket IN ${sql.in(buckets)}
-              ORDER BY bucket
-              FOR UPDATE NOWAIT
             `
             const initialUsed = new Map(
-              locked.map((row) => [row.bucket, Number(row.used)])
+              existing.map((row) => [row.bucket, Number(row.used)])
             )
             const usedByBucket = new Map(initialUsed)
             const updated = new Map<number, number>()
             const blockedIndices: Array<number> = []
 
             for (const { entry, index } of sorted) {
-              const current = usedByBucket.get(entry.bucket) ?? 0
-              if (current + entry.cost > entry.limit) {
+              let current = usedByBucket.get(entry.bucket)
+              if (current !== undefined) {
+                const locked = yield* sql<{ used: number }>`
+                  SELECT used FROM ${sql("_rate_limits")}
+                  WHERE bucket = ${entry.bucket}
+                  FOR UPDATE
+                `
+                const lockedRow = locked[0]
+                if (lockedRow === undefined) {
+                  current = undefined
+                } else {
+                  current = Number(lockedRow.used)
+                  usedByBucket.set(entry.bucket, current)
+                }
+              }
+
+              const used = current ?? 0
+              if (used + entry.cost > entry.limit) {
                 blockedIndices.push(index)
                 continue
               }
 
-              if (usedByBucket.has(entry.bucket)) {
+              if (current !== undefined) {
                 yield* sql`
                   UPDATE ${sql("_rate_limits")}
                   SET used = used + ${entry.cost}
@@ -212,8 +226,8 @@ export const SqlRateLimitStoreLive = Layer.effect(
                 `
               }
 
-              usedByBucket.set(entry.bucket, current + entry.cost)
-              updated.set(index, current + entry.cost)
+              usedByBucket.set(entry.bucket, used + entry.cost)
+              updated.set(index, used + entry.cost)
             }
 
             if (blockedIndices.length > 0) {
@@ -248,6 +262,11 @@ export const SqlRateLimitStoreLive = Layer.effect(
           Effect.catchTag("RateLimitBlocked", (error) => Effect.succeed(error.result))
         )
       }).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("rate_limit.increment_failed", {
+            error: String(error)
+          })
+        ),
         Effect.mapError((error) =>
           Predicate.isTagged(error, "RateLimitStoreError")
             ? error
@@ -277,4 +296,5 @@ export const RateLimitKeySecretLive = Layer.effect(
   RateLimitKeySecret,
   Effect.map(AppConfig, (config) => config.jwtSecret)
 )
+
 

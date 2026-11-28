@@ -466,9 +466,11 @@ const deleteBatch = (
       }
 
       if (count === 0) {
-        yield* Effect.logWarning(
-          `[telemetry] ${table} retention made no progress at cutoff ${cutoff}`
-        )
+        if (deleted === 0) {
+          yield* Effect.logWarning(
+            `[telemetry] ${table} retention made no progress at cutoff ${cutoff}`
+          )
+        }
         return deleted
       }
 

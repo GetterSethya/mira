@@ -38,6 +38,10 @@ const mysqlStoreSql: StoreSqlCapabilities = {
     "SET SESSION lock_wait_timeout = 5",
     "SET SESSION innodb_lock_wait_timeout = 5"
   ],
+  bootstrapRestoreSql: [
+    "SET SESSION lock_wait_timeout = DEFAULT",
+    "SET SESSION innodb_lock_wait_timeout = DEFAULT"
+  ],
   keyColumnType: `VARCHAR(191) CHARACTER SET utf8mb4 COLLATE ${mysqlTextCollation}`,
   textColumnType: "LONGTEXT",
   bucketColumnType: `VARCHAR(512) CHARACTER SET utf8mb4 COLLATE ${mysqlTextCollation}`,

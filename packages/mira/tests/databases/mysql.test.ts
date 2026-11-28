@@ -50,8 +50,22 @@ describe("MysqlDatabase", () => {
       mysqlPoolOptions({ url: Redacted.make("mysql://h:3306") })
     ).toThrow(MysqlConfigError)
     expect(() =>
+      mysqlPoolOptions({ url: Redacted.make("not a url") })
+    ).toThrow(MysqlConfigError)
+    expect(() =>
+      mysqlPoolOptions({ url: Redacted.make("mysql://user:%zz@host/db") })
+    ).toThrow(MysqlConfigError)
+    expect(() =>
       mysqlPoolOptions({ url: goodUrl, maxConnections: 0 })
     ).toThrow(MysqlConfigError)
+  })
+
+  it("parses an IPv6 host", () => {
+    const options = mysqlPoolOptions({
+      url: Redacted.make("mysql://mira:secret@[::1]:3306/mira")
+    })
+    expect(options.host).toBe("::1")
+    expect(options.port).toBe(3306)
   })
 
   it("propagates migrateAtStartup false", () => {
