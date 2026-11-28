@@ -58,6 +58,8 @@ PostgreSQL on Node and Bun (`@effect/sql-pg`).
 
 - Tested with Node 24, Bun 1.4.2, `@effect/sql-libsql` 4.0.0, `@libsql/client` 0.18.0, local SQLite 3.45.1, and sqld `v0.24.33` (SQLite 3.47.0).
 - PostgreSQL 15+ is the support policy; 17.12 is the validated version and the CI service image. `@effect/sql-pg` 4.0.0 is a runtime dependency. The driver is pure JavaScript and implements the wire protocol itself; there is no `pg` package [postgres.ts:PostgresDatabase].
+- MySQL 8.4 and MariaDB 11.4.6+ are supported; 8.4.13 and 11.4.13 are the validated versions and CI images. `MysqlDatabase` parses the URL into the driver's non-URL options, because the URL branch ignores `poolConfig`. It exposes `maxConnections`, `connectionTTL`, `ssl`, `connectTimeout`, `disablePreparedStatements`, and `migrateAtStartup`, validates the URL and `maxConnections` synchronously, and runs a readiness probe that logs the engine version and database [mysql.ts:MysqlDatabase].
+- `@effect/sql-mysql2` is a runtime dependency. `mysql2` remains transitive; the tests import it directly as a dev dependency. The `./mysql` entry mirrors `./postgres` and does not load the other presets.
 - SQLite 3.35+ is required for `DROP COLUMN` and `RENAME COLUMN`. Both tested engines are above it.
 - `@libsql/client` ships platform-native binaries. It is a direct dependency so the packed package pins the version; the dynamic import keeps it out of the root import graph.
 

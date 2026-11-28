@@ -4,14 +4,9 @@ import { join } from "node:path"
 
 import { NodeHttpServer } from "@effect/platform-node"
 import { describe, it } from "@effect/vitest"
-import {
-  AuthCollection,
-  BaseCollection,
-  type CollectionSchema,
-  Field
-} from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection, type CollectionSchema, Field } from "@gettersethya/mira-client"
 import { Effect, Exit, Layer, Redacted, Result, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpIncomingMessage, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { afterAll, expect } from "vitest"
 
@@ -27,8 +22,10 @@ import { TelemetryStore } from "@/telemetry/store.js"
 
 function closeEffect<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> {
   // The built app layer is closed at runtime; the test graph widens R through
-  // plugin/cron config, so this helper restores the closed run type.
-  // oxlint-disable-next-line typescript/consistent-type-assertions
+  // plugin/cron config, so this helper restores the closed run type. The cast is
+  // the only way to drop an `any` requirement channel that TypeScript rejects
+  // assigning to `never` directly.
+  // oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion, typescript/consistent-type-assertions
   return effect as Effect.Effect<A, E, never>
 }
 
@@ -52,8 +49,7 @@ afterAll(() => {
   }
 })
 
-const delay = (millis: number) =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, millis)))
+const delay = (millis: number) => Effect.promise(() => new Promise((resolve) => setTimeout(resolve, millis)))
 
 const PostsDef = BaseCollection.define("posts", {
   title: Field.text({ required: true }),
@@ -94,8 +90,10 @@ const TitleItemSchema = Schema.Struct({ title: Schema.String })
 const IdItemsSchema = Schema.Struct({ items: Schema.Array(IdItemSchema) })
 const TitleItemsSchema = Schema.Struct({ items: Schema.Array(TitleItemSchema) })
 
-const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
-  res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
+const json = <S extends Schema.ConstraintCodec<unknown>, E>(
+  res: HttpIncomingMessage.HttpIncomingMessage<E>,
+  schema: S
+) => HttpIncomingMessage.schemaBodyJson(schema)(res)
 
 const encodeFilter = Schema.encodeSync(
   Schema.fromJsonString(Schema.Struct({ op: Schema.String, field: Schema.String, value: Schema.Unknown }))
@@ -118,21 +116,11 @@ describe("LibsqlDatabase preset", () => {
 
   it("rejects unknown URL schemes and invalid option combinations", () => {
     expect(() => LibsqlDatabase({ url: "postgres://example" })).toThrow(LibsqlConfigError)
-    expect(() =>
-      LibsqlDatabase({ url: "http://127.0.0.1:1", synchronous: "NORMAL" })
-    ).toThrow(/synchronous/)
-    expect(() =>
-      LibsqlDatabase({ url: "file:./x.db", authToken: Redacted.make("token") })
-    ).toThrow(/authToken/)
-    expect(() =>
-      LibsqlDatabase({ url: "http://127.0.0.1:1", syncUrl: "http://127.0.0.1:2" })
-    ).toThrow(/syncUrl/)
-    expect(() => LibsqlDatabase({ url: ":memory:", syncUrl: "libsql://example" })).toThrow(
-      /in-memory/
-    )
-    expect(() => LibsqlDatabase({ url: "file:./x.db", syncInterval: 1 })).toThrow(
-      /syncInterval/
-    )
+    expect(() => LibsqlDatabase({ url: "http://127.0.0.1:1", synchronous: "NORMAL" })).toThrow(/synchronous/)
+    expect(() => LibsqlDatabase({ url: "file:./x.db", authToken: Redacted.make("token") })).toThrow(/authToken/)
+    expect(() => LibsqlDatabase({ url: "http://127.0.0.1:1", syncUrl: "http://127.0.0.1:2" })).toThrow(/syncUrl/)
+    expect(() => LibsqlDatabase({ url: ":memory:", syncUrl: "libsql://example" })).toThrow(/in-memory/)
+    expect(() => LibsqlDatabase({ url: "file:./x.db", syncInterval: 1 })).toThrow(/syncInterval/)
   })
 
   it.effect("applies the local pragma set and disables foreign keys", () => {
@@ -149,11 +137,7 @@ describe("LibsqlDatabase preset", () => {
       expect(synchronous[0]?.synchronous).toBe(1)
       expect(busy[0]?.timeout).toBe(5000)
       expect(foreignKeys[0]?.foreign_keys).toBe(0)
-    }).pipe(
-      Effect.provide(
-        LibsqlDatabase({ url: fileUrl(filename), synchronous: "NORMAL" }).layer
-      )
-    )
+    }).pipe(Effect.provide(LibsqlDatabase({ url: fileUrl(filename), synchronous: "NORMAL" }).layer))
   })
 })
 
@@ -179,9 +163,7 @@ const todosSchema = (categoryRequired: boolean): CollectionSchema => {
 const todosWithoutTitle = (categoryRequired: boolean): CollectionSchema => {
   const schema = todosSchema(categoryRequired)
   delete schema.properties["title"]
-  schema.required = categoryRequired
-    ? ["id", "category", "created", "updated"]
-    : ["id", "created", "updated"]
+  schema.required = categoryRequired ? ["id", "category", "created", "updated"] : ["id", "created", "updated"]
   return schema
 }
 
@@ -221,10 +203,7 @@ describe("libSQL SQL behavior", () => {
   it.effect("migrates, rebuilds with a view, and preserves the high-water mark", () => {
     const dir = tempDir("mira-libsql-rebuild-")
     const database = LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) })
-    const layer = Layer.mergeAll(
-      MigratorLive.pipe(Layer.provide(database.layer)),
-      database.layer
-    )
+    const layer = Layer.mergeAll(MigratorLive.pipe(Layer.provide(database.layer)), database.layer)
 
     return Effect.gen(function* () {
       const migrator = yield* Migrator
@@ -274,9 +253,7 @@ describe("libSQL SQL behavior", () => {
       })}`
       const inserted = yield* sql<{ seqId: number }>`SELECT seqId FROM ${sql("todos")} WHERE id = ${"t4"}`
       expect(inserted[0]?.seqId).toBe(4)
-    }).pipe(
-      Effect.provide(layer)
-    )
+    }).pipe(Effect.provide(layer))
   })
 })
 
@@ -284,10 +261,7 @@ describe("libSQL dependent-view handling", () => {
   it.effect("dropColumn with a tracked dependent view recreates and validates it", () => {
     const dir = tempDir("mira-libsql-drop-view-")
     const database = LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) })
-    const layer = Layer.mergeAll(
-      MigratorLive.pipe(Layer.provide(database.layer)),
-      database.layer
-    )
+    const layer = Layer.mergeAll(MigratorLive.pipe(Layer.provide(database.layer)), database.layer)
 
     return Effect.gen(function* () {
       const migrator = yield* Migrator
@@ -317,10 +291,7 @@ describe("libSQL dependent-view handling", () => {
   it.effect("dropColumn with a stale tracked view rolls back", () => {
     const dir = tempDir("mira-libsql-drop-view-stale-")
     const database = LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) })
-    const layer = Layer.mergeAll(
-      MigratorLive.pipe(Layer.provide(database.layer)),
-      database.layer
-    )
+    const layer = Layer.mergeAll(MigratorLive.pipe(Layer.provide(database.layer)), database.layer)
 
     return Effect.gen(function* () {
       const migrator = yield* Migrator
@@ -356,206 +327,203 @@ describe("libSQL dependent-view handling", () => {
 })
 
 describe("libSQL app and HTTP behavior", () => {
-  it.effect("runs CRUD, list/filter/sort/cursor, rules, auth, and bulk over HTTP", () => {
-    const dir = tempDir("mira-libsql-http-")
-    const app = Mira.builder()
-      .platform(NodePlatform)
-      .database(LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) }))
-      .storage(LocalFileStorage({ directory: join(dir, "uploads") }))
-      .collections([Posts, Locked, Users])
-      .build()
+  it.effect(
+    "runs CRUD, list/filter/sort/cursor, rules, auth, and bulk over HTTP",
+    () => {
+      const dir = tempDir("mira-libsql-http-")
+      const app = Mira.builder()
+        .platform(NodePlatform)
+        .database(LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) }))
+        .storage(LocalFileStorage({ directory: join(dir, "uploads") }))
+        .collections([Posts, Locked, Users])
+        .build()
 
-    const router = makeCollectionRouter([Posts, Locked, Users])
-    const serveRouter = Effect.flatMap(
-      HttpRouter.toHttpEffect(HttpRouter.addAll(router)),
-      HttpServer.serveEffect()
-    )
+      const router = makeCollectionRouter([Posts, Locked, Users])
+      const serveRouter = Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(router)), HttpServer.serveEffect())
 
-    return Effect.gen(function* () {
-      yield* serveRouter
+      return closeEffect(
+        Effect.gen(function* () {
+          yield* serveRouter
 
-      const empty = yield* HttpClient.get("/api/collections/posts")
-      expect(empty.status).toBe(200)
-      expect((yield* json(empty, Schema.Struct({ items: Schema.Array(Schema.Unknown) }))).items).toEqual([])
+          const empty = yield* HttpClient.get("/api/collections/posts")
+          expect(empty.status).toBe(200)
+          expect((yield* json(empty, Schema.Struct({ items: Schema.Array(Schema.Unknown) }))).items).toEqual([])
 
-      const created = yield* HttpClient.execute(
-        HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyJsonUnsafe({ title: "one", published: true })
-        )
+          const created = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/posts").pipe(
+              HttpClientRequest.bodyJsonUnsafe({ title: "one", published: true })
+            )
+          )
+          expect(created.status).toBe(201)
+          const first = yield* json(created, Schema.Struct({ id: Schema.String, title: Schema.String }))
+          expect(first.title).toBe("one")
+
+          const second = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/posts").pipe(HttpClientRequest.bodyJsonUnsafe({ title: "two" }))
+          )
+          expect(second.status).toBe(201)
+
+          const filtered = yield* HttpClient.get(
+            `/api/collections/posts?filter=${encodeURIComponent(
+              encodeFilter({ op: "eq", field: "title", value: "two" })
+            )}`
+          )
+          expect(filtered.status).toBe(200)
+          const filteredBody = yield* json(filtered, TitleItemsSchema)
+          expect(filteredBody.items).toHaveLength(1)
+          expect(filteredBody.items[0]?.title).toBe("two")
+
+          const sorted = yield* HttpClient.get("/api/collections/posts?sort=title&order=asc")
+          expect(sorted.status).toBe(200)
+          const sortedBody = yield* json(sorted, TitleItemsSchema)
+          expect(sortedBody.items.map((row) => row.title)).toEqual(["one", "two"])
+
+          const page = yield* HttpClient.get("/api/collections/posts?limit=1&sort=title&order=asc")
+          const pageBody = yield* json(
+            page,
+            Schema.Struct({ items: Schema.Array(IdItemSchema), nextCursor: Schema.NullOr(Schema.Finite) })
+          )
+          expect(pageBody.items).toHaveLength(1)
+          expect(pageBody.nextCursor).not.toBeNull()
+          const next = yield* HttpClient.get(
+            `/api/collections/posts?limit=1&sort=title&order=asc&after=${pageBody.nextCursor}`
+          )
+          const nextBody = yield* json(next, IdItemsSchema)
+          expect(nextBody.items[0]?.id).not.toBe(pageBody.items[0]?.id)
+
+          const updated = yield* HttpClient.execute(
+            HttpClientRequest.patch(`/api/collections/posts/${first.id}`).pipe(
+              HttpClientRequest.bodyJsonUnsafe({ title: "one-updated" })
+            )
+          )
+          expect(updated.status).toBe(200)
+          expect((yield* json(updated, TitleItemSchema)).title).toBe("one-updated")
+
+          const deleted = yield* HttpClient.execute(HttpClientRequest.delete(`/api/collections/posts/${first.id}`))
+          expect(deleted.status).toBe(204)
+
+          const bulk = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/posts/bulk").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                records: [{ title: "bulk-1" }, { title: "bulk-2" }]
+              })
+            )
+          )
+          expect(bulk.status).toBe(201)
+          expect((yield* json(bulk, Schema.Struct({ records: Schema.Array(Schema.Unknown) }))).records).toHaveLength(2)
+
+          const denied = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/locked").pipe(HttpClientRequest.bodyJsonUnsafe({ title: "nope" }))
+          )
+          expect(denied.status).toBe(403)
+
+          const user = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/users").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                email: "libsql@example.com",
+                password: "correct-password",
+                passwordConfirm: "correct-password"
+              })
+            )
+          )
+          expect(user.status).toBe(201)
+          const userBody = yield* json(user, Schema.Struct({ password: Schema.optional(Schema.Unknown) }))
+          expect(userBody.password).toBeUndefined()
+
+          const login = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                email: "libsql@example.com",
+                password: "correct-password"
+              })
+            )
+          )
+          expect(login.status).toBe(200)
+          const loginBody = yield* json(
+            login,
+            Schema.Struct({
+              token: Schema.optional(Schema.String),
+              record: Schema.optional(Schema.Struct({ email: Schema.String }))
+            })
+          )
+          expect(typeof loginBody.token).toBe("string")
+          expect(loginBody.record?.email).toBe("libsql@example.com")
+        }).pipe(Effect.provide(app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest))))
       )
-      expect(created.status).toBe(201)
-      const first = yield* json(created, Schema.Struct({ id: Schema.String, title: Schema.String }))
-      expect(first.title).toBe("one")
+    },
+    30_000
+  )
 
-      const second = yield* HttpClient.execute(
-        HttpClientRequest.post("/api/collections/posts").pipe(
-          HttpClientRequest.bodyJsonUnsafe({ title: "two" })
-        )
-      )
-      expect(second.status).toBe(201)
-
-      const filtered = yield* HttpClient.get(
-        `/api/collections/posts?filter=${encodeURIComponent(
-          encodeFilter({ op: "eq", field: "title", value: "two" })
-        )}`
-      )
-      expect(filtered.status).toBe(200)
-      const filteredBody = yield* json(filtered, TitleItemsSchema)
-      expect(filteredBody.items).toHaveLength(1)
-      expect(filteredBody.items[0]?.title).toBe("two")
-
-      const sorted = yield* HttpClient.get("/api/collections/posts?sort=title&order=asc")
-      expect(sorted.status).toBe(200)
-      const sortedBody = yield* json(sorted, TitleItemsSchema)
-      expect(sortedBody.items.map((row) => row.title)).toEqual(["one", "two"])
-
-      const page = yield* HttpClient.get("/api/collections/posts?limit=1&sort=title&order=asc")
-      const pageBody = yield* json(
-        page,
-        Schema.Struct({ items: Schema.Array(IdItemSchema), nextCursor: Schema.NullOr(Schema.Number) })
-      )
-      expect(pageBody.items).toHaveLength(1)
-      expect(pageBody.nextCursor).not.toBeNull()
-      const next = yield* HttpClient.get(
-        `/api/collections/posts?limit=1&sort=title&order=asc&after=${pageBody.nextCursor}`
-      )
-      const nextBody = yield* json(next, IdItemsSchema)
-      expect(nextBody.items[0]?.id).not.toBe(pageBody.items[0]?.id)
-
-      const updated = yield* HttpClient.execute(
-        HttpClientRequest.patch(`/api/collections/posts/${first.id}`).pipe(
-          HttpClientRequest.bodyJsonUnsafe({ title: "one-updated" })
-        )
-      )
-      expect(updated.status).toBe(200)
-      expect((yield* json(updated, TitleItemSchema)).title).toBe("one-updated")
-
-      const deleted = yield* HttpClient.execute(
-        HttpClientRequest.delete(`/api/collections/posts/${first.id}`)
-      )
-      expect(deleted.status).toBe(204)
-
-      const bulk = yield* HttpClient.execute(
-        HttpClientRequest.post("/api/collections/posts/bulk").pipe(
-          HttpClientRequest.bodyJsonUnsafe({
-            records: [{ title: "bulk-1" }, { title: "bulk-2" }]
+  it.effect(
+    "persists telemetry and retention into a dedicated libSQL database",
+    () => {
+      const dir = tempDir("mira-libsql-telemetry-")
+      const app = Mira.builder()
+        .platform(NodePlatform)
+        .database(LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) }))
+        .storage(LocalFileStorage({ directory: join(dir, "uploads") }))
+        .collections([Posts])
+        .telemetry(
+          makeTelemetryLayer({
+            storage: {
+              mode: "dedicated",
+              database: LibsqlDatabase({ url: fileUrl(join(dir, "telemetry.db")) })
+            }
           })
         )
-      )
-      expect(bulk.status).toBe(201)
-      expect((yield* json(bulk, Schema.Struct({ records: Schema.Array(Schema.Unknown) }))).records).toHaveLength(2)
+        .build()
 
-      const denied = yield* HttpClient.execute(
-        HttpClientRequest.post("/api/collections/locked").pipe(
-          HttpClientRequest.bodyJsonUnsafe({ title: "nope" })
-        )
-      )
-      expect(denied.status).toBe(403)
+      return Effect.gen(function* () {
+        const store = yield* TelemetryStore
+        yield* Effect.logInfo("libsql-telemetry-log")
+        yield* Effect.void.pipe(Effect.withSpan("libsql-telemetry-span"))
+        yield* delay(150)
 
-      const user = yield* HttpClient.execute(
-        HttpClientRequest.post("/api/collections/users").pipe(
-          HttpClientRequest.bodyJsonUnsafe({
-            email: "libsql@example.com",
-            password: "correct-password",
-            passwordConfirm: "correct-password"
-          })
-        )
-      )
-      expect(user.status).toBe(201)
-      const userBody = yield* json(user, Schema.Struct({ password: Schema.optional(Schema.Unknown) }))
-      expect(userBody.password).toBeUndefined()
-
-      const login = yield* HttpClient.execute(
-        HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-          HttpClientRequest.bodyJsonUnsafe({
-            email: "libsql@example.com",
-            password: "correct-password"
-          })
-        )
-      )
-      expect(login.status).toBe(200)
-      const loginBody = yield* json(
-        login,
-        Schema.Struct({
-          token: Schema.optional(Schema.String),
-          record: Schema.optional(Schema.Struct({ email: Schema.String }))
+        const read = store.read
+        if (read === null) throw new Error("expected telemetry read store")
+        const logs = yield* read.listLogs({
+          limit: 100,
+          after: null,
+          filter: null,
+          traceId: null
         })
-      )
-      expect(typeof loginBody.token).toBe("string")
-      expect(loginBody.record?.email).toBe("libsql@example.com")
-    }).pipe(
-      Effect.provide(Layer.mergeAll(app.buildServiceLayer(), NodeHttpServer.layerTest))
-    )
-  }, 30_000)
+        const spans = yield* read.listSpans({
+          limit: 100,
+          after: null,
+          filter: null,
+          traceId: null
+        })
+        expect(logs.items.some((row) => row.message === "libsql-telemetry-log")).toBe(true)
+        expect(spans.items.some((row) => row.name === "libsql-telemetry-span")).toBe(true)
 
-  it.effect("persists telemetry and retention into a dedicated libSQL database", () => {
-    const dir = tempDir("mira-libsql-telemetry-")
-    const app = Mira.builder()
-      .platform(NodePlatform)
-      .database(LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) }))
-      .storage(LocalFileStorage({ directory: join(dir, "uploads") }))
-      .collections([Posts])
-      .telemetry(
-        makeTelemetryLayer({
-          storage: {
-            mode: "dedicated",
-            database: LibsqlDatabase({ url: fileUrl(join(dir, "telemetry.db")) })
+        const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+        const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+        yield* store.appendLogs([
+          {
+            id: "old-log",
+            level: "INFO",
+            message: "old",
+            created: old,
+            updated: old,
+            traceId: null,
+            spanId: null
+          },
+          {
+            id: "recent-log",
+            level: "INFO",
+            message: "recent",
+            created: recent,
+            updated: recent,
+            traceId: null,
+            spanId: null
           }
-        })
-      )
-      .build()
-
-    return Effect.gen(function* () {
-      const store = yield* TelemetryStore
-      yield* Effect.logInfo("libsql-telemetry-log")
-      yield* Effect.void.pipe(Effect.withSpan("libsql-telemetry-span"))
-      yield* delay(150)
-
-      const read = store.read
-      if (read === null) throw new Error("expected telemetry read store")
-      const logs = yield* read.listLogs({
-        limit: 100,
-        after: null,
-        filter: null,
-        traceId: null
-      })
-      const spans = yield* read.listSpans({
-        limit: 100,
-        after: null,
-        filter: null,
-        traceId: null
-      })
-      expect(logs.items.some((row) => row.message === "libsql-telemetry-log")).toBe(true)
-      expect(spans.items.some((row) => row.name === "libsql-telemetry-span")).toBe(true)
-
-      const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
-      const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
-      yield* store.appendLogs([
-        {
-          id: "old-log",
-          level: "INFO",
-          message: "old",
-          created: old,
-          updated: old,
-          traceId: null,
-          spanId: null
-        },
-        {
-          id: "recent-log",
-          level: "INFO",
-          message: "recent",
-          created: recent,
-          updated: recent,
-          traceId: null,
-          spanId: null
-        }
-      ])
-      const deleted = yield* store.deleteOlderThan(recent)
-      expect(deleted.logs).toBeGreaterThanOrEqual(1)
-    }).pipe(
-      Effect.provide(app.buildServiceLayer())
-    )
-  }, 30_000)
+        ])
+        const deleted = yield* store.deleteOlderThan(recent)
+        expect(deleted.logs).toBeGreaterThanOrEqual(1)
+      }).pipe(Effect.provide(app.buildServiceLayer()))
+    },
+    30_000
+  )
 
   it("flushes a partial telemetry batch after flushInterval", async () => {
     const dir = tempDir("mira-libsql-telemetry-interval-")
@@ -594,28 +562,32 @@ describe("libSQL app and HTTP behavior", () => {
     await Effect.runPromise(closeEffect(program))
   }, 30_000)
 
-  it.effect("skips shared telemetry DDL when migrate is false", () => {
-    const dir = tempDir("mira-libsql-shared-no-migrate-")
-    const app = Mira.builder()
-      .platform(NodePlatform)
-      .database(LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) }))
-      .storage(LocalFileStorage({ directory: join(dir, "uploads") }))
-      .collections([Posts])
-      .telemetry(
-        makeTelemetryLayer({
-          storage: { mode: "shared", migrate: false }
-        })
-      )
-      .build()
+  it.effect(
+    "skips shared telemetry DDL when migrate is false",
+    () => {
+      const dir = tempDir("mira-libsql-shared-no-migrate-")
+      const app = Mira.builder()
+        .platform(NodePlatform)
+        .database(LibsqlDatabase({ url: fileUrl(join(dir, "app.db")) }))
+        .storage(LocalFileStorage({ directory: join(dir, "uploads") }))
+        .collections([Posts])
+        .telemetry(
+          makeTelemetryLayer({
+            storage: { mode: "shared", migrate: false }
+          })
+        )
+        .build()
 
-    return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const tables = yield* sql<{ name: string }>`
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const tables = yield* sql<{ name: string }>`
         SELECT name FROM sqlite_master WHERE name LIKE '_telemetry_%'
       `
-      expect(tables).toEqual([])
-    }).pipe(Effect.provide(app.buildServiceLayer()))
-  }, 30_000)
+        expect(tables).toEqual([])
+      }).pipe(Effect.provide(app.buildServiceLayer()))
+    },
+    30_000
+  )
 })
 
 describe("libSQL duplicate key classification", () => {
@@ -637,9 +609,7 @@ describe("libSQL duplicate key classification", () => {
         expect(libsqlDialect("local").store.isDuplicateKey(duplicate.failure)).toBe(true)
       }
 
-      const notNull = yield* Effect.result(
-        sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, [null])
-      )
+      const notNull = yield* Effect.result(sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, [null]))
       expect(Result.isFailure(notNull)).toBe(true)
       if (Result.isFailure(notNull)) {
         expect(libsqlDialect("local").store.isDuplicateKey(notNull.failure)).toBe(false)

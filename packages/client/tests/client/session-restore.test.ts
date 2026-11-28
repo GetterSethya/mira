@@ -27,8 +27,8 @@ const UserCollection: AnyCollectionDef = {
   schema: {
     "x-collection-kind": "auth",
     type: "object",
-    properties: { name: { type: "string" } },
-  },
+    properties: { name: { type: "string" } }
+  }
 }
 
 // Regression coverage for the login/logout redirect loops:
@@ -48,7 +48,7 @@ describe("BrowserAuth session lifecycle", () => {
           MutableRef.set(cookieValid, true)
           return respondWith<T>({
             token: "tok",
-            record: { id: "u1", created: "", updated: "", name: "Budi" },
+            record: { id: "u1", created: "", updated: "", name: "Budi" }
           })
         }
         if (req.url.includes("/api/auth/logout")) {
@@ -58,7 +58,7 @@ describe("BrowserAuth session lifecycle", () => {
         }
         if (req.url.includes("/api/auth/me")) {
           if (!MutableRef.get(cookieValid)) {
-            return yield* Effect.fail(new MiraError({ status: 401, body: "unauthorized" }))
+            return yield* new MiraError({ status: 401, body: "unauthorized" })
           }
           return respondWith<T>({ collection: "users", record: { id: "u1" } })
         }
@@ -77,7 +77,7 @@ describe("BrowserAuth session lifecycle", () => {
       loggedInRef,
       sessionMemoRef,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: true,
+      isAuth: true
     })
 
     return { auth, users, cookieValid }
@@ -89,9 +89,10 @@ describe("BrowserAuth session lifecycle", () => {
     // Logged out: a guard caches a failed check.
     expect(await auth.ensureSession()).toBe(false)
 
-    const authWithPassword = users.authWithPassword
-    if (!authWithPassword) throw new Error("expected authWithPassword on an auth collection")
-    await authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
+    if (users.authWithPassword === undefined) {
+      throw new Error("expected authWithPassword on an auth collection")
+    }
+    await users.authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
     expect(auth.isLoggedIn()).toBe(true)
 
     // Must be true — the stale `false` must be gone.
@@ -101,9 +102,10 @@ describe("BrowserAuth session lifecycle", () => {
   it("clear() flips isLoggedIn() to false synchronously", async () => {
     const { auth, users } = makeHarness()
 
-    const authWithPassword = users.authWithPassword
-    if (!authWithPassword) throw new Error("expected authWithPassword on an auth collection")
-    await authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
+    if (users.authWithPassword === undefined) {
+      throw new Error("expected authWithPassword on an auth collection")
+    }
+    await users.authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
     expect(auth.isLoggedIn()).toBe(true)
 
     auth.clear()
@@ -113,9 +115,10 @@ describe("BrowserAuth session lifecycle", () => {
   it("ensureSession() is false right after logout even though the cookie is still valid", async () => {
     const { auth, users, cookieValid } = makeHarness()
 
-    const authWithPassword = users.authWithPassword
-    if (!authWithPassword) throw new Error("expected authWithPassword on an auth collection")
-    await authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
+    if (users.authWithPassword === undefined) {
+      throw new Error("expected authWithPassword on an auth collection")
+    }
+    await users.authWithPassword().raw({ email: "budi@email.com", password: "1234567890" })
     expect(await auth.ensureSession()).toBe(true)
 
     auth.clear()

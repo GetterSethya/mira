@@ -3,8 +3,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { LibsqlDatabase, TursoDatabase } from "@gettersethya/mira"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 if (TursoDatabase !== LibsqlDatabase) {
   throw new Error("TursoDatabase is not the LibsqlDatabase alias")
@@ -20,7 +22,7 @@ const program = Effect.gen(function* () {
   yield* sql`INSERT INTO smoke (name) VALUES (${"bun-packed"})`
   const rows = yield* sql`SELECT name FROM smoke`
   if (rows.length !== 1 || rows[0]?.["name"] !== "bun-packed") {
-    throw new Error(`unexpected libSQL rows: ${JSON.stringify(rows)}`)
+    throw new Error(`unexpected libSQL rows: ${encodeJson(rows)}`)
   }
 })
 

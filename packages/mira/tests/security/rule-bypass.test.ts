@@ -45,7 +45,7 @@ function pretty(value: unknown): string {
     return `{${entries.map(([k, v]) => `${k}: ${pretty(v)}`).join(", ")}}`
   }
   if (typeof value === "string") return `"${value}"`
-  return String(value)
+  return toJsonText(value)
 }
 
 /** Build a `filter=` query-string fragment from a plain object. */
@@ -81,84 +81,82 @@ function isRejected(status: number) {
 const layer = makeSecurityLayer()
 
 describe("H1: relation expand must not bypass target collection view rule", () => {
-  it.effect(
-    "posts?expand=profile does not leak private_profiles to a non-owner or anonymous",
-    () =>
-      Effect.gen(function* () {
-        yield* setupTables
-        const userAId = yield* seedUser("a@example.com", "pw")
-        const userBId = yield* seedUser("b@example.com", "pw")
-        const profileId = yield* seedProfile({
-          email: "a-private@example.com",
-          ssn: "111-22-3333",
-          ownerId: userAId
-        })
-        const postId = yield* seedPost({ title: "post-with-profile", profile: profileId })
-        yield* serveRouter()
+  it.effect("posts?expand=profile does not leak private_profiles to a non-owner or anonymous", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      const userAId = yield* seedUser("a@example.com", "pw")
+      const userBId = yield* seedUser("b@example.com", "pw")
+      const profileId = yield* seedProfile({
+        email: "a-private@example.com",
+        ssn: "111-22-3333",
+        ownerId: userAId
+      })
+      const postId = yield* seedPost({ title: "post-with-profile", profile: profileId })
+      yield* serveRouter()
 
-        const tokenA = yield* login("a@example.com", "pw")
-        const tokenB = yield* login("b@example.com", "pw")
+      const tokenA = yield* login("a@example.com", "pw")
+      const tokenB = yield* login("b@example.com", "pw")
 
-        // --- direct reads: control rules, expected to stay enforced ----------
-        const bDirect = yield* get(`/api/collections/private_profiles/${profileId}`, tokenB)
-        const bDirectBody = yield* bDirect.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] B direct read   status=${bDirect.status} body=${pretty(bDirectBody)}`)
+      // --- direct reads: control rules, expected to stay enforced ----------
+      const bDirect = yield* get(`/api/collections/private_profiles/${profileId}`, tokenB)
+      const bDirectBody = yield* bDirect.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] B direct read   status=${bDirect.status} body=${pretty(bDirectBody)}`)
 
-        const anonDirect = yield* get(`/api/collections/private_profiles/${profileId}`)
-        const anonDirectBody = yield* anonDirect.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] anon direct read status=${anonDirect.status} body=${pretty(anonDirectBody)}`)
+      const anonDirect = yield* get(`/api/collections/private_profiles/${profileId}`)
+      const anonDirectBody = yield* anonDirect.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] anon direct read status=${anonDirect.status} body=${pretty(anonDirectBody)}`)
 
-        const aDirect = yield* get(`/api/collections/private_profiles/${profileId}`, tokenA)
-        const aDirectBody = yield* aDirect.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] A (owner) read   status=${aDirect.status} body=${pretty(aDirectBody)}`)
+      const aDirect = yield* get(`/api/collections/private_profiles/${profileId}`, tokenA)
+      const aDirectBody = yield* aDirect.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] A (owner) read   status=${aDirect.status} body=${pretty(aDirectBody)}`)
 
-        const anonList = yield* get("/api/collections/posts?expand=profile")
-        const anonListBody = yield* anonList.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] anon list+expand  status=${anonList.status} body=${pretty(anonListBody)}`)
-        const anonItem = itemById(anonListBody, postId)
-        const anonExpandedProfile = at(at(anonItem, "expand"), "profile")
+      const anonList = yield* get("/api/collections/posts?expand=profile")
+      const anonListBody = yield* anonList.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] anon list+expand  status=${anonList.status} body=${pretty(anonListBody)}`)
+      const anonItem = itemById(anonListBody, postId)
+      const anonExpandedProfile = at(at(anonItem, "expand"), "profile")
 
-        const bList = yield* get("/api/collections/posts?expand=profile", tokenB)
-        const bListBody = yield* bList.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] B list+expand     status=${bList.status} body=${pretty(bListBody)}`)
-        const bItem = itemById(bListBody, postId)
-        const bExpandedProfile = at(at(bItem, "expand"), "profile")
+      const bList = yield* get("/api/collections/posts?expand=profile", tokenB)
+      const bListBody = yield* bList.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] B list+expand     status=${bList.status} body=${pretty(bListBody)}`)
+      const bItem = itemById(bListBody, postId)
+      const bExpandedProfile = at(at(bItem, "expand"), "profile")
 
-        const bView = yield* get(`/api/collections/posts/${postId}?expand=profile`, tokenB)
-        const bViewBody = yield* bView.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] B view+expand     status=${bView.status} body=${pretty(bViewBody)}`)
-        const bViewExpandedProfile = at(at(bViewBody, "expand"), "profile")
+      const bView = yield* get(`/api/collections/posts/${postId}?expand=profile`, tokenB)
+      const bViewBody = yield* bView.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] B view+expand     status=${bView.status} body=${pretty(bViewBody)}`)
+      const bViewExpandedProfile = at(at(bViewBody, "expand"), "profile")
 
-        assert.notStrictEqual(bDirect.status, 200, "non-owner must be denied direct access")
-        assert.notStrictEqual(anonDirect.status, 200, "anonymous must be denied direct access")
-        assert.strictEqual(aDirect.status, 200, "owner must be able to read their profile")
-        assert.strictEqual(at(aDirectBody, "ssn"), "111-22-3333")
+      assert.notStrictEqual(bDirect.status, 200, "non-owner must be denied direct access")
+      assert.notStrictEqual(anonDirect.status, 200, "anonymous must be denied direct access")
+      assert.strictEqual(aDirect.status, 200, "owner must be able to read their profile")
+      assert.strictEqual(at(aDirectBody, "ssn"), "111-22-3333")
 
-        assert.strictEqual(
-          at(anonExpandedProfile, "ssn"),
-          undefined,
-          "anonymous expand must not expose the denied private_profiles.ssn"
-        )
-        assert.strictEqual(
-          at(bExpandedProfile, "ssn"),
-          undefined,
-          "non-owner expand must not expose the denied private_profiles.ssn"
-        )
-        assert.strictEqual(
-          at(bViewExpandedProfile, "ssn"),
-          undefined,
-          "non-owner view+expand must not expose the denied private_profiles.ssn"
-        )
+      assert.strictEqual(
+        at(anonExpandedProfile, "ssn"),
+        undefined,
+        "anonymous expand must not expose the denied private_profiles.ssn"
+      )
+      assert.strictEqual(
+        at(bExpandedProfile, "ssn"),
+        undefined,
+        "non-owner expand must not expose the denied private_profiles.ssn"
+      )
+      assert.strictEqual(
+        at(bViewExpandedProfile, "ssn"),
+        undefined,
+        "non-owner view+expand must not expose the denied private_profiles.ssn"
+      )
 
-        // reference unused binding
-        void userBId
-      }).pipe(Effect.provide(layer))
+      // B is a distinct user with no ownership of A's profile.
+      assert.notStrictEqual(userBId, userAId)
+    }).pipe(Effect.provide(layer))
   )
 })
 

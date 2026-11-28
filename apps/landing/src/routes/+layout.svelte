@@ -1,6 +1,6 @@
 <script lang="ts">
   import '@fontsource-variable/inter';
-  import '../app.css';
+  import '$lib/app.css';
   import '$lib/docs/docs.css';
   import ScrollToTop from '$lib/components/ScrollToTop.svelte';
   import CodeBlockActions from '$lib/docs/CodeBlockActions.svelte';

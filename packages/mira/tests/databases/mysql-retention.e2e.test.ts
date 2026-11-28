@@ -12,16 +12,14 @@
  */
 import { MysqlClient } from "@effect/sql-mysql2"
 import { it as effectIt } from "@effect/vitest"
-import { Context, Effect, Layer, Option, Redacted } from "effect"
+import { Context, Effect, Layer, Redacted } from "effect"
 import { SqlClient } from "effect/sql"
 import mysql from "mysql2/promise"
-import { describe, expect, it } from "vitest"
+import { describe, expect } from "vitest"
 
 import type { DialectType } from "@/dialect/dialect.js"
 import { Dialect } from "@/dialect/dialect.js"
-import { mysqlMigrationDialect } from "@/dialect/dialect-mysql-migrations.js"
-import { mysqlTransactionProbe } from "@/dialect/dialect-mysql-transactions.js"
-import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { mysqlDialect } from "@/dialect/dialect-mysql.js"
 import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
 import { type TelemetryStoreShape, TelemetryStore } from "@/telemetry/store.js"
 
@@ -31,34 +29,12 @@ type EngineConfig = {
   readonly fallbackUrl: string
 }
 
-const readMysqlAffectedRows = (raw: unknown): Option.Option<number> => {
-  const candidate = Array.isArray(raw) ? raw[0] : raw
-  if (typeof candidate !== "object" || candidate === null) return Option.none()
-  const value = Reflect.get(candidate, "affectedRows")
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? Option.some(value)
-    : Option.none()
-}
+const mysqlRetentionDialect: DialectType = mysqlDialect
 
-const mysqlRetentionDialect = {
-  ...sqliteDialect,
-  ...mysqlMigrationDialect,
-  placeholder: () => "?",
-  deleteResult: { _tag: "affectedRows", read: readMysqlAffectedRows },
-  telemetry: {
-    setup: [],
-    cleanup: [],
-    isRetryable: () => false,
-    insertConflictClause: (quotedId: string) =>
-      `ON DUPLICATE KEY UPDATE ${quotedId} = ${quotedId}`
-  },
-  transactionProbe: mysqlTransactionProbe
-} satisfies DialectType
-
-const mysqlReturningDialect = {
-  ...mysqlRetentionDialect,
+const mysqlReturningDialect: DialectType = {
+  ...mysqlDialect,
   deleteResult: { _tag: "returning" }
-} satisfies DialectType
+}
 
 const log = (id: string, created: string) => ({
   id,
@@ -292,22 +268,6 @@ const registerSuite = (config: EngineConfig) => {
     }
   })
 }
-
-describe("readMysqlAffectedRows", () => {
-  it("reads the mysql2 ResultSetHeader object", () => {
-    expect(readMysqlAffectedRows({ affectedRows: 3 })).toEqual(Option.some(3))
-  })
-
-  it("reads a one-element wrapper array defensively", () => {
-    expect(readMysqlAffectedRows([{ affectedRows: 2 }])).toEqual(Option.some(2))
-  })
-
-  it("returns None for missing, non-integer, negative, or null values", () => {
-    for (const raw of [null, undefined, {}, { affectedRows: 1.5 }, { affectedRows: -1 }]) {
-      expect(Option.isNone(readMysqlAffectedRows(raw))).toBe(true)
-    }
-  })
-})
 
 registerSuite({
   label: "MySQL",

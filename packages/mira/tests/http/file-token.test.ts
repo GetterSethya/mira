@@ -5,17 +5,17 @@ import { AuthCollection } from "@gettersethya/mira-client"
 import { BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
-import type { HttpClientError} from "effect/http";
+import type { HttpClientError } from "effect/http"
 import { Cookies, HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 
-import { applyRulesToCollections,defineRule } from "@/app/index.js"
+import { applyRulesToCollections, defineRule } from "@/app/index.js"
 import { makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import { AppConfig } from "@/config/index.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
-import type { AuthService } from "@/http/auth.js";
+import type { AuthService } from "@/http/auth.js"
 import { hashPassword } from "@/http/auth.js"
 import { NodeAuthServiceLayer } from "@/http/auth-node.js"
 import { makeCollectionRouter } from "@/http/router.js"
@@ -34,19 +34,19 @@ const usersRules = defineRule(usersDef, (R) => ({
   view: R.public(),
   create: R.public(),
   update: R.public(),
-  delete: R.public(),
+  delete: R.public()
 }))
 
 const docsDef = BaseCollection.define("docs", {
   title: Field.text(),
-  attachment: Field.file({ required: false }),
+  attachment: Field.file({ required: false })
 })
 const docsRules = defineRule(docsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
-  delete: R.public(),
+  delete: R.public()
 }))
 
 const [Users, Docs] = applyRulesToCollections([usersDef, docsDef], [usersRules, docsRules])
@@ -54,31 +54,39 @@ const [Users, Docs] = applyRulesToCollections([usersDef, docsDef], [usersRules, 
 const JWT_SECRET = "test-file-token-secret"
 const ALL_COLLECTIONS = [Users, Docs]
 
-const AppConfigTest = Layer.succeed(AppConfig, AppConfig.of({
-  appName: "test",
-  port: 8080,
-  applicationUrl: "http://localhost:8080",
-  jwtSecret: Redacted.make(JWT_SECRET),
-  useS3: false,
-  s3Config: Option.none(),
-  logRetentionDays: 30,
-}))
+const AppConfigTest = Layer.succeed(
+  AppConfig,
+  AppConfig.of({
+    appName: "test",
+    port: 8080,
+    applicationUrl: "http://localhost:8080",
+    jwtSecret: Redacted.make(JWT_SECRET),
+    useS3: false,
+    s3Config: Option.none(),
+    logRetentionDays: 30
+  })
+)
 
 // ---------------------------------------------------------------------------
 // Test layer
 // ---------------------------------------------------------------------------
 
-const FileStorageTest = Layer.succeed(FileStorage, FileStorage.of({
-  upload: (key) => Effect.succeed(key),
-  delete: () => Effect.void,
-  url: (key) => `/files/${key}`,
-  read: (key) => Effect.fail(new FileStorageNotFound({ key })),
-  exists: () => Effect.succeed(false),
-  list: () => Effect.succeed([])
-}))
+const FileStorageTest = Layer.succeed(
+  FileStorage,
+  FileStorage.of({
+    upload: (key) => Effect.succeed(key),
+    delete: () => Effect.void,
+    url: (key) => `/files/${key}`,
+    read: (key) => Effect.fail(new FileStorageNotFound({ key })),
+    exists: () => Effect.succeed(false),
+    list: () => Effect.succeed([])
+  })
+)
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
+const repoWithSql = RepositoryLive.pipe(
+  Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect)))
+)
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 const collectionServiceWithDeps = makeCollectionServiceLayer(ALL_COLLECTIONS).pipe(
@@ -144,7 +152,10 @@ function seedUser(email: string, plain: string): Effect.Effect<string, never, Re
   })
 }
 
-function login(email: string, password: string): Effect.Effect<string, HttpClientError.HttpClientError, HttpClient.HttpClient> {
+function login(
+  email: string,
+  password: string
+): Effect.Effect<string, HttpClientError.HttpClientError, HttpClient.HttpClient> {
   return Effect.gen(function* () {
     const res = yield* HttpClient.execute(
       HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
@@ -152,7 +163,9 @@ function login(email: string, password: string): Effect.Effect<string, HttpClien
       )
     )
     const body = yield* res.json
-    const { token } = yield* Schema.decodeUnknownEffect(Schema.Struct({ token: Schema.String }))(body).pipe(Effect.orDie)
+    const { token } = yield* Schema.decodeUnknownEffect(Schema.Struct({ token: Schema.String }))(body).pipe(
+      Effect.orDie
+    )
     return token
   })
 }
@@ -165,11 +178,12 @@ describe("POST /api/files/token", () => {
   it.effect("returns 401 when no auth token is provided", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+        HttpServer.serveEffect()
+      )
       const res = yield* HttpClient.execute(
-        HttpClientRequest.post("/api/files/token").pipe(
-          HttpClientRequest.bodyJsonUnsafe({ collection: "docs" })
-        )
+        HttpClientRequest.post("/api/files/token").pipe(HttpClientRequest.bodyJsonUnsafe({ collection: "docs" }))
       )
       assert.strictEqual(res.status, 401)
     }).pipe(Effect.provide(testLayer))
@@ -178,7 +192,10 @@ describe("POST /api/files/token", () => {
   it.effect("returns 401 when Bearer token is invalid", () =>
     Effect.gen(function* () {
       yield* setupTables
-      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+        HttpServer.serveEffect()
+      )
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/files/token").pipe(
           HttpClientRequest.setHeader("Authorization", "Bearer not-a-valid-jwt"),
@@ -193,7 +210,10 @@ describe("POST /api/files/token", () => {
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("alice@example.com", "pass123")
-      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+        HttpServer.serveEffect()
+      )
       const token = yield* login("alice@example.com", "pass123")
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/files/token").pipe(
@@ -209,7 +229,10 @@ describe("POST /api/files/token", () => {
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("bob@example.com", "pass456")
-      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+        HttpServer.serveEffect()
+      )
       const token = yield* login("bob@example.com", "pass456")
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/files/token").pipe(
@@ -225,7 +248,10 @@ describe("POST /api/files/token", () => {
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("carol@example.com", "pass789")
-      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+        HttpServer.serveEffect()
+      )
       const token = yield* login("carol@example.com", "pass789")
       const res = yield* HttpClient.execute(
         HttpClientRequest.post("/api/files/token").pipe(
@@ -236,7 +262,7 @@ describe("POST /api/files/token", () => {
       assert.strictEqual(res.status, 200)
       const body = yield* res.json
       const parsed = yield* Schema.decodeUnknownEffect(
-        Schema.Struct({ token: Schema.String, expiresAt: Schema.Number })
+        Schema.Struct({ token: Schema.String, expiresAt: Schema.Finite })
       )(body).pipe(Effect.orDie)
       assert.ok(parsed.token.length > 0)
       assert.ok(parsed.expiresAt > Date.now())
@@ -247,7 +273,10 @@ describe("POST /api/files/token", () => {
     Effect.gen(function* () {
       yield* setupTables
       yield* seedUser("cookiefile@example.com", "pass101")
-      yield* Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))), HttpServer.serveEffect())
+      yield* Effect.flatMap(
+        HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(ALL_COLLECTIONS))),
+        HttpServer.serveEffect()
+      )
       const loginRes = yield* HttpClient.execute(
         HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
           HttpClientRequest.bodyJsonUnsafe({ email: "cookiefile@example.com", password: "pass101" })

@@ -1,5 +1,20 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import { Cause, Clock, Context, Deferred, Effect, Equal, Exit, Fiber, Layer, Option, Queue, Ref, Result, Semaphore } from "effect"
+import {
+  Cause,
+  Clock,
+  Context,
+  Deferred,
+  Effect,
+  Equal,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Result,
+  Semaphore
+} from "effect"
 import { SqlClient } from "effect/sql"
 import type { SqlError } from "effect/sql"
 import { isSqlError } from "effect/sql/SqlError"
@@ -104,9 +119,7 @@ function resolveInteger(field: string, value: number | undefined, fallback: numb
 function resolveWindowMs(value: number | undefined, fallback: number) {
   if (value === undefined) return fallback
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(
-      `MiraBatchOperationConfig.windowMs must be a finite number >= 0 (received ${String(value)})`
-    )
+    throw new Error(`MiraBatchOperationConfig.windowMs must be a finite number >= 0 (received ${String(value)})`)
   }
   return value
 }
@@ -151,27 +164,18 @@ function resolveOperationSettings(
  * Kept as a public helper for tests; the application resolver is
  * {@link resolveBatchMutationConfig}.
  */
-export function resolveBatchOperationConfig(
-  config?: MiraBatchOperationConfig
-): ResolvedBatchOperationConfig | null {
+export function resolveBatchOperationConfig(config?: MiraBatchOperationConfig): ResolvedBatchOperationConfig | null {
   if (config?.enabled !== true) return null
   resolveWindowMs(config.windowMs, DEFAULT_WINDOW_MS)
   resolveInteger("maxBatchSize", config.maxBatchSize, DEFAULT_MAX_BATCH_SIZE, 1)
   resolveInteger("maxQueueSize", config.maxQueueSize, DEFAULT_MAX_QUEUE_SIZE, 1)
   resolveInteger("maxQueueBytes", config.maxQueueBytes, DEFAULT_MAX_QUEUE_BYTES, 1)
   return {
-    submitTimeoutMs: resolveInteger(
-      "submitTimeoutMs",
-      config.submitTimeoutMs,
-      DEFAULT_SUBMIT_TIMEOUT_MS,
-      1
-    )
+    submitTimeoutMs: resolveInteger("submitTimeoutMs", config.submitTimeoutMs, DEFAULT_SUBMIT_TIMEOUT_MS, 1)
   }
 }
 
-export function resolveBatchMutationConfig(
-  config?: MiraBatchMutationConfig
-): ResolvedBatchMutationConfig {
+export function resolveBatchMutationConfig(config?: MiraBatchMutationConfig): ResolvedBatchMutationConfig {
   if (config === undefined) return { queue: null, create: null, update: null, delete: null }
   const createSettings = resolveOperationSettings("create", config)
   const updateSettings = resolveOperationSettings("update", config)
@@ -519,10 +523,7 @@ export function makeBatchMutationStatsLayer(): Layer.Layer<BatchMutationStats> {
               applied: current.applied + flush.applied,
               maxBatchSize: Math.max(current.maxBatchSize, flush.size),
               lastBatchSizes: [...current.lastBatchSizes, flush.size].slice(-LAST_BATCH_SIZES),
-              lastFlushDurationsMs: [
-                ...current.lastFlushDurationsMs,
-                flush.durationMs
-              ].slice(-LAST_BATCH_SIZES),
+              lastFlushDurationsMs: [...current.lastFlushDurationsMs, flush.durationMs].slice(-LAST_BATCH_SIZES),
               consecutiveDefects: 0
             }
             for (const entry of flush.operations) {
@@ -587,7 +588,7 @@ export const MutationBatcherDisabledLive: Layer.Layer<MutationBatcher> = Layer.e
 const runInline = (entry: MutationBatchEntry): Effect.Effect<RepoRecord, CollectionError> =>
   Effect.gen(function* () {
     const result = yield* entry.execute
-    yield* result.afterCommit.pipe(Effect.catchCause(() => Effect.void))
+    yield* result.afterCommit.pipe(Effect.ignoreCause)
     yield* Effect.serviceOption(BatchMutationStats).pipe(
       Effect.flatMap(
         Option.match({
@@ -681,9 +682,7 @@ export const probeFailureOf = <E>(cause: Cause.Cause<E>): unknown => {
  *
  * @internal
  */
-export const classifiedFatalProbeResult = (
-  classification: "fatal" | "classifier-failed"
-): TransactionProbeResult => ({
+export const classifiedFatalProbeResult = (classification: "fatal" | "classifier-failed"): TransactionProbeResult => ({
   alive: false,
   verdict: classification === "fatal" ? "classified-fatal" : "classifier-failed"
 })
@@ -722,13 +721,8 @@ export const classifyTransactionFailure = (
         try: () => strategy.isTransactionFatal(failure),
         catch: () => "classifier-failed" as const
       }).pipe(
-        Effect.map(
-          (fatal): TransactionFailureClassification =>
-            fatal ? { _tag: "fatal" } : { _tag: "statement" }
-        ),
-        Effect.orElseSucceed(
-          (): TransactionFailureClassification => ({ _tag: "classifier-failed" })
-        )
+        Effect.map((fatal): TransactionFailureClassification => (fatal ? { _tag: "fatal" } : { _tag: "statement" })),
+        Effect.orElseSucceed((): TransactionFailureClassification => ({ _tag: "classifier-failed" }))
       )
 
 /**
@@ -807,9 +801,7 @@ interface ProbeObservation {
  * trade latency for larger batches.
  */
 const waitForWindow = (windowMs: number, flushSignal: Queue.Dequeue<void>): Effect.Effect<void> =>
-  windowMs === 0
-    ? Effect.yieldNow
-    : Effect.race(Effect.sleep(windowMs), Queue.take(flushSignal)).pipe(Effect.asVoid)
+  windowMs === 0 ? Effect.yieldNow : Effect.race(Effect.sleep(windowMs), Queue.take(flushSignal)).pipe(Effect.asVoid)
 
 /**
  * Create the real batching layer.
@@ -851,13 +843,9 @@ export function makeMutationBatcherLayer(
               })
             )
           )
-        }).pipe(Effect.catchCause(() => Effect.void))
+        }).pipe(Effect.ignoreCause)
       )
-      yield* Effect.forEach(
-        [0, 1, 2, 3],
-        () => Effect.forkScoped(cleanupWorker),
-        { concurrency: 4 }
-      )
+      yield* Effect.forEach([0, 1, 2, 3], () => Effect.forkScoped(cleanupWorker), { concurrency: 4 })
       const closed = yield* Ref.make(false)
       const capacity = yield* Ref.make<{ readonly count: number; readonly bytes: number }>({
         count: 0,
@@ -868,9 +856,7 @@ export function makeMutationBatcherLayer(
       // classification from `runBatchBody` to the loop's degradation decision.
       // The loop must not re-run the predicate: a throwing predicate would
       // otherwise be swallowed as an exemption.
-      const lastClassification = yield* Ref.make<
-        Option.Option<TransactionFailureClassification>
-      >(Option.none())
+      const lastClassification = yield* Ref.make<Option.Option<TransactionFailureClassification>>(Option.none())
 
       // Serializes admission against shutdown/degradation: an entry can never
       // be admitted while the finalizer is draining, so every admitted entry
@@ -894,15 +880,8 @@ export function makeMutationBatcherLayer(
       const ignoreStats = (stage: string) => (cause: Cause.Cause<unknown>) =>
         Effect.logWarning("mutation-batch.stats_failed", { stage, cause: Cause.pretty(cause) })
 
-      const failEntries = (
-        entries: ReadonlyArray<QueuedEntry>,
-        makeError: (entry: QueuedEntry) => CollectionError
-      ) =>
-        Effect.forEach(
-          entries,
-          (entry) => Deferred.fail(entry.deferred, makeError(entry)),
-          { concurrency: 1 }
-        )
+      const failEntries = (entries: ReadonlyArray<QueuedEntry>, makeError: (entry: QueuedEntry) => CollectionError) =>
+        Effect.forEach(entries, (entry) => Deferred.fail(entry.deferred, makeError(entry)), { concurrency: 1 })
 
       const drainQueue: Effect.Effect<ReadonlyArray<QueuedEntry>> = Effect.gen(function* () {
         const size = yield* Queue.size(queue)
@@ -913,9 +892,7 @@ export function makeMutationBatcherLayer(
       })
 
       /** Fail everything still queued, releasing its budget. */
-      const failQueue = (
-        makeError: (pending: number, entry: QueuedEntry) => CollectionError
-      ) =>
+      const failQueue = (makeError: (pending: number, entry: QueuedEntry) => CollectionError) =>
         Effect.gen(function* () {
           const drained = yield* drainQueue
           yield* failEntries(drained, (entry) => makeError(drained.length, entry))
@@ -927,15 +904,8 @@ export function makeMutationBatcherLayer(
        * no-op for entries already completed, so this is safe to run after the
        * per-entry settlement and on interruption.
        */
-      const failRemaining = (
-        entries: ReadonlyArray<QueuedEntry>,
-        makeError: (entry: QueuedEntry) => CollectionError
-      ) =>
-        Effect.forEach(
-          entries,
-          (entry) => Deferred.fail(entry.deferred, makeError(entry)),
-          { concurrency: 1 }
-        )
+      const failRemaining = (entries: ReadonlyArray<QueuedEntry>, makeError: (entry: QueuedEntry) => CollectionError) =>
+        Effect.forEach(entries, (entry) => Deferred.fail(entry.deferred, makeError(entry)), { concurrency: 1 })
 
       const settle = (
         entries: ReadonlyArray<QueuedEntry>,
@@ -1045,12 +1015,10 @@ export function makeMutationBatcherLayer(
               cause: Option.none()
             }
             const execute = entry.execute.pipe(
-              Effect.onExit((exit) =>
-                Exit.isFailure(exit)
-                  ? Effect.sync(() => {
-                      observed.cause = Option.some(exit.cause)
-                    })
-                  : Effect.void
+              Effect.onError((cause) =>
+                Effect.sync(() => {
+                  observed.cause = Option.some(cause)
+                })
               ),
               withSpanWhenEnabled(
                 "collection.mutateInBatch",
@@ -1089,10 +1057,7 @@ export function makeMutationBatcherLayer(
             // would abort either way, but the classifier makes the probe
             // contract itself sound and keeps the real 1213 as the abort cause
             // on the single-entry path where no savepoint exists.
-            const classification = yield* classifyTransactionFailure(
-              transactionProbe,
-              probeFailureOf(originalCause)
-            )
+            const classification = yield* classifyTransactionFailure(transactionProbe, probeFailureOf(originalCause))
             if (classification._tag !== "statement") {
               yield* Ref.set(classificationRecord, Option.some(classification))
               yield* Ref.set(
@@ -1152,9 +1117,7 @@ export function makeMutationBatcherLayer(
         // hands over the entry but before `inFlight` owns it, or shutdown
         // cannot fail it.
         const first = yield* Effect.uninterruptibleMask((restore) =>
-          restore(Queue.take(queue)).pipe(
-            Effect.flatMap((entry) => Ref.set(inFlight, [entry]).pipe(Effect.as(entry)))
-          )
+          restore(Queue.take(queue)).pipe(Effect.tap((entry) => Ref.set(inFlight, [entry])))
         )
         const taken: Array<QueuedEntry> = [first]
 
@@ -1183,11 +1146,7 @@ export function makeMutationBatcherLayer(
         }
         const startedAt = yield* Clock.currentTimeMillis
 
-        yield* sql
-          .withTransaction(
-            runBatchBody(taken, outcomes, aborted, probeRecord, lastClassification)
-          )
-          .pipe(
+        yield* sql.withTransaction(runBatchBody(taken, outcomes, aborted, probeRecord, lastClassification)).pipe(
           // Annotated here, between the driver's transaction and the batch
           // span wrapper, so the probe outcome lands on the current
           // `collection.mutationBatch` span: inside the body the current span
@@ -1200,10 +1159,7 @@ export function makeMutationBatcherLayer(
               if (Option.isNone(probe)) return
               yield* annotateCurrentSpanWhenEnabled((span) => {
                 const result = probe.value.result
-                span.attribute(
-                  "batch.probeStrategy",
-                  probeStrategyName(probe.value.strategy)
-                )
+                span.attribute("batch.probeStrategy", probeStrategyName(probe.value.strategy))
                 span.attribute("batch.probeVerdict", result.verdict)
                 if (!result.alive && result.probeFailureTag !== undefined) {
                   span.attribute("batch.probeFailureTag", result.probeFailureTag)
@@ -1237,24 +1193,22 @@ export function makeMutationBatcherLayer(
         // Safety net for the window/drain phase: interruption before the
         // transaction opens (or a defect before settlement) must not leave a
         // deferred unresolved.
-        Effect.onExit((exit) =>
-          Exit.isSuccess(exit)
-            ? Effect.void
-            : Effect.uninterruptible(
-                Effect.gen(function* () {
-                  const entries = yield* Ref.get(inFlight)
-                  const isClosed = yield* Ref.get(closed)
-                  yield* failRemaining(entries, (entry) =>
-                    isClosed
-                      ? new BatchMutationClosedError({
-                          pending: entries.length,
-                          operation: entry.operation
-                        })
-                      : collectionErrorOf(exit.cause, entries.length, entry.operation)
-                  )
-                  yield* Ref.set(inFlight, [])
-                })
+        Effect.onError((cause) =>
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              const entries = yield* Ref.get(inFlight)
+              const isClosed = yield* Ref.get(closed)
+              yield* failRemaining(entries, (entry) =>
+                isClosed
+                  ? new BatchMutationClosedError({
+                      pending: entries.length,
+                      operation: entry.operation
+                    })
+                  : collectionErrorOf(cause, entries.length, entry.operation)
               )
+              yield* Ref.set(inFlight, [])
+            })
+          )
         )
       )
 
@@ -1263,8 +1217,7 @@ export function makeMutationBatcherLayer(
         Effect.gen(function* () {
           yield* close
           const pending = yield* failQueue(
-            (count, entry) =>
-              new BatchMutationClosedError({ pending: count, operation: entry.operation })
+            (count, entry) => new BatchMutationClosedError({ pending: count, operation: entry.operation })
           )
           yield* Effect.logError("mutation-batch.degraded", {
             consecutiveDefects: defects,
@@ -1275,13 +1228,13 @@ export function makeMutationBatcherLayer(
       const degraded = (cause: Cause.Cause<unknown>) =>
         Effect.gen(function* () {
           yield* Effect.logError("mutation-batch.flush_defect", { cause: Cause.pretty(cause) })
-          yield* stats.recordDefect.pipe(Effect.catchCause(() => Effect.void))
+          yield* stats.recordDefect.pipe(Effect.ignoreCause)
           const snapshot = yield* stats.snapshot
           if (snapshot.consecutiveDefects < 3) return
           yield* lifecycle.withPermit(closeAndFailQueue(snapshot.consecutiveDefects))
           // End the flusher instead of hot-looping for the life of the
           // process. New submissions already fail fast with Closed.
-          yield* Effect.interrupt
+          return yield* Effect.interrupt
         }).pipe(
           // A failure while degrading must still close the batcher and end the
           // loop; otherwise every later create waits for `submitTimeoutMs`.
@@ -1289,15 +1242,13 @@ export function makeMutationBatcherLayer(
             Effect.gen(function* () {
               yield* Effect.logError("mutation-batch.degraded_failed", {
                 cause: Cause.pretty(failure)
-              }).pipe(Effect.catchCause(() => Effect.void))
+              }).pipe(Effect.ignoreCause)
               yield* lifecycle
                 .withPermit(
-                  close.pipe(
-                    Effect.andThen(Queue.shutdown(queue).pipe(Effect.catchCause(() => Effect.void)))
-                  )
+                  close.pipe(Effect.andThen(Queue.shutdown(queue).pipe(Effect.catchCause(() => Effect.void))))
                 )
                 .pipe(Effect.catchCause(() => Effect.void))
-              yield* Effect.interrupt
+              return yield* Effect.interrupt
             })
           )
         )
@@ -1311,10 +1262,7 @@ export function makeMutationBatcherLayer(
               // exemption. A broken predicate on a constraint error must still
               // count as a defect, not be swallowed as a client conflict.
               const classification = yield* Ref.get(lastClassification)
-              if (
-                Option.isSome(classification) &&
-                classification.value._tag === "classifier-failed"
-              ) {
+              if (Option.isSome(classification) && classification.value._tag === "classifier-failed") {
                 return yield* degraded(cause)
               }
               // A constraint abort at COMMIT was already settled as a 409 by
@@ -1324,10 +1272,7 @@ export function makeMutationBatcherLayer(
               // A classified transaction-fatal abort is an engine conflict,
               // not a batcher defect. Three deadlocks in a row must not close
               // the batcher for the life of the process.
-              if (
-                Option.isSome(classification) &&
-                classification.value._tag === "fatal"
-              ) {
+              if (Option.isSome(classification) && classification.value._tag === "fatal") {
                 yield* Effect.logWarning("mutation-batch.transaction_fatal", {
                   cause: Cause.pretty(cause)
                 })
@@ -1355,8 +1300,7 @@ export function makeMutationBatcherLayer(
               yield* Fiber.interrupt(flusher)
               // 3. Fail whatever is still waiting (queue + in-flight).
               const pending = yield* failQueue(
-                (count, entry) =>
-                  new BatchMutationClosedError({ pending: count, operation: entry.operation })
+                (count, entry) => new BatchMutationClosedError({ pending: count, operation: entry.operation })
               )
               const remaining = yield* Ref.get(inFlight)
               yield* failRemaining(
@@ -1384,23 +1328,17 @@ export function makeMutationBatcherLayer(
           // never acquire it, so fail fast instead of deadlocking.
           const context = yield* Effect.context()
           if (Option.isSome(Context.getOption(context, sql.transactionService))) {
-            return yield* Effect.fail(
-              new BatchMutationNestedTransactionError({ operation: entry.operation })
-            )
+            return yield* new BatchMutationNestedTransactionError({ operation: entry.operation })
           }
 
           // A single entry larger than the whole byte budget can never be
           // admitted: fail fast instead of clamping it into the queue.
           if (entry.estimatedBytes > queueConfig.maxQueueBytes) {
-            yield* stats
-              .recordRejected(entry.operation)
-              .pipe(Effect.catchCause(ignoreStats("rejected")))
-            return yield* Effect.fail(
-              new BatchMutationQueueFullError({
-                limit: queueConfig.maxQueueBytes,
-                operation: entry.operation
-              })
-            )
+            yield* stats.recordRejected(entry.operation).pipe(Effect.catchCause(ignoreStats("rejected")))
+            return yield* new BatchMutationQueueFullError({
+              limit: queueConfig.maxQueueBytes,
+              operation: entry.operation
+            })
           }
 
           const bytes = Math.max(0, entry.estimatedBytes)
@@ -1427,10 +1365,7 @@ export function makeMutationBatcherLayer(
                 if (current.bytes + bytes > queueConfig.maxQueueBytes) {
                   return ["bytes" as const, current] as const
                 }
-                return [
-                  "ok" as const,
-                  { count: current.count + 1, bytes: current.bytes + bytes }
-                ] as const
+                return ["ok" as const, { count: current.count + 1, bytes: current.bytes + bytes }] as const
               })
               if (decision !== "ok") return decision
               const offered = yield* Queue.offer(queue, queued)
@@ -1438,32 +1373,23 @@ export function makeMutationBatcherLayer(
                 yield* release([queued])
                 return "closed" as const
               }
-              yield* stats
-                .recordAdmitted(entry.operation)
-                .pipe(Effect.catchCause(ignoreStats("admitted")))
+              yield* stats.recordAdmitted(entry.operation).pipe(Effect.catchCause(ignoreStats("admitted")))
               return "admitted" as const
             })
           )
 
           if (admission === "closed") {
-            return yield* Effect.fail(
-              new BatchMutationClosedError({
-                pending: yield* pendingCount,
-                operation: entry.operation
-              })
-            )
+            return yield* new BatchMutationClosedError({
+              pending: yield* pendingCount,
+              operation: entry.operation
+            })
           }
           if (admission !== "admitted") {
-            yield* stats
-              .recordRejected(entry.operation)
-              .pipe(Effect.catchCause(ignoreStats("rejected")))
-            return yield* Effect.fail(
-              new BatchMutationQueueFullError({
-                limit:
-                  admission === "bytes" ? queueConfig.maxQueueBytes : queueConfig.maxQueueSize,
-                operation: entry.operation
-              })
-            )
+            yield* stats.recordRejected(entry.operation).pipe(Effect.catchCause(ignoreStats("rejected")))
+            return yield* new BatchMutationQueueFullError({
+              limit: admission === "bytes" ? queueConfig.maxQueueBytes : queueConfig.maxQueueSize,
+              operation: entry.operation
+            })
           }
 
           return yield* Deferred.await(queued.deferred).pipe(
@@ -1475,9 +1401,7 @@ export function makeMutationBatcherLayer(
                     queued.cancelled.cancelled = true
                   }).pipe(
                     Effect.andThen(
-                      stats
-                        .recordTimeout(entry.operation)
-                        .pipe(Effect.catchCause(ignoreStats("timeout")))
+                      stats.recordTimeout(entry.operation).pipe(Effect.catchCause(ignoreStats("timeout")))
                     ),
                     Effect.andThen(
                       Effect.fail(
@@ -1500,8 +1424,7 @@ export function makeMutationBatcherLayer(
         })
 
       return MutationBatcher.of({
-        submit: (entry) =>
-          config[entry.operation] === null ? runInline(entry) : submitQueued(entry),
+        submit: (entry) => (config[entry.operation] === null ? runInline(entry) : submitQueued(entry)),
         submitInline: (entry) => runInline(entry)
       })
     })

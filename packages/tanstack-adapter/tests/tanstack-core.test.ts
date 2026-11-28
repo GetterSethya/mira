@@ -1,26 +1,44 @@
 import type { ExecuteFn } from "@gettersethya/mira-client"
-import { BaseCollection, Field, makeClientHandler, makeCollectionClient, makeMutationHandler } from "@gettersethya/mira-client"
+import {
+  BaseCollection,
+  Field,
+  makeClientHandler,
+  makeCollectionClient,
+  makeMutationHandler
+} from "@gettersethya/mira-client"
 import { Effect, MutableRef } from "effect"
 import type { HttpClientRequest } from "effect/http"
 import { describe, expect, it } from "vitest"
 
-import type { QueryKey } from "../src/_core.js"
-import { ActionKeys, collectionAdapter, createCollectionAdapter, enrichMutation, enrichQuery } from "../src/_core.js"
+import type { QueryKey } from "@gettersethya/mira-tanstack-adapter"
+import {
+  ActionKeys,
+  collectionAdapter,
+  createCollectionAdapter,
+  enrichMutation,
+  enrichQuery
+} from "@gettersethya/mira-tanstack-adapter"
 
 const Posts = BaseCollection.define("posts", { title: Field.text() })
 
 function makeTestClient() {
-  const execute: ExecuteFn = <T>(req: HttpClientRequest.HttpClientRequest) =>
-    Effect.gen(function* () {
+  // ExecuteFn is generic over the response body, while this handler returns a
+  // different literal fixture per request. One assertion at the boundary keeps
+  // the fixtures concretely typed instead of casting every return value.
+  // oxlint-disable-next-line typescript/consistent-type-assertions
+  const execute = ((req: HttpClientRequest.HttpClientRequest) =>
+    Effect.sync(() => {
       if (req.url.endsWith("/bulk")) {
-        if (req.method === "DELETE") return { ids: ["a", "b"] } as T
-        return { records: [{ id: "1", created: "", updated: "", title: "bulk" }] } as T
+        if (req.method === "DELETE") return { ids: ["a", "b"] }
+        return { records: [{ id: "1", created: "", updated: "", title: "bulk" }] }
       }
-      if (req.method === "DELETE") return undefined as T
-      if (req.url.includes("auth-with-password")) return { token: "tok", record: { id: "1", created: "", updated: "", title: "" } } as T
-      if (req.method === "GET") return { items: [], nextCursor: null } as T
-      return { id: "1", created: "", updated: "", title: "test" } as T
-    })
+      if (req.method === "DELETE") return undefined
+      if (req.url.includes("auth-with-password")) {
+        return { token: "tok", record: { id: "1", created: "", updated: "", title: "" } }
+      }
+      if (req.method === "GET") return { items: [], nextCursor: null }
+      return { id: "1", created: "", updated: "", title: "test" }
+    })) as ExecuteFn
 
   return makeCollectionClient({
     collectionName: "posts",
@@ -31,7 +49,7 @@ function makeTestClient() {
     authTokenRef: null,
     loggedInRef: null,
     fileTokenCacheRef: MutableRef.make(new Map()),
-    isAuth: false,
+    isAuth: false
   })
 }
 
@@ -101,10 +119,7 @@ describe("createCollectionAdapter / collectionAdapter", () => {
   })
 
   it("getFirstOrNone — query key shape includes options", () => {
-    const handler = adapted.getFirstOrNone(
-      (f) => f.field("title").eq("hi"),
-      { sort: "title" }
-    )
+    const handler = adapted.getFirstOrNone((f) => f.field("title").eq("hi"), { sort: "title" })
     expect(handler.queryKey[1]).toBe(ActionKeys.GetFirstOrNone)
     expect(handler.queryKey[2]).toEqual({ sort: "title" })
   })
@@ -130,9 +145,7 @@ describe("createCollectionAdapter / collectionAdapter", () => {
   })
 
   it("updateMany - mutationOptions.mutationFn delegates to handler.raw", async () => {
-    const result = await adapted
-      .updateMany()
-      .mutationOptions.mutationFn([{ id: "x", data: { title: "new" } }])
+    const result = await adapted.updateMany().mutationOptions.mutationFn([{ id: "x", data: { title: "new" } }])
     expect(result).toEqual(expect.arrayContaining([expect.objectContaining({ id: "1" })]))
   })
 
@@ -148,14 +161,22 @@ describe("createCollectionAdapter / collectionAdapter", () => {
 
   it("invalidateAll calls invalidateQueries with collection key", () => {
     const calls: Array<{ queryKey: QueryKey }> = []
-    const mockQC = { invalidateQueries: (opts: { queryKey: QueryKey }) => { calls.push(opts) } }
+    const mockQC = {
+      invalidateQueries: (opts: { queryKey: QueryKey }) => {
+        calls.push(opts)
+      }
+    }
     adapted.invalidateAll(mockQC)
     expect(calls[0]).toEqual({ queryKey: ["posts"] })
   })
 
   it("invalidateOne calls invalidateQueries with [name, GetOne, id]", () => {
     const calls: Array<{ queryKey: QueryKey }> = []
-    const mockQC = { invalidateQueries: (opts: { queryKey: QueryKey }) => { calls.push(opts) } }
+    const mockQC = {
+      invalidateQueries: (opts: { queryKey: QueryKey }) => {
+        calls.push(opts)
+      }
+    }
     adapted.invalidateOne(mockQC, "rec-1")
     expect(calls[0]).toEqual({ queryKey: ["posts", ActionKeys.GetOne, "rec-1"] })
   })

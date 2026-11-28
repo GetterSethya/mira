@@ -7,11 +7,7 @@ import { expect } from "vitest"
 import { Dialect } from "@/dialect/dialect.js"
 import { postgresDialect } from "@/dialect/dialect-postgres.js"
 import { makeSqlTelemetryStoreLayer } from "@/telemetry/sql-store.js"
-import {
-  type TelemetryLogEntry,
-  type TelemetrySpanEntry,
-  TelemetryStore
-} from "@/telemetry/store.js"
+import { type TelemetryLogEntry, type TelemetrySpanEntry, TelemetryStore } from "@/telemetry/store.js"
 
 const postgresUrl = process.env["MIRA_TEST_POSTGRES_URL"]
 
@@ -23,11 +19,7 @@ const makeLayer = (url: string) =>
   )
 
 // Local copy of the SQLite test fixture; test helpers are not exported.
-const log = (
-  id: string,
-  message = id,
-  created = new Date().toISOString()
-): TelemetryLogEntry => ({
+const log = (id: string, message = id, created = new Date().toISOString()): TelemetryLogEntry => ({
   id,
   level: "INFO",
   message,
@@ -37,11 +29,7 @@ const log = (
   spanId: null
 })
 
-const span = (
-  id: string,
-  traceId: string,
-  created = new Date().toISOString()
-): TelemetrySpanEntry => ({
+const span = (id: string, traceId: string, created = new Date().toISOString()): TelemetrySpanEntry => ({
   id,
   name: id,
   traceId,
@@ -153,7 +141,7 @@ if (postgresUrl === undefined) {
           sql.withTransaction(
             Effect.gen(function* () {
               yield* store.appendLogs([log("rolled-back")])
-              return yield* Effect.fail(new RollbackError({}))
+              return yield* new RollbackError({})
             })
           )
         )
@@ -190,11 +178,7 @@ if (postgresUrl === undefined) {
           filter: { op: "like", field: "message", value: "%a%" },
           traceId: null
         })
-        expect(ascii.items.map((row) => row.id).sort(), `collation: ${collation}`).toEqual([
-          "a",
-          "b",
-          "c"
-        ])
+        expect(ascii.items.map((row) => row.id).sort(), `collation: ${collation}`).toEqual(["a", "b", "c"])
         expect(ascii.total, `collation: ${collation}`).toBe(3)
 
         yield* store.appendLogs([log("pct", "100%"), log("x", "100x")])
@@ -205,7 +189,10 @@ if (postgresUrl === undefined) {
           filter: { op: "like", field: "message", value: "100\\%" },
           traceId: null
         })
-        expect(escaped.items.map((row) => row.id), `collation: ${collation}`).toEqual(["pct"])
+        expect(
+          escaped.items.map((row) => row.id),
+          `collation: ${collation}`
+        ).toEqual(["pct"])
 
         const wildcard = yield* read.listLogs({
           limit: 10,
@@ -213,10 +200,7 @@ if (postgresUrl === undefined) {
           filter: { op: "like", field: "message", value: "100%" },
           traceId: null
         })
-        expect(wildcard.items.map((row) => row.id).sort(), `collation: ${collation}`).toEqual([
-          "pct",
-          "x"
-        ])
+        expect(wildcard.items.map((row) => row.id).sort(), `collation: ${collation}`).toEqual(["pct", "x"])
       }).pipe(Effect.provide(makeLayer(url)))
     )
 
@@ -229,10 +213,7 @@ if (postgresUrl === undefined) {
 
         yield* createTelemetryTables(sql)
         yield* store.appendLogs([log("old", "old", old), log("recent", "recent", recent)])
-        yield* store.appendSpans([
-          span("old-span", "trace-old", old),
-          span("recent-span", "trace-recent", recent)
-        ])
+        yield* store.appendSpans([span("old-span", "trace-old", old), span("recent-span", "trace-recent", recent)])
 
         const deleted = yield* store.deleteOlderThan(recent)
         expect(deleted.logs).toBe(1)
@@ -251,9 +232,7 @@ if (postgresUrl === undefined) {
         const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
 
         yield* createTelemetryTables(sql)
-        yield* sql.unsafe(
-          `ALTER TABLE "logs" ALTER COLUMN "seqId" RESTART WITH 9007199254740993`
-        )
+        yield* sql.unsafe(`ALTER TABLE "logs" ALTER COLUMN "seqId" RESTART WITH 9007199254740993`)
 
         yield* store.appendLogs([log("old", "old", old), log("recent", "recent", recent)])
 

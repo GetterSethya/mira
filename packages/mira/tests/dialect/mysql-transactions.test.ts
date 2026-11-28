@@ -14,12 +14,8 @@ describe("isMysqlTransactionFatal", () => {
   })
 
   it("walks nested cause and error fields for the reason tag", () => {
-    expect(
-      isMysqlTransactionFatal({ cause: { reason: { _tag: "DeadlockError" } } })
-    ).toBe(true)
-    expect(
-      isMysqlTransactionFatal({ error: { reason: { _tag: "DeadlockError" } } })
-    ).toBe(true)
+    expect(isMysqlTransactionFatal({ cause: { reason: { _tag: "DeadlockError" } } })).toBe(true)
+    expect(isMysqlTransactionFatal({ error: { reason: { _tag: "DeadlockError" } } })).toBe(true)
     expect(
       isMysqlTransactionFatal({
         reason: { _tag: "UnknownError" },
@@ -31,9 +27,7 @@ describe("isMysqlTransactionFatal", () => {
   it("falls back to the numeric and symbolic deadlock codes", () => {
     expect(isMysqlTransactionFatal({ errno: 1213 })).toBe(true)
     expect(isMysqlTransactionFatal({ code: "ER_LOCK_DEADLOCK" })).toBe(true)
-    expect(
-      isMysqlTransactionFatal({ reason: { cause: { errno: 1213, code: "ER_LOCK_DEADLOCK" } } })
-    ).toBe(true)
+    expect(isMysqlTransactionFatal({ reason: { cause: { errno: 1213, code: "ER_LOCK_DEADLOCK" } } })).toBe(true)
   })
 
   it("does not match statement-level errors", () => {
@@ -81,6 +75,6 @@ describe("mysqlTransactionProbe", () => {
   it("requires a classifier on the error-classified form", () => {
     // @ts-expect-error - the object form must carry isTransactionFatal
     const incomplete: TransactionProbeStrategy = { _tag: "error-classified" }
-    void incomplete
+    expect(incomplete).toEqual({ _tag: "error-classified" })
   })
 })

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
+// apps/benchmarks has no exports map or path alias, so the test resolves its
+// sibling source module through the repository-relative path.
+// oxlint-disable-next-line import/no-relative-parent-imports
 import { summarizeHeapProfile } from "../src/analyze-heapprofile.ts"
 
-test("sums selfSize and groups by call frame", () => {
+void test("sums selfSize and groups by call frame", () => {
   const summary = summarizeHeapProfile({
     head: {
       callFrame: { functionName: "root", url: "root.js", lineNumber: 1 },
@@ -28,7 +31,7 @@ test("sums selfSize and groups by call frame", () => {
   ])
 })
 
-test("empty or zero-size profiles report zero", () => {
+void test("empty or zero-size profiles report zero", () => {
   assert.deepEqual(summarizeHeapProfile({}), { totalBytes: 0, byFunction: [] })
   assert.deepEqual(summarizeHeapProfile({ head: { selfSize: 0 } }), {
     totalBytes: 0,
@@ -36,7 +39,7 @@ test("empty or zero-size profiles report zero", () => {
   })
 })
 
-test("unknown call frames use stable labels", () => {
+void test("unknown call frames use stable labels", () => {
   const summary = summarizeHeapProfile({ head: { selfSize: 8 } })
   assert.deepEqual(summary.byFunction, [{ key: "(anonymous) @ (unknown):0", bytes: 8 }])
 })

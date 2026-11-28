@@ -5,18 +5,9 @@ import { expect } from "vitest"
 import type { TranslatePlanContext, ViewShape } from "@/dialect/dialect.js"
 import { mysqlMigrationDialect } from "@/dialect/dialect-mysql-migrations.js"
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
-import type {
-  ColumnDef,
-  IndexShape,
-  MigrationStep,
-  TableShapes
-} from "@/migrator/types.js"
+import type { ColumnDef, IndexShape, MigrationStep, TableShapes } from "@/migrator/types.js"
 
-const column = (
-  name: string,
-  type: ColumnDef["type"],
-  overrides: Partial<ColumnDef> = {}
-): ColumnDef => ({
+const column = (name: string, type: ColumnDef["type"], overrides: Partial<ColumnDef> = {}): ColumnDef => ({
   name,
   type,
   nullable: false,
@@ -31,10 +22,7 @@ const seqId = column("seqId", "integer", {
 const id = column("id", "text", { unique: true, xSystem: true, maxLength: 255 })
 const title = column("title", "text")
 
-const tableShapes = (
-  columns: Array<ColumnDef>,
-  indexes: Array<IndexShape> = []
-): TableShapes => ({
+const tableShapes = (columns: Array<ColumnDef>, indexes: Array<IndexShape> = []): TableShapes => ({
   stored: null,
   desired: { columns, indexes }
 })
@@ -52,9 +40,7 @@ type CatalogColumnSpec = {
   readonly generationExpression?: string | null
 }
 
-type CatalogIndexFieldSpec =
-  | string
-  | { readonly name: string; readonly subPart?: boolean }
+type CatalogIndexFieldSpec = string | { readonly name: string; readonly subPart?: boolean }
 
 type CatalogIndexSpec = {
   readonly name: string
@@ -114,11 +100,8 @@ const makeContext = (
         column_name: columnSpec.name,
         column_type: columnSpec.type,
         is_nullable: columnSpec.nullable === true ? "YES" : "NO",
-        column_default:
-          columnSpec.defaultValue === undefined ? null : columnSpec.defaultValue,
-        extra:
-          columnSpec.extra ??
-          (columnSpec.autoIncrement === true ? "auto_increment" : ""),
+        column_default: columnSpec.defaultValue === undefined ? null : columnSpec.defaultValue,
+        extra: columnSpec.extra ?? (columnSpec.autoIncrement === true ? "auto_increment" : ""),
         character_set_name:
           columnSpec.characterSetName === undefined
             ? columnSpec.type.includes("text") || columnSpec.type.startsWith("varchar")
@@ -177,14 +160,10 @@ const makeContext = (
       return Effect.succeed(options.duplicate === true ? [{ hit: 1 }] : [])
     }
     if (statement.includes("LIMIT 2")) {
-      return Effect.succeed(
-        Array.from({ length: options.rows ?? 0 }, () => ({ hit: 1 }))
-      )
+      return Effect.succeed(Array.from({ length: options.rows ?? 0 }, () => ({ hit: 1 })))
     }
     if (statement.includes("bin_padded")) {
-      return Effect.succeed([
-        { bin_padded: 0, email_padded: 0, email_case_equal: 1 }
-      ])
+      return Effect.succeed([{ bin_padded: 0, email_padded: 0, email_case_equal: 1 }])
     }
     return Effect.succeed([])
   }
@@ -199,30 +178,18 @@ const makeContext = (
   }
 }
 
-const plan = (
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-) => mysqlMigrationDialect.translatePlan(steps, ctx)
+const plan = (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) =>
+  mysqlMigrationDialect.translatePlan(steps, ctx)
 
-const failureDetail = (
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-) =>
+const failureDetail = (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) =>
   plan(steps, ctx).pipe(
-    Effect.catchTag("UnsupportedMigrationStepError", (error) =>
-      Effect.succeed(error.detail)
-    ),
+    Effect.catchTag("UnsupportedMigrationStepError", (error) => Effect.succeed(error.detail)),
     Effect.orDie
   )
 
-const verifyDetail = (
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-) =>
+const verifyDetail = (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) =>
   mysqlMigrationDialect.verifyPlan(steps, ctx).pipe(
-    Effect.catchTag("UnsupportedMigrationStepError", (error) =>
-      Effect.succeed(error.detail)
-    ),
+    Effect.catchTag("UnsupportedMigrationStepError", (error) => Effect.succeed(error.detail)),
     Effect.orDie
   )
 
@@ -232,11 +199,7 @@ const indexNameFromSql = (statement: string) => {
   return match[1] ?? ""
 }
 
-const catalogTypeOf = (
-  type: ColumnDef["type"],
-  keyed = false,
-  maxLength = 255
-) => {
+const catalogTypeOf = (type: ColumnDef["type"], keyed = false, maxLength = 255) => {
   switch (type) {
     case "boolean":
       return "tinyint(1)"
@@ -249,10 +212,7 @@ const catalogTypeOf = (
   }
 }
 
-const createTableWithCatalogDefault = (
-  desired: ColumnDef,
-  catalogDefault: string | number | null
-) => {
+const createTableWithCatalogDefault = (desired: ColumnDef, catalogDefault: string | number | null) => {
   const { ctx } = makeContext({
     catalogTables: [
       {
@@ -260,11 +220,7 @@ const createTableWithCatalogDefault = (
         columns: [
           {
             name: desired.name,
-            type: catalogTypeOf(
-              desired.type,
-              desired.unique === true,
-              desired.maxLength ?? 255
-            ),
+            type: catalogTypeOf(desired.type, desired.unique === true, desired.maxLength ?? 255),
             nullable: desired.nullable,
             defaultValue: catalogDefault
           }
@@ -272,10 +228,7 @@ const createTableWithCatalogDefault = (
       }
     ]
   })
-  return plan(
-    [{ kind: "createTable", table: "t", columns: [desired] }],
-    ctx
-  )
+  return plan([{ kind: "createTable", table: "t", columns: [desired] }], ctx)
 }
 
 const dependentViewContext = () =>
@@ -318,14 +271,7 @@ describe("mysqlMigrationDialect createTable", () => {
     const statements = mysqlMigrationDialect.translate({
       kind: "createTable",
       table: "todos",
-      columns: [
-        seqId,
-        id,
-        title,
-        column("score", "real"),
-        column("done", "boolean"),
-        column("count", "integer")
-      ]
+      columns: [seqId, id, title, column("score", "real"), column("done", "boolean"), column("count", "integer")]
     })
 
     expect(statements).toHaveLength(1)
@@ -348,7 +294,9 @@ describe("mysqlMigrationDialect createTable", () => {
     })
 
     expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS `_collections`")
-    expect(statements[0]).toContain("`name` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL PRIMARY KEY")
+    expect(statements[0]).toContain(
+      "`name` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL PRIMARY KEY"
+    )
   })
 })
 
@@ -360,7 +308,9 @@ describe("mysqlMigrationDialect addColumn", () => {
       column: column("note", "text", { nullable: true })
     })
 
-    expect(statements).toEqual(["ALTER TABLE `t` ADD COLUMN `note` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin"])
+    expect(statements).toEqual([
+      "ALTER TABLE `t` ADD COLUMN `note` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin"
+    ])
   })
 
   it("renders a non-null column with a declared default in one statement", () => {
@@ -370,9 +320,7 @@ describe("mysqlMigrationDialect addColumn", () => {
       column: column("count", "integer", { default: 7 })
     })
 
-    expect(statements).toEqual([
-      "ALTER TABLE `t` ADD COLUMN `count` INT NOT NULL DEFAULT 7"
-    ])
+    expect(statements).toEqual(["ALTER TABLE `t` ADD COLUMN `count` INT NOT NULL DEFAULT 7"])
   })
 
   it("renders the add, backfill, and MODIFY sequence for a non-null column without a default", () => {
@@ -401,12 +349,8 @@ describe("mysqlMigrationDialect addColumn", () => {
       column: column("flag", "boolean")
     })
 
-    expect(integerStatements[1]).toBe(
-      "UPDATE `t` SET `n` = 0 WHERE `n` IS NULL"
-    )
-    expect(booleanStatements[1]).toBe(
-      "UPDATE `t` SET `flag` = FALSE WHERE `flag` IS NULL"
-    )
+    expect(integerStatements[1]).toBe("UPDATE `t` SET `n` = 0 WHERE `n` IS NULL")
+    expect(booleanStatements[1]).toBe("UPDATE `t` SET `flag` = FALSE WHERE `flag` IS NULL")
   })
 })
 
@@ -435,9 +379,7 @@ describe("mysqlMigrationDialect createIndex", () => {
       unique: false
     })
 
-    expect(statements).toEqual([
-      "CREATE INDEX `idx_todos_category` ON `todos` (`category`)"
-    ])
+    expect(statements).toEqual(["CREATE INDEX `idx_todos_category` ON `todos` (`category`)"])
   })
 
   it("renders UNIQUE for a unique index and quotes every field", () => {
@@ -477,7 +419,7 @@ describe("mysqlMigrationDialect createIndex", () => {
     })[0]
 
     const name = indexNameFromSql(first)
-    expect([...name]).toHaveLength(64)
+    expect(name).toHaveLength(64)
     expect(name.startsWith("idx_")).toBe(true)
     expect(name).toBe(indexNameFromSql(second))
     expect(name).not.toBe(indexNameFromSql(other))
@@ -493,20 +435,12 @@ describe("mysqlMigrationDialect metadata upsert", () => {
   }
 
   it("renders ? placeholders and returns params in key order", () => {
-    const statement = mysqlMigrationDialect.upsertStatement(
-      "_collections",
-      record,
-      ["name"]
-    )
+    const statement = mysqlMigrationDialect.upsertStatement("_collections", record, ["name"])
 
     expect(statement.sql).toBe(
       "INSERT INTO `_collections` (`name`, `schema`, `updated_at`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `schema` = VALUES(`schema`), `updated_at` = VALUES(`updated_at`)"
     )
-    expect(statement.params).toEqual([
-      "todos",
-      '{"x":"y"}',
-      "2026-01-01"
-    ])
+    expect(statement.params).toEqual(["todos", '{"x":"y"}', "2026-01-01"])
   })
 
   it("renders the literal form with quoted values and no params", () => {
@@ -519,9 +453,9 @@ describe("mysqlMigrationDialect metadata upsert", () => {
   })
 
   it("rejects an upsert whose every column is a conflict key", () => {
-    expect(() =>
-      mysqlMigrationDialect.upsertStatement("_t", { name: "x" }, ["name"])
-    ).toThrow(UnsupportedMigrationStepError)
+    expect(() => mysqlMigrationDialect.upsertStatement("_t", { name: "x" }, ["name"])).toThrow(
+      UnsupportedMigrationStepError
+    )
   })
 })
 
@@ -627,7 +561,8 @@ describe("mysqlMigrationDialect translatePlan", () => {
       ])
       expect(result.cleanup).toEqual([])
       expect(result.skipped).toEqual([])
-    }))
+    })
+  )
 
   it.effect("skips a done step with a note and its index in skipped", () =>
     Effect.gen(function* () {
@@ -637,7 +572,8 @@ describe("mysqlMigrationDialect translatePlan", () => {
       expect(result.statements).toEqual([])
       expect(result.skipped).toEqual([0])
       expect(result.notes).toEqual(["skip dropTable gone (already present)"])
-    }))
+    })
+  )
 
   it.effect("treats a createTable with inline keys and absent explicit indexes as done", () =>
     Effect.gen(function* () {
@@ -657,22 +593,15 @@ describe("mysqlMigrationDialect translatePlan", () => {
             ]
           }
         ],
-        shapes: new Map([
-          [
-            "todos",
-            tableShapes(desiredColumns, [{ fields: ["priority"], unique: false }])
-          ]
-        ])
+        shapes: new Map([["todos", tableShapes(desiredColumns, [{ fields: ["priority"], unique: false }])]])
       })
 
-      const result = yield* plan(
-        [{ kind: "createTable", table: "todos", columns: desiredColumns }],
-        ctx
-      )
+      const result = yield* plan([{ kind: "createTable", table: "todos", columns: desiredColumns }], ctx)
 
       expect(result.statements).toEqual([])
       expect(result.skipped).toEqual([0])
-    }))
+    })
+  )
 
   it.effect("treats a createTable with its explicit planned index as done", () =>
     Effect.gen(function* () {
@@ -697,22 +626,15 @@ describe("mysqlMigrationDialect translatePlan", () => {
             ]
           }
         ],
-        shapes: new Map([
-          [
-            "todos",
-            tableShapes(desiredColumns, [{ fields: ["priority"], unique: false }])
-          ]
-        ])
+        shapes: new Map([["todos", tableShapes(desiredColumns, [{ fields: ["priority"], unique: false }])]])
       })
 
-      const result = yield* plan(
-        [{ kind: "createTable", table: "todos", columns: desiredColumns }],
-        ctx
-      )
+      const result = yield* plan([{ kind: "createTable", table: "todos", columns: desiredColumns }], ctx)
 
       expect(result.statements).toEqual([])
       expect(result.skipped).toEqual([0])
-    }))
+    })
+  )
 
   it.effect("drifts a createTable that finds an unplanned index", () =>
     Effect.gen(function* () {
@@ -733,28 +655,19 @@ describe("mysqlMigrationDialect translatePlan", () => {
             ]
           }
         ],
-        shapes: new Map([
-          [
-            "todos",
-            tableShapes(desiredColumns, [{ fields: ["priority"], unique: false }])
-          ]
-        ])
+        shapes: new Map([["todos", tableShapes(desiredColumns, [{ fields: ["priority"], unique: false }])]])
       })
 
-      const detail = yield* failureDetail(
-        [{ kind: "createTable", table: "todos", columns: desiredColumns }],
-        ctx
-      )
+      const detail = yield* failureDetail([{ kind: "createTable", table: "todos", columns: desiredColumns }], ctx)
 
       expect(detail).toContain('unexpected index "legacy_idx"')
-    }))
+    })
+  )
 
   it.effect("compares an alterColumn against to, from, and a third shape", () =>
     Effect.gen(function* () {
       const matchingTo = makeContext({
-        catalogTables: [
-          { name: "t", columns: [{ name: "n", type: "int" }] }
-        ]
+        catalogTables: [{ name: "t", columns: [{ name: "n", type: "int" }] }]
       })
       const done = yield* plan(
         [
@@ -771,9 +684,7 @@ describe("mysqlMigrationDialect translatePlan", () => {
       expect(done.skipped).toEqual([0])
 
       const matchingFrom = makeContext({
-        catalogTables: [
-          { name: "t", columns: [{ name: "n", type: "int", nullable: true }] }
-        ]
+        catalogTables: [{ name: "t", columns: [{ name: "n", type: "int", nullable: true }] }]
       })
       const pendingFrom = yield* plan(
         [
@@ -793,9 +704,7 @@ describe("mysqlMigrationDialect translatePlan", () => {
       ])
 
       const thirdShape = makeContext({
-        catalogTables: [
-          { name: "t", columns: [{ name: "n", type: "double", nullable: true }] }
-        ]
+        catalogTables: [{ name: "t", columns: [{ name: "n", type: "double", nullable: true }] }]
       })
       const drift = yield* failureDetail(
         [
@@ -809,14 +718,13 @@ describe("mysqlMigrationDialect translatePlan", () => {
         thirdShape.ctx
       )
       expect(drift).toContain("differs from both plan shapes")
-    }))
+    })
+  )
 
   it.effect("applies an alterColumn whose only difference is the default", () =>
     Effect.gen(function* () {
       const { ctx } = makeContext({
-        catalogTables: [
-          { name: "t", columns: [{ name: "n", type: "int", defaultValue: "0" }] }
-        ]
+        catalogTables: [{ name: "t", columns: [{ name: "n", type: "int", defaultValue: "0" }] }]
       })
       const result = yield* plan(
         [
@@ -831,10 +739,9 @@ describe("mysqlMigrationDialect translatePlan", () => {
       )
 
       expect(result.skipped).toEqual([])
-      expect(result.statements).toEqual([
-        "ALTER TABLE `t` MODIFY COLUMN `n` INT NOT NULL DEFAULT 5"
-      ])
-    }))
+      expect(result.statements).toEqual(["ALTER TABLE `t` MODIFY COLUMN `n` INT NOT NULL DEFAULT 5"])
+    })
+  )
 
   it.effect("finishes a non-null addColumn from the nullable intermediate shape", () =>
     Effect.gen(function* () {
@@ -856,7 +763,8 @@ describe("mysqlMigrationDialect translatePlan", () => {
         "UPDATE `t` SET `code` = ('') WHERE `code` IS NULL",
         "ALTER TABLE `t` MODIFY COLUMN `code` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL"
       ])
-    }))
+    })
+  )
 
   it.effect("treats the final NOT NULL addColumn shape as done", () =>
     Effect.gen(function* () {
@@ -875,16 +783,15 @@ describe("mysqlMigrationDialect translatePlan", () => {
 
       expect(result.statements).toEqual([])
       expect(result.skipped).toEqual([0])
-    }))
+    })
+  )
 
   it.effect("drifts an addColumn with a different type or default", () =>
     Effect.gen(function* () {
       const wrongType = yield* failureDetail(
         [{ kind: "addColumn", table: "t", column: column("code", "text", { maxLength: 255 }) }],
         makeContext({
-          catalogTables: [
-            { name: "t", columns: [{ name: "code", type: "varchar(255)" }] }
-          ]
+          catalogTables: [{ name: "t", columns: [{ name: "code", type: "varchar(255)" }] }]
         }).ctx
       )
       expect(wrongType).toContain('column "t"."code" differs')
@@ -908,26 +815,21 @@ describe("mysqlMigrationDialect translatePlan", () => {
         }).ctx
       )
       expect(wrongDefault).toContain('column "t"."code" differs')
-    }))
+    })
+  )
 
   it.effect("rejects indexed text without a declared length", () =>
     Effect.gen(function* () {
       const { ctx } = makeContext({
-        catalogTables: [
-          { name: "t", columns: [{ name: "body", type: "longtext" }] }
-        ],
-        shapes: new Map([
-          ["t", tableShapes([column("body", "text")], [{ fields: ["body"], unique: false }])]
-        ])
+        catalogTables: [{ name: "t", columns: [{ name: "body", type: "longtext" }] }],
+        shapes: new Map([["t", tableShapes([column("body", "text")], [{ fields: ["body"], unique: false }])]])
       })
-      const detail = yield* failureDetail(
-        [{ kind: "createIndex", table: "t", fields: ["body"], unique: false }],
-        ctx
-      )
+      const detail = yield* failureDetail([{ kind: "createIndex", table: "t", fields: ["body"], unique: false }], ctx)
 
       expect(detail).toContain("has no maxLength")
       expect(detail).toContain("768")
-    }))
+    })
+  )
 
   it.effect("drifts a system table that is missing a column", () =>
     Effect.gen(function* () {
@@ -956,17 +858,15 @@ describe("mysqlMigrationDialect translatePlan", () => {
       )
 
       expect(detail).toContain("column set differs")
-    }))
+    })
+  )
 
   it.effect("rejects 65-code-point table, column, and index-field names before SQL", () =>
     Effect.gen(function* () {
       const longName = "a".repeat(65)
 
       const tableContext = makeContext()
-      const tableDetail = yield* failureDetail(
-        [{ kind: "dropTable", table: longName }],
-        tableContext.ctx
-      )
+      const tableDetail = yield* failureDetail([{ kind: "dropTable", table: longName }], tableContext.ctx)
       expect(tableDetail).toContain("65 code points")
       expect(tableContext.queries).toHaveLength(0)
 
@@ -998,7 +898,8 @@ describe("mysqlMigrationDialect translatePlan", () => {
       )
       expect(indexDetail).toContain("65 code points")
       expect(indexContext.queries).toHaveLength(0)
-    }))
+    })
+  )
 
   it.effect("rejects invalid defaults before SQL", () =>
     Effect.gen(function* () {
@@ -1029,19 +930,14 @@ describe("mysqlMigrationDialect translatePlan", () => {
       )
       expect(outOfRangeDetail).toContain("is out of range for type integer")
       expect(outOfRange.queries).toHaveLength(0)
-    }))
+    })
+  )
 
   it.effect("rejects a unique non-null addColumn without a default before SQL", () =>
     Effect.gen(function* () {
       const { ctx, queries } = makeContext({
         shapes: new Map([
-          [
-            "t",
-            tableShapes(
-              [column("code", "text", { maxLength: 255 })],
-              [{ fields: ["code"], unique: true }]
-            )
-          ]
+          ["t", tableShapes([column("code", "text", { maxLength: 255 })], [{ fields: ["code"], unique: true }])]
         ])
       })
       const detail = yield* failureDetail(
@@ -1051,7 +947,8 @@ describe("mysqlMigrationDialect translatePlan", () => {
 
       expect(detail).toContain("collide in a unique index")
       expect(queries).toHaveLength(0)
-    }))
+    })
+  )
 
   it.effect("rejects an identity alterColumn before SQL", () =>
     Effect.gen(function* () {
@@ -1070,7 +967,8 @@ describe("mysqlMigrationDialect translatePlan", () => {
 
       expect(detail).toContain('changing identity column "t"."seqId" is not supported')
       expect(queries).toHaveLength(0)
-    }))
+    })
+  )
 
   it.effect("normalizes int(11), bigint(20), tinyint(1), and varchar(255)", () =>
     Effect.gen(function* () {
@@ -1095,14 +993,12 @@ describe("mysqlMigrationDialect translatePlan", () => {
         ]
       })
 
-      const result = yield* plan(
-        [{ kind: "createTable", table: "t", columns: desiredColumns }],
-        ctx
-      )
+      const result = yield* plan([{ kind: "createTable", table: "t", columns: desiredColumns }], ctx)
 
       expect(result.statements).toEqual([])
       expect(result.skipped).toEqual([0])
-    }))
+    })
+  )
 
   it.effect("creates a view on a view or absent name but drifts on a base table", () =>
     Effect.gen(function* () {
@@ -1110,37 +1006,29 @@ describe("mysqlMigrationDialect translatePlan", () => {
         [{ kind: "createView", view: "v", query: "SELECT 1" }],
         makeContext({ catalogTables: [{ name: "v", kind: "view" }] }).ctx
       )
-      expect(onView.statements).toEqual([
-        "CREATE OR REPLACE VIEW `v` AS SELECT 1"
-      ])
+      expect(onView.statements).toEqual(["CREATE OR REPLACE VIEW `v` AS SELECT 1"])
       expect(onView.skipped).toEqual([])
 
-      const absent = yield* plan(
-        [{ kind: "createView", view: "v", query: "SELECT 1" }],
-        makeContext().ctx
-      )
-      expect(absent.statements).toEqual([
-        "CREATE OR REPLACE VIEW `v` AS SELECT 1"
-      ])
+      const absent = yield* plan([{ kind: "createView", view: "v", query: "SELECT 1" }], makeContext().ctx)
+      expect(absent.statements).toEqual(["CREATE OR REPLACE VIEW `v` AS SELECT 1"])
 
       const baseDetail = yield* failureDetail(
         [{ kind: "createView", view: "v", query: "SELECT 1" }],
         makeContext({ catalogTables: [{ name: "v" }] }).ctx
       )
       expect(baseDetail).toContain("a base table")
-    }))
+    })
+  )
 
   it.effect("rejects a dropColumn that a view outside the plan references", () =>
     Effect.gen(function* () {
       const { ctx } = dependentViewContext()
-      const detail = yield* failureDetail(
-        [{ kind: "dropColumn", table: "t", column: "a" }],
-        ctx
-      )
+      const detail = yield* failureDetail([{ kind: "dropColumn", table: "t", column: "a" }], ctx)
 
       expect(detail).toContain('view "v"')
       expect(detail).toContain("dropView")
-    }))
+    })
+  )
 
   it.effect("allows the same dropColumn when the view is recreated in the plan", () =>
     Effect.gen(function* () {
@@ -1157,7 +1045,8 @@ describe("mysqlMigrationDialect translatePlan", () => {
         "ALTER TABLE `t` DROP COLUMN `a`",
         "CREATE OR REPLACE VIEW `v` AS SELECT b FROM t"
       ])
-    }))
+    })
+  )
 
   it.effect("flags a transitive dependent view and requires both recreations", () =>
     Effect.gen(function* () {
@@ -1179,9 +1068,10 @@ describe("mysqlMigrationDialect translatePlan", () => {
         transitiveViewContext().ctx
       )
 
-      expect(result.statements.filter((statement) => statement.includes('`v1`'))).toHaveLength(1)
-      expect(result.statements.filter((statement) => statement.includes('`v2`'))).toHaveLength(1)
-    }))
+      expect(result.statements.filter((statement) => statement.includes("`v1`"))).toHaveLength(1)
+      expect(result.statements.filter((statement) => statement.includes("`v2`"))).toHaveLength(1)
+    })
+  )
 
   it.effect("creates an inner view before the outer view that reads it", () =>
     Effect.gen(function* () {
@@ -1203,7 +1093,8 @@ describe("mysqlMigrationDialect translatePlan", () => {
         "CREATE OR REPLACE VIEW `inner` AS SELECT a FROM t",
         "CREATE OR REPLACE VIEW `outer` AS SELECT a FROM inner"
       ])
-    }))
+    })
+  )
 
   it.effect("drops an outer view before the inner view it reads", () =>
     Effect.gen(function* () {
@@ -1229,11 +1120,9 @@ describe("mysqlMigrationDialect translatePlan", () => {
         ctx
       )
 
-      expect(result.statements).toEqual([
-        "DROP VIEW IF EXISTS `outer`",
-        "DROP VIEW IF EXISTS `inner`"
-      ])
-    }))
+      expect(result.statements).toEqual(["DROP VIEW IF EXISTS `outer`", "DROP VIEW IF EXISTS `inner`"])
+    })
+  )
 
   it.effect("agrees with translate for non-indexed text and keys text only through the plan", () =>
     Effect.gen(function* () {
@@ -1256,16 +1145,13 @@ describe("mysqlMigrationDialect translatePlan", () => {
       const indexed = yield* plan(
         [{ kind: "createTable", table: "todos", columns: [indexedTitle] }],
         makeContext({
-          shapes: new Map([
-            [
-              "todos",
-              tableShapes([indexedTitle], [{ fields: ["title"], unique: false }])
-            ]
-          ])
+          shapes: new Map([["todos", tableShapes([indexedTitle], [{ fields: ["title"], unique: false }])]])
         }).ctx
       )
 
-      expect(indexed.statements[0]).toContain("`title` VARCHAR(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL")
+      expect(indexed.statements[0]).toContain(
+        "`title` VARCHAR(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL"
+      )
       expect(
         mysqlMigrationDialect.translate({
           kind: "createTable",
@@ -1273,39 +1159,30 @@ describe("mysqlMigrationDialect translatePlan", () => {
           columns: [title]
         })[0]
       ).toContain("`title` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL")
-    }))
+    })
+  )
 })
 
 describe("mysqlMigrationDialect verifyPlan", () => {
   it.effect("accepts an existing view and rejects a missing one", () =>
     Effect.gen(function* () {
-      const steps: ReadonlyArray<MigrationStep> = [
-        { kind: "createView", view: "v", query: "SELECT 1" }
-      ]
+      const steps: ReadonlyArray<MigrationStep> = [{ kind: "createView", view: "v", query: "SELECT 1" }]
 
-      yield* mysqlMigrationDialect.verifyPlan(
-        steps,
-        makeContext({ catalogTables: [{ name: "v", kind: "view" }] }).ctx
-      )
+      yield* mysqlMigrationDialect.verifyPlan(steps, makeContext({ catalogTables: [{ name: "v", kind: "view" }] }).ctx)
 
       const detail = yield* verifyDetail(steps, makeContext().ctx)
       expect(detail).toContain('view "v" does not exist')
-    }))
+    })
+  )
 })
 
 describe("mysqlMigrationDialect normalizeDefault through translatePlan", () => {
   it.effect("treats the engine text default encodings as one value", () =>
     Effect.gen(function* () {
-      const charsetEmpty = yield* createTableWithCatalogDefault(
-        column("label", "text", { default: "" }),
-        "_utf8mb4''"
-      )
+      const charsetEmpty = yield* createTableWithCatalogDefault(column("label", "text", { default: "" }), "_utf8mb4''")
       expect(charsetEmpty.skipped).toEqual([0])
 
-      const parenthesizedEmpty = yield* createTableWithCatalogDefault(
-        column("label", "text", { default: "" }),
-        "('')"
-      )
+      const parenthesizedEmpty = yield* createTableWithCatalogDefault(column("label", "text", { default: "" }), "('')")
       expect(parenthesizedEmpty.skipped).toEqual([0])
 
       const escaped = yield* createTableWithCatalogDefault(
@@ -1313,7 +1190,8 @@ describe("mysqlMigrationDialect normalizeDefault through translatePlan", () => {
         "_utf8mb4'it\\'s a\\\\path'"
       )
       expect(escaped.skipped).toEqual([0])
-    }))
+    })
+  )
 
   it.effect("treats SQL NULL and the string NULL as no default", () =>
     Effect.gen(function* () {
@@ -1328,35 +1206,26 @@ describe("mysqlMigrationDialect normalizeDefault through translatePlan", () => {
         "NULL"
       )
       expect(stringNull.skipped).toEqual([0])
-    }))
+    })
+  )
 
   it.effect("coerces bit and numeric string defaults", () =>
     Effect.gen(function* () {
-      const bit = yield* createTableWithCatalogDefault(
-        column("ok", "boolean", { default: true }),
-        "b'1'"
-      )
+      const bit = yield* createTableWithCatalogDefault(column("ok", "boolean", { default: true }), "b'1'")
       expect(bit.skipped).toEqual([0])
 
-      const integer = yield* createTableWithCatalogDefault(
-        column("n", "integer", { default: 3 }),
-        "3"
-      )
+      const integer = yield* createTableWithCatalogDefault(column("n", "integer", { default: 3 }), "3")
       expect(integer.skipped).toEqual([0])
 
-      const real = yield* createTableWithCatalogDefault(
-        column("score", "real", { default: 1.5 }),
-        "1.50"
-      )
+      const real = yield* createTableWithCatalogDefault(column("score", "real", { default: 1.5 }), "1.50")
       expect(real.skipped).toEqual([0])
-    }))
+    })
+  )
 
   it.effect("still drifts a genuinely different default", () =>
     Effect.gen(function* () {
       const { ctx } = makeContext({
-        catalogTables: [
-          { name: "t", columns: [{ name: "n", type: "int", defaultValue: "4" }] }
-        ]
+        catalogTables: [{ name: "t", columns: [{ name: "n", type: "int", defaultValue: "4" }] }]
       })
       const detail = yield* failureDetail(
         [
@@ -1370,7 +1239,8 @@ describe("mysqlMigrationDialect normalizeDefault through translatePlan", () => {
       )
 
       expect(detail).toContain('column "t"."n" differs')
-    }))
+    })
+  )
 })
 
 describe("mysqlMigrationDialect text strategy", () => {
@@ -1379,14 +1249,13 @@ describe("mysqlMigrationDialect text strategy", () => {
       const detail = yield* failureDetail(
         [{ kind: "createTable", table: "t", columns: [column("title", "text")] }],
         makeContext({
-          shapes: new Map([
-            ["t", tableShapes([column("title", "text")], [{ fields: ["title"], unique: false }])]
-          ])
+          shapes: new Map([["t", tableShapes([column("title", "text")], [{ fields: ["title"], unique: false }])]])
         }).ctx
       )
       expect(detail).toContain("has no maxLength")
       expect(detail).toContain("768")
-    }))
+    })
+  )
 
   it.effect("rejects a keyed text column over 768 characters", () =>
     Effect.gen(function* () {
@@ -1399,39 +1268,36 @@ describe("mysqlMigrationDialect text strategy", () => {
         }).ctx
       )
       expect(detail).toContain("768")
-    }))
+    })
+  )
 
   it.effect("rejects a composite index over 3072 bytes", () =>
     Effect.gen(function* () {
-      const columns = [
-        column("a", "text", { maxLength: 500 }),
-        column("b", "text", { maxLength: 500 })
-      ]
+      const columns = [column("a", "text", { maxLength: 500 }), column("b", "text", { maxLength: 500 })]
       const detail = yield* failureDetail(
         [{ kind: "createTable", table: "t", columns }],
         makeContext({
-          shapes: new Map([
-            ["t", tableShapes(columns, [{ fields: ["a", "b"], unique: false }])]
-          ])
+          shapes: new Map([["t", tableShapes(columns, [{ fields: ["a", "b"], unique: false }])]])
         }).ctx
       )
       expect(detail).toContain("3072")
-    }))
+    })
+  )
 
   it.effect("renders the email collation and probes with it", () =>
     Effect.gen(function* () {
       const email = column("email", "text", { maxLength: 320, collation: "utf8mb4_0900_as_ci", unique: true })
       const { ctx, queries } = makeContext({
-        catalogTables: [{ name: "users", columns: [{ name: "email", type: "varchar(320)", collationName: "utf8mb4_0900_as_ci" }] }],
+        catalogTables: [
+          { name: "users", columns: [{ name: "email", type: "varchar(320)", collationName: "utf8mb4_0900_as_ci" }] }
+        ],
         shapes: new Map([["users", tableShapes([email])]])
       })
-      const result = yield* plan(
-        [{ kind: "createIndex", table: "users", fields: ["email"], unique: true }],
-        ctx
-      )
+      const result = yield* plan([{ kind: "createIndex", table: "users", fields: ["email"], unique: true }], ctx)
       expect(result.statements[0]).toContain("CREATE UNIQUE INDEX")
       expect(queries.some((query) => query.includes("utf8mb4_0900_as_ci"))).toBe(true)
-    }))
+    })
+  )
 
   it.effect("reconciles a legacy text shape before an index", () =>
     Effect.gen(function* () {
@@ -1439,22 +1305,38 @@ describe("mysqlMigrationDialect text strategy", () => {
       const other = column("other", "integer")
       const { ctx, queries } = makeContext({
         catalogTables: [
-          { name: "t", columns: [{ name: "title", type: "varchar(255)" }, { name: "other", type: "int" }] }
+          {
+            name: "t",
+            columns: [
+              { name: "title", type: "varchar(255)" },
+              { name: "other", type: "int" }
+            ]
+          }
         ],
         shapes: new Map([
-          ["t", { stored: { columns: [column("title", "text"), other], indexes: [] }, desired: { columns: [title, other], indexes: [{ fields: ["title"], unique: false }, { fields: ["other"], unique: false }] } }]
+          [
+            "t",
+            {
+              stored: { columns: [column("title", "text"), other], indexes: [] },
+              desired: {
+                columns: [title, other],
+                indexes: [
+                  { fields: ["title"], unique: false },
+                  { fields: ["other"], unique: false }
+                ]
+              }
+            }
+          ]
         ])
       })
-      const result = yield* plan(
-        [{ kind: "createIndex", table: "t", fields: ["other"], unique: false }],
-        ctx
-      )
+      const result = yield* plan([{ kind: "createIndex", table: "t", fields: ["other"], unique: false }], ctx)
       expect(result.statements[0]).toContain("MODIFY COLUMN")
       expect(result.statements[0]).toContain("VARCHAR(200)")
       expect(result.statements[0]).toContain("ALGORITHM=COPY, LOCK=SHARED")
       expect(result.notes?.some((note) => note.includes("reconcile text shape"))).toBe(true)
       expect(queries.length).toBeGreaterThan(0)
-    }))
+    })
+  )
 
   it.effect("rejects duplicate rows before a unique index", () =>
     Effect.gen(function* () {
@@ -1468,22 +1350,22 @@ describe("mysqlMigrationDialect text strategy", () => {
         }).ctx
       )
       expect(detail).toContain("would collapse")
-    }))
+    })
+  )
 
   it.effect("audits a legacy text shape without repairing it", () =>
     Effect.gen(function* () {
       const title = column("title", "text", { maxLength: 200 })
       const { ctx } = makeContext({
-        catalogTables: [
-          { name: "t", columns: [{ name: "title", type: "varchar(255)" }] }
-        ],
+        catalogTables: [{ name: "t", columns: [{ name: "title", type: "varchar(255)" }] }],
         shapes: new Map([["t", tableShapes([title])]])
       })
       const audit = mysqlMigrationDialect.auditTextShape
       if (audit === undefined) return yield* Effect.die(new Error("auditTextShape missing"))
       const drift = yield* audit(ctx)
       expect(drift.some((detail) => detail.includes("title"))).toBe(true)
-    }))
+    })
+  )
 
   it.effect("rejects a rename combined with a same-plan index step", () =>
     Effect.gen(function* () {
@@ -1493,36 +1375,30 @@ describe("mysqlMigrationDialect text strategy", () => {
           { kind: "createIndex", table: "t", fields: ["name"], unique: false }
         ],
         makeContext({
-          shapes: new Map([
-            ["t", tableShapes([column("name", "text", { maxLength: 200 })])]
-          ])
+          shapes: new Map([["t", tableShapes([column("name", "text", { maxLength: 200 })])]])
         }).ctx
       )
       expect(detail).toContain("split the rename")
-    }))
+    })
+  )
 
   it.effect("does not preflight an unchanged latent shape", () =>
     Effect.gen(function* () {
       const ctx = makeContext({
-        shapes: new Map([
-          [
-            "t",
-            tableShapes([column("title", "text")], [{ fields: ["title"], unique: false }])
-          ]
-        ])
+        shapes: new Map([["t", tableShapes([column("title", "text")], [{ fields: ["title"], unique: false }])]])
       }).ctx
       const preflight = mysqlMigrationDialect.preflightPlan
       if (preflight === undefined) return yield* Effect.die(new Error("preflightPlan missing"))
       yield* preflight([], ctx)
-    }))
+    })
+  )
 
   it.effect("fails the collation sanity preflight on a PAD SPACE alias", () =>
     Effect.gen(function* () {
       const ctx: TranslatePlanContext = {
         tables: new Map(),
         views: new Map(),
-        readonlyQuery: () =>
-          Effect.succeed([{ bin_padded: 1, email_padded: 0, email_case_equal: 1 }])
+        readonlyQuery: () => Effect.succeed([{ bin_padded: 1, email_padded: 0, email_case_equal: 1 }])
       }
       const preflight = mysqlMigrationDialect.preflightPlan
       if (preflight === undefined) return yield* Effect.die(new Error("preflightPlan missing"))
@@ -1535,5 +1411,6 @@ describe("mysqlMigrationDialect text strategy", () => {
           expect(failure.detail).toContain("PAD SPACE")
         }
       }
-    }))
+    })
+  )
 })

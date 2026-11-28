@@ -81,9 +81,7 @@ export const makeHookedEmailServiceLayer = () =>
             ...((hooked.collection ?? options.collection) === undefined
               ? {}
               : { collection: hooked.collection ?? options.collection }),
-            ...((hooked.userId ?? options.userId) === undefined
-              ? {}
-              : { userId: hooked.userId ?? options.userId })
+            ...((hooked.userId ?? options.userId) === undefined ? {} : { userId: hooked.userId ?? options.userId })
           }
 
           if (base.enabled) {
@@ -115,10 +113,7 @@ export const makeHookedEmailServiceLayer = () =>
 
             const secret = Redacted.value(keySecret)
             for (const recipient of recipients) {
-              const key = yield* rateLimitKey(
-                secret,
-                `send:${effectiveOptions.purpose}:${recipient}`
-              )
+              const key = yield* rateLimitKey(secret, `send:${effectiveOptions.purpose}:${recipient}`)
               requests.push({ policy: policies.sendRecipient, key, cost: 1 })
             }
 
@@ -129,13 +124,11 @@ export const makeHookedEmailServiceLayer = () =>
                 collection: effectiveOptions.collection ?? null,
                 policy: decision.blocked.policy
               })
-              return yield* Effect.fail(
-                new RateLimitedError({
-                  retryAfterSeconds: decision.blocked.retryAfterSeconds,
-                  policy: decision.blocked.policy,
-                  scope: "send"
-                })
-              )
+              return yield* new RateLimitedError({
+                retryAfterSeconds: decision.blocked.retryAfterSeconds,
+                policy: decision.blocked.policy,
+                scope: "send"
+              })
             }
           }
 
@@ -165,8 +158,8 @@ export const makeHookedEmailServiceLayer = () =>
       return {
         enabled: base.enabled,
         send,
-        verify: base.verify,
-        describe: base.describe
+        verify: () => base.verify(),
+        describe: () => base.describe()
       }
     })
   )

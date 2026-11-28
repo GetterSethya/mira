@@ -14,7 +14,7 @@ export const PRUNE_INTERVAL_MS = 60_000
 export const PRUNE_RETENTION_MS = 5 * 60_000
 
 const encodeBucketKey = Schema.encodeSync(
-  Schema.fromJsonString(Schema.Tuple([Schema.String, Schema.String, Schema.Number]))
+  Schema.fromJsonString(Schema.Tuple([Schema.String, Schema.String, Schema.Finite]))
 )
 
 const scopeForPolicy = (policy: string): "request" | "send" | "cooldown" => {
@@ -67,11 +67,9 @@ export const makeRateLimiter = (store: RateLimitStoreShape): RateLimiterShape =>
       if (first === undefined) return { decisions: [], blocked: null }
       const mode = first.policy.onStoreError
       if (requests.some((request) => request.policy.onStoreError !== mode)) {
-        return yield* Effect.fail(
-          new RateLimitUnavailableError({
-            message: "A rate-limit batch mixed allow and deny store-error policies"
-          })
-        )
+        return yield* new RateLimitUnavailableError({
+          message: "A rate-limit batch mixed allow and deny store-error policies"
+        })
       }
 
       const now = Date.now()
@@ -79,9 +77,7 @@ export const makeRateLimiter = (store: RateLimitStoreShape): RateLimiterShape =>
       for (const request of requests) {
         const cost = request.cost ?? 1
         if (!Number.isInteger(cost) || cost < 1) {
-          return yield* Effect.fail(
-            new RateLimitUnavailableError({ message: "Rate-limit cost must be a positive integer" })
-          )
+          return yield* new RateLimitUnavailableError({ message: "Rate-limit cost must be a positive integer" })
         }
         const windowStart = windowFor(request.policy.windowMs, now)
         entries.push({
@@ -107,9 +103,7 @@ export const makeRateLimiter = (store: RateLimitStoreShape): RateLimiterShape =>
             retryable: error.retryable
           }).pipe(
             Effect.flatMap(() =>
-              Effect.fail(
-                new RateLimitUnavailableError({ message: "The rate-limit store is unavailable" })
-              )
+              Effect.fail(new RateLimitUnavailableError({ message: "The rate-limit store is unavailable" }))
             )
           )
         })
@@ -153,9 +147,7 @@ export const makeRateLimiter = (store: RateLimitStoreShape): RateLimiterShape =>
             .filter((decision): decision is RateLimitDecision => decision !== undefined)
             .reduce<RateLimitDecision | null>(
               (longest, decision) =>
-                longest === null || decision.retryAfterSeconds > longest.retryAfterSeconds
-                  ? decision
-                  : longest,
+                longest === null || decision.retryAfterSeconds > longest.retryAfterSeconds ? decision : longest,
               null
             )
       if (blocked !== null) {
@@ -172,8 +164,7 @@ export const makeRateLimiter = (store: RateLimitStoreShape): RateLimiterShape =>
     })
 
   return {
-    consume: (policy, key, cost) =>
-      consumeMany([{ policy, key, ...(cost === undefined ? {} : { cost }) }]),
+    consume: (policy, key, cost) => consumeMany([{ policy, key, ...(cost === undefined ? {} : { cost }) }]),
     consumeMany
   }
 }

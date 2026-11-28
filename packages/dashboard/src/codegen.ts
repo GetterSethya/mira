@@ -1,4 +1,9 @@
+import { Schema } from "effect"
+
 import type { ApiCollectionSchema, ApiFieldSchema } from "@gettersethya/mira-client"
+
+const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.String))
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 export type CodegenOptions = {
   /** Emit only these collections. Default: every collection in input order. */
@@ -52,9 +57,7 @@ function renderImports(needs: ImportNeeds): ReadonlyArray<string> {
 /** Deterministic PascalCase: "published_posts" -> "PublishedPosts"; leading digit gets "_" prefix. */
 export function pascalCase(name: string): string {
   const parts = name.split(/[^A-Za-z0-9]+/).filter((part) => part.length > 0)
-  const joined = parts
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("")
+  const joined = parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("")
 
   if (joined.length === 0) return "_"
   return /^[0-9]/.test(joined) ? `_${joined}` : joined
@@ -92,28 +95,21 @@ export function resolveSubset(
   return ordered
 }
 
-export function generateCollectionFile(
-  schemas: ReadonlyArray<ApiCollectionSchema>,
-  options?: CodegenOptions
-): string {
+export function generateCollectionFile(schemas: ReadonlyArray<ApiCollectionSchema>, options?: CodegenOptions): string {
   const include = options?.include
   const includedNames = new Set<string>()
   if (include !== undefined) {
     for (const name of include) includedNames.add(name)
   }
 
-  const selected = schemas.filter(
-    (schema) => include === undefined || includedNames.has(schema.name)
-  )
+  const selected = schemas.filter((schema) => include === undefined || includedNames.has(schema.name))
 
   const { ordered, cyclic } = orderByDependencies(selected)
   const emitted = new Set<string>()
   for (const schema of ordered) emitted.add(schema.name)
 
   const timestamp = options?.generatedAt ?? new Date().toISOString()
-  const lines: Array<string> = HEADER.map((line) =>
-    line.replace("{TIMESTAMP}", timestamp)
-  )
+  const lines: Array<string> = HEADER.map((line) => line.replace("{TIMESTAMP}", timestamp))
 
   lines.push("")
   if (cyclic) {
@@ -140,13 +136,9 @@ type DependencyOrder = {
   readonly cyclic: boolean
 }
 
-function importNeeds(
-  schemas: ReadonlyArray<ApiCollectionSchema>
-): ImportNeeds {
+function importNeeds(schemas: ReadonlyArray<ApiCollectionSchema>): ImportNeeds {
   const writable = schemas.some((schema) => schema.kind !== "view")
-  const hasFields = schemas.some((schema) =>
-    Object.values(schema.fields).some((field) => field["x-system"] !== true)
-  )
+  const hasFields = schemas.some((schema) => Object.values(schema.fields).some((field) => field["x-system"] !== true))
 
   return {
     auth: schemas.some((schema) => schema.kind === "auth"),
@@ -159,9 +151,7 @@ function importNeeds(
   }
 }
 
-function orderByDependencies(
-  schemas: ReadonlyArray<ApiCollectionSchema>
-): DependencyOrder {
+function orderByDependencies(schemas: ReadonlyArray<ApiCollectionSchema>): DependencyOrder {
   const byName = new Map<string, ApiCollectionSchema>()
   for (const schema of schemas) byName.set(schema.name, schema)
 
@@ -194,10 +184,7 @@ function orderByDependencies(
   return cyclic ? { ordered: schemas, cyclic: true } : { ordered, cyclic: false }
 }
 
-function renderCollectionDefinition(
-  schema: ApiCollectionSchema,
-  emitted: ReadonlySet<string>
-): string {
+function renderCollectionDefinition(schema: ApiCollectionSchema, emitted: ReadonlySet<string>): string {
   const name = pascalCase(schema.name)
   const entries = renderFieldEntries(schema, emitted)
 
@@ -205,7 +192,7 @@ function renderCollectionDefinition(
     const query = escapeTemplateLiteral(schema.viewQuery ?? "")
     return [
       `export const ${name} = ViewCollection.define(`,
-      `  ${JSON.stringify(schema.name)},`,
+      `  ${encodeJsonString(schema.name)},`,
       `  \`${query}\`,`,
       `  ${renderObject(entries, 2)}`,
       ")"
@@ -214,10 +201,8 @@ function renderCollectionDefinition(
 
   const builder = schema.kind === "auth" ? "AuthCollection" : "BaseCollection"
   const email = schema.kind === "auth" ? schema.auth?.email : undefined
-  const options = email === undefined
-    ? ""
-    : `, { email: ${JSON.stringify(email)} }`
-  return `export const ${name} = ${builder}.define(${JSON.stringify(schema.name)}, ${renderObject(entries, 0)}${options})`
+  const options = email === undefined ? "" : `, { email: ${encodeJson(email)} }`
+  return `export const ${name} = ${builder}.define(${encodeJsonString(schema.name)}, ${renderObject(entries, 0)}${options})`
 }
 
 function renderTypeAliases(schema: ApiCollectionSchema): ReadonlyArray<string> {
@@ -225,27 +210,17 @@ function renderTypeAliases(schema: ApiCollectionSchema): ReadonlyArray<string> {
   const lines = [`export type ${name}Record = InferRecord<typeof ${name}.fields>`]
 
   if (schema.kind !== "view") {
-    lines.push(
-      `export type ${name}Create = CreateInput<typeof ${name}.fields, "${schema.kind}">`
-    )
-    lines.push(
-      `export type ${name}Update = UpdateInput<typeof ${name}.fields, "${schema.kind}">`
-    )
+    lines.push(`export type ${name}Create = CreateInput<typeof ${name}.fields, "${schema.kind}">`)
+    lines.push(`export type ${name}Update = UpdateInput<typeof ${name}.fields, "${schema.kind}">`)
   }
 
   return lines
 }
 
-function renderCollectionsMap(
-  schemas: ReadonlyArray<ApiCollectionSchema>,
-  emitted: ReadonlySet<string>
-): string {
+function renderCollectionsMap(schemas: ReadonlyArray<ApiCollectionSchema>, emitted: ReadonlySet<string>): string {
   const entries: Array<readonly [string, string]> = schemas
     .filter((schema) => emitted.has(schema.name))
-    .map((schema): readonly [string, string] => [
-      schema.name,
-      pascalCase(schema.name)
-    ])
+    .map((schema): readonly [string, string] => [schema.name, pascalCase(schema.name)])
 
   if (entries.length === 0) return "export const collections = {}"
   return `export const collections = ${renderObject(entries, 0, true)}`
@@ -253,10 +228,7 @@ function renderCollectionsMap(
 
 type FieldEntry = readonly [name: string, code: string]
 
-function renderFieldEntries(
-  schema: ApiCollectionSchema,
-  emitted: ReadonlySet<string>
-): ReadonlyArray<FieldEntry> {
+function renderFieldEntries(schema: ApiCollectionSchema, emitted: ReadonlySet<string>): ReadonlyArray<FieldEntry> {
   const entries: Array<FieldEntry> = []
 
   for (const [fieldName, field] of Object.entries(schema.fields)) {
@@ -273,11 +245,7 @@ function renderFieldEntries(
   return entries
 }
 
-function renderSimpleField(
-  schema: ApiCollectionSchema,
-  fieldName: string,
-  field: ApiFieldSchema
-): string {
+function renderSimpleField(schema: ApiCollectionSchema, fieldName: string, field: ApiFieldSchema): string {
   const kind = fieldKind(field)
   const options: Array<string> = []
 
@@ -330,8 +298,7 @@ function renderRelationField(
 
   if (targetName === undefined || !targetExists) {
     const missing = targetName ?? "unknown"
-    const options: Array<string> =
-      field.default !== undefined ? [`default: ${formatValue(field.default)}`] : []
+    const options: Array<string> = field.default !== undefined ? [`default: ${formatValue(field.default)}`] : []
     if (field["x-hidden"] === true) options.push("hidden: true")
     if (!isView && requiredNames(schema).has(fieldName) === false) {
       options.push("required: false")
@@ -343,7 +310,7 @@ function renderRelationField(
 
   const options: Array<string> = []
   if (field["x-field"] !== undefined && field["x-field"] !== "id") {
-    options.push(`field: ${JSON.stringify(field["x-field"])}`)
+    options.push(`field: ${encodeJsonString(field["x-field"])}`)
   }
   if (field.default !== undefined) options.push(`default: ${formatValue(field.default)}`)
   if (field["x-hidden"] === true) options.push("hidden: true")
@@ -391,25 +358,17 @@ function fieldKind(field: ApiFieldSchema): BuilderKind {
   return "text"
 }
 
-function escapeTemplateLiteral(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/`/g, "\\`")
-    .replace(/\$\{/g, "\\${")
+function escapeTemplateLiteral(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")
 }
 
-function renderObject(
-  entries: ReadonlyArray<FieldEntry>,
-  closingIndent: number,
-  quoteKeys = false
-): string {
+function renderObject(entries: ReadonlyArray<FieldEntry>, closingIndent: number, quoteKeys = false): string {
   if (entries.length === 0) return "{}"
 
   const indent = " ".repeat(closingIndent)
   const fields = entries
     .map(
-      ([name, code]) =>
-        `${indent}  ${quoteKeys ? JSON.stringify(name) : formatKey(name)}: ${withTrailingComma(code)}`
+      ([name, code]) => `${indent}  ${quoteKeys ? encodeJsonString(name) : formatKey(name)}: ${withTrailingComma(code)}`
     )
     .join("\n")
 
@@ -422,15 +381,15 @@ function withTrailingComma(code: string): string {
   return `${code.slice(0, commentIndex)},${code.slice(commentIndex)}`
 }
 
-function formatKey(name: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name)
+function formatKey(name: string) {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : encodeJsonString(name)
 }
 
 function formatValue(value: unknown): string {
-  if (typeof value === "string") return JSON.stringify(value)
+  if (typeof value === "string") return encodeJsonString(value)
   if (typeof value === "number" || typeof value === "boolean") return String(value)
   if (value === null) return "null"
   if (Array.isArray(value)) return `[${value.map(formatValue).join(", ")}]`
-  if (typeof value === "object") return JSON.stringify(value) ?? "undefined"
+  if (typeof value === "object") return encodeJson(value)
   return "undefined"
 }

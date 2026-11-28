@@ -1,4 +1,4 @@
-import { Data, Effect, Tracer } from "effect"
+import { Data, Effect, type Tracer } from "effect"
 import { HttpServerRequest } from "effect/http"
 import { authenticateSession } from "@gettersethya/mira"
 

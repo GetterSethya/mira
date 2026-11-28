@@ -42,18 +42,11 @@ const postsDef = BaseCollection.define("posts", {
   publishedAt: Field.date({ required: false }),
   authorId: Field.text({ indexed: true }),
   viewCount: Field.integer({ default: 0, min: 0 })
-})
-  .indexes((I) => [I.on("publishedAt"), I.unique("authorId", "title")])
+}).indexes((I) => [I.on("publishedAt"), I.unique("authorId", "title")])
 
 const postsRules = defineRule(postsDef, (R) => ({
-  list: R.or(
-    R.field("published").eq(R.literal(true)),
-    R.field("authorId").eq(R.authId(usersDef))
-  ),
-  view: R.or(
-    R.field("published").eq(R.literal(true)),
-    R.field("authorId").eq(R.authId(usersDef))
-  ),
+  list: R.or(R.field("published").eq(R.literal(true)), R.field("authorId").eq(R.authId(usersDef))),
+  view: R.or(R.field("published").eq(R.literal(true)), R.field("authorId").eq(R.authId(usersDef))),
   create: R.field("authorId").eq(R.authId(usersDef)),
   update: R.field("authorId").eq(R.authId(usersDef)),
   delete: R.field("authorId").eq(R.authId(usersDef))
@@ -64,8 +57,7 @@ const commentsDef = BaseCollection.define("comments", {
   authorId: Field.text({ indexed: true }),
   body: Field.text({ maxLength: 2000 }),
   createdAt: Field.date()
-})
-  .indexes((I) => [I.on("postId", "createdAt")])
+}).indexes((I) => [I.on("postId", "createdAt")])
 
 const commentsRules = defineRule(commentsDef, (R) => ({
   list: R.public(),
@@ -84,13 +76,13 @@ const publishedPostsDef = ViewCollection.define(
    FROM posts p JOIN users u ON p.authorId = u.id
    WHERE p.published = 1`,
   {
-    seqId:       Field.integer().view(),
-    id:          Field.text().view(),
-    title:       Field.text().view(),
+    seqId: Field.integer().view(),
+    id: Field.text().view(),
+    title: Field.text().view(),
     publishedAt: Field.date().view(),
-    viewCount:   Field.integer().view(),
-    authorId:    Field.text().view(),
-    authorName:  Field.text().view()
+    viewCount: Field.integer().view(),
+    authorId: Field.text().view(),
+    authorName: Field.text().view()
   }
 )
 
@@ -114,6 +106,8 @@ const allSchemas = [
 
 const DB_PATH = resolve("mira-dev.db")
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+
 // provideMerge keeps SqlClient.SqlClient in the output so the program can query directly.
 const appLayer = MigratorLive.pipe(
   Layer.provideMerge(Layer.mergeAll(Layer.succeed(Dialect, sqliteDialect), SqliteClient.layer({ filename: DB_PATH })))
@@ -135,7 +129,8 @@ const program = Effect.gen(function* () {
   } else {
     for (const step of plan.steps) {
       const marker = plan.destructive ? "  [DESTRUCTIVE]" : "  "
-      console.log(`${marker} ${step.kind}: ${"table" in step ? step.table : "name" in step ? step.name : ""}`)
+      const target = "table" in step ? step.table : ""
+      console.log(`${marker} ${step.kind}: ${target}`)
     }
     if (plan.notes !== undefined && plan.notes.length > 0) {
       console.log("\n  Statement notes:")
@@ -170,9 +165,9 @@ const program = Effect.gen(function* () {
     SELECT name, schema FROM _collections ORDER BY name
   `
   for (const row of collections) {
-    const parsed = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
-    )(row.schema).pipe(Effect.orDie)
+    const parsed = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(
+      row.schema
+    ).pipe(Effect.orDie)
     const props = parsed["properties"]
     const fieldNames = Object.keys(typeof props === "object" && props !== null ? props : {})
     console.log(`${row.name}: [${fieldNames.join(", ")}]`)
@@ -192,7 +187,7 @@ const program = Effect.gen(function* () {
       console.log("    (empty)")
     } else {
       for (const row of rows) {
-        console.log("   ", JSON.stringify(row))
+        console.log("   ", encodeJson(row))
       }
     }
   }

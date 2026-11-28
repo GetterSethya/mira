@@ -7,310 +7,306 @@ const BAYER = [
   [51, 19, 59, 27, 49, 17, 57, 25],
   [15, 47, 7, 39, 13, 45, 5, 37],
   [63, 31, 55, 23, 61, 29, 53, 21]
-];
+]
 
-const THRESHOLD = BAYER.map((row) => row.map((value) => (value + 0.5) / 64));
+const THRESHOLD = BAYER.map((row) => row.map((value) => (value + 0.5) / 64))
 
-const DARK = 10;
-const LIGHT = 245;
-const POINTER_RADIUS = 0.18;
+const DARK = 10
+const LIGHT = 245
+const POINTER_RADIUS = 0.18
 
-function clamp01(value: number): number {
-  return value < 0 ? 0 : value > 1 ? 1 : value;
+function clamp01(value: number) {
+  return value < 0 ? 0 : value > 1 ? 1 : value
 }
 
 function hash(x: number, y: number, seed: number): number {
-  let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(seed, 1442695041);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(seed, 1442695041)
+  h = Math.imul(h ^ (h >>> 13), 1274126177)
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296
 }
 
-function smooth(t: number): number {
-  return t * t * (3 - 2 * t);
+function smooth(t: number) {
+  return t * t * (3 - 2 * t)
 }
 
 function noise(x: number, y: number, seed: number): number {
-  const xi = Math.floor(x);
-  const yi = Math.floor(y);
-  const u = smooth(x - xi);
-  const v = smooth(y - yi);
+  const xi = Math.floor(x)
+  const yi = Math.floor(y)
+  const u = smooth(x - xi)
+  const v = smooth(y - yi)
 
-  const a = hash(xi, yi, seed);
-  const b = hash(xi + 1, yi, seed);
-  const c = hash(xi, yi + 1, seed);
-  const d = hash(xi + 1, yi + 1, seed);
+  const a = hash(xi, yi, seed)
+  const b = hash(xi + 1, yi, seed)
+  const c = hash(xi, yi + 1, seed)
+  const d = hash(xi + 1, yi + 1, seed)
 
-  const top = a + (b - a) * u;
-  const bottom = c + (d - c) * u;
+  const top = a + (b - a) * u
+  const bottom = c + (d - c) * u
 
-  return top + (bottom - top) * v;
+  return top + (bottom - top) * v
 }
 
 function fbm(x: number, y: number, seed: number): number {
-  let value = 0;
-  let amplitude = 0.5;
-  let frequency = 1;
-  let total = 0;
+  let value = 0
+  let amplitude = 0.5
+  let frequency = 1
+  let total = 0
 
   for (let octave = 0; octave < 4; octave += 1) {
-    value += amplitude * noise(x * frequency, y * frequency, seed + octave * 19);
-    total += amplitude;
-    amplitude *= 0.5;
-    frequency *= 2.07;
+    value += amplitude * noise(x * frequency, y * frequency, seed + octave * 19)
+    total += amplitude
+    amplitude *= 0.5
+    frequency *= 2.07
   }
 
-  return value / total;
+  return value / total
 }
 
 function field(u: number, v: number, time: number): number {
-  const t = time * 0.16;
+  const t = time * 0.16
 
-  const wx = fbm(u * 1.5 + 0.7 + t * 0.4, v * 1.5 - 1.3 - t * 0.3, 17);
-  const wy = fbm(u * 1.5 - 2.1 - t * 0.26, v * 1.5 + 3.4 + t * 0.34, 41);
+  const wx = fbm(u * 1.5 + 0.7 + t * 0.4, v * 1.5 - 1.3 - t * 0.3, 17)
+  const wy = fbm(u * 1.5 - 2.1 - t * 0.26, v * 1.5 + 3.4 + t * 0.34, 41)
 
-  const wide = fbm(u * 0.9 + 4.2, v * 0.9 - 2.7 + t * 0.18, 131);
-  const detail = fbm(
-    u * 2.2 + (wx - 0.5) * 3.1 + t * 0.22,
-    v * 2.2 + (wy - 0.5) * 3.1 - t * 0.18,
-    73
-  );
+  const wide = fbm(u * 0.9 + 4.2, v * 0.9 - 2.7 + t * 0.18, 131)
+  const detail = fbm(u * 2.2 + (wx - 0.5) * 3.1 + t * 0.22, v * 2.2 + (wy - 0.5) * 3.1 - t * 0.18, 73)
 
-  let value = (detail * 0.58 + wide * 0.42 - 0.5) * 1.78 + 0.47;
+  let value = (detail * 0.58 + wide * 0.42 - 0.5) * 1.78 + 0.47
 
-  if (value < 0) value = 0;
-  else if (value > 1) value = 1;
+  if (value < 0) value = 0
+  else if (value > 1) value = 1
 
-  return value;
+  return value
 }
 
 export function mountDither(canvas: HTMLCanvasElement): () => void {
-  const context = canvas.getContext('2d');
-  if (!context) return () => {};
+  const context = canvas.getContext("2d")
+  if (!context) return () => {}
 
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)")
 
-  let columns = 0;
-  let rows = 0;
-  let coarseColumns = 0;
-  let coarseRows = 0;
-  let coarse = new Float32Array(0);
-  let image: ImageData | null = null;
-  let frame = 0;
-  let running = false;
-  let onScreen = true;
-  let last = 0;
-  let clock = 3.2;
+  let columns = 0
+  let rows = 0
+  let coarseColumns = 0
+  let coarseRows = 0
+  let coarse = new Float32Array(0)
+  let image: ImageData | null = null
+  let frame = 0
+  let running = false
+  let onScreen = true
+  let last = 0
+  let clock = 3.2
 
-  let pointerTargetX = 0.5;
-  let pointerTargetY = 0.5;
-  let pointerX = 0.5;
-  let pointerY = 0.5;
-  let pointerStrength = 0;
-  let pointerActive = false;
+  let pointerTargetX = 0.5
+  let pointerTargetY = 0.5
+  let pointerX = 0.5
+  let pointerY = 0.5
+  let pointerStrength = 0
+  let pointerActive = false
 
   function paint(time: number) {
-    if (!image) return;
+    if (!image) return
 
-    const aspect = rows / columns;
-    const pointerV = pointerY * aspect;
+    const aspect = rows / columns
+    const pointerV = pointerY * aspect
 
     for (let cy = 0; cy < coarseRows; cy += 1) {
-      const v = (cy / Math.max(1, coarseRows - 1)) * aspect;
-      const rowOffset = cy * coarseColumns;
+      const v = (cy / Math.max(1, coarseRows - 1)) * aspect
+      const rowOffset = cy * coarseColumns
 
       for (let cx = 0; cx < coarseColumns; cx += 1) {
-        const u = cx / Math.max(1, coarseColumns - 1);
-        let sampleU = u;
-        let sampleV = v;
-        let distance = 0;
-        let lens = 0;
+        const u = cx / Math.max(1, coarseColumns - 1)
+        let sampleU = u
+        let sampleV = v
+        let distance = 0
+        let lens = 0
 
         if (pointerStrength > 0.002) {
-          const dx = u - pointerX;
-          const dy = v - pointerV;
-          distance = Math.hypot(dx, dy);
-          const falloff = smooth(clamp01(1 - distance / POINTER_RADIUS));
+          const dx = u - pointerX
+          const dy = v - pointerV
+          distance = Math.hypot(dx, dy)
+          const falloff = smooth(clamp01(1 - distance / POINTER_RADIUS))
 
           if (falloff > 0) {
             // A soft magnetic lens: swirl the field around the cursor and pull
             // it slightly inward, then bias the threshold near the centre.
-            const angle = falloff * 0.62;
-            const cos = Math.cos(angle);
-            const sin = Math.sin(angle);
-            const rotatedX = dx * cos - dy * sin;
-            const rotatedY = dx * sin + dy * cos;
-            const scale = 1 - falloff * 0.1;
+            const angle = falloff * 0.62
+            const cos = Math.cos(angle)
+            const sin = Math.sin(angle)
+            const rotatedX = dx * cos - dy * sin
+            const rotatedY = dx * sin + dy * cos
+            const scale = 1 - falloff * 0.1
 
-            sampleU = pointerX + rotatedX * scale;
-            sampleV = pointerV + rotatedY * scale;
-            lens = falloff * pointerStrength;
+            sampleU = pointerX + rotatedX * scale
+            sampleV = pointerV + rotatedY * scale
+            lens = falloff * pointerStrength
           }
         }
 
-        let value = field(sampleU, sampleV, time);
+        let value = field(sampleU, sampleV, time)
 
         if (lens > 0) {
-          const ripple = Math.sin(distance * 52 - time * 2.6);
-          value += lens * (0.14 + ripple * 0.055);
+          const ripple = Math.sin(distance * 52 - time * 2.6)
+          value += lens * (0.14 + ripple * 0.055)
         }
 
-        if (value < 0) value = 0;
-        else if (value > 1) value = 1;
+        if (value < 0) value = 0
+        else if (value > 1) value = 1
 
-        coarse[rowOffset + cx] = value;
+        coarse[rowOffset + cx] = value
       }
     }
 
-    const data = image.data;
-    const scaleX = coarseColumns / columns;
-    const scaleY = coarseRows / rows;
+    const data = image.data
+    const scaleX = coarseColumns / columns
+    const scaleY = coarseRows / rows
 
     for (let y = 0; y < rows; y += 1) {
-      const gy = Math.min(coarseRows - 1, Math.max(0, (y + 0.5) * scaleY - 0.5));
-      const y0 = Math.floor(gy);
-      const y1 = Math.min(coarseRows - 1, y0 + 1);
-      const fy = gy - y0;
-      const band = THRESHOLD[y & 7];
+      const gy = Math.min(coarseRows - 1, Math.max(0, (y + 0.5) * scaleY - 0.5))
+      const y0 = Math.floor(gy)
+      const y1 = Math.min(coarseRows - 1, y0 + 1)
+      const fy = gy - y0
+      const band = THRESHOLD[y & 7]
 
       for (let x = 0; x < columns; x += 1) {
-        const gx = Math.min(coarseColumns - 1, Math.max(0, (x + 0.5) * scaleX - 0.5));
-        const x0 = Math.floor(gx);
-        const x1 = Math.min(coarseColumns - 1, x0 + 1);
-        const fx = gx - x0;
+        const gx = Math.min(coarseColumns - 1, Math.max(0, (x + 0.5) * scaleX - 0.5))
+        const x0 = Math.floor(gx)
+        const x1 = Math.min(coarseColumns - 1, x0 + 1)
+        const fx = gx - x0
 
-        const a = coarse[y0 * coarseColumns + x0];
-        const b = coarse[y0 * coarseColumns + x1];
-        const c = coarse[y1 * coarseColumns + x0];
-        const d = coarse[y1 * coarseColumns + x1];
+        const a = coarse[y0 * coarseColumns + x0]
+        const b = coarse[y0 * coarseColumns + x1]
+        const c = coarse[y1 * coarseColumns + x0]
+        const d = coarse[y1 * coarseColumns + x1]
 
-        const top = a + (b - a) * fx;
-        const bottom = c + (d - c) * fx;
-        const value = top + (bottom - top) * fy;
+        const top = a + (b - a) * fx
+        const bottom = c + (d - c) * fx
+        const value = top + (bottom - top) * fy
 
-        const tone = value > band[x & 7] ? LIGHT : DARK;
-        const index = (y * columns + x) * 4;
+        const tone = value > band[x & 7] ? LIGHT : DARK
+        const index = (y * columns + x) * 4
 
-        data[index] = tone;
-        data[index + 1] = tone;
-        data[index + 2] = tone;
-        data[index + 3] = 255;
+        data[index] = tone
+        data[index + 1] = tone
+        data[index + 2] = tone
+        data[index + 3] = 255
       }
     }
 
-    context.putImageData(image, 0, 0);
+    context.putImageData(image, 0, 0)
   }
 
   function measure() {
-    const rect = canvas.getBoundingClientRect();
-    const width = Math.max(1, rect.width);
-    const height = Math.max(1, rect.height);
+    const rect = canvas.getBoundingClientRect()
+    const width = Math.max(1, rect.width)
+    const height = Math.max(1, rect.height)
 
-    columns = Math.round(Math.min(560, Math.max(240, width / 4)));
-    rows = Math.max(2, Math.round((height / width) * columns));
+    columns = Math.round(Math.min(560, Math.max(240, width / 4)))
+    rows = Math.max(2, Math.round((height / width) * columns))
 
-    canvas.width = columns;
-    canvas.height = rows;
+    canvas.width = columns
+    canvas.height = rows
 
-    image = context.createImageData(columns, rows);
+    image = context.createImageData(columns, rows)
 
-    coarseColumns = Math.max(2, Math.ceil(columns / 2));
-    coarseRows = Math.max(2, Math.ceil(rows / 2));
-    coarse = new Float32Array(coarseColumns * coarseRows);
+    coarseColumns = Math.max(2, Math.ceil(columns / 2))
+    coarseRows = Math.max(2, Math.ceil(rows / 2))
+    coarse = new Float32Array(coarseColumns * coarseRows)
 
-    paint(clock);
+    paint(clock)
   }
 
   function advancePointer(delta: number) {
-    const follow = Math.min(1, delta * 14);
-    pointerX += (pointerTargetX - pointerX) * follow;
-    pointerY += (pointerTargetY - pointerY) * follow;
+    const follow = Math.min(1, delta * 14)
+    pointerX += (pointerTargetX - pointerX) * follow
+    pointerY += (pointerTargetY - pointerY) * follow
 
-    const targetStrength = pointerActive ? 1 : 0;
-    pointerStrength += (targetStrength - pointerStrength) * Math.min(1, delta * 10);
-    if (pointerStrength < 0.001) pointerStrength = 0;
+    const targetStrength = pointerActive ? 1 : 0
+    pointerStrength += (targetStrength - pointerStrength) * Math.min(1, delta * 10)
+    if (pointerStrength < 0.001) pointerStrength = 0
   }
 
   function tick(now: number) {
-    if (!running) return;
-    frame = requestAnimationFrame(tick);
+    if (!running) return
+    frame = requestAnimationFrame(tick)
 
-    if (!onScreen) return;
-    if (now - last < 33) return;
+    if (!onScreen) return
+    if (now - last < 33) return
 
-    const delta = Math.min(0.08, (now - last) / 1000);
-    last = now;
-    advancePointer(delta);
-    clock += delta;
-    paint(clock);
+    const delta = Math.min(0.08, (now - last) / 1000)
+    last = now
+    advancePointer(delta)
+    clock += delta
+    paint(clock)
   }
 
   function start() {
-    if (running || reduceMotion.matches) return;
-    running = true;
-    last = performance.now();
-    frame = requestAnimationFrame(tick);
+    if (running || reduceMotion.matches) return
+    running = true
+    last = performance.now()
+    frame = requestAnimationFrame(tick)
   }
 
   function stop() {
-    running = false;
-    cancelAnimationFrame(frame);
+    running = false
+    cancelAnimationFrame(frame)
   }
 
   const intersection = new IntersectionObserver(
     (entries) => {
-      const entry = entries[0];
-      onScreen = entry ? entry.isIntersecting : true;
-      if (onScreen) start();
-      else stop();
+      const entry = entries[0]
+      onScreen = entry ? entry.isIntersecting : true
+      if (onScreen) start()
+      else stop()
     },
     { threshold: 0.01 }
-  );
+  )
 
-  const resizeObserver = new ResizeObserver(() => measure());
+  const resizeObserver = new ResizeObserver(() => measure())
 
   function handleVisibility() {
-    if (document.hidden) stop();
-    else if (onScreen) start();
+    if (document.hidden) stop()
+    else if (onScreen) start()
   }
 
   function handlePointerMove(event: PointerEvent) {
-    if (event.pointerType === 'touch') return;
+    if (event.pointerType === "touch") return
 
-    const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = (event.clientY - rect.top) / rect.height;
+    const rect = canvas.getBoundingClientRect()
+    const x = (event.clientX - rect.left) / rect.width
+    const y = (event.clientY - rect.top) / rect.height
 
     if (x < 0 || x > 1 || y < 0 || y > 1) {
-      pointerActive = false;
-      return;
+      pointerActive = false
+      return
     }
 
-    pointerActive = true;
-    pointerTargetX = x;
-    pointerTargetY = y;
+    pointerActive = true
+    pointerTargetX = x
+    pointerTargetY = y
   }
 
   function handlePointerLeave() {
-    pointerActive = false;
+    pointerActive = false
   }
 
-  measure();
-  start();
+  measure()
+  start()
 
-  intersection.observe(canvas);
-  resizeObserver.observe(canvas);
-  document.addEventListener('visibilitychange', handleVisibility);
-  window.addEventListener('pointermove', handlePointerMove, { passive: true });
-  document.addEventListener('pointerleave', handlePointerLeave);
-  window.addEventListener('blur', handlePointerLeave);
+  intersection.observe(canvas)
+  resizeObserver.observe(canvas)
+  document.addEventListener("visibilitychange", handleVisibility)
+  window.addEventListener("pointermove", handlePointerMove, { passive: true })
+  document.addEventListener("pointerleave", handlePointerLeave)
+  window.addEventListener("blur", handlePointerLeave)
 
   return () => {
-    stop();
-    intersection.disconnect();
-    resizeObserver.disconnect();
-    document.removeEventListener('visibilitychange', handleVisibility);
-    window.removeEventListener('pointermove', handlePointerMove);
-    document.removeEventListener('pointerleave', handlePointerLeave);
-    window.removeEventListener('blur', handlePointerLeave);
-  };
+    stop()
+    intersection.disconnect()
+    resizeObserver.disconnect()
+    document.removeEventListener("visibilitychange", handleVisibility)
+    window.removeEventListener("pointermove", handlePointerMove)
+    document.removeEventListener("pointerleave", handlePointerLeave)
+    window.removeEventListener("blur", handlePointerLeave)
+  }
 }

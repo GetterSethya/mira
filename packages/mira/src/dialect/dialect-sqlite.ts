@@ -42,24 +42,24 @@ const SUBSUMED_BY_REBUILD: ReadonlySet<MigrationStep["kind"]> = new Set([
 
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
+const unknownToText = (value: unknown): string => {
+  if (value instanceof Error) return `${value.name}: ${value.message}`
+  if (typeof value === "object" && value !== null) return Object.prototype.toString.call(value)
+  return String(value)
+}
+
 const quoteLiteral = (value: unknown) => {
   if (value === null) return "NULL"
   if (typeof value === "boolean") return value ? "1" : "0"
   if (typeof value === "number") return String(value)
-  return `'${String(value).replace(/'/g, "''")}'`
+  return `'${unknownToText(value).replace(/'/g, "''")}'`
 }
 
 const isSqliteBusy = (error: unknown) => errorHasCode(error, ["SQLITE_BUSY", "SQLITE_LOCKED"])
 
-const SQLITE_UNIQUE_CODES = [
-  "SQLITE_CONSTRAINT_PRIMARYKEY",
-  "SQLITE_CONSTRAINT_UNIQUE",
-  1555,
-  2067
-]
+const SQLITE_UNIQUE_CODES = ["SQLITE_CONSTRAINT_PRIMARYKEY", "SQLITE_CONSTRAINT_UNIQUE", 1555, 2067]
 
-export const isSqliteUniqueViolation = (error: unknown) =>
-  errorHasCode(error, SQLITE_UNIQUE_CODES)
+export const isSqliteUniqueViolation = (error: unknown) => errorHasCode(error, SQLITE_UNIQUE_CODES)
 
 const STORE_CODE_KEYS = ["code", "errno", "errstr", "errcode", "extendedCode", "rawCode"]
 
@@ -72,11 +72,7 @@ export const isSqliteStoreDuplicateKey = (error: unknown) =>
   hasUniqueViolationReason(error) ||
   errorHasCode(error, SQLITE_UNIQUE_CODES, STORE_CODE_KEYS)
 
-const upsertSql = (
-  table: string,
-  record: Readonly<Record<string, unknown>>,
-  conflictKeys: ReadonlyArray<string>
-) => {
+const upsertSql = (table: string, record: Readonly<Record<string, unknown>>, conflictKeys: ReadonlyArray<string>) => {
   const keys = Object.keys(record)
   const columns = keys.map(quote).join(", ")
   const values = keys.map((key) => quoteLiteral(record[key])).join(", ")
@@ -164,30 +160,24 @@ function validateUniqueChanges(
         if (field === undefined) continue
 
         if (step.kind === "addColumn" && step.column.name === field && !storedNames.has(field)) {
-          return yield* Effect.fail(
-            new UnsupportedMigrationStepError({
-              step: step.kind,
-              detail: `adding "${step.column.name}" to "${step.table}" cannot satisfy the single-field unique index "${indexNameOf(step.table, index.fields)}" because every existing row would receive the same value`
-            })
-          )
+          return yield* new UnsupportedMigrationStepError({
+            step: step.kind,
+            detail: `adding "${step.column.name}" to "${step.table}" cannot satisfy the single-field unique index "${indexNameOf(step.table, index.fields)}" because every existing row would receive the same value`
+          })
         }
 
         if (step.kind === "alterColumn" && step.to.name === field) {
           if (step.from.type !== step.to.type) {
-            return yield* Effect.fail(
-              new UnsupportedMigrationStepError({
-                step: step.kind,
-                detail: `changing the type of "${step.table}"."${field}" can collapse values in the single-field unique index "${indexNameOf(step.table, index.fields)}"`
-              })
-            )
+            return yield* new UnsupportedMigrationStepError({
+              step: step.kind,
+              detail: `changing the type of "${step.table}"."${field}" can collapse values in the single-field unique index "${indexNameOf(step.table, index.fields)}"`
+            })
           }
           if (step.from.nullable && !step.to.nullable && step.to.default !== undefined) {
-            return yield* Effect.fail(
-              new UnsupportedMigrationStepError({
-                step: step.kind,
-                detail: `making "${step.table}"."${field}" NOT NULL with a default can collapse NULL rows into one value in the single-field unique index "${indexNameOf(step.table, index.fields)}"`
-              })
-            )
+            return yield* new UnsupportedMigrationStepError({
+              step: step.kind,
+              detail: `making "${step.table}"."${field}" NOT NULL with a default can collapse NULL rows into one value in the single-field unique index "${indexNameOf(step.table, index.fields)}"`
+            })
           }
         }
       }
@@ -209,9 +199,7 @@ function rebuildStatements(table: string, desired: TableShape, stored: TableShap
   const copied = desired.columns.filter((c) => previous.has(c.name))
   const storedNames = new Set(previous.keys())
   const syntheticDefaults = new Set(
-    desired.columns
-      .filter((c) => !storedNames.has(c.name) && !c.nullable && c.default === undefined)
-      .map((c) => c.name)
+    desired.columns.filter((c) => !storedNames.has(c.name) && !c.nullable && c.default === undefined).map((c) => c.name)
   )
 
   const statements = [createTableSql(scratch, desired.columns, false, syntheticDefaults)]
@@ -242,10 +230,7 @@ function rebuildStatements(table: string, desired: TableShape, stored: TableShap
     )
   }
 
-  statements.push(
-    `DROP TABLE ${quote(table)}`,
-    createTableSql(table, desired.columns, false, syntheticDefaults)
-  )
+  statements.push(`DROP TABLE ${quote(table)}`, createTableSql(table, desired.columns, false, syntheticDefaults))
 
   if (copied.length > 0) {
     const columns = desired.columns.map((c) => quote(c.name)).join(", ")
@@ -280,11 +265,7 @@ const timestampDiffSql = (left: string, right: string, unit: TimestampUnit) => {
 /** One backslash that SQLite treats as the LIKE escape character. */
 const LIKE_ESCAPE = "ESCAPE '\\'"
 
-const caseInsensitiveLikeSql = (
-  left: string,
-  right: string,
-  mode: "prefix" | "contains"
-) =>
+const caseInsensitiveLikeSql = (left: string, right: string, mode: "prefix" | "contains") =>
   mode === "prefix"
     ? `${left} LIKE (${right} || '%') ${LIKE_ESCAPE}`
     : `${left} LIKE ('%' || ${right} || '%') ${LIKE_ESCAPE}`
@@ -333,10 +314,7 @@ const hasQuery = (query: string | null | undefined): query is string =>
  * node in the stored dependency graph, so a tracked view that reads the
  * untracked dropped view enters the affected closure.
  */
-function analyzeViewPlan(
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-): ViewAnalysis | null {
+function analyzeViewPlan(steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext): ViewAnalysis | null {
   const changedTablesRaw = new Set<string>()
   for (const step of steps) {
     if (step.kind === "dropColumn") changedTablesRaw.add(step.table)
@@ -508,11 +486,7 @@ function collectViewPreflightErrors(
   return errors
 }
 
-function referencesTouched(
-  query: string,
-  changedTables: ReadonlySet<string>,
-  affected: ReadonlySet<string>
-): boolean {
+function referencesTouched(query: string, changedTables: ReadonlySet<string>, affected: ReadonlySet<string>): boolean {
   for (const reference of fromJoinReferences(query)) {
     if (changedTables.has(reference) || affected.has(reference)) return true
   }
@@ -532,10 +506,7 @@ function buildViewSynthesis(analysis: ViewAnalysis, ctx: TranslatePlanContext): 
     const raw = entry?.raw ?? explicit
     if (raw === undefined) continue
     const stored = entry?.shape.stored
-    if (
-      explicit === undefined &&
-      (stored === undefined || stored === null || stored.query === null)
-    ) {
+    if (explicit === undefined && (stored === undefined || stored === null || stored.query === null)) {
       continue
     }
     drops.push(raw)
@@ -575,10 +546,7 @@ function buildViewSynthesis(analysis: ViewAnalysis, ctx: TranslatePlanContext): 
     }
   }
 
-  const createOrder = topologicalViewOrder(
-    new Set(createRaw.keys()),
-    viewDependencies(effectiveDesired, "desired")
-  )
+  const createOrder = topologicalViewOrder(new Set(createRaw.keys()), viewDependencies(effectiveDesired, "desired"))
   const creates = createOrder.flatMap((name) => {
     const create = createRaw.get(name)
     return create === undefined ? [] : [create]
@@ -595,11 +563,8 @@ function buildViewSynthesis(analysis: ViewAnalysis, ctx: TranslatePlanContext): 
 }
 
 function validationQuery(raw: string, properties: ReadonlyArray<string>): string {
-  const columns = properties.length === 0
-    ? ["seqId"]
-    : properties.includes("seqId")
-      ? properties
-      : [...properties, "seqId"]
+  const columns =
+    properties.length === 0 ? ["seqId"] : properties.includes("seqId") ? properties : [...properties, "seqId"]
   return `SELECT ${columns.map(quote).join(", ")} FROM ${quote(raw)} LIMIT 0`
 }
 
@@ -663,10 +628,7 @@ type PlanSurface = {
  * `analyzeViewPlan` uses. Every catalog-to-plan name comparison goes through
  * `normalizeIdentifier`.
  */
-function planSurfaceOf(
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-): PlanSurface {
+function planSurfaceOf(steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext): PlanSurface {
   const rawNames = new Map<string, string>()
   const nameOf = (raw: string) => {
     const normalized = normalizeIdentifier(raw)
@@ -769,12 +731,7 @@ type ReferenceSurface = {
 
 /** The first object a view's stored references match, with its class. */
 type MatchedReference = {
-  readonly kind:
-    | "rebuildDropTable"
-    | "droppedTable"
-    | "removedView"
-    | "nativeDropTable"
-    | "recreatedView"
+  readonly kind: "rebuildDropTable" | "droppedTable" | "removedView" | "nativeDropTable" | "recreatedView"
   readonly name: string
 }
 
@@ -804,9 +761,7 @@ function classifyCatalogPlan(
     if (surface.explicitCreates.has(normalized)) recreateSet.add(normalized)
   }
   if (synthesis !== null) {
-    const synthesisDrops = new Set(
-      synthesis.drops.map((raw) => normalizeIdentifier(raw))
-    )
+    const synthesisDrops = new Set(synthesis.drops.map((raw) => normalizeIdentifier(raw)))
     for (const create of synthesis.creates) {
       const normalized = normalizeIdentifier(create.raw)
       if (synthesisDrops.has(normalized)) recreateSet.add(normalized)
@@ -894,9 +849,10 @@ function classifyCatalogPlan(
         !recreateSet.has(normalized) &&
         !surface.droppedViews.has(normalized)
       ) {
-        const object = matched.kind === "droppedTable"
-          ? `dropped table "${rawOf(matched.name)}"`
-          : `dropped view "${rawOf(matched.name)}"`
+        const object =
+          matched.kind === "droppedTable"
+            ? `dropped table "${rawOf(matched.name)}"`
+            : `dropped view "${rawOf(matched.name)}"`
         trackedErrors.push(
           new UnsupportedMigrationStepError({
             step: matched.kind === "droppedTable" ? "dropTable" : "dropView",
@@ -1001,9 +957,7 @@ function classifyCatalogPlan(
   }
 
   const catalogNames = new Set(catalog.map((row) => normalizeIdentifier(row.name)))
-  const sortedNewCreates = [...surface.newCreateViews].sort((left, right) =>
-    left.localeCompare(right)
-  )
+  const sortedNewCreates = [...surface.newCreateViews].sort((left, right) => left.localeCompare(right))
   for (const normalized of sortedNewCreates) {
     if (!catalogNames.has(normalized)) continue
     errors.push(
@@ -1025,6 +979,28 @@ function classifyCatalogPlan(
 
 export const sqliteStoreSql: StoreSqlCapabilities = {
   bootstrapMode: "plain",
+  keyColumnType: "TEXT",
+  textColumnType: "TEXT",
+  bucketColumnType: "TEXT",
+  bucketMaxLength: 1_000_000,
+  createIndexIfNotExists: (name, table, columns, unique) =>
+    `CREATE ${unique ? "UNIQUE " : ""}INDEX IF NOT EXISTS ${quote(name)} ON ${quote(table)} (${columns.map(quote).join(", ")})`,
+  isIgnorableBootstrapError: () => false,
+  insertIgnoreClause: (conflictKeys) => `ON CONFLICT (${conflictKeys.map(quote).join(", ")}) DO NOTHING`,
+  upsertClause: (conflictKeys, assignments) =>
+    `ON CONFLICT (${conflictKeys.map(quote).join(", ")}) DO UPDATE SET ${assignments
+      .map((assignment) =>
+        assignment.kind === "excluded"
+          ? `${quote(assignment.column)} = excluded.${quote(assignment.column)}`
+          : `${quote(assignment.column)} = ${quote(assignment.column)} + 1`
+      )
+      .join(", ")}`,
+  mutationResult: { _tag: "returning" },
+  challengeLive: {
+    mode: "partial",
+    indexName: "_auth_challenges_live",
+    indexStatement: `CREATE UNIQUE INDEX IF NOT EXISTS ${quote("_auth_challenges_live")} ON ${quote("_auth_challenges")} (${["collection", "user_id", "purpose"].map(quote).join(", ")}) WHERE ${quote("consumed_at")} IS NULL`
+  },
   columnExistsSql: sqliteColumnExistsSql,
   isRetryable: isSqliteBusy,
   isDuplicateKey: isSqliteStoreDuplicateKey
@@ -1053,11 +1029,7 @@ export const sqliteDialect: DialectType = {
   upsert: upsertSql,
   store: sqliteStoreSql,
   telemetry: {
-    setup: [
-      "PRAGMA journal_mode = WAL",
-      "PRAGMA synchronous = NORMAL",
-      "PRAGMA busy_timeout = 5000"
-    ],
+    setup: ["PRAGMA journal_mode = WAL", "PRAGMA synchronous = NORMAL", "PRAGMA busy_timeout = 5000"],
     cleanup: ["PRAGMA wal_checkpoint(TRUNCATE)"],
     isRetryable: isSqliteBusy
   },
@@ -1085,7 +1057,7 @@ export const sqliteDialect: DialectType = {
       if (analysis !== null) {
         const errors = collectViewPreflightErrors(steps, analysis)
         const firstError = errors[0]
-        if (firstError !== undefined) return yield* Effect.fail(firstError)
+        if (firstError !== undefined) return yield* firstError
       }
 
       const synthesis = analysis === null ? null : buildViewSynthesis(analysis, ctx)
@@ -1094,19 +1066,17 @@ export const sqliteDialect: DialectType = {
         ? classifyCatalogPlan(ctx, surface, synthesis, catalog)
         : EMPTY_CLASSIFICATION
       const classificationError = classification.errors[0]
-      if (classificationError !== undefined) return yield* Effect.fail(classificationError)
+      if (classificationError !== undefined) return yield* classificationError
 
       const rebuilds = new Map<string, TableShapes>()
       for (const step of steps) {
         if (step.kind !== "alterColumn") continue
         const shapes = ctx.tables.get(step.table)
         if (shapes === undefined || shapes.stored === null) {
-          return yield* Effect.fail(
-            new UnsupportedMigrationStepError({
-              step: step.kind,
-              detail: `changing a column of "${step.table}" requires rebuilding that table, but the plan carries no stored shape for it`
-            })
-          )
+          return yield* new UnsupportedMigrationStepError({
+            step: step.kind,
+            detail: `changing a column of "${step.table}" requires rebuilding that table, but the plan carries no stored shape for it`
+          })
         }
         rebuilds.set(step.table, shapes)
       }
@@ -1128,12 +1098,7 @@ export const sqliteDialect: DialectType = {
         const table = "table" in step ? step.table : null
         const shapes = table === null ? undefined : rebuilds.get(table)
 
-        if (
-          table !== null &&
-          shapes !== undefined &&
-          shapes.stored !== null &&
-          SUBSUMED_BY_REBUILD.has(step.kind)
-        ) {
+        if (table !== null && shapes !== undefined && shapes.stored !== null && SUBSUMED_BY_REBUILD.has(step.kind)) {
           if (!rebuilt.has(table)) {
             rebuilt.add(table)
             statements.push(...rebuildStatements(table, shapes.desired, shapes.stored))
@@ -1202,9 +1167,7 @@ export const sqliteDialect: DialectType = {
         return [`ALTER TABLE ${quote(step.table)} DROP COLUMN ${quote(step.column)}`]
 
       case "renameColumn":
-        return [
-          `ALTER TABLE ${quote(step.table)} RENAME COLUMN ${quote(step.from)} TO ${quote(step.to)}`
-        ]
+        return [`ALTER TABLE ${quote(step.table)} RENAME COLUMN ${quote(step.from)} TO ${quote(step.to)}`]
 
       case "alterColumn":
         // Unreachable through `translatePlan`, which rebuilds the table instead:

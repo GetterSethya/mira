@@ -1,7 +1,13 @@
+import { Schema } from "effect"
+
 import type { ApiCollectionSchema, ApiFieldSchema } from "@gettersethya/mira-client"
 
 import { pascalCase } from "./codegen.js"
 import { installCommand, type PackageManager } from "./package-manager.js"
+
+const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.String))
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const encodePrettyJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }))
 
 export type SnippetLanguage = "ts" | "bash" | "json"
 
@@ -47,8 +53,7 @@ type SnippetKind =
   | "relation"
   | "file"
 
-const ERROR_LINE =
-  "if (!res.ok) throw new Error(`Mira ${res.status}: ${await res.text()}`)"
+const ERROR_LINE = "if (!res.ok) throw new Error(`Mira ${res.status}: ${await res.text()}`)"
 
 /** Sections for the SDK tab: plain client, server client, TanStack adapter. */
 export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSection> {
@@ -70,7 +75,7 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
         "",
         'import { collections } from "./mira.generated.js"',
         "",
-        `export const mira = createMiraClient(${JSON.stringify(baseUrl)}).withCollections(collections)`
+        `export const mira = createMiraClient(${encodeJsonString(baseUrl)}).withCollections(collections)`
       ].join("\n")
     }
   ]
@@ -150,11 +155,7 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
       id: "get-one",
       label: "get one",
       language: "ts",
-      code: [
-        'const recordId = "record-id"',
-        "",
-        `const record = await ${access}.getOne(recordId).raw()`
-      ].join("\n")
+      code: ['const recordId = "record-id"', "", `const record = await ${access}.getOne(recordId).raw()`].join("\n")
     })
     plain.push({
       id: "note",
@@ -171,7 +172,7 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
       label: "upload",
       language: "ts",
       code: [
-        "// `file` is a File or Blob picked from an <input type=\"file\">",
+        '// `file` is a File or Blob picked from an <input type="file">',
         `const updated = await ${access}.update().raw({`,
         "  id: created.id,",
         `  data: { ${formatKey(file.name)}: file }`,
@@ -190,7 +191,7 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
         "",
         'import { collections } from "./mira.generated.js"',
         "",
-        `const mira = createMiraClient(${JSON.stringify(baseUrl)}, { type: "server" }).withCollections(collections)`
+        `const mira = createMiraClient(${encodeJsonString(baseUrl)}, { type: "server" }).withCollections(collections)`
       ].join("\n")
     }
   ]
@@ -223,10 +224,7 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
       id: "adapter-install",
       label: "install",
       language: "bash",
-      code: installCommand(manager, [
-        "@gettersethya/mira-tanstack-adapter",
-        "@tanstack/svelte-query"
-      ])
+      code: installCommand(manager, ["@gettersethya/mira-tanstack-adapter", "@tanstack/svelte-query"])
     },
     {
       id: "adapter-setup",
@@ -238,7 +236,7 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
         "",
         'import { collections } from "./mira.generated.js"',
         "",
-        `export const mira = createMiraClient(${JSON.stringify(baseUrl)}).withCollections(collections, {`,
+        `export const mira = createMiraClient(${encodeJsonString(baseUrl)}).withCollections(collections, {`,
         "  adapter: collectionAdapter",
         "})"
       ].join("\n")
@@ -280,15 +278,13 @@ export function sdkSections(options: SnippetOptions): ReadonlyArray<SnippetSecti
     {
       id: "server",
       heading: "Server-to-server",
-      description:
-        "Server-side client using a Bearer token. Set the token once per request context.",
+      description: "Server-side client using a Bearer token. Set the token once per request context.",
       blocks: serverBlocks
     },
     {
       id: "adapter",
       heading: "With TanStack Query",
-      description:
-        "TanStack Query integration. Every query and mutation exposes ready-made options.",
+      description: "TanStack Query integration. Every query and mutation exposes ready-made options.",
       blocks: adapterBlocks
     }
   ]
@@ -313,13 +309,13 @@ export function fetchSections(options: SnippetOptions): ReadonlyArray<SnippetSec
       id: "filter",
       label: "filter",
       language: "json",
-      code: JSON.stringify(filterNode, null, 2)
+      code: encodePrettyJson(filterNode)
     },
     {
       id: "filter-url",
       label: "filter url",
       language: "bash",
-      code: `${collectionUrl}?filter=${encodeURIComponent(JSON.stringify(filterNode))}`
+      code: `${collectionUrl}?filter=${encodeURIComponent(encodeJson(filterNode))}`
     },
     {
       id: "get-one",
@@ -353,8 +349,7 @@ export function fetchSections(options: SnippetOptions): ReadonlyArray<SnippetSec
     sections.push({
       id: "auth",
       heading: "Authentication",
-      description:
-        "Register an account, log in, and fetch the current user. The browser keeps the session cookie.",
+      description: "Register an account, log in, and fetch the current user. The browser keeps the session cookie.",
       blocks: [
         {
           id: "register",
@@ -439,10 +434,7 @@ export function curlSections(options: SnippetOptions): ReadonlyArray<SnippetSect
       id: "filter",
       label: "filter",
       language: "bash",
-      code: curlGet(
-        `${collectionUrl}?filter=${encodeURIComponent(JSON.stringify(filterNode))}`,
-        true
-      )
+      code: curlGet(`${collectionUrl}?filter=${encodeURIComponent(encodeJson(filterNode))}`, true)
     },
     {
       id: "get-one",
@@ -476,8 +468,7 @@ export function curlSections(options: SnippetOptions): ReadonlyArray<SnippetSect
     sections.push({
       id: "auth",
       heading: "Authentication",
-      description:
-        "Register an account, exchange credentials for a JWT, then send it as a Bearer token.",
+      description: "Register an account, exchange credentials for a JWT, then send it as a Bearer token.",
       blocks: [
         {
           id: "register",
@@ -540,11 +531,7 @@ export function curlSections(options: SnippetOptions): ReadonlyArray<SnippetSect
         id: "upload",
         label: "upload",
         language: "bash",
-        code: curlRequest(
-          `${collectionUrl}/record-id`,
-          ["-X PATCH", `-F "${file.name}=@${file.name}.png"`],
-          true
-        )
+        code: curlRequest(`${collectionUrl}/record-id`, ["-X PATCH", `-F "${file.name}=@${file.name}.png"`], true)
       })
     }
 
@@ -575,9 +562,9 @@ function sdkListCode(schema: ApiCollectionSchema): string {
 
   if (filter !== undefined) {
     lines.push(
-      `  filter: (f) => f.field(${JSON.stringify(filter.name)}).eq(${tsValue(sampleValue(filter.name, filter.field))}),`
+      `  filter: (f) => f.field(${encodeJsonString(filter.name)}).eq(${tsValue(sampleValue(filter.name, filter.field))}),`
     )
-    lines.push(`  sort: ${JSON.stringify(filter.name)},`)
+    lines.push(`  sort: ${encodeJsonString(filter.name)},`)
     lines.push('  order: "desc",')
   }
 
@@ -590,7 +577,7 @@ function fetchListCode(
   schema: ApiCollectionSchema,
   collectionUrl: string,
   allSchemas: ReadonlyArray<ApiCollectionSchema>
-): string {
+) {
   return [
     '// Browser: session cookie. Server: headers: { authorization: "Bearer <token>" }',
     `const params = new URLSearchParams(${tsObject(listParams(schema, allSchemas), 0)})`,
@@ -603,7 +590,7 @@ function fetchListCode(
   ].join("\n")
 }
 
-function fetchGetOneCode(collectionUrl: string): string {
+function fetchGetOneCode(collectionUrl: string) {
   return [
     `const res = await fetch(\`${collectionUrl}/record-id\`, {`,
     '  credentials: "include"',
@@ -613,22 +600,18 @@ function fetchGetOneCode(collectionUrl: string): string {
   ].join("\n")
 }
 
-function fetchCreateCode(schema: ApiCollectionSchema, collectionUrl: string): string {
+function fetchCreateCode(schema: ApiCollectionSchema, collectionUrl: string) {
   return fetchJsonWrite("POST", collectionUrl, createBody(schema))
 }
 
-function fetchUpdateCode(schema: ApiCollectionSchema, collectionUrl: string): string {
+function fetchUpdateCode(schema: ApiCollectionSchema, collectionUrl: string) {
   return fetchJsonWrite("PATCH", `${collectionUrl}/record-id`, updateBody(schema))
 }
 
-function fetchJsonWrite(
-  method: "POST" | "PATCH",
-  url: string,
-  body: ReadonlyArray<BodyEntry>
-): string {
+function fetchJsonWrite(method: "POST" | "PATCH", url: string, body: ReadonlyArray<BodyEntry>) {
   return [
     `const res = await fetch(\`${url}\`, {`,
-    `  method: ${JSON.stringify(method)},`,
+    `  method: ${encodeJsonString(method)},`,
     '  credentials: "include",',
     '  headers: { "content-type": "application/json" },',
     `  body: JSON.stringify(${tsObject(body, 2)})`,
@@ -638,7 +621,7 @@ function fetchJsonWrite(
   ].join("\n")
 }
 
-function fetchDeleteCode(collectionUrl: string): string {
+function fetchDeleteCode(collectionUrl: string) {
   return [
     `const res = await fetch(\`${collectionUrl}/record-id\`, {`,
     '  method: "DELETE",',
@@ -654,7 +637,7 @@ function fetchUploadCode(schema: ApiCollectionSchema, collectionUrl: string): st
 
   return [
     "const form = new FormData()",
-    `form.set(${JSON.stringify(fieldName)}, file)`,
+    `form.set(${encodeJsonString(fieldName)}, file)`,
     "",
     `const res = await fetch(\`${collectionUrl}/record-id\`, {`,
     '  method: "PATCH",',
@@ -666,17 +649,14 @@ function fetchUploadCode(schema: ApiCollectionSchema, collectionUrl: string): st
   ].join("\n")
 }
 
-function fetchRegisterCode(
-  schema: ApiCollectionSchema,
-  collectionUrl: string
-): string {
+function fetchRegisterCode(schema: ApiCollectionSchema, collectionUrl: string) {
   return [
     "// register = a create on an auth collection; it does not log in automatically",
     fetchJsonWrite("POST", collectionUrl, createBody(schema))
   ].join("\n")
 }
 
-function fetchLoginCode(collectionUrl: string): string {
+function fetchLoginCode(collectionUrl: string) {
   return [
     `const res = await fetch(\`${collectionUrl}/auth-with-password\`, {`,
     '  method: "POST",',
@@ -689,9 +669,9 @@ function fetchLoginCode(collectionUrl: string): string {
   ].join("\n")
 }
 
-function fetchMeCode(baseUrl: string): string {
+function fetchMeCode(baseUrl: string) {
   return [
-    `const res = await fetch(${JSON.stringify(joinUrl(baseUrl, "/api/auth/me"))}, {`,
+    `const res = await fetch(${encodeJsonString(joinUrl(baseUrl, "/api/auth/me"))}, {`,
     '  credentials: "include"',
     "})",
     ERROR_LINE,
@@ -699,28 +679,15 @@ function fetchMeCode(baseUrl: string): string {
   ].join("\n")
 }
 
-function curlGet(url: string, auth: boolean): string {
+function curlGet(url: string, auth: boolean) {
   return curlRequest(url, [], auth)
 }
 
-function curlJson(
-  method: "POST" | "PATCH",
-  url: string,
-  body: ReadonlyArray<BodyEntry>,
-  auth: boolean
-): string {
-  return curlRequest(
-    url,
-    [`-X ${method}`, '-H "content-type: application/json"', `-d '${jsonBody(body)}'`],
-    auth
-  )
+function curlJson(method: "POST" | "PATCH", url: string, body: ReadonlyArray<BodyEntry>, auth: boolean) {
+  return curlRequest(url, [`-X ${method}`, '-H "content-type: application/json"', `-d '${jsonBody(body)}'`], auth)
 }
 
-function curlRequest(
-  url: string,
-  options: ReadonlyArray<string>,
-  auth: boolean
-): string {
+function curlRequest(url: string, options: ReadonlyArray<string>, auth: boolean): string {
   const parts = [`curl "${url}"`, ...options]
   if (auth) parts.push('-H "authorization: Bearer <token>"')
   if (parts.length > 1) return parts.join(" \\\n  ")
@@ -748,10 +715,8 @@ function listParams(
   return params
 }
 
-function queryString(params: ReadonlyArray<readonly [string, string]>): string {
-  return params
-    .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`)
-    .join("&")
+function queryString(params: ReadonlyArray<readonly [string, string]>) {
+  return params.map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`).join("&")
 }
 
 function buildFilterNode(schema: ApiCollectionSchema): {
@@ -929,7 +894,7 @@ function accessor(collectionName: string): string {
   if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(collectionName)) {
     return `mira.${collectionName}`
   }
-  return `mira[${JSON.stringify(collectionName)}]`
+  return `mira[${encodeJsonString(collectionName)}]`
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -938,39 +903,31 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${base}${suffix}`
 }
 
-function tsObject(
-  entries: ReadonlyArray<BodyEntry>,
-  closingIndent: number
-): string {
+function tsObject(entries: ReadonlyArray<BodyEntry>, closingIndent: number): string {
   if (entries.length === 0) return "{}"
 
   const indent = " ".repeat(closingIndent)
-  const fields = entries
-    .map(([name, value]) => `${indent}  ${formatKey(name)}: ${tsValue(value)}`)
-    .join(",\n")
+  const fields = entries.map(([name, value]) => `${indent}  ${formatKey(name)}: ${tsValue(value)}`).join(",\n")
 
   return `{\n${fields}\n${indent}}`
 }
 
 function tsValue(value: unknown): string {
-  if (typeof value === "string") return JSON.stringify(value)
+  if (typeof value === "string") return encodeJsonString(value)
   if (typeof value === "number" || typeof value === "boolean") return String(value)
   if (value === null) return "null"
-  return JSON.stringify(value) ?? "undefined"
+  if (value === undefined) return "undefined"
+  return encodeJson(value)
 }
 
 function jsonBody(entries: ReadonlyArray<BodyEntry>): string {
   const body: Record<string, unknown> = {}
   for (const [name, value] of entries) body[name] = value
-  return JSON.stringify(body)
+  return encodeJson(body)
 }
 
-function formatKey(name: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name)
-}
-
-function pascal(name: string): string {
-  return pascalCase(name)
+function formatKey(name: string) {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : encodeJsonString(name)
 }
 
 function camelCase(name: string): string {

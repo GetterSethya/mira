@@ -3,7 +3,7 @@ import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { Effect, Layer, Option, Redacted } from "effect"
 import { expect } from "vitest"
 
-import { applyRulesToCollections,defineRule } from "@/app/index.js"
+import { applyRulesToCollections, defineRule } from "@/app/index.js"
 import { MiraPlugin } from "@/app/plugin.js"
 import { CollectionService } from "@/collection-service/collection-service.js"
 import { AppConfig } from "@/config/index.js"
@@ -108,7 +108,7 @@ describe("HookService", () => {
               handler: (ctx) =>
                 Effect.succeed({
                   ...ctx,
-                  data: { ...ctx.data, title: `${ctx.data.title}-first` }
+                  data: { ...ctx.data, title: `${String(ctx.data.title)}-first` }
                 })
             }
           }),
@@ -117,7 +117,7 @@ describe("HookService", () => {
               handler: (ctx) =>
                 Effect.succeed({
                   ...ctx,
-                  data: { ...ctx.data, title: `${ctx.data.title}-second` }
+                  data: { ...ctx.data, title: `${String(ctx.data.title)}-second` }
                 })
             }
           })

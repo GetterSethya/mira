@@ -18,11 +18,35 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { performance } from "node:perf_hooks"
 
-type Operation = "create" | "update" | "delete" | "mixed" | "list"
+import { Schema } from "effect"
+
+const OperationSchema = Schema.Literals(["create", "update", "delete", "mixed", "list"])
+
+const CreateRecordSchema = Schema.Struct({
+  title: Schema.String,
+  body: Schema.String,
+  published: Schema.Boolean
+})
+
+const SeedRequestSchema = Schema.Struct({ records: Schema.Array(CreateRecordSchema) })
+
+const UpdateRequestSchema = Schema.Struct({ title: Schema.String })
+
+const FilterSchema = Schema.Struct({
+  op: Schema.Literals(["neq", "eq"]),
+  field: Schema.String,
+  value: Schema.String
+})
+
+const decodeOperation = Schema.decodeUnknownSync(OperationSchema)
+const encodeSeedRequest = Schema.encodeSync(Schema.fromJsonString(SeedRequestSchema))
+const encodeCreateRequest = Schema.encodeSync(Schema.fromJsonString(CreateRecordSchema))
+const encodeUpdateRequest = Schema.encodeSync(Schema.fromJsonString(UpdateRequestSchema))
+const encodeFilter = Schema.encodeSync(Schema.fromJsonString(FilterSchema))
 
 const packageRoot = process.cwd()
 const repoRoot = join(packageRoot, "../..")
-const operation = (process.env.PROFILE_OP ?? "update") as Operation
+const operation = decodeOperation(process.env.PROFILE_OP ?? "update")
 const requests = Number(process.env.PROFILE_REQUESTS ?? "5000")
 const concurrency = Number(process.env.PROFILE_CONCURRENCY ?? "50")
 const seedRows = Number(process.env.PROFILE_SEED ?? "3000")
@@ -51,30 +75,26 @@ const freePort = () =>
 
 const directory = mkdtempSync(join(tmpdir(), "mira-profile-mutation-"))
 const port = await freePort()
-const child: ChildProcess = spawn(
-  process.execPath,
-  ["src/server.ts"],
-  {
-    cwd: packageRoot,
-    env: {
-      ...process.env,
-      BENCH_PLATFORM: "node",
-      BENCH_PORT: String(port),
-      BENCH_DB: join(directory, "bench.sqlite"),
-      BENCH_UPLOADS: join(directory, "uploads"),
-      BENCH_SYNCHRONOUS: synchronous,
-      BENCH_CACHE: "off",
-      BENCH_TRACING: tracing ? "on" : "off",
-      BENCH_STACK_TRACES: "off",
-      BENCH_CREATE_BATCH: "on",
-      BENCH_UPDATE_BATCH: "on",
-      BENCH_DELETE_BATCH: "on",
-      BENCH_CREATE_BATCH_WINDOW_MS: "0",
-      BENCH_CREATE_BATCH_MAX: "100"
-    },
-    stdio: ["ignore", "pipe", "pipe"]
-  }
-)
+const child: ChildProcess = spawn(process.execPath, ["src/server.ts"], {
+  cwd: packageRoot,
+  env: {
+    ...process.env,
+    BENCH_PLATFORM: "node",
+    BENCH_PORT: String(port),
+    BENCH_DB: join(directory, "bench.sqlite"),
+    BENCH_UPLOADS: join(directory, "uploads"),
+    BENCH_SYNCHRONOUS: synchronous,
+    BENCH_CACHE: "off",
+    BENCH_TRACING: tracing ? "on" : "off",
+    BENCH_STACK_TRACES: "off",
+    BENCH_CREATE_BATCH: "on",
+    BENCH_UPDATE_BATCH: "on",
+    BENCH_DELETE_BATCH: "on",
+    BENCH_CREATE_BATCH_WINDOW_MS: "0",
+    BENCH_CREATE_BATCH_MAX: "100"
+  },
+  stdio: ["ignore", "pipe", "pipe"]
+})
 let logs = ""
 child.stdout?.on("data", (value: Buffer) => (logs += value.toString()))
 child.stderr?.on("data", (value: Buffer) => (logs += value.toString()))
@@ -121,7 +141,7 @@ const seed = async () => {
     const response = await fetch(`${baseUrl}/api/collections/posts/bulk`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ records })
+      body: encodeSeedRequest({ records })
     })
     if (!response.ok) throw new Error(`Seed failed: ${response.status} ${await response.text()}`)
     const payload: unknown = await response.json()
@@ -143,7 +163,7 @@ const create = async (index: number) => {
   const response = await fetch(`${baseUrl}/api/collections/posts`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: `create-${index}`, body: "x", published: false })
+    body: encodeCreateRequest({ title: `create-${index}`, body: "x", published: false })
   })
   await response.arrayBuffer()
   return response.ok
@@ -153,7 +173,7 @@ const update = async (id: string, index: number) => {
   const response = await fetch(`${baseUrl}/api/collections/posts/${id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: `update-${index}` })
+    body: encodeUpdateRequest({ title: `update-${index}` })
   })
   await response.arrayBuffer()
   return response.ok
@@ -166,9 +186,7 @@ const remove = async (id: string) => {
 }
 
 const list = async (index: number) => {
-  const filter = encodeURIComponent(
-    JSON.stringify({ op: "neq", field: "title", value: `read-${index}` })
-  )
+  const filter = encodeURIComponent(encodeFilter({ op: "neq", field: "title", value: `read-${index}` }))
   const response = await fetch(`${baseUrl}/api/collections/posts?limit=20&filter=${filter}`)
   await response.arrayBuffer()
   return response.ok

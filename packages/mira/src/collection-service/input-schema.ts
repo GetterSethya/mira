@@ -12,34 +12,22 @@ export type InputSchemas = {
   update: Schema.Codec<RepoRecord, RepoRecord>
 }
 
-function filterAnnotations(
-  kind: ConstraintKind,
-  errorFn: ((kind: ConstraintKind) => string | undefined) | undefined
-): { message: string } | undefined {
-  if (errorFn === undefined) return undefined
-  const msg = errorFn(kind)
+function filterAnnotations(kind: ConstraintKind, fieldDef: FieldDef | undefined): { message: string } | undefined {
+  if (fieldDef === undefined) return undefined
+  const msg = fieldDef.error?.(kind)
   if (msg === undefined) return undefined
   return { message: msg }
 }
 
 function propertyToSchema(prop: JsonSchemaProperty, fieldDef: FieldDef | undefined): Schema.Codec<unknown, unknown> {
-  const errorFn = fieldDef?.error
-
   if (prop["x-kind"] === "literalText") {
-    const typeMsg = errorFn?.("type")
-    const base = typeMsg !== undefined
-      ? Schema.String.annotate({ message: typeMsg })
-      : Schema.String
+    const typeMsg = fieldDef?.error?.("type")
+    const base = typeMsg !== undefined ? Schema.String.annotate({ message: typeMsg }) : Schema.String
     const literalValues = prop["x-literal"]
     if (literalValues && literalValues.length > 0) {
       const literalSet = new Set(literalValues)
       return base.pipe(
-        Schema.check(
-          Schema.makeFilter(
-            (a: string) => literalSet.has(a),
-            filterAnnotations("literal", errorFn)
-          )
-        )
+        Schema.check(Schema.makeFilter((a: string) => literalSet.has(a), filterAnnotations("literal", fieldDef)))
       )
     }
     return base
@@ -48,58 +36,50 @@ function propertyToSchema(prop: JsonSchemaProperty, fieldDef: FieldDef | undefin
   if (prop["x-kind"] === "json") return Schema.Unknown
 
   if (prop.type === "string") {
-    const typeMsg = errorFn?.("type")
-    const base = typeMsg !== undefined
-      ? Schema.String.annotate({ message: typeMsg })
-      : Schema.String
+    const typeMsg = fieldDef?.error?.("type")
+    const base = typeMsg !== undefined ? Schema.String.annotate({ message: typeMsg }) : Schema.String
     let s = base
     if (prop.format === "email") {
-      s = s.pipe(Schema.check(Schema.isPattern(EMAIL_RE, filterAnnotations("email", errorFn))))
+      s = s.pipe(Schema.check(Schema.isPattern(EMAIL_RE, filterAnnotations("email", fieldDef))))
     }
     if (prop.minLength !== undefined) {
-      s = s.pipe(Schema.check(Schema.isMinLength(prop.minLength, filterAnnotations("minLength", errorFn))))
+      s = s.pipe(Schema.check(Schema.isMinLength(prop.minLength, filterAnnotations("minLength", fieldDef))))
     }
     if (prop.maxLength !== undefined) {
-      s = s.pipe(Schema.check(Schema.isMaxLength(prop.maxLength, filterAnnotations("maxLength", errorFn))))
+      s = s.pipe(Schema.check(Schema.isMaxLength(prop.maxLength, filterAnnotations("maxLength", fieldDef))))
     }
     return s
   }
 
   if (prop.type === "integer") {
-    const typeMsg = errorFn?.("type")
-    const base = typeMsg !== undefined
-      ? Schema.Number.annotate({ message: typeMsg })
-      : Schema.Number
-    let s = base.pipe(Schema.check(Schema.isInt(filterAnnotations("int", errorFn))))
+    const typeMsg = fieldDef?.error?.("type")
+    const base = typeMsg !== undefined ? Schema.Finite.annotate({ message: typeMsg }) : Schema.Finite
+    let s = base.pipe(Schema.check(Schema.isInt(filterAnnotations("int", fieldDef))))
     if (prop.minimum !== undefined) {
-      s = s.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(prop.minimum, filterAnnotations("minimum", errorFn))))
+      s = s.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(prop.minimum, filterAnnotations("minimum", fieldDef))))
     }
     if (prop.maximum !== undefined) {
-      s = s.pipe(Schema.check(Schema.isLessThanOrEqualTo(prop.maximum, filterAnnotations("maximum", errorFn))))
+      s = s.pipe(Schema.check(Schema.isLessThanOrEqualTo(prop.maximum, filterAnnotations("maximum", fieldDef))))
     }
     return s
   }
 
   if (prop.type === "number") {
-    const typeMsg = errorFn?.("type")
-    const base = typeMsg !== undefined
-      ? Schema.Number.annotate({ message: typeMsg })
-      : Schema.Number
+    const typeMsg = fieldDef?.error?.("type")
+    const base = typeMsg !== undefined ? Schema.Finite.annotate({ message: typeMsg }) : Schema.Finite
     let s = base
     if (prop.minimum !== undefined) {
-      s = s.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(prop.minimum, filterAnnotations("minimum", errorFn))))
+      s = s.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(prop.minimum, filterAnnotations("minimum", fieldDef))))
     }
     if (prop.maximum !== undefined) {
-      s = s.pipe(Schema.check(Schema.isLessThanOrEqualTo(prop.maximum, filterAnnotations("maximum", errorFn))))
+      s = s.pipe(Schema.check(Schema.isLessThanOrEqualTo(prop.maximum, filterAnnotations("maximum", fieldDef))))
     }
     return s
   }
 
   if (prop.type === "boolean") {
-    const typeMsg = errorFn?.("type")
-    return typeMsg !== undefined
-      ? Schema.Boolean.annotate({ message: typeMsg })
-      : Schema.Boolean
+    const typeMsg = fieldDef?.error?.("type")
+    return typeMsg !== undefined ? Schema.Boolean.annotate({ message: typeMsg }) : Schema.Boolean
   }
 
   return Schema.Unknown
@@ -116,8 +96,6 @@ export function buildInputSchemas(colDef: AnyCollectionDef): InputSchemas {
     if (prop["x-generated"]) continue
 
     const fieldDef = colDef.fields[key]
-    const errorFn = fieldDef?.error
-
     const base = propertyToSchema(prop, fieldDef)
 
     // A field whose key may be omitted may only also accept an explicit `null`
@@ -131,10 +109,9 @@ export function buildInputSchemas(colDef: AnyCollectionDef): InputSchemas {
       nullable ? Schema.optional(Schema.NullOr(base)) : Schema.optional(base)
 
     if (required.has(key)) {
-      const requiredMsg = errorFn?.("required")
-      createFields[key] = requiredMsg !== undefined
-        ? base.pipe(Schema.annotateKey({ messageMissingKey: requiredMsg }))
-        : base
+      const requiredMsg = fieldDef?.error?.("required")
+      createFields[key] =
+        requiredMsg !== undefined ? base.pipe(Schema.annotateKey({ messageMissingKey: requiredMsg })) : base
     } else {
       createFields[key] = optionalField(clearsWithNull)
     }
@@ -152,7 +129,9 @@ export function buildInputSchemas(colDef: AnyCollectionDef): InputSchemas {
 export function parseErrToValidationError(collection: string) {
   return (err: Schema.SchemaError): ValidationError => {
     const issues = SchemaIssue.makeFormatterStandardSchemaV1()(err.issue).issues.map((i) => {
-      const path = i.path ?? []
+      const path = (i.path ?? []).map((segment) =>
+        typeof segment === "object" && segment !== null ? String(segment.key) : String(segment)
+      )
       const prefix = path.length > 0 ? `${path.join(".")}: ` : ""
       return `${prefix}${i.message}`
     })

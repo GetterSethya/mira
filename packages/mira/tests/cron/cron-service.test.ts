@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Layer, Option, Schedule } from "effect"
+import { Cause, Data, Deferred, Effect, Exit, Layer, Option, Schedule } from "effect"
 import { adjust as adjustTestClock } from "effect/testing/TestClock"
 import { expect } from "vitest"
 
@@ -13,6 +13,8 @@ import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 
 // Handlers are Effect.void stubs — R = never, but cron state persistence requires SqlClient
 type StubCronDef = CronDef<never>
+
+class CronTestFailure extends Data.TaggedError("CronTestFailure")<{ readonly message: string }> {}
 
 function makeUnitLayer(defs: ReadonlyArray<StubCronDef>) {
   return makeCronServiceLayer(defs).pipe(
@@ -39,7 +41,7 @@ describe("CronService unit tests", () => {
       Effect.provide(
         makeUnitLayer([
           { name: "job-a", schedule: Schedule.once, handler: () => Effect.void },
-          { name: "job-b", schedule: Schedule.once, handler: () => Effect.void },
+          { name: "job-b", schedule: Schedule.once, handler: () => Effect.void }
         ])
       )
     )
@@ -50,18 +52,14 @@ describe("CronService unit tests", () => {
       const svc = yield* CronService
       yield* adjustTestClock("1 hours")
       yield* Effect.yieldNow
-      yield* Effect.sleep(0)
+      yield* Effect.yieldNow
       const [state] = yield* svc.getAll()
       expect(state.status).toBe("standby")
       expect(state.lastStatus).toBe("success")
       expect(state.lastRunAt).toBeDefined()
       expect(state.lastDurationMs).toBeGreaterThanOrEqual(0)
     }).pipe(
-      Effect.provide(
-        makeUnitLayer([
-          { name: "success-job", schedule: Schedule.once, handler: () => Effect.void },
-        ])
-      )
+      Effect.provide(makeUnitLayer([{ name: "success-job", schedule: Schedule.once, handler: () => Effect.void }]))
     )
   )
 
@@ -70,7 +68,7 @@ describe("CronService unit tests", () => {
       const svc = yield* CronService
       yield* adjustTestClock("1 hours")
       yield* Effect.yieldNow
-      yield* Effect.sleep(0)
+      yield* Effect.yieldNow
       const [state] = yield* svc.getAll()
       expect(state.lastStatus).toBe("error")
       expect(state.lastError).toBeDefined()
@@ -80,8 +78,8 @@ describe("CronService unit tests", () => {
           {
             name: "fail-job",
             schedule: Schedule.once,
-            handler: () => Effect.fail(new Error("boom")),
-          },
+            handler: () => Effect.fail(new CronTestFailure({ message: "boom" }))
+          }
         ])
       )
     )
@@ -92,15 +90,11 @@ describe("CronService unit tests", () => {
       const svc = yield* CronService
       yield* svc.runNow("immediate-job")
       yield* Effect.yieldNow
-      yield* Effect.sleep(0)
+      yield* Effect.yieldNow
       const [state] = yield* svc.getAll()
       expect(state.lastStatus).toBe("success")
     }).pipe(
-      Effect.provide(
-        makeUnitLayer([
-          { name: "immediate-job", schedule: Schedule.once, handler: () => Effect.void },
-        ])
-      )
+      Effect.provide(makeUnitLayer([{ name: "immediate-job", schedule: Schedule.once, handler: () => Effect.void }]))
     )
   )
 
@@ -119,13 +113,7 @@ describe("CronService unit tests", () => {
           expect(value.name).toBe("no-such-cron")
         }
       }
-    }).pipe(
-      Effect.provide(
-        makeUnitLayer([
-          { name: "some-job", schedule: Schedule.once, handler: () => Effect.void },
-        ])
-      )
-    )
+    }).pipe(Effect.provide(makeUnitLayer([{ name: "some-job", schedule: Schedule.once, handler: () => Effect.void }])))
   )
 
   it.effect("two crons with different names both appear in getAll()", () =>
@@ -139,7 +127,7 @@ describe("CronService unit tests", () => {
       Effect.provide(
         makeUnitLayer([
           { name: "alpha", schedule: Schedule.once, handler: () => Effect.void },
-          { name: "beta", schedule: Schedule.once, handler: () => Effect.void },
+          { name: "beta", schedule: Schedule.once, handler: () => Effect.void }
         ])
       )
     )
@@ -152,7 +140,7 @@ describe("CronService unit tests", () => {
           Effect.void,
           makeUnitLayer([
             { name: "dup", schedule: Schedule.once, handler: () => Effect.void },
-            { name: "dup", schedule: Schedule.once, handler: () => Effect.void },
+            { name: "dup", schedule: Schedule.once, handler: () => Effect.void }
           ])
         )
       )
@@ -172,8 +160,8 @@ describe("CronService unit tests", () => {
         {
           name: "slow-job",
           schedule: Schedule.once,
-          handler: () => Deferred.await(latch),
-        },
+          handler: () => Deferred.await(latch)
+        }
       ])
 
       const svc = yield* CronService.pipe(Effect.provide(layer))
@@ -185,7 +173,7 @@ describe("CronService unit tests", () => {
 
       yield* Deferred.succeed(latch, undefined)
       yield* Effect.yieldNow
-      yield* Effect.sleep(0)
+      yield* Effect.yieldNow
 
       const doneStates = yield* svc.getAll()
       expect(doneStates[0].status).toBe("standby")

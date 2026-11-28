@@ -4,7 +4,6 @@
     "module":           "ESNext",
     "moduleResolution": "bundler",
     "outDir":           "dist",
-    "baseUrl":          ".",
     "ignoreDeprecations": "6.0",
     "declaration":      true,
     "declarationMap":   true,

@@ -30,7 +30,7 @@ const usersRules = defineRule(usersDef, (R) => ({
   view: R.public(),
   create: R.public(),
   update: R.public(),
-  delete: R.public(),
+  delete: R.public()
 }))
 
 const docsDef = BaseCollection.define("docs", {
@@ -38,14 +38,14 @@ const docsDef = BaseCollection.define("docs", {
   body: Field.text({ required: false }),
   author: Field.relation(usersDef, { required: false }),
   avatar: Field.file({ required: false }),
-  cover: Field.file(),
+  cover: Field.file()
 })
 const docsRules = defineRule(docsDef, (R) => ({
   list: R.public(),
   view: R.public(),
   create: R.public(),
   update: R.public(),
-  delete: R.public(),
+  delete: R.public()
 }))
 
 const [Users, Docs] = applyRulesToCollections([usersDef, docsDef], [usersRules, docsRules])
@@ -59,7 +59,7 @@ const membersRules = defineRule(membersDef, (R) => ({
   view: R.public(),
   create: R.public(),
   update: R.public(),
-  delete: R.public(),
+  delete: R.public()
 }))
 const Members = applyRulesToCollections([membersDef], [membersRules])[0]
 
@@ -69,18 +69,23 @@ const ALL_COLLECTIONS = [Users, Docs, Members]
 // Static config
 // ---------------------------------------------------------------------------
 
-const AppConfigTest = Layer.succeed(AppConfig, AppConfig.of({
-  appName: "test",
-  port: 8080,
-  applicationUrl: "http://localhost:8080",
-  jwtSecret: Redacted.make("test-null-clearing-secret"),
-  useS3: false,
-  s3Config: Option.none(),
-  logRetentionDays: 30,
-}))
+const AppConfigTest = Layer.succeed(
+  AppConfig,
+  AppConfig.of({
+    appName: "test",
+    port: 8080,
+    applicationUrl: "http://localhost:8080",
+    jwtSecret: Redacted.make("test-null-clearing-secret"),
+    useS3: false,
+    s3Config: Option.none(),
+    logRetentionDays: 30
+  })
+)
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
+const repoWithSql = RepositoryLive.pipe(
+  Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect)))
+)
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
 function makeServerLayer(storageLayer: Layer.Layer<FileStorage, never, FileSystem.FileSystem | Path.Path>) {
@@ -97,13 +102,12 @@ function makeServerLayer(storageLayer: Layer.Layer<FileStorage, never, FileSyste
     storageLayer,
     sqliteLayer,
     ThumbnailServiceNoopLive,
-    NodeHttpServer.layerTest,
     AppConfigTest,
     NodeCryptoLayer,
     NodeAuthServiceLayer,
     DialectTest,
     rateLimitTestLayer
-  )
+  ).pipe(Layer.provideMerge(NodeHttpServer.layerTest))
 }
 
 /**
@@ -184,11 +188,7 @@ function seedAvatarWithThumb(fileKey: string) {
   return Effect.gen(function* () {
     const storage = yield* FileStorage
     yield* storage.upload(fileKey, Stream.fromArray([new Uint8Array([1, 2, 3])]), "image/png")
-    yield* storage.upload(
-      `_thumbs/${fileKey}/${THUMB_SPEC}`,
-      Stream.fromArray([new Uint8Array([9])]),
-      "image/png"
-    )
+    yield* storage.upload(`_thumbs/${fileKey}/${THUMB_SPEC}`, Stream.fromArray([new Uint8Array([9])]), "image/png")
   })
 }
 
@@ -207,9 +207,7 @@ function createDoc(fields: Record<string, unknown>) {
 
 function patchDoc(id: string, data: Record<string, unknown>) {
   return HttpClient.execute(
-    HttpClientRequest.patch(`/api/collections/docs/${id}`).pipe(
-      HttpClientRequest.bodyJsonUnsafe(data)
-    )
+    HttpClientRequest.patch(`/api/collections/docs/${id}`).pipe(HttpClientRequest.bodyJsonUnsafe(data))
   )
 }
 
@@ -242,9 +240,9 @@ describe("clearing optional fields via null (issue #14)", () => {
         const res = yield* patchDoc(id, { avatar: null })
         assert.strictEqual(res.status, 200)
 
-        const decoded = yield* Schema.decodeUnknownEffect(
-          Schema.Struct({ avatar: Schema.NullOr(Schema.String) })
-        )(yield* res.json).pipe(Effect.orDie)
+        const decoded = yield* Schema.decodeUnknownEffect(Schema.Struct({ avatar: Schema.NullOr(Schema.String) }))(
+          yield* res.json
+        ).pipe(Effect.orDie)
         assert.strictEqual(decoded.avatar, null)
 
         assert.strictEqual(yield* readDocColumn(id, "avatar"), null)
@@ -348,7 +346,7 @@ describe("clearing optional fields via null (issue #14)", () => {
             HttpClientRequest.bodyJsonUnsafe({
               email: "member@example.com",
               password: "secret",
-              passwordConfirm: "secret",
+              passwordConfirm: "secret"
             })
           )
         )

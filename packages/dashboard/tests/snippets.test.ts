@@ -1,10 +1,18 @@
+import { Schema } from "effect"
+
 import { describe, expect, it } from "vitest"
 
 import type { ApiCollectionSchema } from "@gettersethya/mira-client"
 
-import type { SnippetBlock, SnippetSection } from "../src/snippets.js"
-import { curlSections, fetchSections, sdkSections } from "../src/snippets.js"
-import type { PackageManager } from "../src/package-manager.js"
+import type { SnippetBlock, SnippetSection } from "@/snippets.js"
+import { curlSections, fetchSections, sdkSections } from "@/snippets.js"
+import type { PackageManager } from "@/package-manager.js"
+
+const FilterAstSchema = Schema.Struct({
+  op: Schema.String,
+  field: Schema.String,
+  value: Schema.Unknown
+})
 
 const users: ApiCollectionSchema = {
   name: "users",
@@ -44,7 +52,8 @@ const posts: ApiCollectionSchema = {
 const publishedPosts: ApiCollectionSchema = {
   name: "published_posts",
   kind: "view",
-  viewQuery: "SELECT p.id, CAST(ROW_NUMBER() OVER (ORDER BY p.seqId) AS INTEGER) AS seqId, p.title FROM posts p WHERE p.published = 1",
+  viewQuery:
+    "SELECT p.id, CAST(ROW_NUMBER() OVER (ORDER BY p.seqId) AS INTEGER) AS seqId, p.title FROM posts p WHERE p.published = 1",
   fields: {
     id: { type: "string", "x-view-only": true },
     seqId: { type: "integer", "x-kind": "seqId", "x-view-only": true },
@@ -67,10 +76,8 @@ function blocks(sections: ReadonlyArray<SnippetSection>): ReadonlyArray<SnippetB
   return sections.flatMap((section) => section.blocks)
 }
 
-function block(
-  sections: ReadonlyArray<SnippetSection>,
-  id: string
-): SnippetBlock | undefined {
+// oxlint-disable-next-line typescript/no-redundant-type-constituents -- oxlint's type program does not resolve the `@/*` alias from `tests/` (the dashboard tsconfig only includes `src`), so `SnippetBlock` shows up as an error type here; `tsc` and vitest resolve it
+function block(sections: ReadonlyArray<SnippetSection>, id: string): SnippetBlock | undefined {
   return blocks(sections).find((candidate) => candidate.id === id)
 }
 
@@ -80,42 +87,20 @@ function requiredBlock(sections: ReadonlyArray<SnippetSection>, id: string): Sni
   return found
 }
 
-type FilterAst = {
-  readonly op: string
-  readonly field: string
-  readonly value: unknown
-}
-
-function isFilterAst(value: unknown): value is FilterAst {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "op" in value &&
-    "field" in value &&
-    "value" in value
-  )
-}
-
 describe("sdkSections", () => {
   it("builds plain, server, and adapter sections", () => {
     const sections = sdkSections(options(posts))
 
     expect(sections.map((section) => section.id)).toEqual(["plain", "server", "adapter"])
-    expect(requiredBlock(sections, "install").code).toBe(
-      "pnpm add @gettersethya/mira-client"
-    )
+    expect(requiredBlock(sections, "install").code).toBe("pnpm add @gettersethya/mira-client")
     expect(requiredBlock(sections, "client").code).toContain(
-      "createMiraClient(\"https://mira.example.com:9000\").withCollections(collections)"
+      'createMiraClient("https://mira.example.com:9000").withCollections(collections)'
     )
     expect(requiredBlock(sections, "server-client").code).toContain('{ type: "server" }')
     expect(requiredBlock(sections, "server-token").code).toContain("mira.auth.setToken")
     expect(requiredBlock(sections, "adapter-setup").code).toContain("collectionAdapter")
-    expect(requiredBlock(sections, "adapter-query").code).toContain(
-      "mira.posts.getList().queryOptions"
-    )
-    expect(requiredBlock(sections, "adapter-mutation").code).toContain(
-      "mira.posts.create().mutationOptions"
-    )
+    expect(requiredBlock(sections, "adapter-query").code).toContain("mira.posts.getList().queryOptions")
+    expect(requiredBlock(sections, "adapter-mutation").code).toContain("mira.posts.create().mutationOptions")
   })
 
   it("adds a typed filter when a suitable field exists", () => {
@@ -189,11 +174,7 @@ describe("sdkSections install commands", () => {
       "yarn add @gettersethya/mira-client",
       "yarn add @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"
     ],
-    [
-      "bun",
-      "bun add @gettersethya/mira-client",
-      "bun add @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"
-    ]
+    ["bun", "bun add @gettersethya/mira-client", "bun add @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"]
   ]
 
   it("uses the selected package manager for every install block", () => {
@@ -206,9 +187,7 @@ describe("sdkSections install commands", () => {
   })
 
   it("defaults to pnpm when no package manager is passed", () => {
-    expect(requiredBlock(sdkSections(options(posts)), "install").code).toBe(
-      "pnpm add @gettersethya/mira-client"
-    )
+    expect(requiredBlock(sdkSections(options(posts)), "install").code).toBe("pnpm add @gettersethya/mira-client")
   })
 })
 
@@ -267,9 +246,7 @@ describe("fetchSections", () => {
     const filter = requiredBlock(fetchSections(options(posts)), "filter")
 
     expect(filter.language).toBe("json")
-    const parsed: unknown = JSON.parse(filter.code)
-    expect(isFilterAst(parsed)).toBe(true)
-    if (!isFilterAst(parsed)) return
+    const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(FilterAstSchema))(filter.code)
 
     expect(parsed.op).toBe("eq")
     expect(parsed.field).toBe("title")
@@ -366,7 +343,11 @@ describe("curlSections", () => {
   it("encodes the filter AST into the URL", () => {
     const filter = requiredBlock(curlSections(options(posts)), "filter")
     const encoded = encodeURIComponent(
-      JSON.stringify({ op: "eq", field: "title", value: "<title>" })
+      Schema.encodeSync(Schema.fromJsonString(FilterAstSchema))({
+        op: "eq",
+        field: "title",
+        value: "<title>"
+      })
     )
 
     expect(filter.code).toContain(`filter=${encoded}`)

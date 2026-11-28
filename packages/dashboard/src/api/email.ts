@@ -6,9 +6,7 @@ import {
   EmailService,
   RateLimitKeySecret,
   RateLimiter,
-  RateLimitedError,
-  rateLimitKey,
-  RateLimitUnavailableError
+  rateLimitKey
 } from "@gettersethya/mira"
 import { requireDashboardAuth } from "./auth.js"
 
@@ -68,20 +66,13 @@ export const emailTestRoute = Effect.gen(function* () {
     .pipe(
       Effect.as(HttpServerResponse.jsonUnsafe({ ok: true }, { status: 202 })),
       Effect.catchTags({
-        RateLimitedError: (error) =>
-          Effect.succeed(rateLimited(error.retryAfterSeconds, error.scope)),
+        RateLimitedError: (error) => Effect.succeed(rateLimited(error.retryAfterSeconds, error.scope)),
         RateLimitUnavailableError: () =>
-          Effect.succeed(
-            HttpServerResponse.jsonUnsafe({ error: "rate_limit_unavailable" }, { status: 503 })
-          ),
+          Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "rate_limit_unavailable" }, { status: 503 })),
         EmailNotConfiguredError: () =>
-          Effect.succeed(
-            HttpServerResponse.jsonUnsafe({ error: "email_not_configured" }, { status: 503 })
-          ),
+          Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "email_not_configured" }, { status: 503 })),
         EmailSendError: () =>
-          Effect.succeed(
-            HttpServerResponse.jsonUnsafe({ error: "email_unavailable" }, { status: 502 })
-          )
+          Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "email_unavailable" }, { status: 502 }))
       })
     )
 })

@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Layer, Option, Schedule } from "effect"
+import { Cause, Data, Deferred, Effect, Exit, Layer, Option, Schedule } from "effect"
 
 import { MiraPlugin } from "@/app/plugin.js"
 import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
@@ -11,6 +11,8 @@ import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
 
 type StubDef = CronDef<never>
+
+class CronTestFailure extends Data.TaggedError("CronTestFailure")<{ readonly message: string }> {}
 
 // Minimal self-contained test layer: handler R = never, but cron state persistence requires SqlClient
 function makeLayer(builderDefs: ReadonlyArray<StubDef>, plugins: ReadonlyArray<MiraPlugin> = []) {
@@ -74,7 +76,7 @@ describe("CronService integration", () => {
       const svc = yield* CronService
       yield* svc.runNow("quick-cron")
       yield* Effect.yieldNow
-      yield* Effect.sleep(0)
+      yield* Effect.yieldNow
       const [state] = yield* svc.getAll()
       assert.strictEqual(state.lastStatus, "success")
       assert.isDefined(state.lastRunAt)
@@ -90,7 +92,7 @@ describe("CronService integration", () => {
       const svc = yield* CronService
       yield* svc.runNow("error-cron")
       yield* Effect.yieldNow
-      yield* Effect.sleep(0)
+      yield* Effect.yieldNow
       const [state] = yield* svc.getAll()
       assert.strictEqual(state.lastStatus, "error")
       assert.isDefined(state.lastError)
@@ -100,7 +102,7 @@ describe("CronService integration", () => {
           {
             name: "error-cron",
             schedule: Schedule.duration("24 hours"),
-            handler: () => Effect.fail(new Error("boom"))
+            handler: () => Effect.fail(new CronTestFailure({ message: "boom" }))
           }
         ])
       )
@@ -169,7 +171,7 @@ describe("CronService integration", () => {
               {
                 name: "fail-hook-cron",
                 schedule: Schedule.duration("24 hours"),
-                handler: () => Effect.fail(new Error("intentional failure"))
+                handler: () => Effect.fail(new CronTestFailure({ message: "intentional failure" }))
               }
             ],
             [plugin]

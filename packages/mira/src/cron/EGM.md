@@ -74,3 +74,9 @@ No subdirectories.
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+
+## MySQL dialect threading (issue #30)
+
+- `loadPersistedCronState(sql, dialect)` and `savePersistedCronState(sql, states, dialect)` take the active dialect. `executeAndTrack`, `runOneTick`, `runNow`, and the boot path pass it through.
+- The read quotes `key` and `value`. The write appends `store.upsertClause(["key"], [{ column: "value", kind: "excluded" }])` with `sql.literal`.
+- `_config.value` is `LONGTEXT` on MySQL, so a large cron JSON payload is not capped at 64 KB.

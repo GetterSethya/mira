@@ -18,9 +18,7 @@ function isResponseOfType<T>(_value: unknown): _value is T {
   return true
 }
 
-const encodeJwtPayload = Schema.encodeSync(
-  Schema.fromJsonString(Schema.Struct({ exp: Schema.Number }))
-)
+const encodeJwtPayload = Schema.encodeSync(Schema.fromJsonString(Schema.Struct({ exp: Schema.Finite })))
 
 describe("BrowserAuth", () => {
   it("isLoggedIn() false initially", () => {
@@ -54,8 +52,7 @@ describe("BrowserAuth", () => {
 
   it("refresh() returns false and clears the flag when the check fails", async () => {
     const loggedInRef = MutableRef.make(true)
-    const execute: ExecuteFn = () =>
-      Effect.fail(new MiraError({ status: 401, body: "unauthorized" }))
+    const execute: ExecuteFn = () => Effect.fail(new MiraError({ status: 401, body: "unauthorized" }))
     const auth = makeBrowserAuth(execute, makeClientHandler, loggedInRef)
 
     expect(await auth.refresh()).toBe(false)

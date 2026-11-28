@@ -46,7 +46,7 @@ const app = Mira.builder()
 app.serve()
 ```
 
-For Bun, import `BunPlatform` and `BunSqliteDatabase` from `@gettersethya/mira/bun` and pass them to the same `.platform(...)` and `.database(...)` steps. The Bun entry also exports `PostgresDatabase`, so a Bun PostgreSQL app keeps the same builder. The rest of the builder is unchanged.
+For Bun, import `BunPlatform` and `BunSqliteDatabase` from `@gettersethya/mira/bun` and pass them to the same `.platform(...)` and `.database(...)` steps. The Bun entry also exports `PostgresDatabase` and `MysqlDatabase`, so a Bun PostgreSQL or MySQL app keeps the same builder. The rest of the builder is unchanged.
 
 `serve()` accepts optional `port` and `maxPortAttempts` (default 10). On a busy port it retries upward and reports the bound port to `AppConfig`, keeping `applicationUrl` accurate.
 
@@ -63,8 +63,10 @@ Plugin `onBootstrap` hooks run during that startup, after the socket binds and b
 There is no config-file layer. `AppConfig` seeds a `_config` table on first boot and reads it on every start. Some values, such as S3 credentials, can also be supplied as Effect `Config` values.
 
 ```sql
-SELECT key, value FROM _config;
+SELECT `key`, `value` FROM `_config`;
 ```
+
+The backticks are required on MySQL and MariaDB because `key` is a reserved word.
 
 The seeded defaults are `app_name = "mira"`, `port = "8080"`, `application_url = "http://localhost:8080"`, `use_s3 = "false"`, and `log_retention_days = "30"`. Existing rows win. Seeding only fills missing keys. `jwt_secret` is 48 random bytes as hex, generated on first boot and persisted, so tokens survive restarts. It is a `Redacted<string>`.
 
@@ -103,7 +105,7 @@ Every field accepts a plain value or an Effect `Config`, resolved once at build,
 
 The `_config` table also carries `use_s3` and `s3_*` legacy keys, but the current storage layer is activated by `.storage(S3CompatibleStorage(...))`, not by those rows. Use the builder call as the source of truth. Do not assume setting `use_s3` swaps the backend. An incomplete `use_s3=true` row logs a warning and yields no S3 config instead of crashing boot.
 
-SQLite, libSQL, and PostgreSQL are the database backends. `SqliteDatabase({ filename })` wires the Node SQLite client and `sqliteDialect`; `BunSqliteDatabase({ filename })` does the same on Bun. `PostgresDatabase({ url })` wires the PostgreSQL client and `postgresDialect` on Node and Bun. Use `":memory:"` in SQLite tests. SQLite stores booleans as `0`/`1` and PostgreSQL stores native `BOOLEAN` because the dialect declares it, not because the collection service hardcodes it.
+SQLite, libSQL, PostgreSQL, MySQL, and MariaDB are the database backends. `SqliteDatabase({ filename })` wires the Node SQLite client and `sqliteDialect`; `BunSqliteDatabase({ filename })` does the same on Bun. `PostgresDatabase({ url })` wires the PostgreSQL client and `postgresDialect`. `MysqlDatabase({ url })` wires `@effect/sql-mysql2` and `mysqlDialect` on Node and Bun. Use `":memory:"` in SQLite tests. SQLite and MySQL store booleans as `0`/`1`; PostgreSQL stores native `BOOLEAN` because the dialect declares it, not because the collection service hardcodes it.
 
 `LibsqlDatabase` runs libSQL on Node. `TursoDatabase` is an alias:
 
@@ -184,13 +186,66 @@ await Effect.runPromise(migrate)
 
 PostgreSQL does not scan `pg_catalog` for untracked objects. An untracked view that depends on a dropped column makes `DROP COLUMN` or `ALTER COLUMN TYPE` fail at the statement, and the transaction rolls back with the existing table and view intact. A desired view whose name already exists outside Mira fails `CREATE VIEW`, because PostgreSQL has no `CREATE VIEW IF NOT EXISTS`. Track the view in Mira, or remove or rename it before migrating. Table, column, view, and index-field names over 63 bytes fail preflight with `UnsupportedMigrationStepError`; generated index names over 63 bytes are truncated with an FNV-1a suffix.
 
+### MySQL and MariaDB
+
+`MysqlDatabase` runs MySQL 8.4+ and MariaDB 11.4.6+ on Node and Bun through `@effect/sql-mysql2`. 8.4.13 and 11.4.13 are the validated versions and CI targets. MariaDB 11.4.6 is the floor because earlier 11.4 patches lack the `utf8mb4_0900_*` collations or alias them to a PAD-space collation.
+
+```ts
+import { Redacted } from "effect"
+import { MysqlDatabase } from "@gettersethya/mira"
+
+.database(MysqlDatabase({
+  url: Redacted.make(process.env.MYSQL_URL!),
+  maxConnections: 20,
+  connectionTTL: "30 seconds",
+  ssl: true,
+  connectTimeout: "5 seconds",
+  disablePreparedStatements: false
+}))
+```
+
+The URL is `Redacted` and is not logged. The preset parses the standard `mysql://user:password@host:3306/database` shape into the driver's non-URL options, so `ssl`, `connectTimeout`, and `disablePreparedStatements` reach the pool. Query parameters are not forwarded. `connectionTTL` is the pool idle setting, not a maximum connection age. `maxConnections` defaults to 10. The preset validates the URL and `maxConnections` synchronously and runs a readiness probe that logs the engine version and database at boot, never credentials.
+
+MySQL stores `seqId` as `BIGINT AUTO_INCREMENT`, booleans as `tinyint(1)`, `Field.number()` as `DOUBLE`, timestamps as text, and keyed text as `VARCHAR(n)` with the binary `utf8mb4_0900_bin` collation. A `seqId` above 2^53 comes back as a decimal string; pass it back unchanged as a cursor. Deletes report the driver's `affectedRows`, not a `RETURNING` row, on both engines.
+
+Migrations use the statement model from `#68` because MySQL commits DDL implicitly. `Migrator.migrate` reserves one connection, takes a session-scoped `GET_LOCK`, applies catalog-guarded statements outside a transaction, verifies the catalog, and writes metadata last. A failed plan can leave partial DDL; the next boot resumes from the catalog and the stored schema. `plan` and `status` check `information_schema` instead of bootstrapping tables, so a dry run does not mutate the database. `plan` and `status` fail with `MigrationBusyError` while another migration holds the lock. Table, column, view, and index-field names over 64 code points fail preflight; generated index names are truncated with an FNV-1a suffix.
+
+`migrateAtStartup: false` skips collection migrations only. The internal config, token, rate-limit, auth-challenge, and cron stores still run idempotent DDL at boot, so the runtime role needs `CREATE`, `ALTER`, and `INDEX` on the app database. The bootstrap sets a five-second metadata-lock timeout on its connection.
+
+The runtime and migration roles have different grants. A minimal deployment separates them:
+
+```sql
+-- Runtime role: app DML plus the idempotent internal-store bootstrap DDL.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON mira.* TO 'mira_app'@'%';
+
+-- Migration role: everything above plus destructive and view DDL.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, CREATE VIEW, SHOW VIEW
+  ON mira.* TO 'mira_migrator'@'%';
+
+-- Dedicated telemetry database, if used.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON mira_logs.* TO 'mira_app'@'%';
+```
+
+The runtime role must keep `CREATE`/`ALTER`/`INDEX` because the internal stores re-run their guarded bootstrap on every boot. The default `migrateAtStartup: true` also runs collection migrations, so a single-role deployment needs the migration grants too; use `mira_migrator` for `Migrator` and `mira_app` for the server only when `migrateAtStartup: false`.
+
+### Single-role deployment
+
+If one role runs both the server and `migrateAtStartup: true`, grant the union. This is the simplest deployment and the one the tests exercise:
+
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, CREATE VIEW, SHOW VIEW
+  ON mira.* TO 'mira'@'%';
+```
+
+The dialect does not enable `NO_BACKSLASH_ESCAPES`; user data is always bound. Do not enable that mode on an app connection. Request-path locking reads use `FOR UPDATE` inside a short transaction; the store retries once on `1205`/`1213`. The bootstrap sets a five-second lock-wait timeout (`innodb_lock_wait_timeout` and `lock_wait_timeout`) for its own connection and restores both session values before the connection returns to the pool, logging a warning if a restore statement fails, so request connections keep the server default. Lower `innodb_lock_wait_timeout` at the server for latency-sensitive deployments.
+
 ## Email transport
 
 `.email(SmtpEmail(...))` selects an SMTP transport. Without it Mira uses a no-op `EmailService`. Host, port, TLS, auth, From, and the reset URL are resolved once at layer build, and every field also accepts an Effect `Config` value. The transport is optional because local development and clients that do not use email should not need an SMTP server. The [email page](../email/) covers auth-collection options, routes, rate limits, plugin hooks, and Mailpit.
 
 ## Rate limits
 
-Rate limits use a `RateLimitStore` service. The app's default store is the SQL-backed store (`_rate_limits`). It runs on SQLite, libSQL, and PostgreSQL; the PostgreSQL store uses a conditional upsert and row locks. Tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQL store is single-node on SQLite and libSQL; row-locked on PostgreSQL. A multi-instance deployment needs a shared database or a shared store. Request policies fail open on store errors. Send policies fail closed with `503 rate_limit_unavailable`.
+Rate limits use a `RateLimitStore` service. The app's default store is the SQL-backed store (`_rate_limits`). It runs on SQLite, libSQL, PostgreSQL, MySQL, and MariaDB. PostgreSQL uses a conditional upsert with `RETURNING`; MySQL and MariaDB use a locked transaction with `FOR UPDATE`, an explicit guard, and all-or-nothing rollback. Tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQL store is single-node on SQLite and libSQL; row-locked on PostgreSQL, MySQL, and MariaDB. A multi-instance deployment needs a shared database or a shared store. Request policies fail open on store errors. Send policies fail closed with `503 rate_limit_unavailable`. Buckets longer than 512 code points are rejected on MySQL and MariaDB; SQLite and PostgreSQL impose no new cap.
 
 ## Migrations at boot
 
@@ -211,7 +266,7 @@ A `dropColumn` plan with tracked views drops the views that depend on the change
 
 PostgreSQL changes types with `ALTER COLUMN TYPE ... USING` and recreates tracked views around a destructive table change. It does not scan `pg_catalog`, so an untracked dependent view that reads a dropped column fails at the statement and the transaction rolls back. The same is true for a desired view whose name already exists outside Mira: `CREATE VIEW` fails instead of silently skipping the desired query.
 
-Migrations run through `sql.withTransaction`, so the plan statements, validation probes, the `_migrations` row, and the `_collections` upserts commit or roll back together. `plan` and `status` still bootstrap the system tables and therefore need write permission on first use. The abstract step order is global: drop views, drop indexes, table changes, create indexes, create views. Synthesized view drops and creates follow the plan's dependency order, and synthesized validations run after the DDL.
+On SQLite, libSQL, and PostgreSQL, migrations run through `sql.withTransaction`, so the plan statements, validation probes, the `_migrations` row, and the `_collections` upserts commit or roll back together. MySQL and MariaDB use the statement model instead: DDL commits implicitly, the catalog is verified before metadata is written, and a failed plan can leave partial DDL for the next boot to resume. `plan` and `status` still bootstrap the system tables on transaction-model dialects and therefore need write permission on first use; the MySQL statement model checks `information_schema` instead. The abstract step order is global: drop views, drop indexes, table changes, create indexes, create views. Synthesized view drops and creates follow the plan's dependency order, and synthesized validations run after the DDL.
 
 On PostgreSQL, `migrate` takes a transaction-scoped advisory lock, so concurrent replicas serialize instead of racing `CREATE TABLE`. `plan` and `status` take a non-blocking preview lock and fail with `MigrationBusyError` rather than waiting behind a migration. On SQLite and libSQL the write transaction serializes its own DDL; for a remote deployment, run migrations on one instance or as a deploy step.
 
@@ -241,6 +296,8 @@ Dedicated mode applies `journal_mode=WAL`, `synchronous=NORMAL`, and `busy_timeo
 For libSQL, pass `LibsqlDatabase` as the dedicated preset. Local `file:` telemetry reuses the SQLite WAL and checkpoint hooks. Remote libSQL skips setup and cleanup because sqld rejects writable pragmas. Each unbatched row is a network round trip, so remote deployments should set `flushBatchSize: 100` and `flushInterval: "1 second"`. A `syncUrl` replica sets `migrateAtStartup` to false; migrate the telemetry tables on the primary and sync first. Shared telemetry on a replica needs `{ mode: "shared", migrate: false }`.
 
 For PostgreSQL, shared storage is the recommended mode: it reuses the app pool and writes `logs` and `spans` in the app database. Dedicated mode needs a second `PostgresDatabase` and a separate database or schema; pointing it at the app database can make the app migrator treat `logs` and `spans` as app collections. PostgreSQL telemetry has no setup or cleanup statements and treats `40001`, `40P01`, and `55P03` as retryable. The telemetry read cursor is numeric and exact only below 2^53; retention deletes by a `seqId` subquery, so retention is not affected by that ceiling.
+
+For MySQL and MariaDB, shared storage is also the recommended mode; dedicated mode needs a second `MysqlDatabase` and its own database. MySQL has no separate schema namespace, so use a separate database, not a schema. Telemetry has no setup or cleanup statements. Setup and migration retries treat `1205` and `1213` as retryable; append and retention retries treat `1205` only, because a `1213` deadlock already ended the caller's transaction. Duplicate telemetry ids are ignored with `ON DUPLICATE KEY UPDATE id = id`. Retention uses a derived-table `seqId` subquery and does not run `OPTIMIZE TABLE`; InnoDB reuses pages and an online optimize is an operator choice. The telemetry read cursor is numeric and exact only below 2^53.
 
 Completed spans go onto an unbounded queue and log rows onto a bounded 10,000-entry queue, each drained by a scoped fiber, so span and record completion never blocks on I/O. On shutdown Mira interrupts the writers, drains both queues with a 2-second budget, and reports log rows dropped because the bounded queue was full. `logConsole` echoes to stdout. `pretty` affects only that echo, never the stored rows.
 

@@ -37,13 +37,13 @@
  *     body: { "postId": "...", "authorId": "YOUR_ID", "body": "..." }
  */
 
-import { HttpServer } from "effect/http"
+import { HttpRouter } from "effect/http"
 import { NodeFileSystem, NodeHttpServer, NodePath, NodeRuntime } from "@effect/platform-node"
 import { SqlClient } from "effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Data, Effect, Layer, Schedule, Schema } from "effect"
 import { createServer } from "node:http"
-import { AuthCollection, BaseCollection, Field } from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection, Field, FilterNodeSchema } from "@gettersethya/mira-client"
 import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
@@ -212,7 +212,7 @@ const foundation = Layer.mergeAll(
   ),
   ThumbnailServicePhotonLive,
   NodeCryptoLayer,
-  NodeAuthServiceLayer,
+  NodeAuthServiceLayer
 )
 
 // infra: Repository + Migrator, wired to foundation
@@ -240,9 +240,9 @@ const serverLayer = Layer.unwrap(
 )
 
 // app: serve the router with all service dependencies provided
-const appLayer = HttpServer.serve(router).pipe(
+const appLayer = HttpRouter.serve(HttpRouter.addAll(router)).pipe(
   Layer.provideMerge(serverLayer),
-  Layer.provideMerge(Layer.merge(collectionLayer, configLayer)),
+  Layer.provideMerge(Layer.merge(collectionLayer, configLayer))
 )
 
 // ---------------------------------------------------------------------------
@@ -278,7 +278,10 @@ async function test(name: string, fn: () => Promise<void>): Promise<void> {
   }
 }
 
-function check(condition: boolean, msg: string): void {
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const encodeJsonFilter = Schema.encodeSync(Schema.fromJsonString(FilterNodeSchema))
+
+function check(condition: unknown, msg: string): asserts condition {
   if (!condition) throw new Error(msg)
 }
 
@@ -292,10 +295,14 @@ async function req(
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers,
-    ...(opts?.body !== undefined ? { body: JSON.stringify(opts.body) } : {})
+    ...(opts?.body !== undefined ? { body: encodeJson(opts.body) } : {})
   })
   let body: unknown = null
-  try { body = await res.json() } catch { /* 204 or non-JSON */ }
+  try {
+    body = await res.json()
+  } catch {
+    /* 204 or non-JSON */
+  }
   return { status: res.status, body }
 }
 
@@ -308,7 +315,7 @@ async function waitForServer(): Promise<void> {
         try: () => fetch(`${BASE}/api/collections/posts`).then(() => undefined),
         catch: (e) => new ServerNotReadyError({ cause: e })
       }),
-      Schedule.intersect(Schedule.recurs(49), Schedule.spaced("200 millis"))
+      Schedule.max([Schedule.recurs(49), Schedule.spaced("200 millis")])
     ).pipe(Effect.mapError((e) => new ServerNotReadyError({ cause: e })))
   )
 }
@@ -325,9 +332,9 @@ async function runTests(): Promise<void> {
   await waitForServer()
 
   const alice = await doLogin("alice@example.com", "alice123")
-  const bob   = await doLogin("bob@example.com",   "bob123")
+  const bob = await doLogin("bob@example.com", "bob123")
   const aliceId = alice.record.id
-  const bobId   = bob.record.id
+  const bobId = bob.record.id
 
   // Prefetch seed data for IDs used across sections
   const PostItemSchema = Schema.Struct({ id: Schema.String, authorId: Schema.String })
@@ -338,9 +345,9 @@ async function runTests(): Promise<void> {
   const allComments = Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(CommentItemSchema) }))(
     (await req("GET", "/api/collections/comments")).body
   ).items
-  const alicePost   = allPosts.find((p) => p.authorId === aliceId)
-  const bobPost     = allPosts.find((p) => p.authorId === bobId)
-  const bobComment  = allComments.find((c) => c.authorId === bobId)
+  const alicePost = allPosts.find((p) => p.authorId === aliceId)
+  const bobPost = allPosts.find((p) => p.authorId === bobId)
+  const bobComment = allComments.find((c) => c.authorId === bobId)
 
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
   console.log("  Test suite")
@@ -357,7 +364,10 @@ async function runTests(): Promise<void> {
     const { record } = Schema.decodeUnknownSync(
       Schema.Struct({ record: Schema.Struct({ emailVerified: Schema.Boolean }) })
     )(r.body)
-    check(typeof record.emailVerified === "boolean", `emailVerified should be boolean, got ${typeof record.emailVerified} (${String(record.emailVerified)})`)
+    check(
+      typeof record.emailVerified === "boolean",
+      `emailVerified should be boolean, got ${typeof record.emailVerified} (${String(record.emailVerified)})`
+    )
   })
 
   await test("login wrong password → 403", async () => {
@@ -430,7 +440,7 @@ async function runTests(): Promise<void> {
 
   await test("get post by id (public) → 200", async () => {
     check(alicePost !== undefined, "no alice post in seed data")
-    const r = await req("GET", `/api/collections/posts/${alicePost!.id}`)
+    const r = await req("GET", `/api/collections/posts/${alicePost.id}`)
     check(r.status === 200, `expected 200, got ${r.status}`)
   })
 
@@ -456,7 +466,7 @@ async function runTests(): Promise<void> {
 
   await test("try update other user's post (authorId rule) → 403", async () => {
     check(bobPost !== undefined, "no bob post in seed data")
-    const r = await req("PATCH", `/api/collections/posts/${bobPost!.id}`, {
+    const r = await req("PATCH", `/api/collections/posts/${bobPost.id}`, {
       token: alice.token,
       body: { title: "Hacked" }
     })
@@ -465,7 +475,7 @@ async function runTests(): Promise<void> {
 
   await test("try delete other user's post (authorId rule) → 403", async () => {
     check(bobPost !== undefined, "no bob post in seed data")
-    const r = await req("DELETE", `/api/collections/posts/${bobPost!.id}`, { token: alice.token })
+    const r = await req("DELETE", `/api/collections/posts/${bobPost.id}`, { token: alice.token })
     check(r.status === 403, `expected 403, got ${r.status}`)
   })
 
@@ -479,25 +489,29 @@ async function runTests(): Promise<void> {
   await test("list comments (public) → 200 with items", async () => {
     const r = await req("GET", "/api/collections/comments")
     check(r.status === 200, `expected 200, got ${r.status}`)
-    check(Array.isArray((r.body as any).items), "expected items array")
+    const body = Schema.decodeUnknownSync(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))(r.body)
+    check(Array.isArray(body.items), "expected items array")
   })
 
   await test("get comment by id (public) → 200", async () => {
     check(bobComment !== undefined, "no bob comment in seed data")
-    const r = await req("GET", `/api/collections/comments/${bobComment!.id}`)
+    const r = await req("GET", `/api/collections/comments/${bobComment.id}`)
     check(r.status === 200, `expected 200, got ${r.status}`)
   })
 
   await test("list comments by post (filter by postId) → 200, all match", async () => {
     check(alicePost !== undefined, "no alice post in seed data")
-    const filter = encodeURIComponent(JSON.stringify({ op: "eq", field: "postId", value: alicePost!.id }))
+    const filter = encodeURIComponent(encodeJsonFilter({ op: "eq", field: "postId", value: alicePost.id }))
     const r = await req("GET", `/api/collections/comments?filter=${filter}`)
     check(r.status === 200, `expected 200, got ${r.status}`)
     const { items } = Schema.decodeUnknownSync(
       Schema.Struct({ items: Schema.Array(Schema.Struct({ postId: Schema.String })) })
     )(r.body)
     check(items.length > 0, "expected at least one comment for alice's post")
-    check(items.every((c) => c.postId === alicePost!.id), "all returned comments should match the filtered postId")
+    check(
+      items.every((c) => c.postId === alicePost.id),
+      "all returned comments should match the filtered postId"
+    )
   })
 
   let newCommentId: string | undefined
@@ -506,7 +520,7 @@ async function runTests(): Promise<void> {
     check(alicePost !== undefined, "no alice post in seed data")
     const r = await req("POST", "/api/collections/comments", {
       token: alice.token,
-      body: { postId: alicePost!.id, authorId: aliceId, body: "Test comment." }
+      body: { postId: alicePost.id, authorId: aliceId, body: "Test comment." }
     })
     check(r.status === 201, `expected 201, got ${r.status}`)
     newCommentId = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(r.body).id
@@ -523,7 +537,7 @@ async function runTests(): Promise<void> {
 
   await test("try update other user's comment (authorId rule) → 403", async () => {
     check(bobComment !== undefined, "no bob comment in seed data")
-    const r = await req("PATCH", `/api/collections/comments/${bobComment!.id}`, {
+    const r = await req("PATCH", `/api/collections/comments/${bobComment.id}`, {
       token: alice.token,
       body: { body: "Hacked" }
     })
@@ -538,7 +552,7 @@ async function runTests(): Promise<void> {
 
   await test("try delete other user's comment (authorId rule) → 403", async () => {
     check(bobComment !== undefined, "no bob comment in seed data")
-    const r = await req("DELETE", `/api/collections/comments/${bobComment!.id}`, { token: alice.token })
+    const r = await req("DELETE", `/api/collections/comments/${bobComment.id}`, { token: alice.token })
     check(r.status === 403, `expected 403, got ${r.status}`)
   })
 
@@ -561,8 +575,16 @@ async function runTests(): Promise<void> {
 const program = Effect.gen(function* () {
   yield* Effect.forkDetach(Layer.launch(appLayer))
   yield* Effect.promise(() =>
-    runTests().catch((e: unknown) => { console.error("[tests] Fatal:", e) })
+    runTests().catch((e: unknown) => {
+      console.error("[tests] Fatal:", e)
+    })
   )
-}).pipe(Effect.ensuring(Effect.sync(() => { process.exit(_failed > 0 ? 1 : 0) })))
+}).pipe(
+  Effect.ensuring(
+    Effect.sync(() => {
+      process.exit(_failed > 0 ? 1 : 0)
+    })
+  )
+)
 
 NodeRuntime.runMain(program)

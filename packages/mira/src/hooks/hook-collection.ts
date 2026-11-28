@@ -59,15 +59,15 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
               hookCtx.select,
               hookCtx.expand
             )
-            yield* hooks
-              .runRecordListSuccess({ ...hookCtx, items: result.items, nextCursor: result.nextCursor })
-              .pipe(Effect.catch(() => Effect.void))
+            yield* hooks.runRecordListSuccess({
+              ...hookCtx,
+              items: result.items,
+              nextCursor: result.nextCursor
+            })
             return result
           }).pipe(
-            Effect.catch((error: CollectionError) =>
-              hooks
-                .runRecordListError({ collection, action: "list", error, auth: toAuth(ctx.auth) })
-                .pipe(Effect.andThen(Effect.fail(error)))
+            Effect.tapError((error: CollectionError) =>
+              hooks.runRecordListError({ collection, action: "list", error, auth: toAuth(ctx.auth) })
             ),
             withSpanWhenEnabled(
               "hook.list",
@@ -87,13 +87,11 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             const auth = toAuth(ctx.auth)
             const hookCtx = yield* hooks.runRecordView({ collection, id, select, expand, auth })
             const result = yield* inner.view(collection, id, ctx, hookCtx.select, hookCtx.expand)
-            yield* hooks.runRecordViewSuccess({ ...hookCtx, result }).pipe(Effect.catch(() => Effect.void))
+            yield* hooks.runRecordViewSuccess({ ...hookCtx, result })
             return result
           }).pipe(
-            Effect.catch((error: CollectionError) =>
-              hooks
-                .runRecordViewError({ collection, action: "view", error, auth: toAuth(ctx.auth) })
-                .pipe(Effect.andThen(Effect.fail(error)))
+            Effect.tapError((error: CollectionError) =>
+              hooks.runRecordViewError({ collection, action: "view", error, auth: toAuth(ctx.auth) })
             ),
             withSpanWhenEnabled(
               "hook.view",
@@ -108,13 +106,11 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             const hookCtx = yield* hooks.runRecordCreate({ collection, data, record: undefined, auth })
             const execCtx = yield* hooks.runRecordCreateExecute(hookCtx)
             const result = yield* inner.create(collection, execCtx.data, ctx)
-            yield* hooks.runRecordCreateSuccess({ ...execCtx, result }).pipe(Effect.catch(() => Effect.void))
+            yield* hooks.runRecordCreateSuccess({ ...execCtx, result })
             return result
           }).pipe(
-            Effect.catch((error: CollectionError) =>
-              hooks
-                .runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) })
-                .pipe(Effect.andThen(Effect.fail(error)))
+            Effect.tapError((error: CollectionError) =>
+              hooks.runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) })
             ),
             withSpanWhenEnabled(
               "hook.create",
@@ -146,23 +142,17 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             )
             yield* Effect.forEach(
               results,
-              (result) =>
-                hooks
-                  .runRecordCreateSuccess({ collection, data: result, record: undefined, auth, result })
-                  .pipe(Effect.catch(() => Effect.void)),
+              (result) => hooks.runRecordCreateSuccess({ collection, data: result, record: undefined, auth, result }),
               { concurrency: "unbounded" }
             )
             return results
           }).pipe(
-            Effect.catch((error: CollectionError) =>
+            Effect.tapError((error: CollectionError) =>
               Effect.forEach(
                 records,
-                () =>
-                  hooks
-                    .runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) })
-                    .pipe(Effect.catch(() => Effect.void)),
+                () => hooks.runRecordCreateError({ collection, action: "create", error, auth: toAuth(ctx.auth) }),
                 { concurrency: "unbounded" }
-              ).pipe(Effect.andThen(Effect.fail(error)))
+              )
             ),
             withSpanWhenEnabled(
               "hook.createMany",
@@ -178,13 +168,11 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             const hookCtx = yield* hooks.runRecordUpdate({ collection, data, record: existing, auth })
             const execCtx = yield* hooks.runRecordUpdateExecute(hookCtx)
             const result = yield* inner.update(collection, id, execCtx.data, ctx)
-            yield* hooks.runRecordUpdateSuccess({ ...execCtx, result }).pipe(Effect.catch(() => Effect.void))
+            yield* hooks.runRecordUpdateSuccess({ ...execCtx, result })
             return result
           }).pipe(
-            Effect.catch((error: CollectionError) =>
-              hooks
-                .runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) })
-                .pipe(Effect.andThen(Effect.fail(error)))
+            Effect.tapError((error: CollectionError) =>
+              hooks.runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) })
             ),
             withSpanWhenEnabled(
               "hook.update",
@@ -226,21 +214,17 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             )
             yield* Effect.forEach(
               results.map((result, index) => ({ execCtx: prepared[index], result })),
-              ({ execCtx, result }) =>
-                hooks.runRecordUpdateSuccess({ ...execCtx, result }).pipe(Effect.catch(() => Effect.void)),
+              ({ execCtx, result }) => hooks.runRecordUpdateSuccess({ ...execCtx, result }),
               { concurrency: "unbounded" }
             )
             return results
           }).pipe(
-            Effect.catch((error: CollectionError) =>
+            Effect.tapError((error: CollectionError) =>
               Effect.forEach(
                 updates,
-                () =>
-                  hooks
-                    .runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) })
-                    .pipe(Effect.catch(() => Effect.void)),
+                () => hooks.runRecordUpdateError({ collection, action: "update", error, auth: toAuth(ctx.auth) }),
                 { concurrency: "unbounded" }
-              ).pipe(Effect.andThen(Effect.fail(error)))
+              )
             ),
             withSpanWhenEnabled(
               "hook.updateMany",
@@ -256,12 +240,10 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             const hookCtx = yield* hooks.runRecordDelete({ collection, data: existing, record: existing, auth })
             const execCtx = yield* hooks.runRecordDeleteExecute(hookCtx)
             yield* inner.delete(collection, id, ctx)
-            yield* hooks.runRecordDeleteSuccess({ ...execCtx, result: existing }).pipe(Effect.catch(() => Effect.void))
+            yield* hooks.runRecordDeleteSuccess({ ...execCtx, result: existing })
           }).pipe(
-            Effect.catch((error: CollectionError) =>
-              hooks
-                .runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) })
-                .pipe(Effect.andThen(Effect.fail(error)))
+            Effect.tapError((error: CollectionError) =>
+              hooks.runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) })
             ),
             withSpanWhenEnabled(
               "hook.delete",
@@ -295,23 +277,17 @@ export function makeHookCollectionServiceLayer(): Layer.Layer<
             const deleted = yield* inner.deleteMany(collection, ids, ctx)
             yield* Effect.forEach(
               deleted.map((id, index) => ({ execCtx: prepared[index], id })),
-              ({ execCtx }) =>
-                hooks
-                  .runRecordDeleteSuccess({ ...execCtx, result: execCtx.data })
-                  .pipe(Effect.catch(() => Effect.void)),
+              ({ execCtx }) => hooks.runRecordDeleteSuccess({ ...execCtx, result: execCtx.data }),
               { concurrency: "unbounded" }
             )
             return deleted
           }).pipe(
-            Effect.catch((error: CollectionError) =>
+            Effect.tapError((error: CollectionError) =>
               Effect.forEach(
                 ids,
-                () =>
-                  hooks
-                    .runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) })
-                    .pipe(Effect.catch(() => Effect.void)),
+                () => hooks.runRecordDeleteError({ collection, action: "delete", error, auth: toAuth(ctx.auth) }),
                 { concurrency: "unbounded" }
-              ).pipe(Effect.andThen(Effect.fail(error)))
+              )
             ),
             withSpanWhenEnabled(
               "hook.deleteMany",

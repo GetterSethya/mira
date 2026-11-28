@@ -1,7 +1,9 @@
-import { Effect, Layer } from "effect"
+import { Data, Effect, Layer } from "effect"
 
 import { AuthService } from "./auth.js"
 import { hashScryptPassword, verifyScryptPassword } from "./password-scrypt.js"
+
+class BunPasswordError extends Data.TaggedError("BunPasswordError")<{ readonly message: string }> {}
 
 type BunPasswordApi = {
   hash(
@@ -17,10 +19,7 @@ type BunPasswordApi = {
 
 const isBunPasswordApi = (value: unknown): value is BunPasswordApi => {
   if (typeof value !== "object" || value === null) return false
-  return (
-    typeof Reflect.get(value, "hash") === "function" &&
-    typeof Reflect.get(value, "verify") === "function"
-  )
+  return typeof Reflect.get(value, "hash") === "function" && typeof Reflect.get(value, "verify") === "function"
 }
 
 const bunPassword = (): BunPasswordApi | undefined => {
@@ -65,7 +64,7 @@ export const BunAuthServiceLayer = Layer.succeed(
         if (password === undefined) return yield* hashScryptPassword(plain)
         return yield* Effect.tryPromise({
           try: () => password.hash(plain, ARGON2_OPTIONS),
-          catch: (error) => new Error(`Bun.password.hash failed: ${String(error)}`)
+          catch: (error) => new BunPasswordError({ message: `Bun.password.hash failed: ${String(error)}` })
         }).pipe(Effect.orDie)
       }),
     verifyPassword: (plain, stored) =>
@@ -77,7 +76,7 @@ export const BunAuthServiceLayer = Layer.succeed(
         if (password === undefined || !isBunPasswordHash(stored)) return false
         return yield* Effect.tryPromise({
           try: () => password.verify(plain, stored),
-          catch: () => new Error("Bun.password.verify failed")
+          catch: () => new BunPasswordError({ message: "Bun.password.verify failed" })
         }).pipe(Effect.orElseSucceed(() => false))
       }),
     // Only request an upgrade when the native Argon2id hasher is available.

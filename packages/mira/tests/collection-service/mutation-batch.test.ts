@@ -4,7 +4,23 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
 import { AuthCollection, BaseCollection, Field } from "@gettersethya/mira-client"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
-import { Cause, Clock, Data, Deferred, Effect, Exit, Fiber, Layer, Option, Predicate, Queue, Ref, Result, Scope, Tracer } from "effect"
+import {
+  Cause,
+  Clock,
+  Data,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Predicate,
+  Queue,
+  Ref,
+  Result,
+  Scope,
+  Tracer
+} from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -156,9 +172,7 @@ const mutationConfig: ResolvedBatchMutationConfig = {
 
 type ServiceRequirements = Repository | SqlClient.SqlClient | FileStorageService | DialectService | AuthService
 
-function serviceDeps<A, E>(
-  layer: Layer.Layer<A, E, ServiceRequirements>
-): Layer.Layer<A, E, never> {
+function serviceDeps<A, E>(layer: Layer.Layer<A, E, ServiceRequirements>): Layer.Layer<A, E, never> {
   return layer.pipe(
     Layer.provide(RepositoryLive),
     Layer.provide(sqliteLayer),
@@ -268,7 +282,7 @@ const waitFor = (what: string, count: number, read: Effect.Effect<number>) =>
       yield* Effect.yieldNow
       yield* tick
     }
-    return yield* Effect.fail(new WaitTimeout({ what }))
+    return yield* new WaitTimeout({ what })
   })
 
 const waitForAdmitted = (count: number) =>
@@ -367,10 +381,12 @@ const emptySnapshot: BatchMutationStatsSnapshot = {
   }
 }
 
-function makeInstrumentedStatsLayer(options: {
-  readonly failFlushTimes?: number
-  readonly commitSignal?: Deferred.Deferred<void>
-} = {}): Layer.Layer<BatchMutationStats> {
+function makeInstrumentedStatsLayer(
+  options: {
+    readonly failFlushTimes?: number
+    readonly commitSignal?: Deferred.Deferred<void>
+  } = {}
+): Layer.Layer<BatchMutationStats> {
   return Layer.effect(
     BatchMutationStats,
     Effect.gen(function* () {
@@ -409,16 +425,13 @@ function makeInstrumentedStatsLayer(options: {
               consecutiveDefects: 0
             }))
           }),
-        recordRejected: () =>
-          Ref.update(state, (current) => ({ ...current, rejected: current.rejected + 1 })),
+        recordRejected: () => Ref.update(state, (current) => ({ ...current, rejected: current.rejected + 1 })),
         recordDefect: Ref.update(state, (current) => ({
           ...current,
           consecutiveDefects: current.consecutiveDefects + 1
         })),
-        recordTimeout: () =>
-          Ref.update(state, (current) => ({ ...current, timedOut: current.timedOut + 1 })),
-        recordAdmitted: () =>
-          Ref.update(state, (current) => ({ ...current, admitted: current.admitted + 1 })),
+        recordTimeout: () => Ref.update(state, (current) => ({ ...current, timedOut: current.timedOut + 1 })),
+        recordAdmitted: () => Ref.update(state, (current) => ({ ...current, admitted: current.admitted + 1 })),
         recordCleanupAbandoned: () =>
           Ref.update(state, (current) => ({
             ...current,
@@ -455,9 +468,7 @@ describe("resolveBatchOperationConfig", () => {
     Effect.sync(() => {
       const resolved = resolveBatchMutationConfig({ windowMs: 0.5, create: {} })
       expect(resolved.queue?.windowMs).toBe(0.5)
-      expect(() => resolveBatchOperationConfig({ enabled: true, maxBatchSize: 1.5 })).toThrowError(
-        /maxBatchSize/
-      )
+      expect(() => resolveBatchOperationConfig({ enabled: true, maxBatchSize: 1.5 })).toThrowError(/maxBatchSize/)
     })
   )
 
@@ -487,9 +498,7 @@ describe("resolveBatchOperationConfig", () => {
       expect(() => resolveBatchOperationConfig({ enabled: true, maxBatchSize: 0 })).toThrowError(/maxBatchSize/)
       expect(() => resolveBatchOperationConfig({ enabled: true, maxQueueSize: 0 })).toThrowError(/maxQueueSize/)
       expect(() => resolveBatchOperationConfig({ enabled: true, maxQueueBytes: 0 })).toThrowError(/maxQueueBytes/)
-      expect(() => resolveBatchOperationConfig({ enabled: true, submitTimeoutMs: 0 })).toThrowError(
-        /submitTimeoutMs/
-      )
+      expect(() => resolveBatchOperationConfig({ enabled: true, submitTimeoutMs: 0 })).toThrowError(/submitTimeoutMs/)
       expect(() => resolveBatchOperationConfig({ enabled: true, maxBatchSize: 1.5 })).toThrowError(/maxBatchSize/)
     })
   )
@@ -697,7 +706,7 @@ describe("create batching", () => {
             yield* Ref.set(dead, Option.some((yield* probeTransactionAlive(sql, "nested-begin")).alive))
             // Leave the (already rolled back) transaction: the driver skips
             // ROLLBACK when `isTransaction` is false.
-            return yield* Effect.fail(new ProbeAbort())
+            return yield* new ProbeAbort()
           })
         )
         .pipe(Effect.exit)
@@ -742,7 +751,7 @@ describe("create batching", () => {
             yield* Ref.set(nestedBegin, Option.some(yield* probeTransactionAlive(sql, "nested-begin")))
             // Leave the (already rolled back) transaction: the driver skips
             // ROLLBACK when `isTransaction` is false.
-            return yield* Effect.fail(new ProbeAbort())
+            return yield* new ProbeAbort()
           })
         )
         .pipe(Effect.exit)
@@ -760,12 +769,7 @@ describe("create batching", () => {
     Effect.gen(function* () {
       const scope = yield* Scope.make()
       const context = yield* Layer.buildWithScope(SqliteClient.layer({ filename: ":memory:" }), scope)
-      const sql = yield* Effect.provide(
-        Effect.gen(function* () {
-          return yield* SqlClient.SqlClient
-        }),
-        context
-      )
+      const sql = yield* Effect.provide(SqlClient.SqlClient, context)
       // Releasing the layer scope closes the database handle; the probe must
       // report that as not-usable instead of dying on the closed connection.
       yield* Scope.close(scope, Exit.void)
@@ -891,9 +895,7 @@ describe("create batching", () => {
       const svc = yield* CollectionService
       const sql = yield* SqlClient.SqlClient
 
-      const result = yield* sql
-        .withTransaction(svc.create(Posts, { title: "nested" }, noCtx))
-        .pipe(Effect.exit)
+      const result = yield* sql.withTransaction(svc.create(Posts, { title: "nested" }, noCtx)).pipe(Effect.exit)
       expect(failureTag(result)).toBe("BatchMutationNestedTransactionError")
     }).pipe(Effect.provide(batchedLayer()))
   )
@@ -956,20 +958,14 @@ const probeSelects = (calls: ReadonlyArray<RecordedCall>) =>
 const interpolatedFragments = (calls: ReadonlyArray<RecordedCall>) =>
   calls.filter((call) => call.strings.join("") === "").flatMap((call) => stringsIn(call.values))
 
-const runRecordedBatch = (
-  transactionProbe: TransactionProbeStrategy,
-  expectedCommits?: number
-) =>
+const runRecordedBatch = (transactionProbe: TransactionProbeStrategy, expectedCommits?: number) =>
   Effect.gen(function* () {
     const recorded: Array<RecordedCall> = []
     const statsLayer = makeBatchMutationStatsLayer()
     const layer = Layer.merge(
       makeMutationBatcherLayer(batchedConfig, statsLayer).pipe(
         Layer.provideMerge(
-          Layer.merge(
-            recordingSqlLayer(recorded),
-            Layer.succeed(Dialect, { ...sqliteDialect, transactionProbe })
-          )
+          Layer.merge(recordingSqlLayer(recorded), Layer.succeed(Dialect, { ...sqliteDialect, transactionProbe }))
         )
       ),
       statsLayer
@@ -1002,9 +998,10 @@ const runRecordedBatch = (
         batcher.submit({
           operation: "create",
           collection: Posts,
-          execute: sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('other', 'other', 'x', 'x')`.pipe(
-            Effect.as({ value: { id: "other" }, afterCommit: Effect.void })
-          ),
+          execute:
+            sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('other', 'other', 'x', 'x')`.pipe(
+              Effect.as({ value: { id: "other" }, afterCommit: Effect.void })
+            ),
           estimatedBytes: 10
         })
       )
@@ -1122,9 +1119,7 @@ describe("transaction probe wiring", () => {
   it("names every strategy as a string", () => {
     expect(probeStrategyName("select-only")).toBe("select-only")
     expect(probeStrategyName("nested-begin")).toBe("nested-begin")
-    expect(
-      probeStrategyName({ _tag: "error-classified", isTransactionFatal: () => false })
-    ).toBe("error-classified")
+    expect(probeStrategyName({ _tag: "error-classified", isTransactionFatal: () => false })).toBe("error-classified")
   })
 
   it("uses the classified verdicts", () => {
@@ -1162,10 +1157,7 @@ describe("transaction probe wiring", () => {
 
   it.effect("classifies fatal and statement outcomes", () =>
     Effect.gen(function* () {
-      const fatal = yield* classifyTransactionFailure(
-        { _tag: "error-classified", isTransactionFatal: () => true },
-        {}
-      )
+      const fatal = yield* classifyTransactionFailure({ _tag: "error-classified", isTransactionFatal: () => true }, {})
       const statement = yield* classifyTransactionFailure(
         { _tag: "error-classified", isTransactionFatal: () => false },
         {}
@@ -1211,9 +1203,10 @@ describe("transaction probe wiring", () => {
           batcher.submit({
             operation: "create",
             collection: Posts,
-            execute: sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('dup', 'same', 'x', 'x')`.pipe(
-              Effect.as({ value: { id: "dup" }, afterCommit: Effect.void })
-            ),
+            execute:
+              sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('dup', 'same', 'x', 'x')`.pipe(
+                Effect.as({ value: { id: "dup" }, afterCommit: Effect.void })
+              ),
             estimatedBytes: 10
           })
         )
@@ -1277,9 +1270,10 @@ describe("transaction probe wiring", () => {
           batcher.submit({
             operation: "create",
             collection: Posts,
-            execute: sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('dup', 'same', 'x', 'x')`.pipe(
-              Effect.as({ value: { id: "dup" }, afterCommit: Effect.void })
-            ),
+            execute:
+              sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('dup', 'same', 'x', 'x')`.pipe(
+                Effect.as({ value: { id: "dup" }, afterCommit: Effect.void })
+              ),
             estimatedBytes: 10
           })
         )
@@ -1292,9 +1286,10 @@ describe("transaction probe wiring", () => {
         batcher.submit({
           operation: "create",
           collection: Posts,
-          execute: sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('late', 'late', 'x', 'x')`.pipe(
-            Effect.as({ value: { id: "late" }, afterCommit: Effect.void })
-          ),
+          execute:
+            sql`INSERT INTO "posts" ("id", "title", "created", "updated") VALUES ('late', 'late', 'x', 'x')`.pipe(
+              Effect.as({ value: { id: "late" }, afterCommit: Effect.void })
+            ),
           estimatedBytes: 10
         })
       )
@@ -1414,9 +1409,7 @@ describe("create batching queue bounds", () => {
 
       const snapshot = yield* stats.snapshot
       expect(snapshot.rejected).toBe(1)
-    }).pipe(
-      Effect.provide(batcherOnlyLayer(withQueue(batchedConfig, { maxQueueBytes: 1_000 })))
-    )
+    }).pipe(Effect.provide(batcherOnlyLayer(withQueue(batchedConfig, { maxQueueBytes: 1_000 }))))
   )
 
   it.live("times out a create whose batch never flushes and frees its budget", () =>
@@ -1534,9 +1527,7 @@ describe("create batching queue bounds", () => {
       const recovered = yield* collectBatched([svc.create(Posts, { title: "two" }, noCtx)])
       expect(failureTag(recovered[0])).toBeUndefined()
       expect(yield* countPosts).toBe(2)
-    }).pipe(
-      Effect.provide(batchedLayer([Posts], batchedConfig, makeInstrumentedStatsLayer({ failFlushTimes: 1 })))
-    )
+    }).pipe(Effect.provide(batchedLayer([Posts], batchedConfig, makeInstrumentedStatsLayer({ failFlushTimes: 1 }))))
   )
 
   it.effect("maps a deferred foreign key COMMIT abort to a conflict and recovers", () =>
@@ -1587,7 +1578,7 @@ describe("create batching queue bounds", () => {
       const recovered = yield* collectBatched([svc.create(Posts, { title: "four" }, noCtx)])
       expect(failureTag(recovered[0])).toBeUndefined()
       expect((yield* stats.snapshot).consecutiveDefects).toBe(0)
-      expect((yield* countPosts)).toBe(1)
+      expect(yield* countPosts).toBe(1)
     }).pipe(Effect.provide(batchedLayer()))
   )
 
@@ -1667,7 +1658,8 @@ describe("create batcher shutdown", () => {
       )
       yield* Scope.close(consumerScope, Exit.void)
       expect(releases).toEqual(["consumer"])
-    }))
+    })
+  )
 
   it.effect("rolls back an in-flight uncommitted create and reports BatchMutationClosedError", () =>
     Effect.gen(function* () {
@@ -1692,13 +1684,14 @@ describe("create batcher shutdown", () => {
           batcher.submit({
             operation: "create",
             collection: Posts,
-            execute: sql`INSERT INTO "posts" ("id", "title", "published", "created", "updated") VALUES ('inflight', 'inflight', 0, 'x', 'x')`.pipe(
-              // A real write inside the open batch transaction, then block so
-              // shutdown interrupts the transaction with the row uncommitted.
-              Effect.andThen(Deferred.succeed(started, undefined)),
-              Effect.andThen(Deferred.await(gate)),
-              Effect.as({ value: { id: "inflight" }, afterCommit: Effect.void })
-            ),
+            execute:
+              sql`INSERT INTO "posts" ("id", "title", "published", "created", "updated") VALUES ('inflight', 'inflight', 0, 'x', 'x')`.pipe(
+                // A real write inside the open batch transaction, then block so
+                // shutdown interrupts the transaction with the row uncommitted.
+                Effect.andThen(Deferred.succeed(started, undefined)),
+                Effect.andThen(Deferred.await(gate)),
+                Effect.as({ value: { id: "inflight" }, afterCommit: Effect.void })
+              ),
             estimatedBytes: 10
           })
         )
@@ -1858,8 +1851,7 @@ describe("create batching with decorators", () => {
             )
         },
         onRecordCreateSuccess: {
-          handler: () =>
-            Ref.update(success, (count) => count + 1).pipe(Effect.asVoid)
+          handler: () => Ref.update(success, (count) => count + 1).pipe(Effect.asVoid)
         }
       })
 
@@ -1872,9 +1864,10 @@ describe("create batching with decorators", () => {
           svc.create(Posts, { title: "b" }, noCtx)
         ])
         expect(exits.every(Exit.isSuccess)).toBe(true)
-        expect(
-          exits.map((exit) => (Exit.isSuccess(exit) ? exit.value["title"] : undefined))
-        ).toEqual(["hooked-a", "hooked-b"])
+        expect(exits.map((exit) => (Exit.isSuccess(exit) ? exit.value["title"] : undefined))).toEqual([
+          "hooked-a",
+          "hooked-b"
+        ])
         expect(yield* Ref.get(pre)).toBe(2)
         yield* waitFor("success hooks", 2, Ref.get(success))
         expect(yield* Ref.get(success)).toBe(2)
@@ -1940,9 +1933,9 @@ describe("create batching instrumentation", () => {
         const row = yield* svc.create(Posts, { title: "before-no-tracing" }, noCtx)
         yield* Queue.clear(queue)
 
-        yield* svc.update(Posts, String(row["id"]), { title: "after-no-tracing" }, noCtx).pipe(
-          Effect.withTracerEnabled(false)
-        )
+        yield* svc
+          .update(Posts, String(row["id"]), { title: "after-no-tracing" }, noCtx)
+          .pipe(Effect.withTracerEnabled(false))
         const spans = yield* Queue.clear(queue)
         expect(spans.some((span) => span.name.startsWith("repository."))).toBe(false)
       }).pipe(
@@ -2009,9 +2002,7 @@ describe("create batching instrumentation", () => {
       yield* Effect.gen(function* () {
         yield* setupPostsTable
         const svc = yield* CollectionService
-        yield* collectBatched([
-          svc.create(Posts, { title: "no-span" }, noCtx).pipe(Effect.withTracerEnabled(false))
-        ])
+        yield* collectBatched([svc.create(Posts, { title: "no-span" }, noCtx).pipe(Effect.withTracerEnabled(false))])
         const spans = yield* Queue.clear(queue)
         expect(spans.some((span) => span.name === "collection.create")).toBe(false)
       }).pipe(
@@ -2265,9 +2256,7 @@ describe("update/delete batching", () => {
 
       const [row] = yield* svc.createMany(Posts, [{ title: "vanishing" }], noCtx)
       const id = String(row?.["id"])
-      const fiber = yield* Effect.forkChild(
-        svc.update(Posts, id, { title: "updated" }, noCtx).pipe(Effect.exit)
-      )
+      const fiber = yield* Effect.forkChild(svc.update(Posts, id, { title: "updated" }, noCtx).pipe(Effect.exit))
       yield* waitForAdmitted(1)
       // The row disappears after admission but before the flush executes.
       yield* sql`DELETE FROM ${sql("posts")} WHERE "id" = ${id}`

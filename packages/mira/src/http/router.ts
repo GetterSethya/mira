@@ -18,9 +18,30 @@ import type { RepoRecord } from "@/repository/types.js"
 import type { FileStorage } from "@/storage/storage.js"
 import type { ThumbnailService } from "@/thumbnail/types.js"
 
-import { clientIp, confirmEmailChange, emailOptionsOf, issueLoginOtp, loginWithPasswordless, requestEmailChange, requestEmailVerification, requestPasswordReset, requestPasswordlessLogin, resendLoginOtp, resetPassword, sendLoginAlert, verifyEmail, verifyLoginOtp } from "./auth-email.js"
-import type { AuthService} from "./auth.js";
-import { authenticateSession, maybeRehashPassword, mintSession as mintSessionFromAuth, verifyJwt, verifyPassword } from "./auth.js"
+import {
+  clientIp,
+  confirmEmailChange,
+  emailOptionsOf,
+  issueLoginOtp,
+  loginWithPasswordless,
+  requestEmailChange,
+  requestEmailVerification,
+  requestPasswordReset,
+  requestPasswordlessLogin,
+  resendLoginOtp,
+  resetPassword,
+  sendLoginAlert,
+  verifyEmail,
+  verifyLoginOtp
+} from "./auth-email.js"
+import type { AuthService } from "./auth.js"
+import {
+  authenticateSession,
+  maybeRehashPassword,
+  mintSession as mintSessionFromAuth,
+  verifyJwt,
+  verifyPassword
+} from "./auth.js"
 import { consumeLoginRequestLimits } from "./auth-rate-limit.js"
 import { catchAuthEmailErrors, catchCollectionErrors } from "./errors.js"
 import { makeFileServeRoute } from "./file-serve.js"
@@ -146,10 +167,7 @@ const decodeBody = <S extends Schema.Constraint>(
   req.json.pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(schema)),
     Effect.mapError(() =>
-      HttpServerResponse.jsonUnsafe(
-        { error: "validation_failed", issues: ["Invalid request body"] },
-        { status: 422 }
-      )
+      HttpServerResponse.jsonUnsafe({ error: "validation_failed", issues: ["Invalid request body"] }, { status: 422 })
     )
   )
 
@@ -160,10 +178,7 @@ const normalizeEmail = (email: string): string | null => {
 }
 
 const invalidEmail = () =>
-  HttpServerResponse.jsonUnsafe(
-    { error: "validation_failed", issues: ["Invalid email address"] },
-    { status: 422 }
-  )
+  HttpServerResponse.jsonUnsafe({ error: "validation_failed", issues: ["Invalid email address"] }, { status: 422 })
 
 const decodeEmailBody = (
   req: HttpServerRequest.HttpServerRequest
@@ -177,10 +192,7 @@ const decodeEmailBody = (
 
 const decodeEmailChangeBody = (
   req: HttpServerRequest.HttpServerRequest
-): Effect.Effect<
-  { readonly newEmail: string; readonly oldPassword: string },
-  HttpServerResponse.HttpServerResponse
-> =>
+): Effect.Effect<{ readonly newEmail: string; readonly oldPassword: string }, HttpServerResponse.HttpServerResponse> =>
   decodeBody(req, EmailChangeRequestSchema).pipe(
     Effect.flatMap(({ newEmail, oldPassword }) => {
       const normalized = normalizeEmail(newEmail)
@@ -302,9 +314,7 @@ export function makeCollectionRouter(
 ) {
   const collectionMap = new Map(collections.map((c) => [c.name, c]))
   const adminSet = new Set(adminCollections)
-  const authNames = new Set(
-    collections.filter((c) => c.schema["x-collection-kind"] === "auth").map((c) => c.name)
-  )
+  const authNames = new Set(collections.filter((c) => c.schema["x-collection-kind"] === "auth").map((c) => c.name))
   const isAuthCol = (name: string) => authNames.has(name)
 
   function collectionRoute(
@@ -416,11 +426,7 @@ export function makeCollectionRouter(
       const body = yield* getBody(req, col).pipe(catchCollectionErrors)
       const svc = yield* CollectionService
       const record = yield* svc.create(col, body, ctx).pipe(catchCollectionErrors)
-      if (
-        col.schema["x-collection-kind"] === "auth" &&
-        ctx.admin !== true &&
-        emailOptionsOf(col).verification
-      ) {
+      if (col.schema["x-collection-kind"] === "auth" && ctx.admin !== true && emailOptionsOf(col).verification) {
         const email = yield* EmailService
         const address = record["email"]
         if (email.enabled && typeof address === "string") {
@@ -436,11 +442,7 @@ export function makeCollectionRouter(
               EmailNotConfiguredError: () => Effect.succeed({ kind: "deferred" as const }),
               EmailFlowDisabledError: () => Effect.succeed({ kind: "deferred" as const })
             }),
-            Effect.catch(() =>
-              Effect.fail(
-                HttpServerResponse.jsonUnsafe({ error: "internal_error" }, { status: 500 })
-              )
-            )
+            Effect.mapError(() => HttpServerResponse.jsonUnsafe({ error: "internal_error" }, { status: 500 }))
           )
           if (verification.kind === "issued") {
             return HttpServerResponse.jsonUnsafe(
@@ -454,15 +456,12 @@ export function makeCollectionRouter(
               { status: 201 }
             )
           }
-          const retryAfterSeconds =
-            "retryAfterSeconds" in verification ? verification.retryAfterSeconds : undefined
+          const retryAfterSeconds = "retryAfterSeconds" in verification ? verification.retryAfterSeconds : undefined
           return HttpServerResponse.jsonUnsafe(
             {
               ...record,
               verificationDeferred: true,
-              ...(retryAfterSeconds === undefined
-                ? {}
-                : { verificationRetryAfterSeconds: retryAfterSeconds })
+              ...(retryAfterSeconds === undefined ? {} : { verificationRetryAfterSeconds: retryAfterSeconds })
             },
             { status: 201 }
           )
@@ -691,15 +690,10 @@ export function makeCollectionRouter(
       }
 
       const session = yield* mintSessionFromAuth(col, effectiveRow).pipe(
-        Effect.mapError(() =>
-          HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })
-        )
+        Effect.mapError(() => HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
       )
-      yield* sendLoginAlert(col, effectiveRow, req).pipe(Effect.catchCause(() => Effect.void))
-      return HttpServerResponse.jsonUnsafe(
-        { token: session.token, record: session.record },
-        { status: 200 }
-      ).pipe(
+      yield* Effect.ignoreCause(sendLoginAlert(col, effectiveRow, req))
+      return HttpServerResponse.jsonUnsafe({ token: session.token, record: session.record }, { status: 200 }).pipe(
         HttpServerResponse.setCookieUnsafe("mira_token", session.token, {
           httpOnly: true,
           sameSite: "strict",
@@ -778,13 +772,9 @@ export function makeCollectionRouter(
         return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
       const body = yield* decodeEmailChangeBody(req)
-      yield* requestEmailChange(
-        col,
-        auth.record,
-        body.newEmail,
-        body.oldPassword,
-        clientIp(req)
-      ).pipe(catchAuthEmailErrors)
+      yield* requestEmailChange(col, auth.record, body.newEmail, body.oldPassword, clientIp(req)).pipe(
+        catchAuthEmailErrors
+      )
       return HttpServerResponse.jsonUnsafe(
         { message: "If the address can be changed, a confirmation link has been sent." },
         { status: 202 }
@@ -821,14 +811,9 @@ export function makeCollectionRouter(
   const passwordlessLoginRoute = collectionRoute("passwordless-login", (col, _ctx, req) =>
     Effect.gen(function* () {
       const body = yield* decodeBody(req, CodeBodySchema)
-      const session = yield* loginWithPasswordless(col, body.challengeId, body.code).pipe(
-        catchAuthEmailErrors
-      )
-      yield* sendLoginAlert(col, session.raw, req).pipe(Effect.catchCause(() => Effect.void))
-      return HttpServerResponse.jsonUnsafe(
-        { token: session.token, record: session.record },
-        { status: 200 }
-      ).pipe(
+      const session = yield* loginWithPasswordless(col, body.challengeId, body.code).pipe(catchAuthEmailErrors)
+      yield* Effect.ignoreCause(sendLoginAlert(col, session.raw, req))
+      return HttpServerResponse.jsonUnsafe({ token: session.token, record: session.record }, { status: 200 }).pipe(
         HttpServerResponse.setCookieUnsafe("mira_token", session.token, {
           httpOnly: true,
           sameSite: "strict",
@@ -843,11 +828,8 @@ export function makeCollectionRouter(
     Effect.gen(function* () {
       const body = yield* decodeBody(req, CodeBodySchema)
       const session = yield* verifyLoginOtp(col, body.challengeId, body.code).pipe(catchAuthEmailErrors)
-      yield* sendLoginAlert(col, session.raw, req).pipe(Effect.catchCause(() => Effect.void))
-      return HttpServerResponse.jsonUnsafe(
-        { token: session.token, record: session.record },
-        { status: 200 }
-      ).pipe(
+      yield* Effect.ignoreCause(sendLoginAlert(col, session.raw, req))
+      return HttpServerResponse.jsonUnsafe({ token: session.token, record: session.record }, { status: 200 }).pipe(
         HttpServerResponse.setCookieUnsafe("mira_token", session.token, {
           httpOnly: true,
           sameSite: "strict",
@@ -861,9 +843,7 @@ export function makeCollectionRouter(
   const resendLoginOtpRoute = collectionRoute("login-otp-resend", (col, _ctx, req) =>
     Effect.gen(function* () {
       const body = yield* decodeBody(req, Schema.Struct({ challengeId: Schema.String }))
-      const result = yield* resendLoginOtp(col, body.challengeId, clientIp(req)).pipe(
-        catchAuthEmailErrors
-      )
+      const result = yield* resendLoginOtp(col, body.challengeId, clientIp(req)).pipe(catchAuthEmailErrors)
       return HttpServerResponse.jsonUnsafe(
         { challengeId: result.id, expiresAt: new Date(result.expiresAt).toISOString() },
         { status: 202 }
@@ -877,7 +857,7 @@ export function makeCollectionRouter(
         httpOnly: true,
         sameSite: "strict",
         path: "/",
-        maxAge: Duration.zero,
+        maxAge: Duration.zero
       })
     )
     const token = extractToken(req)
@@ -889,8 +869,7 @@ export function makeCollectionRouter(
       const jwtSecret = Redacted.value(config.jwtSecret)
       const payload = yield* verifyJwt(token, jwtSecret).pipe(Effect.orElseSucceed(() => undefined))
       if (payload !== undefined && payload.jti !== null) {
-        const expiresAtMs =
-          payload.exp !== null ? payload.exp * 1000 : Date.now() + 72 * 60 * 60 * 1000
+        const expiresAtMs = payload.exp !== null ? payload.exp * 1000 : Date.now() + 72 * 60 * 60 * 1000
         const store = yield* TokenStore
         // Best-effort: a store failure must not stop the cookie from clearing.
         yield* store.revoke(payload.jti, expiresAtMs).pipe(Effect.orElseSucceed(() => undefined))
@@ -910,7 +889,7 @@ export function makeCollectionRouter(
         httpOnly: true,
         sameSite: "strict",
         path: "/",
-        maxAge: Duration.zero,
+        maxAge: Duration.zero
       })
     )
     return Effect.gen(function* () {
@@ -957,15 +936,8 @@ export function makeCollectionRouter(
         return HttpServerResponse.jsonUnsafe({ error: "unauthorized" }, { status: 401 })
       }
       const dialect = yield* Dialect
-      const publicRecord = yield* toPublicRecord(
-        meCollection.schema,
-        dialect.storesBooleanAsInteger,
-        auth.record
-      )
-      return HttpServerResponse.jsonUnsafe(
-        { collection: auth.collection, record: publicRecord },
-        { status: 200 }
-      )
+      const publicRecord = yield* toPublicRecord(meCollection.schema, dialect.storesBooleanAsInteger, auth.record)
+      return HttpServerResponse.jsonUnsafe({ collection: auth.collection, record: publicRecord }, { status: 200 })
     }).pipe(
       withSpanWhenEnabled(
         "http.handler",
@@ -1029,14 +1001,10 @@ export function makeCollectionRouter(
       }
 
       return yield* effect.pipe(
-        Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 })))
+        Effect.orElseSucceed(() => HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
       )
     }).pipe(
-      withSpanWhenEnabled(
-        "http.handler",
-        { kind: "server", attributes: { operation } },
-        { captureStackTrace: false }
-      )
+      withSpanWhenEnabled("http.handler", { kind: "server", attributes: { operation } }, { captureStackTrace: false })
     )
   }
 

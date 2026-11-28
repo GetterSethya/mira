@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Data, Effect, Result } from "effect"
+import { Data, Effect, Exit, Result } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -8,7 +8,7 @@ import type { StoreSqlCapabilities } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { libsqlDialect } from "@/dialect/dialect-libsql.js"
 import { postgresStoreSql } from "@/dialect/dialect-postgres.js"
-import { withStoreBootstrap } from "@/dialect/store-sql.js"
+import { ensureStoreColumn, ensureStoreIndex, withStoreBootstrap } from "@/dialect/store-sql.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 
@@ -27,10 +27,7 @@ describe("withStoreBootstrap", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const store: StoreSqlCapabilities = {
-        bootstrapMode: "plain",
-        columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false,
-        isDuplicateKey: () => false
+        ...sqliteDialect.store
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>
@@ -45,14 +42,9 @@ describe("withStoreBootstrap", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const store: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
         bootstrapMode: "transaction",
-        bootstrapSql: [
-          "CREATE TABLE _bootstrap_gate (id INTEGER)",
-          "INSERT INTO _bootstrap_gate (id) VALUES (1)"
-        ],
-        columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false,
-        isDuplicateKey: () => false
+        bootstrapSql: ["CREATE TABLE _bootstrap_gate (id INTEGER)", "INSERT INTO _bootstrap_gate (id) VALUES (1)"]
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>
@@ -72,18 +64,16 @@ describe("withStoreBootstrap", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const store: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
         bootstrapMode: "transaction",
-        bootstrapSql: ["CREATE TABLE _rollback_gate (id INTEGER)"],
-        columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false,
-        isDuplicateKey: () => false
+        bootstrapSql: ["CREATE TABLE _rollback_gate (id INTEGER)"]
       }
 
       const exit = yield* Effect.exit(
         withStoreBootstrap(sql, store, (tx) =>
           Effect.gen(function* () {
             yield* tx.unsafe("CREATE TABLE _rollback_probe (id INTEGER)").pipe(Effect.asVoid)
-            return yield* Effect.fail(new TestError({ retryable: false }))
+            return yield* new TestError({ retryable: false })
           })
         )
       )
@@ -99,18 +89,17 @@ describe("withStoreBootstrap", () => {
       const sql = yield* SqlClient.SqlClient
       let attempts = 0
       const store: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
         bootstrapMode: "transaction",
         bootstrapSql: ["SELECT 1"],
-        columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: (error) => error instanceof TestError && error.retryable,
-        isDuplicateKey: () => false
+        isRetryable: (error) => error instanceof TestError && error.retryable
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>
         Effect.gen(function* () {
           attempts += 1
           if (attempts === 1) {
-            return yield* Effect.fail(new TestError({ retryable: true }))
+            return yield* new TestError({ retryable: true })
           }
           yield* tx.unsafe("CREATE TABLE _retry_probe (id INTEGER)").pipe(Effect.asVoid)
         })
@@ -134,9 +123,7 @@ describe("store capabilities", () => {
     if (postgresStoreSql.bootstrapMode !== "transaction") return
     expect(postgresStoreSql.bootstrapSql.join("\n")).toContain("lock_timeout")
     expect(postgresStoreSql.bootstrapSql.join("\n")).toContain("pg_advisory_xact_lock")
-    expect(postgresStoreSql.columnExistsSql("_auth_challenges", "new_email")).toContain(
-      "current_schema()"
-    )
+    expect(postgresStoreSql.columnExistsSql("_auth_challenges", "new_email")).toContain("current_schema()")
     expect(postgresStoreSql.columnExistsSql("_auth_challenges", "new_email")).toContain("LIMIT 1")
     expect(postgresStoreSql.isRetryable({ code: "40001" })).toBe(true)
     expect(postgresStoreSql.isRetryable({ code: "40P01" })).toBe(true)
@@ -144,6 +131,73 @@ describe("store capabilities", () => {
     expect(postgresStoreSql.isRetryable({ code: "23505" })).toBe(false)
     expect(postgresStoreSql.transactionLockTimeoutSql).toContain("2s")
   })
+})
+
+describe("ensureStoreIndex and ensureStoreColumn", () => {
+  it.effect("ignores only classified bootstrap errors", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const lenient: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
+        isIgnorableBootstrapError: () => true
+      }
+      yield* ensureStoreIndex(sql, lenient, "THIS IS NOT VALID SQL")
+
+      const strict: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
+        isIgnorableBootstrapError: () => false
+      }
+      const exit = yield* Effect.exit(ensureStoreIndex(sql, strict, "THIS IS NOT VALID SQL"))
+      expect(Exit.isFailure(exit)).toBe(true)
+    }).pipe(Effect.provide(sqliteLayer))
+  )
+
+  it.effect("adds a missing column once and reports whether it ran", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe("CREATE TABLE _column_probe (id INTEGER)")
+
+      const added = yield* ensureStoreColumn(
+        sql,
+        sqliteDialect.store,
+        "_column_probe",
+        "extra",
+        "ALTER TABLE _column_probe ADD COLUMN extra TEXT"
+      )
+      expect(added).toBe(true)
+
+      const again = yield* ensureStoreColumn(
+        sql,
+        sqliteDialect.store,
+        "_column_probe",
+        "extra",
+        "ALTER TABLE _column_probe ADD COLUMN extra TEXT"
+      )
+      expect(again).toBe(false)
+
+      const lenient: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
+        isIgnorableBootstrapError: () => true
+      }
+      const raced = yield* ensureStoreColumn(
+        sql,
+        lenient,
+        "_column_probe",
+        "raced",
+        "ALTER TABLE _column_probe ADD COLUMN"
+      )
+      expect(raced).toBe(true)
+
+      const strict: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
+        isIgnorableBootstrapError: () => false
+      }
+      const denied = yield* Effect.exit(
+        ensureStoreColumn(sql, strict, "_column_probe", "denied", "ALTER TABLE _column_probe ADD COLUMN")
+      )
+      expect(Exit.isFailure(denied)).toBe(true)
+    }).pipe(Effect.provide(sqliteLayer))
+  )
 })
 
 describe("duplicate key classifiers", () => {
@@ -167,9 +221,7 @@ describe("duplicate key classifiers", () => {
         expect(sqliteDialect.store.isDuplicateKey(duplicate.failure.reason)).toBe(true)
       }
 
-      const notNull = yield* Effect.result(
-        sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, [null])
-      )
+      const notNull = yield* Effect.result(sql.unsafe(`INSERT INTO "_duplicate_email" ("email") VALUES (?)`, [null]))
       expect(Result.isFailure(notNull)).toBe(true)
       if (Result.isFailure(notNull)) {
         expect(sqliteDialect.store.isDuplicateKey(notNull.failure)).toBe(false)
@@ -180,9 +232,7 @@ describe("duplicate key classifiers", () => {
   it("classifies structured codes without message text", () => {
     expect(sqliteDialect.store.isDuplicateKey({ errcode: 2067 })).toBe(true)
     expect(sqliteDialect.store.isDuplicateKey({ rawCode: 2067 })).toBe(true)
-    expect(sqliteDialect.store.isDuplicateKey({ extendedCode: "SQLITE_CONSTRAINT_UNIQUE" })).toBe(
-      true
-    )
+    expect(sqliteDialect.store.isDuplicateKey({ extendedCode: "SQLITE_CONSTRAINT_UNIQUE" })).toBe(true)
     expect(sqliteDialect.store.isDuplicateKey({ reason: { _tag: "UniqueViolation" } })).toBe(true)
     expect(sqliteDialect.store.isDuplicateKey({ errstr: "constraint failed" })).toBe(false)
 
@@ -193,9 +243,7 @@ describe("duplicate key classifiers", () => {
         reason: { _tag: "UniqueViolation", cause: { code: "23505" } }
       })
     ).toBe(true)
-    expect(
-      postgresStoreSql.isDuplicateKey({ _tag: "SqlError", reason: { _tag: "UniqueViolation" } })
-    ).toBe(true)
+    expect(postgresStoreSql.isDuplicateKey({ _tag: "SqlError", reason: { _tag: "UniqueViolation" } })).toBe(true)
     expect(postgresStoreSql.isDuplicateKey({ code: "40P01" })).toBe(false)
     expect(
       postgresStoreSql.isDuplicateKey({

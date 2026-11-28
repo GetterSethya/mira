@@ -44,15 +44,7 @@ const categories = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]
 const now = new Date().toISOString()
 db.exec("BEGIN")
 for (let index = 0; index < rows; index += 1) {
-  insert.run(
-    `id-${index}`,
-    `title-${index}`,
-    categories[index % categories.length],
-    index % 1000,
-    index % 2,
-    now,
-    now
-  )
+  insert.run(`id-${index}`, `title-${index}`, categories[index % categories.length], index % 1000, index % 2, now, now)
 }
 db.exec("COMMIT")
 db.exec("ANALYZE")
@@ -135,6 +127,10 @@ function median(values: ReadonlyArray<number>) {
   return sorted[Math.floor(sorted.length / 2)] ?? 0
 }
 
+// `better-sqlite3` types EXPLAIN rows as `unknown`; the `detail` column is
+// preferred below, so this fallback only needs a non-throwing rendering.
+const describeRow = (row: unknown) => String(row)
+
 for (const shape of shapes) {
   const plan = db.prepare(`EXPLAIN QUERY PLAN ${shape.sql}`).all(...shape.params)
   const statement = db.prepare(shape.sql)
@@ -150,7 +146,7 @@ for (const shape of shapes) {
     const detail =
       typeof row === "object" && row !== null && "detail" in row && typeof row.detail === "string"
         ? row.detail
-        : String(row)
+        : describeRow(row)
     process.stdout.write(`  ${detail}\n`)
   }
   process.stdout.write(`  median ${median(samples).toFixed(3)} ms\n`)

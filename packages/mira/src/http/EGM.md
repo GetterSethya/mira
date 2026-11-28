@@ -137,3 +137,10 @@ The public API surface of a Mira server, built on `effect/http`: per-collection 
 - `makeFileTokenRoute` and `issueToken` add `Dialect` to their requirement rows because they call `authenticateSession` [file-token.ts:makeFileTokenRoute].
 - Login and auth-email user lookup use `fieldEqualsClause` with the dialect quoter instead of raw `t.email = ?` [router.ts:authRoute] [auth-email.ts:findAuthUser].
 - File serving uses `idClause(id, dialect.quoteIdentifier)` and passes required resolve options to `resolveCtxPlaceholders` [file-serve.ts:serveFile].
+
+## MySQL token store (issue #30)
+
+- `_revoked_tokens` and `_auth_generations` use `store.keyColumnType` for keyed text (`VARCHAR(191)` with `utf8mb4_0900_bin` on MySQL).
+- Revoke uses `store.insertIgnoreClause(["jti"])` inside a `sql` template and appends the clause with `sql.literal`.
+- Generation bumps use `upsertClause(..., [{ column: "gen", kind: "increment-by-one" }])`, which renders `gen = gen + 1`, not `VALUES(gen) + 1`.
+- Expiry indexes go through `ensureStoreIndex`, so MySQL's missing `CREATE INDEX IF NOT EXISTS` is handled by ignoring `1061`.

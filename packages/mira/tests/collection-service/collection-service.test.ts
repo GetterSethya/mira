@@ -3,11 +3,11 @@ import { describe, it } from "@effect/vitest"
 import { AuthCollection, BaseCollection } from "@gettersethya/mira-client"
 import { Field } from "@gettersethya/mira-client"
 import { ViewCollection } from "@gettersethya/mira-client"
-import { Effect, Layer, Match,Result } from "effect"
+import { Effect, Layer, Match, Result } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
-import { applyRulesToCollections,defineRule } from "@/app/index.js"
+import { applyRulesToCollections, defineRule } from "@/app/index.js"
 import { CollectionService, makeCollectionServiceLayer } from "@/collection-service/collection-service.js"
 import type { CursorPage, RequestCtx } from "@/collection-service/context.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
@@ -21,14 +21,17 @@ import { FileStorage, FileStorageNotFound } from "@/storage/storage.js"
 // Test layer
 // ---------------------------------------------------------------------------
 
-const FileStorageTest = Layer.succeed(FileStorage, FileStorage.of({
-  upload: (key) => Effect.succeed(key),
-  delete: () => Effect.void,
-  url: (key) => `/files/${key}`,
-  read: (key) => Effect.fail(new FileStorageNotFound({ key })),
-  exists: () => Effect.succeed(false),
-  list: () => Effect.succeed([])
-}))
+const FileStorageTest = Layer.succeed(
+  FileStorage,
+  FileStorage.of({
+    upload: (key) => Effect.succeed(key),
+    delete: () => Effect.void,
+    url: (key) => `/files/${key}`,
+    read: (key) => Effect.fail(new FileStorageNotFound({ key })),
+    exists: () => Effect.succeed(false),
+    list: () => Effect.succeed([])
+  })
+)
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const DialectTest = Layer.succeed(Dialect, sqliteDialect)
@@ -136,10 +139,10 @@ const activePostsDef = ViewCollection.define(
   "active_posts",
   "SELECT seqId, id, title, status, created, updated FROM posts_base WHERE status = 'active'",
   {
-    seqId:   Field.integer().view(),
-    id:      Field.text().view(),
-    title:   Field.text().view(),
-    status:  Field.text().view()
+    seqId: Field.integer().view(),
+    id: Field.text().view(),
+    title: Field.text().view(),
+    status: Field.text().view()
   }
 )
 const activePostsRules = defineRule(activePostsDef, (R) => ({
@@ -152,27 +155,29 @@ const ActivePosts = applyRulesToCollections([activePostsDef], [activePostsRules]
 const scoredDef = BaseCollection.define("scored", {
   name: Field.text({
     minLength: 2,
-    error: (kind) => Match.value(kind).pipe(
-      Match.when("minLength", () => "Name too short"),
-      Match.when("required",  () => "Name is required"),
-      Match.orElse(()         => "Invalid name")
-    )
+    error: (kind) =>
+      Match.value(kind).pipe(
+        Match.when("minLength", () => "Name too short"),
+        Match.when("required", () => "Name is required"),
+        Match.orElse(() => "Invalid name")
+      )
   }),
   score: Field.number({
     min: 0,
     max: 100,
-    error: (kind) => Match.value(kind).pipe(
-      Match.when("minimum", () => "Score below zero"),
-      Match.when("maximum", () => "Score above 100"),
-      Match.orElse(()       => "Invalid score")
-    )
+    error: (kind) =>
+      Match.value(kind).pipe(
+        Match.when("minimum", () => "Score below zero"),
+        Match.when("maximum", () => "Score above 100"),
+        Match.orElse(() => "Invalid score")
+      )
   })
 })
 const scoredRules = defineRule(scoredDef, (R) => ({
   create: R.public(),
   update: R.public(),
-  list:   R.public(),
-  view:   R.public(),
+  list: R.public(),
+  view: R.public(),
   delete: R.public()
 }))
 const Scored = applyRulesToCollections([scoredDef], [scoredRules])[0]
@@ -184,8 +189,8 @@ const rolesDef = BaseCollection.define("roles", {
 const rolesRules = defineRule(rolesDef, (R) => ({
   create: R.public(),
   update: R.public(),
-  list:   R.public(),
-  view:   R.public(),
+  list: R.public(),
+  view: R.public(),
   delete: R.public()
 }))
 const Roles = applyRulesToCollections([rolesDef], [rolesRules])[0]
@@ -201,12 +206,7 @@ const makeCollectionServiceWithDialect = (dialect: DialectType) =>
     Layer.provide(NodeAuthServiceLayer)
   )
 const makeTestLayer = (dialect: DialectType) =>
-  Layer.mergeAll(
-    makeCollectionServiceWithDialect(dialect),
-    sqliteLayer,
-    FileStorageTest,
-    NodeCryptoLayer
-  )
+  Layer.mergeAll(makeCollectionServiceWithDialect(dialect), sqliteLayer, FileStorageTest, NodeCryptoLayer)
 const testLayer = makeTestLayer(sqliteDialect)
 
 // ScoredServiceLayer wires Scored into the collection service
@@ -250,7 +250,8 @@ describe("list", () => {
       const svc = yield* CollectionService
       const result = yield* svc.list(Posts, null, 10, noCtx)
       expect(isCursorPage(result)).toBe(true)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("returns all inserted rows", () =>
     Effect.gen(function* () {
@@ -260,7 +261,8 @@ describe("list", () => {
       yield* svc.create(Posts, { title: "B" }, noCtx)
       const result = yield* svc.list(Posts, null, 10, noCtx)
       expect(isCursorPage(result) && result.items.length).toBe(2)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("seqId is NOT present in list items (x-hidden stripped)", () =>
     Effect.gen(function* () {
@@ -270,7 +272,8 @@ describe("list", () => {
       const result = yield* svc.list(Posts, null, 10, noCtx)
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect("seqId" in result.items[0]).toBe(false)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("list item key set and order follow the SELECT projection", () =>
     Effect.gen(function* () {
@@ -279,15 +282,9 @@ describe("list", () => {
       yield* svc.create(Posts, { title: "Ordered", published: true }, noCtx)
       const result = yield* svc.list(Posts, null, 10, noCtx)
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
-      expect(Object.keys(result.items[0] ?? {})).toEqual([
-        "id",
-        "title",
-        "published",
-        "authorId",
-        "created",
-        "updated"
-      ])
-    }).pipe(Effect.provide(testLayer)))
+      expect(Object.keys(result.items[0] ?? {})).toEqual(["id", "title", "published", "authorId", "created", "updated"])
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("admin default list omits seqId and keeps the same schema order", () =>
     Effect.gen(function* () {
@@ -296,15 +293,9 @@ describe("list", () => {
       yield* svc.create(Posts, { title: "Admin", published: false }, noCtx)
       const result = yield* svc.list(Posts, null, 10, { headers: {}, query: {}, admin: true })
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
-      expect(Object.keys(result.items[0] ?? {})).toEqual([
-        "id",
-        "title",
-        "published",
-        "authorId",
-        "created",
-        "updated"
-      ])
-    }).pipe(Effect.provide(testLayer)))
+      expect(Object.keys(result.items[0] ?? {})).toEqual(["id", "title", "published", "authorId", "created", "updated"])
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("list items decode booleans and omit seqId in the same pass", () =>
     Effect.gen(function* () {
@@ -316,7 +307,8 @@ describe("list", () => {
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.map((r) => r["published"])).toEqual([true, false])
       expect(result.items.some((r) => "seqId" in r)).toBe(false)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("nextCursor is null when page is not full", () =>
     Effect.gen(function* () {
@@ -326,7 +318,8 @@ describe("list", () => {
       const result = yield* svc.list(Posts, null, 10, noCtx)
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.nextCursor).toBeNull()
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("nextCursor is a number when page is full", () =>
     Effect.gen(function* () {
@@ -338,7 +331,8 @@ describe("list", () => {
       const result = yield* svc.list(Posts, null, 2, noCtx)
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(typeof result.nextCursor).toBe("number")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("cursor pagination: page 2 fetches rows not in page 1", () =>
     Effect.gen(function* () {
@@ -369,7 +363,8 @@ describe("list", () => {
       const ids1 = page1.items.map((r) => r["id"])
       const ids2 = page2.items.map((r) => r["id"])
       expect(ids1.some((id) => ids2.includes(id))).toBe(false)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("rule-enforced list returns only matching rows", () =>
     Effect.gen(function* () {
@@ -381,7 +376,8 @@ describe("list", () => {
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.length).toBe(1)
       expect(result.items[0]["title"]).toBe("Mine")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("no rules → ForbiddenError", () =>
     Effect.gen(function* () {
@@ -395,7 +391,8 @@ describe("list", () => {
           expect(result.failure.action).toBe("list")
         }
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("view collection returns CursorPage shape", () =>
     Effect.gen(function* () {
@@ -403,7 +400,8 @@ describe("list", () => {
       const svc = yield* CollectionService
       const result = yield* svc.list(ActivePosts, null, 10, noCtx)
       expect(isCursorPage(result)).toBe(true)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("view collection list returns only rows from the view", () =>
     Effect.gen(function* () {
@@ -423,7 +421,8 @@ describe("list", () => {
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.length).toBe(1)
       expect(result.items[0]["title"]).toBe("Active Post")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -459,7 +458,8 @@ describe("list sorted cursor pagination", () => {
       if (!isCursorPage(page3)) throw new Error("expected page 3")
       expect(pageTitles(page3)).toEqual(["E"])
       expect(page3.nextCursor).toBeNull()
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("walks a title-descending list across pages", () =>
     Effect.gen(function* () {
@@ -487,7 +487,8 @@ describe("list sorted cursor pagination", () => {
       if (!isCursorPage(page3)) throw new Error("expected page 3")
       expect(pageTitles(page3)).toEqual(["A"])
       expect(page3.nextCursor).toBeNull()
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("uses seqId as a tie-breaker for equal sort values", () =>
     Effect.gen(function* () {
@@ -514,7 +515,8 @@ describe("list sorted cursor pagination", () => {
 
       expect(new Set(seen).size).toBe(3)
       expect(page2.nextCursor).toBeNull()
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("supports filter + sort + cursor together", () =>
     Effect.gen(function* () {
@@ -545,7 +547,8 @@ describe("list sorted cursor pagination", () => {
       )
       if (!isCursorPage(page2)) throw new Error("expected page 2")
       expect(pageTitles(page2)).toEqual(["D"])
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("rejects a sorted cursor on a nullable field", () =>
     Effect.gen(function* () {
@@ -573,7 +576,8 @@ describe("list sorted cursor pagination", () => {
           expect(result.failure.issues.some((issue) => issue.includes("nullable"))).toBe(true)
         }
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("rejects a cursor whose row no longer exists", () =>
     Effect.gen(function* () {
@@ -596,7 +600,8 @@ describe("list sorted cursor pagination", () => {
           expect(result.failure.issues.some((issue) => issue.includes("Invalid cursor"))).toBe(true)
         }
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 })
 
 describe("list with filter", () => {
@@ -614,7 +619,8 @@ describe("list with filter", () => {
       })
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.length).toBe(2)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("filters by gt on integer field", () =>
     Effect.gen(function* () {
@@ -632,7 +638,8 @@ describe("list with filter", () => {
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.length).toBe(1)
       expect(result.items[0]["title"]).toBe("C")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("and filter combines conditions", () =>
     Effect.gen(function* () {
@@ -651,7 +658,8 @@ describe("list with filter", () => {
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.length).toBe(1)
       expect(result.items[0]["title"]).toBe("Alpha")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("filter is ANDed with rule enforcement", () =>
     Effect.gen(function* () {
@@ -670,7 +678,8 @@ describe("list with filter", () => {
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.length).toBe(1)
       expect(result.items[0]["title"]).toBe("X")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("in filter works", () =>
     Effect.gen(function* () {
@@ -686,9 +695,10 @@ describe("list with filter", () => {
       })
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.length).toBe(2)
-      const titles = result.items.map((r) => r["title"]).sort()
+      const titles = result.items.map((r) => String(r["title"])).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
       expect(titles).toEqual(["Blue", "Red"])
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("or filter works", () =>
     Effect.gen(function* () {
@@ -705,9 +715,10 @@ describe("list with filter", () => {
       })
       if (!isCursorPage(result)) throw new Error("expected CursorPage")
       expect(result.items.length).toBe(2)
-      const titles = result.items.map((r) => r["title"]).sort()
+      const titles = result.items.map((r) => String(r["title"])).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
       expect(titles).toEqual(["Cat", "Dog"])
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("not filter works", () =>
     Effect.gen(function* () {
@@ -725,7 +736,8 @@ describe("list with filter", () => {
       expect(result.items.length).toBe(2)
       const titles = result.items.map((r) => r["title"])
       expect(titles).not.toContain("Skip")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("like filters fold ASCII only under SQLite LIKE", () =>
     Effect.gen(function* () {
@@ -750,7 +762,8 @@ describe("list with filter", () => {
       })
       if (!isCursorPage(unicode)) throw new Error("expected CursorPage")
       expect(unicode.items).toEqual([])
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("like filters consult the dialect pattern renderer", () =>
     Effect.gen(function* () {
@@ -774,7 +787,8 @@ describe("list with filter", () => {
           caseInsensitivePattern: (left, right) => `${left} LIKE ${right} AND 1 = 0`
         })
       )
-    ))
+    )
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -791,7 +805,8 @@ describe("view", () => {
       if (typeof id !== "string") throw new Error("expected string id")
       const result = yield* svc.view(Posts, id, noCtx)
       expect(result["title"]).toBe("Hello")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("returns NotFoundError for an unknown id", () =>
     Effect.gen(function* () {
@@ -802,7 +817,8 @@ describe("view", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("NotFoundError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("seqId is NOT in the returned row", () =>
     Effect.gen(function* () {
@@ -813,7 +829,8 @@ describe("view", () => {
       if (typeof id !== "string") throw new Error("expected string id")
       const result = yield* svc.view(Posts, id, noCtx)
       expect("seqId" in result).toBe(false)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("row not matching rule → NotFoundError (indistinguishable from missing)", () =>
     Effect.gen(function* () {
@@ -827,7 +844,8 @@ describe("view", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("NotFoundError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("no rules → ForbiddenError", () =>
     Effect.gen(function* () {
@@ -838,7 +856,8 @@ describe("view", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ForbiddenError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -855,7 +874,8 @@ describe("create", () => {
       expect(result["title"]).toBe("New Post")
       expect(typeof result["created"]).toBe("string")
       expect(typeof result["updated"]).toBe("string")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("seqId is NOT in the returned row", () =>
     Effect.gen(function* () {
@@ -863,7 +883,8 @@ describe("create", () => {
       const svc = yield* CollectionService
       const result = yield* svc.create(Posts, { title: "X" }, noCtx)
       expect("seqId" in result).toBe(false)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("boolean field round-trips through SQLite encode/decode (true)", () =>
     Effect.gen(function* () {
@@ -871,7 +892,8 @@ describe("create", () => {
       const svc = yield* CollectionService
       const result = yield* svc.create(Posts, { title: "Bool true", published: true }, noCtx)
       expect(result["published"]).toBe(true)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("boolean field round-trips through SQLite encode/decode (false)", () =>
     Effect.gen(function* () {
@@ -879,7 +901,8 @@ describe("create", () => {
       const svc = yield* CollectionService
       const result = yield* svc.create(Posts, { title: "Bool false", published: false }, noCtx)
       expect(result["published"]).toBe(false)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ValidationError when required field is missing", () =>
     Effect.gen(function* () {
@@ -893,7 +916,8 @@ describe("create", () => {
           expect(result.failure.issues.some((i) => i.includes("title"))).toBe(true)
         }
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ValidationError when x-system field is in input", () =>
     Effect.gen(function* () {
@@ -907,7 +931,8 @@ describe("create", () => {
           expect(result.failure.issues.some((i) => i.includes("id"))).toBe(true)
         }
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ValidationError when seqId is in input", () =>
     Effect.gen(function* () {
@@ -918,7 +943,8 @@ describe("create", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ValidationError when type is wrong", () =>
     Effect.gen(function* () {
@@ -929,15 +955,14 @@ describe("create", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ValidationError when string exceeds maxLength", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc
-        .create(Posts, { title: "x".repeat(101) }, noCtx)
-        .pipe(Effect.result)
+      const result = yield* svc.create(Posts, { title: "x".repeat(101) }, noCtx).pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
@@ -945,21 +970,21 @@ describe("create", () => {
           expect(result.failure.issues.some((i) => i.includes("100"))).toBe(true)
         }
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ForbiddenError when create rule pre-check fails", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
       // ProtectedPosts requires authorId = "user1"; supply "user2" → rule fails
-      const result = yield* svc
-        .create(ProtectedPosts, { title: "X", authorId: "user2" }, noCtx)
-        .pipe(Effect.result)
+      const result = yield* svc.create(ProtectedPosts, { title: "X", authorId: "user2" }, noCtx).pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ForbiddenError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("create succeeds when rule pre-check passes", () =>
     Effect.gen(function* () {
@@ -967,7 +992,8 @@ describe("create", () => {
       const svc = yield* CollectionService
       const result = yield* svc.create(ProtectedPosts, { title: "X", authorId: "user1" }, noCtx)
       expect(result["title"]).toBe("X")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("no rules → ForbiddenError", () =>
     Effect.gen(function* () {
@@ -978,7 +1004,8 @@ describe("create", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ForbiddenError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("view collection → ReadOnlyError", () =>
     Effect.gen(function* () {
@@ -991,7 +1018,8 @@ describe("create", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ReadOnlyError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -1009,7 +1037,8 @@ describe("update", () => {
       const updated = yield* svc.update(Posts, id, { title: "New" }, noCtx)
       expect(updated["title"]).toBe("New")
       expect(updated["authorId"]).toBe("user1")
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("toggling a boolean field updates and round-trips correctly", () =>
     Effect.gen(function* () {
@@ -1020,7 +1049,8 @@ describe("update", () => {
       if (typeof id !== "string") throw new Error("expected string id")
       const updated = yield* svc.update(Posts, id, { published: true }, noCtx)
       expect(updated["published"]).toBe(true)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.live("updated timestamp is refreshed; created is unchanged", () =>
     Effect.gen(function* () {
@@ -1033,7 +1063,8 @@ describe("update", () => {
       const updated = yield* svc.update(Posts, id, { title: "Time2" }, noCtx)
       expect(updated["created"]).toBe(created["created"])
       expect(updated["updated"]).not.toBe(created["updated"])
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ValidationError when x-system field is in patch", () =>
     Effect.gen(function* () {
@@ -1049,20 +1080,20 @@ describe("update", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("NotFoundError for unknown id", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc
-        .update(Posts, "nosuchid1234567", { title: "X" }, noCtx)
-        .pipe(Effect.result)
+      const result = yield* svc.update(Posts, "nosuchid1234567", { title: "X" }, noCtx).pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("NotFoundError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ForbiddenError when rule blocks update", () =>
     Effect.gen(function* () {
@@ -1072,9 +1103,7 @@ describe("update", () => {
       const created = yield* svc.create(Posts, { title: "X", authorId: "user2" }, noCtx)
       const id = created["id"]
       if (typeof id !== "string") throw new Error("expected string id")
-      const result = yield* svc
-        .update(ProtectedPosts, id, { title: "Y" }, noCtx)
-        .pipe(Effect.result)
+      const result = yield* svc.update(ProtectedPosts, id, { title: "Y" }, noCtx).pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ForbiddenError")
@@ -1082,33 +1111,32 @@ describe("update", () => {
           expect(result.failure.action).toBe("update")
         }
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("no rules → ForbiddenError", () =>
     Effect.gen(function* () {
       yield* setupPostsTable
       const svc = yield* CollectionService
-      const result = yield* svc
-        .update(NoRulePosts, "anyid", { title: "X" }, noCtx)
-        .pipe(Effect.result)
+      const result = yield* svc.update(NoRulePosts, "anyid", { title: "X" }, noCtx).pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ForbiddenError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("view collection → ReadOnlyError", () =>
     Effect.gen(function* () {
       yield* setupViewTables
       const svc = yield* CollectionService
-      const result = yield* svc
-        .update(ActivePosts, "anyid", { title: "X" }, noCtx)
-        .pipe(Effect.result)
+      const result = yield* svc.update(ActivePosts, "anyid", { title: "X" }, noCtx).pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ReadOnlyError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -1124,7 +1152,8 @@ describe("delete", () => {
       const id = created["id"]
       if (typeof id !== "string") throw new Error("expected string id")
       yield* svc.delete(Posts, id, noCtx)
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("row is gone after delete (confirmed via view)", () =>
     Effect.gen(function* () {
@@ -1139,7 +1168,8 @@ describe("delete", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("NotFoundError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("NotFoundError for unknown id", () =>
     Effect.gen(function* () {
@@ -1150,7 +1180,8 @@ describe("delete", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("NotFoundError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("ForbiddenError when rule blocks delete", () =>
     Effect.gen(function* () {
@@ -1159,9 +1190,7 @@ describe("delete", () => {
       const created = yield* svc.create(Posts, { title: "X", authorId: "user2" }, noCtx)
       const id = created["id"]
       if (typeof id !== "string") throw new Error("expected string id")
-      const result = yield* svc
-        .delete(ProtectedPosts, id, noCtx)
-        .pipe(Effect.result)
+      const result = yield* svc.delete(ProtectedPosts, id, noCtx).pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ForbiddenError")
@@ -1169,7 +1198,8 @@ describe("delete", () => {
           expect(result.failure.action).toBe("delete")
         }
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("no rules → ForbiddenError", () =>
     Effect.gen(function* () {
@@ -1180,7 +1210,8 @@ describe("delete", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ForbiddenError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 
   it.effect("view collection → ReadOnlyError", () =>
     Effect.gen(function* () {
@@ -1191,7 +1222,8 @@ describe("delete", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ReadOnlyError")
       }
-    }).pipe(Effect.provide(testLayer)))
+    }).pipe(Effect.provide(testLayer))
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -1208,7 +1240,8 @@ describe("error callback — integration", () => {
       if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
         expect(result.failure.issues.some((i) => i.includes("Name too short"))).toBe(true)
       }
-    }).pipe(Effect.provide(scoredTestLayer)))
+    }).pipe(Effect.provide(scoredTestLayer))
+  )
 
   it.effect("minimum message propagates from create", () =>
     Effect.gen(function* () {
@@ -1219,7 +1252,8 @@ describe("error callback — integration", () => {
       if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
         expect(result.failure.issues.some((i) => i.includes("Score below zero"))).toBe(true)
       }
-    }).pipe(Effect.provide(scoredTestLayer)))
+    }).pipe(Effect.provide(scoredTestLayer))
+  )
 
   it.effect("maximum message propagates from create", () =>
     Effect.gen(function* () {
@@ -1230,7 +1264,8 @@ describe("error callback — integration", () => {
       if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
         expect(result.failure.issues.some((i) => i.includes("Score above 100"))).toBe(true)
       }
-    }).pipe(Effect.provide(scoredTestLayer)))
+    }).pipe(Effect.provide(scoredTestLayer))
+  )
 
   it.effect("required message propagates from create", () =>
     Effect.gen(function* () {
@@ -1241,7 +1276,8 @@ describe("error callback — integration", () => {
       if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
         expect(result.failure.issues.some((i) => i.includes("Name is required"))).toBe(true)
       }
-    }).pipe(Effect.provide(scoredTestLayer)))
+    }).pipe(Effect.provide(scoredTestLayer))
+  )
 
   it.effect("Match.orElse fallback fires for type mismatch", () =>
     Effect.gen(function* () {
@@ -1252,7 +1288,8 @@ describe("error callback — integration", () => {
       if (Result.isFailure(result) && result.failure._tag === "ValidationError") {
         expect(result.failure.issues.some((i) => i.includes("Invalid name"))).toBe(true)
       }
-    }).pipe(Effect.provide(scoredTestLayer)))
+    }).pipe(Effect.provide(scoredTestLayer))
+  )
 
   it.effect("update with too-short name produces default message (no custom error on update path)", () =>
     Effect.gen(function* () {
@@ -1269,7 +1306,8 @@ describe("error callback — integration", () => {
           expect(result.failure.issues.length).toBeGreaterThan(0)
         }
       }
-    }).pipe(Effect.provide(scoredTestLayer)))
+    }).pipe(Effect.provide(scoredTestLayer))
+  )
 
   it.effect("valid data succeeds", () =>
     Effect.gen(function* () {
@@ -1278,7 +1316,8 @@ describe("error callback — integration", () => {
       const result = yield* svc.create(Scored, { name: "ok", score: 50 }, noCtx)
       expect(result["name"]).toBe("ok")
       expect(result["score"]).toBe(50)
-    }).pipe(Effect.provide(scoredTestLayer)))
+    }).pipe(Effect.provide(scoredTestLayer))
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -1306,7 +1345,8 @@ describe("literalText integration", () => {
       const svc = yield* CollectionService
       const result = yield* svc.create(Roles, { role: "admin" }, noCtx)
       expect(result["role"]).toBe("admin")
-    }).pipe(Effect.provide(rolesTestLayer)))
+    }).pipe(Effect.provide(rolesTestLayer))
+  )
 
   it.effect("create with invalid literal value fails with ValidationError", () =>
     Effect.gen(function* () {
@@ -1317,7 +1357,8 @@ describe("literalText integration", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
       }
-    }).pipe(Effect.provide(rolesTestLayer)))
+    }).pipe(Effect.provide(rolesTestLayer))
+  )
 
   it.effect("update with invalid literal value fails with ValidationError", () =>
     Effect.gen(function* () {
@@ -1331,7 +1372,8 @@ describe("literalText integration", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
       }
-    }).pipe(Effect.provide(rolesTestLayer)))
+    }).pipe(Effect.provide(rolesTestLayer))
+  )
 
   it.effect("update with valid literal value succeeds", () =>
     Effect.gen(function* () {
@@ -1342,7 +1384,8 @@ describe("literalText integration", () => {
       if (typeof id !== "string") throw new Error("expected string id")
       const updated = yield* svc.update(Roles, id, { role: "agent" }, noCtx)
       expect(updated["role"]).toBe("agent")
-    }).pipe(Effect.provide(rolesTestLayer)))
+    }).pipe(Effect.provide(rolesTestLayer))
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -1401,18 +1444,22 @@ describe("AuthCollection create", () => {
       expect(record["email"]).toBe("admin@example.com")
       expect(typeof record["id"]).toBe("string")
       expect(record["id"]).not.toBe("")
-    }).pipe(Effect.provide(superAdminTestLayer)))
+    }).pipe(Effect.provide(superAdminTestLayer))
+  )
 
   it.effect("rejects attempt to set generated field id", () =>
     Effect.gen(function* () {
       yield* setupSuperAdminTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(SuperAdmin, { email: "a@b.com", password: "pw", id: "custom-id" }, adminCtx).pipe(Effect.result)
+      const result = yield* svc
+        .create(SuperAdmin, { email: "a@b.com", password: "pw", id: "custom-id" }, adminCtx)
+        .pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
       }
-    }).pipe(Effect.provide(superAdminTestLayer)))
+    }).pipe(Effect.provide(superAdminTestLayer))
+  )
 
   it.effect("fails validation when email is missing", () =>
     Effect.gen(function* () {
@@ -1423,18 +1470,22 @@ describe("AuthCollection create", () => {
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
       }
-    }).pipe(Effect.provide(superAdminTestLayer)))
+    }).pipe(Effect.provide(superAdminTestLayer))
+  )
 
   it.effect("fails validation when email format is invalid", () =>
     Effect.gen(function* () {
       yield* setupSuperAdminTable
       const svc = yield* CollectionService
-      const result = yield* svc.create(SuperAdmin, { email: "notanemail", password: "pw" }, adminCtx).pipe(Effect.result)
+      const result = yield* svc
+        .create(SuperAdmin, { email: "notanemail", password: "pw" }, adminCtx)
+        .pipe(Effect.result)
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure._tag).toBe("ValidationError")
       }
-    }).pipe(Effect.provide(superAdminTestLayer)))
+    }).pipe(Effect.provide(superAdminTestLayer))
+  )
 
   it.effect("hashes the password on create — the stored value is not the plaintext", () =>
     Effect.gen(function* () {
@@ -1445,7 +1496,8 @@ describe("AuthCollection create", () => {
       expect(typeof stored).toBe("string")
       expect(stored).not.toBe("plaintext-pw")
       expect(String(stored).startsWith("scrypt$")).toBe(true)
-    }).pipe(Effect.provide(superAdminTestLayer)))
+    }).pipe(Effect.provide(superAdminTestLayer))
+  )
 
   it.effect("hashes a new password on update", () =>
     Effect.gen(function* () {
@@ -1457,7 +1509,8 @@ describe("AuthCollection create", () => {
       const updated = yield* svc.update(SuperAdmin, id, { password: "second-pw" }, adminCtx)
       expect(updated["password"]).not.toBe("second-pw")
       expect(String(updated["password"]).startsWith("scrypt$")).toBe(true)
-    }).pipe(Effect.provide(superAdminTestLayer)))
+    }).pipe(Effect.provide(superAdminTestLayer))
+  )
 
   it.effect("empty password on update is dropped and keeps the existing hash", () =>
     Effect.gen(function* () {
@@ -1469,5 +1522,6 @@ describe("AuthCollection create", () => {
       const before = created["password"]
       const updated = yield* svc.update(SuperAdmin, id, { password: "" }, adminCtx)
       expect(updated["password"]).toBe(before)
-    }).pipe(Effect.provide(superAdminTestLayer)))
+    }).pipe(Effect.provide(superAdminTestLayer))
+  )
 })

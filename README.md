@@ -169,7 +169,7 @@ Mira.builder()
 | Step | Required | Description |
 |---|---|---|
 | `.platform(p)` | yes | Runtime environment. `NodePlatform`, or `BunPlatform` from the `@gettersethya/mira/bun` entry. |
-| `.database(d)` | yes | SQL backend. `SqliteDatabase({ filename })`, `BunSqliteDatabase({ filename })` on Bun, `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` / `TursoDatabase` on Node, or `PostgresDatabase({ url, maxConnections?, idleTimeout?, prepare?, ssl?, migrateAtStartup? })` on Node and Bun. |
+| `.database(d)` | yes | SQL backend. `SqliteDatabase({ filename })`, `BunSqliteDatabase({ filename })` on Bun, `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` / `TursoDatabase` on Node, `PostgresDatabase({ url, maxConnections?, idleTimeout?, prepare?, ssl?, migrateAtStartup? })`, or `MysqlDatabase({ url, maxConnections?, connectionTTL?, ssl?, connectTimeout?, disablePreparedStatements?, migrateAtStartup? })` on Node and Bun. |
 | `.storage(s)` | yes | File storage. `LocalFileStorage({ directory })` for local disk, or `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for S3-compatible buckets (AWS S3, MinIO, R2, LocalStack). |
 | `.email(e)` | no | Email transport. `SmtpEmail({ host, port, secure, auth, from })`. Without it, a no-op `EmailService` is used. |
 | `.emailTemplates(t)` | no | Auth email overrides: `{ defaults?, collections? }`. Resolution is per-collection → app-wide → built-in. |
@@ -185,8 +185,10 @@ Mira.builder()
 ### Databases
 
 SQLite is available on Node (`SqliteDatabase`) and Bun (`BunSqliteDatabase`).
-PostgreSQL 15+ is available on Node and Bun through `PostgresDatabase`. libSQL
-is available on Node as `LibsqlDatabase`, with `TursoDatabase` as an alias:
+PostgreSQL 15+ is available on Node and Bun through `PostgresDatabase`. MySQL
+8.4 and MariaDB 11.4.6+ are available on Node and Bun through `MysqlDatabase`.
+libSQL is available on Node as `LibsqlDatabase`, with `TursoDatabase` as an
+alias:
 
 ```typescript
 import { LibsqlDatabase } from "@gettersethya/mira"
@@ -338,11 +340,13 @@ and `seqId` identity values restart rather than preserving the old SQLite
 values. Password hashes copy unchanged. Reverting the configuration does not copy
 PostgreSQL data back, so any rows written after cutover stay in PostgreSQL.
 
-The main and Bun entries keep SQLite, libSQL, and PostgreSQL. A PostgreSQL-only
+The main and Bun entries keep SQLite, libSQL, PostgreSQL, MySQL, and MariaDB. A PostgreSQL-only
 Node app can import `@gettersethya/mira/postgres` instead; that subpath exports
 the app builder, Node platform, local storage, `PostgresDatabase`, and `Migrator`
-without the SQLite/libSQL preset barrel. The Bun entry exports
-`PostgresDatabase` as well.
+without the SQLite/libSQL preset barrel. A MySQL-only Node app can import
+`@gettersethya/mira/mysql` for the same builder and platform plus
+`MysqlDatabase` and `mysqlDialect`. The Bun entry exports `PostgresDatabase`
+and `MysqlDatabase` as well.
 
 The CI `postgres-e2e` job runs the gated PostgreSQL behavior, migration, cursor,
 batch, and shared telemetry suites against `postgres:17.12-alpine`, then runs
@@ -1853,6 +1857,10 @@ pnpm -r typecheck
 # Run all tests across all packages
 pnpm -r test
 
+# Lint the whole workspace with Oxlint in type-aware mode
+# (@effect/tsgo adds the Effect diagnostics and rules)
+pnpm lint
+
 # Rebuild the dashboard SPA bundle (not part of `pnpm build`)
 pnpm build:ui
 
@@ -1866,7 +1874,7 @@ pnpm --filter @gettersethya/mira build
 pnpm --filter @gettersethya/mira-tanstack-adapter build
 ```
 
-> Build order matters: `@gettersethya/mira-collection` and `@gettersethya/mira-client` must be built before running typecheck or tests in `@gettersethya/mira` or `@gettersethya/mira-tanstack-adapter`.
+> Build order matters: `@gettersethya/mira-collection` and `@gettersethya/mira-client` must be built before running `pnpm lint`, typecheck, or tests in `@gettersethya/mira` or `@gettersethya/mira-tanstack-adapter`.
 
 ---
 

@@ -18,8 +18,8 @@ const infra = Layer.mergeAll(
 describe("repository dialect requirement", () => {
   it("requires Dialect at the type level", () => {
     // @ts-expect-error RepositoryLive requires the Dialect service.
-    const missing: Layer.Layer<Repository, never, never> = RepositoryLive
-    void missing
+    const missing: Layer.Layer<Repository, never, never> = RepositoryLive // oxlint-disable-line effecttsgo/missing-layer-context -- negative type test: the missing Dialect requirement is intentional.
+    expect(missing).toBeDefined()
     expect(true).toBe(true)
   })
 
@@ -27,5 +27,6 @@ describe("repository dialect requirement", () => {
     Effect.gen(function* () {
       const context = yield* Layer.build(RepositoryLive.pipe(Layer.provide(infra)))
       expect(context).toBeDefined()
-    }))
+    })
+  )
 })

@@ -20,7 +20,7 @@ export function parseFilterParam(
   if (raw === null) return Effect.succeed(null)
 
   return Effect.gen(function* () {
-    const parsed = yield* Schema.decodeUnknownEffect(FilterJsonSchema)(raw).pipe(
+    const parsed = yield* Schema.decodeEffect(FilterJsonSchema)(raw).pipe(
       Effect.mapError(
         () =>
           new ValidationError({
@@ -31,21 +31,19 @@ export function parseFilterParam(
     )
 
     const decoded = yield* Schema.decodeUnknownEffect(FilterNodeSchema)(parsed).pipe(
-      Effect.mapError((e) =>
-        new ValidationError({
-          collection: collectionName,
-          issues: [`filter: schema mismatch: ${e.message}`]
-        })
+      Effect.mapError(
+        (e) =>
+          new ValidationError({
+            collection: collectionName,
+            issues: [`filter: schema mismatch: ${e.message}`]
+          })
       )
     )
     return decoded
   })
 }
 
-export function parseSortParam(
-  query: RequestCtx["query"],
-  schema: CollectionSchema
-): SortOrder | null {
+export function parseSortParam(query: RequestCtx["query"], schema: CollectionSchema): SortOrder | null {
   const sortField = typeof query["sort"] === "string" ? query["sort"] : null
   // `Object.hasOwn` so keys inherited from `Object.prototype` are treated as
   // unknown and ignored.
@@ -55,28 +53,28 @@ export function parseSortParam(
   return { field: sortField, direction }
 }
 
-export function parsePaginationParam(
-  query: RequestCtx["query"]
-): { cursor: Cursor | null; limit: number } {
+export function parsePaginationParam(query: RequestCtx["query"]): { cursor: Cursor | null; limit: number } {
   const rawCursor = typeof query["after"] === "string" ? query["after"] : null
-  const rawLimit  = typeof query["limit"]  === "string" ? Number(query["limit"])  : NaN
+  const rawLimit = typeof query["limit"] === "string" ? Number(query["limit"]) : NaN
   const cursor = parseCursor(rawCursor)
-  const limit  = !Number.isNaN(rawLimit)  && rawLimit  >= 1 ? Math.min(Math.floor(rawLimit), 100) : 30
+  const limit = !Number.isNaN(rawLimit) && rawLimit >= 1 ? Math.min(Math.floor(rawLimit), 100) : 30
   return { cursor, limit }
 }
 
-export function parseSelectParam(
-  query: RequestCtx["query"]
-): ReadonlyArray<string> | null {
+export function parseSelectParam(query: RequestCtx["query"]): ReadonlyArray<string> | null {
   const raw = typeof query["select"] === "string" ? query["select"] : null
   if (raw === null) return null
-  return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
 }
 
-export function parseExpandParam(
-  query: RequestCtx["query"]
-): ReadonlyArray<string> | null {
+export function parseExpandParam(query: RequestCtx["query"]): ReadonlyArray<string> | null {
   const raw = typeof query["expand"] === "string" ? query["expand"] : null
   if (raw === null) return null
-  return raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
 }

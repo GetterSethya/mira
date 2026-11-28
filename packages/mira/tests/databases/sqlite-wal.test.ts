@@ -24,8 +24,10 @@ const journalMode = Effect.gen(function* () {
 
 describe("SqliteDatabase WAL mode", () => {
   it.effect("enables WAL on file-backed databases by default", () =>
-    journalMode.pipe(Effect.provide(SqliteDatabase({ filename }).layer))
-      .pipe(Effect.map((mode) => expect(mode).toBe("wal")))
+    journalMode.pipe(
+      Effect.provide(SqliteDatabase({ filename }).layer),
+      Effect.map((mode) => expect(mode).toBe("wal"))
+    )
   )
 
   it.effect("keeps WAL enabled when a synchronous mode is configured", () =>

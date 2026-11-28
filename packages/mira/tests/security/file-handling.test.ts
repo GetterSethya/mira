@@ -2,7 +2,7 @@
 // `CollectionService`, real on-disk `FileStorage`).
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, FileSystem, Result, Schema } from "effect"
-import { HttpClient, HttpClientRequest } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpIncomingMessage } from "effect/http"
 
 import { FileStorage } from "@/storage/storage.js"
 
@@ -48,11 +48,8 @@ const delAnon = (path: string) => HttpClient.execute(HttpClientRequest.delete(pa
 
 const ReadPost = Schema.Struct({ id: Schema.String, attachment: Schema.String })
 
-const readPost = (res: { json: Effect.Effect<unknown, unknown, never> }) =>
-  Effect.gen(function* () {
-    const raw = yield* res.json
-    return yield* Schema.decodeUnknownEffect(ReadPost)(raw)
-  })
+const readPost = <E>(res: HttpIncomingMessage.HttpIncomingMessage<E>) =>
+  HttpIncomingMessage.schemaBodyJson(ReadPost)(res)
 
 /** A served file is safe only if it is not inline-executable. */
 const servedInlineIsSafe = (headers: Readonly<Record<string, string | undefined>>) => {
@@ -226,7 +223,9 @@ describe("file handling security audit (regression: expects secure behaviour)", 
         const r = yield* get(`/api/files/posts/${rec.id}/${enc}`)
         const body = yield* r.text.pipe(Effect.orElseSucceed(() => "<no-body>"))
         observed.push({ enc, status: r.status, ct: r.headers["content-type"], body })
-        console.log(`[H3][evidence] enc=${enc} status=${r.status} content-type=${r.headers["content-type"]} body=${toJsonText(body.slice(0, 80))}`)
+        console.log(
+          `[H3][evidence] enc=${enc} status=${r.status} content-type=${r.headers["content-type"]} body=${toJsonText(body.slice(0, 80))}`
+        )
       }
 
       const leaked = observed.filter((o) => o.body.includes("SECRET-VICTIM-CONTENT"))
@@ -301,14 +300,10 @@ describe("file handling security audit (regression: expects secure behaviour)", 
       const listedCount = Result.isSuccess(listedResult) ? listedResult.success.length : 0
       console.log(
         "[H5][evidence] direct list('../evil-listed/') =>",
-        Result.isSuccess(listedResult) ? toJsonText(listedResult.success) : `failure: ${listedResult.failure}`
+        Result.isSuccess(listedResult) ? toJsonText(listedResult.success) : `failure: ${String(listedResult.failure)}`
       )
 
-      assert.strictEqual(
-        listedCount,
-        0,
-        `list('../evil-listed/') enumerated ${listedCount} out-of-root file(s)`
-      )
+      assert.strictEqual(listedCount, 0, `list('../evil-listed/') enumerated ${listedCount} out-of-root file(s)`)
 
       // ---- end-to-end: delete path's thumbnail cleanup ----
       yield* fsWrite(`${TMP}/evil-amp/x.txt`, "X")

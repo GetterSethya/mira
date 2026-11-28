@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Context, Effect, Layer, Queue, Schedule, Schema, Tracer } from "effect"
+import { Context, Data, Effect, Layer, Queue, Schedule, Schema, Tracer } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -16,10 +16,12 @@ import { makeConsoleTracer } from "@/telemetry/tracer.js"
 
 type StubDef = CronDef<never>
 
+class CronTestFailure extends Data.TaggedError("CronTestFailure")<{ readonly message: string }> {}
+
 const PersistedCronEntrySchema = Schema.Struct({
   lastRunAt: Schema.NullOr(Schema.String),
   lastStatus: Schema.NullOr(Schema.Literals(["success", "error"])),
-  lastDurationMs: Schema.NullOr(Schema.Number),
+  lastDurationMs: Schema.NullOr(Schema.Finite),
   lastError: Schema.NullOr(Schema.String)
 })
 
@@ -64,7 +66,7 @@ describe("cron state persistence", () => {
         )
         yield* svc.runNow("ok-cron")
         yield* Effect.yieldNow
-        yield* Effect.sleep(0)
+        yield* Effect.yieldNow
 
         const rows = yield* sql<{ value: string }>`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
         expect(rows).toHaveLength(1)
@@ -87,14 +89,14 @@ describe("cron state persistence", () => {
             {
               name: "fail-cron",
               schedule: Schedule.duration("24 hours"),
-              handler: () => Effect.fail(new Error("boom"))
+              handler: () => Effect.fail(new CronTestFailure({ message: "boom" }))
             }
           ],
           dbContext
         )
         yield* svc.runNow("fail-cron")
         yield* Effect.yieldNow
-        yield* Effect.sleep(0)
+        yield* Effect.yieldNow
 
         const rows = yield* sql<{ value: string }>`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
         const blob = yield* decodePersistedCronState(rows[0]?.value).pipe(Effect.orDie)
@@ -117,7 +119,7 @@ describe("cron state persistence", () => {
         const svc1 = yield* bootCronService([def], dbContext)
         yield* svc1.runNow("persist-cron")
         yield* Effect.yieldNow
-        yield* Effect.sleep(0)
+        yield* Effect.yieldNow
         const [before] = yield* svc1.getAll()
         expect(before.lastStatus).toBe("success")
 
@@ -143,13 +145,13 @@ describe("cron state persistence", () => {
         yield* svc1.runNow("cron-a")
         yield* svc1.runNow("cron-b")
         yield* Effect.yieldNow
-        yield* Effect.sleep(0)
+        yield* Effect.yieldNow
 
         // Reboot with only cron-a registered, then run it so a fresh save occurs
         const svc2 = yield* bootCronService([defA], dbContext)
         yield* svc2.runNow("cron-a")
         yield* Effect.yieldNow
-        yield* Effect.sleep(0)
+        yield* Effect.yieldNow
 
         const rows = yield* sql<{ value: string }>`SELECT value FROM ${sql("_config")} WHERE key = 'cron_state'`
         const blob = yield* decodePersistedCronState(rows[0]?.value).pipe(Effect.orDie)
@@ -183,7 +185,10 @@ describe("cron state persistence", () => {
       Effect.gen(function* () {
         const dbContext = yield* Layer.build(SqliteClient.layer({ filename: ":memory:" }))
         const queue = yield* Queue.unbounded<CompletedSpan>()
-        const tracerLayer = Layer.succeed(Tracer.Tracer, makeConsoleTracer(queue, (size) => randomBytes(size)))
+        const tracerLayer = Layer.succeed(
+          Tracer.Tracer,
+          makeConsoleTracer(queue, (size) => randomBytes(size))
+        )
 
         const svc = yield* bootCronService(
           [{ name: "span-cron", schedule: Schedule.duration("24 hours"), handler: () => Effect.void }],
@@ -192,7 +197,7 @@ describe("cron state persistence", () => {
         )
         yield* svc.runNow("span-cron")
         yield* Effect.yieldNow
-        yield* Effect.sleep(0)
+        yield* Effect.yieldNow
 
         const spans = yield* collectSpans(queue)
         const loadSpan = spans.find((s) => s.name === "cron.persistence.load")

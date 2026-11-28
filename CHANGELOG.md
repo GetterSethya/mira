@@ -17,6 +17,32 @@ published by CI.
 
 ### Added
 
+- **MySQL 8.4 and MariaDB 11.4 support (#30).** `mysqlDialect` composes the
+  merged migration, text, and transaction capabilities with the remaining
+  `DialectType` surface. `MysqlDatabase` backs the preset with
+  `@effect/sql-mysql2`, exposes `maxConnections`, `connectionTTL`, `ssl`,
+  `connectTimeout`, `disablePreparedStatements`, and `migrateAtStartup`, and is
+  exported from the main, Bun, and new `@gettersethya/mira/mysql` entries.
+  MySQL 8.4 is validated at 8.4.13; MariaDB 11.4 requires 11.4.6 or newer
+  because earlier patches lack the `utf8mb4_0900_*` collations, and is validated
+  at 11.4.13.
+- **MySQL/MariaDB internal stores.** Config, cron, token, rate-limit, and auth
+  challenge stores use the extended `StoreSqlCapabilities` seam. MySQL gets
+  quoted reserved identifiers, `ON DUPLICATE KEY UPDATE` clauses, `LONGTEXT`
+  values, a generated `live_key` column for the challenge live-row invariant, a
+  locked `FOR UPDATE` rate-limit path with all-or-nothing rollback, and
+  `SQL_CALC`-free batch retention. SQLite and PostgreSQL keep their existing
+  schema and behavior.
+- **MySQL/MariaDB telemetry.** The dialect hooks have no setup or cleanup
+  statements, retry `1205`/`1213` on setup/migration, retry `1205` on appends
+  and retention, and ignore duplicate telemetry ids with
+  `ON DUPLICATE KEY UPDATE id = id`. Shared and dedicated modes are covered on
+  both engines.
+- **MySQL/MariaDB real-engine coverage.** Docker-backed suites cover HTTP CRUD,
+  list/filter/sort/cursor, rules, auth, bulk endpoints, views, migrations,
+  internal stores, concurrency, telemetry, retention, and batching on MySQL 8.4
+  and MariaDB 11.4, plus a Bun smoke for both engines. CI pins `mysql:8.4.13`
+  and `mariadb:11.4.13`.
 - **MySQL/MariaDB transaction probe.** `TransactionProbeStrategy` gains an
   `error-classified` object form that carries a dialect-supplied
   `isTransactionFatal` predicate. The batcher runs the classifier on the failed
@@ -32,7 +58,7 @@ published by CI.
   close the batcher; a throwing predicate still counts toward the three-strike
   close. A consumer that exhaustively switches on `TransactionProbeStrategy`
   must add the `error-classified` arm; a dialect that assigns a string is
-  unaffected. MySQL/MariaDB support itself is still pending #30.
+  unaffected.
 - **MySQL/MariaDB text length and collation strategy.** Indexed, unique, and
   primary-key text now carries `Field.text({ maxLength })` into the physical
   column as `VARCHAR(n)` (`1 <= n <= 768`); unindexed text stays `LONGTEXT`.
@@ -46,7 +72,7 @@ published by CI.
   rule and filter `LIKE` renders with `LOWER`/`CONCAT`. This is a validation
   change on every dialect: email/date/relation/file values are now bounded by
   `maxLength` (320/64/320/255 by default, overridable), matching the physical
-  MySQL/MariaDB column. MySQL/MariaDB support itself is still pending #30.
+  MySQL/MariaDB column.
 - **MySQL/MariaDB migration lock.** Statement-mode dialects can now declare a
   session-scoped `MigrationLock`. `migrate` serializes on a database-scoped,
   always-hashed ASCII name (`mira.migrations:<16 hex>` from stable FNV-1a), waits
@@ -59,10 +85,9 @@ published by CI.
   migration session sets `wait_timeout = 600` so an idle half-open holder is
   reclaimed in about ten minutes. New public exports: `MigrationLock`,
   `LockExecutor`, `LockConnection`, `MigrationLockError`,
-  `MigrationLockReleaseError`, and `MigrationError`. MySQL/MariaDB support itself
-  is still pending #30.
+  `MigrationLockReleaseError`, and `MigrationError`.
 - **PostgreSQL database support.** `PostgresDatabase({ url, maxConnections?,
-  idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
+idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
   Node and Bun through `@effect/sql-pg`. The preset validates `maxConnections`,
   exposes pool and TLS options, defaults `prepare` to true with `prepare: false`
   for statement-mode poolers such as PgBouncer, and runs a `SELECT 1` readiness
@@ -83,6 +108,14 @@ published by CI.
 
 ### Fixed
 
+- **MySQL/MariaDB internal stores now boot.** The previous SQL used
+  `TEXT PRIMARY KEY`, unquoted `key`, `CREATE INDEX IF NOT EXISTS`, partial
+  indexes, `ON CONFLICT`, and `UPDATE ... RETURNING`, all rejected by one or
+  both engines. The portable DDL/DML and the MySQL-only generated live column
+  replace them.
+- **Rate-limit retention on MySQL/MariaDB.** The `prune` statement no longer
+  puts `LIMIT` inside an `IN` subquery; expired buckets are deleted in batches
+  on both engines.
 - **The MySQL/MariaDB transaction probe could report a dead transaction as
   usable.** `select-only` succeeds after InnoDB rolls a deadlock back, and
   `nested-begin` is unusable on MySQL (`ER_UNSUPPORTED_PS` on the prepared
@@ -116,6 +149,28 @@ published by CI.
 
 ### Changed
 
+- **The workspace linter is type-aware and Effect-aware.** `pnpm lint` now runs
+  `effect-tsgo oxlint` over the whole repository with the `@effect/tsgo`
+  recommended preset, so Effect diagnostics and the type-aware TypeScript rules
+  run in CI. The gate is clean with zero errors and zero warnings: source
+  findings were fixed rather than suppressed (Effect Schema for JSON, typed
+  errors, `Effect.ignore`, `Effect.tapError`, `Schema.Finite`, and the Effect v4
+  scheduler and logging APIs). `effecttsgo/unstable-api-usage` is off because
+  Mira intentionally builds on Effect's unstable SQL APIs;
+  `effecttsgo/lazy-effect` is off because converting the exported zero-argument
+  helpers and service members would break their public call shape. The test
+  suites are held to the same rule set: their HTTP helpers now decode bodies
+  with `HttpIncomingMessage.schemaBodyJson`, and the retry/cron helpers preserve
+  concrete error channels instead of widening them. `tsconfig` path mappings no
+  longer use `baseUrl`, which the type-aware checker rejects.
+- **`StoreSqlCapabilities` gained required members.** Custom dialects must now
+  supply `keyColumnType`, `textColumnType`, `bucketColumnType`,
+  `bucketMaxLength`, `createIndexIfNotExists`, `isIgnorableBootstrapError`,
+  `insertIgnoreClause`, `upsertClause`, `mutationResult`, and `challengeLive`.
+  The built-in SQLite, libSQL, PostgreSQL, MySQL, and MariaDB dialects already
+  do. Internal store DDL identifiers are now quoted on every engine, and the
+  rate-limit retention delete uses one derived-table shape on every engine;
+  schema and semantics are unchanged.
 - **The migrator has a catalog-guarded statement mode for engines where DDL
   commits implicitly.** `DialectType.migrationModel` selects `transaction` or
   `statement`. Statement mode reserves one connection, applies DDL outside a
@@ -123,7 +178,7 @@ published by CI.
   conflicts, and writes `_migrations` and `_collections` last in one
   parameterized transaction. `plan` and `status` are read-only on those engines.
   The required `migrationModel` field is a source-breaking addition for external
-  dialect implementations. MySQL/MariaDB support itself is still pending #30.
+  dialect implementations.
 - **`TranslatePlanContext` gains the guarded `readonlyQuery` executor and
   `translatePlan`'s error channel includes `SqlError`.** The context type is not
   root-exported; the change is source-compatible through the exported
@@ -367,7 +422,7 @@ published by CI.
   `409 { error: "batch_conflict", operation }` / `BatchMutationConflictError`
   and does not count as a batcher defect; driver defects close the batcher after
   three consecutive failures. Queue-full, timeout and closed map to `503
-  { error: "batch_unavailable", operation, retryable }`; create is never
+{ error: "batch_unavailable", operation, retryable }`; create is never
   retryable, update/delete are retryable for queue-full/timeout (a retried
   delete may return 404). Admin is captured per entry and hidden fields are
   stripped per entry. File and auth-challenge cleanup runs after commit through
@@ -551,7 +606,7 @@ published by CI.
   are limited per IP and recipient; sends are limited per recovery, login, or notification
   class, collection, and recipient. Daily caps bound cost. `429` responses
   carry `retryAfterSeconds` and `Retry-After`. The builder accepts `.rateLimits({ store,
-  emailPolicies })`.
+emailPolicies })`.
 - **Bun runtime.** `BunPlatform` and `BunSqliteDatabase` backed by
   `@effect/platform-bun` and `@effect/sql-sqlite-bun`, plus the
   `@gettersethya/mira/bun` package entry and a root `bun` export condition. Bun uses native

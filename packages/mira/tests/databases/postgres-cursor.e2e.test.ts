@@ -20,7 +20,7 @@ import { PgClient } from "@effect/sql-pg"
 import { describe, it } from "@effect/vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { Effect, Layer, Redacted, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpIncomingMessage, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -31,6 +31,13 @@ import { PostgresDatabase } from "@/databases/postgres.js"
 import { makeCollectionRouter } from "@/http/router.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { LocalFileStorage } from "@/storage/local-preset.js"
+
+function closeEffect<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> {
+  // The app layer is closed at runtime; the test graph widens R through
+  // plugin/cron config, so this helper restores the closed run type.
+  // oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion, typescript/consistent-type-assertions
+  return effect as Effect.Effect<A, E, never>
+}
 
 const postgresUrl = process.env["MIRA_TEST_POSTGRES_URL"]
 const enabled = postgresUrl !== undefined
@@ -92,10 +99,10 @@ const Page = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String)
 })
 
-const json = <A>(
-  res: { json: Effect.Effect<unknown, unknown> },
-  schema: Schema.Schema<A>
-) => res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
+const json = <S extends Schema.ConstraintCodec<unknown>, E>(
+  res: HttpIncomingMessage.HttpIncomingMessage<E>,
+  schema: S
+) => HttpIncomingMessage.schemaBodyJson(schema)(res)
 
 const adminCtx: RequestCtx = { headers: {}, query: {}, admin: true }
 
@@ -123,23 +130,17 @@ describeE2E("PostgreSQL cursors", () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const cleanupCtx = yield* Layer.build(
-            PgClient.layer({ url: Redacted.make(url), maxConnections: 1 })
-          )
+          const cleanupCtx = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 1 }))
           yield* cleanupCursorDatabase.pipe(Effect.provide(cleanupCtx))
 
           const app = createApp()
-          const appCtx = yield* Layer.build(
-            Layer.mergeAll(app.buildServiceLayer(), NodeHttpServer.layerTest)
-          )
+          const appCtx = yield* Layer.build(app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest)))
 
           yield* Effect.gen(function* () {
             yield* serveRouter
             const sql = yield* SqlClient.SqlClient
 
-            yield* sql.unsafe(
-              `ALTER TABLE "e2e_pg_posts" ALTER COLUMN "seqId" RESTART WITH 9007199254740993`
-            )
+            yield* sql.unsafe(`ALTER TABLE "e2e_pg_posts" ALTER COLUMN "seqId" RESTART WITH 9007199254740993`)
 
             const first = yield* HttpClient.execute(
               HttpClientRequest.post("/api/collections/e2e_pg_posts").pipe(
@@ -147,10 +148,7 @@ describeE2E("PostgreSQL cursors", () => {
               )
             )
             expect(first.status).toBe(201)
-            const firstBody = yield* json(
-              first,
-              Schema.Struct({ id: Schema.String })
-            )
+            const firstBody = yield* json(first, Schema.Struct({ id: Schema.String }))
 
             const second = yield* HttpClient.execute(
               HttpClientRequest.post("/api/collections/e2e_pg_posts").pipe(
@@ -158,14 +156,9 @@ describeE2E("PostgreSQL cursors", () => {
               )
             )
             expect(second.status).toBe(201)
-            const secondBody = yield* json(
-              second,
-              Schema.Struct({ id: Schema.String })
-            )
+            const secondBody = yield* json(second, Schema.Struct({ id: Schema.String }))
 
-            const pageOne = yield* HttpClient.get(
-              "/api/collections/e2e_pg_posts?limit=1"
-            )
+            const pageOne = yield* HttpClient.get("/api/collections/e2e_pg_posts?limit=1")
             expect(pageOne.status).toBe(200)
             const pageOneBody = yield* json(pageOne, Page)
             expect(pageOneBody.items).toHaveLength(1)
@@ -189,9 +182,7 @@ describeE2E("PostgreSQL cursors", () => {
             const outOfRangeBody = yield* json(outOfRange, Page)
             expect(outOfRangeBody.items[0]?.id).toBe(firstBody.id)
 
-            const titlePage = yield* HttpClient.get(
-              "/api/collections/e2e_pg_posts?sort=title&order=asc&limit=1"
-            )
+            const titlePage = yield* HttpClient.get("/api/collections/e2e_pg_posts?sort=title&order=asc&limit=1")
             expect(titlePage.status).toBe(200)
             const titlePageBody = yield* json(titlePage, Page)
             expect(titlePageBody.items[0]?.title).toBe("alpha")
@@ -211,44 +202,32 @@ describeE2E("PostgreSQL cursors", () => {
             // seqId is hidden from public sort fields, so the descending leg
             // uses the service-level admin context, matching the SDK contract
             // that a public caller pages by seqId through the returned cursor.
-            const descending = yield* svc.list(
-              Posts,
-              null,
-              1,
-              adminCtx,
-              undefined,
-              { field: "seqId", direction: "desc" }
-            )
+            const descending = yield* svc.list(Posts, null, 1, adminCtx, undefined, {
+              field: "seqId",
+              direction: "desc"
+            })
             expect(descending.items[0]?.id).toBe(secondBody.id)
             expect(typeof descending.nextCursor).toBe("string")
             if (descending.nextCursor === null) {
               return yield* Effect.die("expected the descending cursor")
             }
             const descendingCursor = descending.nextCursor
-            const descendingNext = yield* svc.list(
-              Posts,
-              descendingCursor,
-              1,
-              adminCtx,
-              undefined,
-              { field: "seqId", direction: "desc" }
-            )
+            const descendingNext = yield* svc.list(Posts, descendingCursor, 1, adminCtx, undefined, {
+              field: "seqId",
+              direction: "desc"
+            })
             expect(descendingNext.items[0]?.id).toBe(firstBody.id)
 
             const adminRow = yield* svc.view(Posts, secondBody.id, adminCtx)
             expect(adminRow["seqId"]).toBe("9007199254740994")
-            const serialized = Schema.encodeSync(
-              Schema.fromJsonString(Schema.Unknown)
-            )(adminRow)
+            const serialized = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(adminRow)
             expect(typeof serialized).toBe("string")
             if (typeof serialized === "string") {
               expect(serialized).toContain('"seqId"')
             }
 
             const deleted = yield* HttpClient.execute(
-              HttpClientRequest.delete(
-                `/api/collections/e2e_pg_posts/${firstBody.id}`
-              )
+              HttpClientRequest.delete(`/api/collections/e2e_pg_posts/${firstBody.id}`)
             )
             expect(deleted.status).toBe(204)
 
@@ -258,7 +237,7 @@ describeE2E("PostgreSQL cursors", () => {
             expect(staleCursor.status).toBe(422)
           }).pipe(Effect.provide(appCtx))
         })
-      ),
+      ).pipe(closeEffect),
     120_000
   )
 })

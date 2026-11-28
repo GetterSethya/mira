@@ -5,28 +5,35 @@
  */
 import { readFileSync } from "node:fs"
 
-interface CallFrame {
-  readonly functionName: string
-  readonly url: string
-  readonly lineNumber: number
-  readonly columnNumber: number
-}
+import { Schema } from "effect"
 
-interface ProfileNode {
-  readonly id: number
-  readonly callFrame: CallFrame
-  readonly hitCount?: number
-}
+const CallFrameSchema = Schema.Struct({
+  functionName: Schema.String,
+  url: Schema.String,
+  lineNumber: Schema.Finite,
+  columnNumber: Schema.Finite
+})
 
-interface Profile {
-  readonly nodes: ReadonlyArray<ProfileNode>
-  readonly samples: ReadonlyArray<number>
-  readonly timeDeltas: ReadonlyArray<number>
-}
+const ProfileNodeSchema = Schema.Struct({
+  id: Schema.Finite,
+  callFrame: CallFrameSchema,
+  hitCount: Schema.optional(Schema.Finite)
+})
+
+const ProfileSchema = Schema.Struct({
+  nodes: Schema.Array(ProfileNodeSchema),
+  samples: Schema.Array(Schema.Finite),
+  timeDeltas: Schema.Array(Schema.Finite)
+})
+
+type ProfileNode = typeof ProfileNodeSchema.Type
+type Profile = typeof ProfileSchema.Type
+
+const decodeProfile = Schema.decodeUnknownSync(Schema.fromJsonString(ProfileSchema))
 
 const path = process.argv[2]
 if (path === undefined) throw new Error("Usage: analyze-cpuprofile.ts <file.cpuprofile>")
-const profile = JSON.parse(readFileSync(path, "utf8")) as Profile
+const profile: Profile = decodeProfile(readFileSync(path, "utf8"))
 const nodes = new Map<number, ProfileNode>(profile.nodes.map((node) => [node.id, node]))
 const selfMicros = new Map<number, number>()
 for (let index = 0; index < profile.samples.length; index += 1) {
@@ -62,5 +69,7 @@ for (const [, value] of byFunction) {
 process.stdout.write("\nself time by module:\n")
 for (const [url, micros] of [...byUrl.entries()].sort((left, right) => right[1] - left[1]).slice(0, 20)) {
   const pct = total === 0 ? 0 : (micros / total) * 100
-  process.stdout.write(`${(micros / 1000).toFixed(1).padStart(8)} ms ${pct.toFixed(1).padStart(5)}%  ${url || "(native)"}\n`)
+  process.stdout.write(
+    `${(micros / 1000).toFixed(1).padStart(8)} ms ${pct.toFixed(1).padStart(5)}%  ${url || "(native)"}\n`
+  )
 }

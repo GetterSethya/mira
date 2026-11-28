@@ -3,17 +3,15 @@ import {
   BaseCollection,
   defineRule,
   Field,
-  InferRecord,
+  type InferRecord,
   LocalFileStorage,
   logCleanupCronDef,
   makeTelemetryLayer,
   Mira,
   NodePlatform,
-  S3CompatibleStorage,
   SqliteDatabase
 } from "@gettersethya/mira"
 import { MiraDashboard } from "@gettersethya/mira-dashboard"
-import { Config } from "effect"
 
 const UserCollection = AuthCollection.define("users", {
   name: Field.text({ required: true, minLength: 1 })

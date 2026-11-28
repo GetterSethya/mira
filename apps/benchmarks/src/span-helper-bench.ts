@@ -13,6 +13,9 @@ import { performance } from "node:perf_hooks"
 import { Effect } from "effect"
 
 import { summarizeHeapProfile } from "./analyze-heapprofile.js"
+// This benchmark measures mira's internal span helper directly; the package
+// entry point does not reach that module.
+// oxlint-disable-next-line import/no-relative-parent-imports
 import { withSpanWhenEnabled } from "../../../packages/mira/src/telemetry/span.js"
 
 const iterations = 100_000
@@ -53,14 +56,8 @@ const loop = (span: Effect.Effect<void>) =>
     { discard: true }
   )
 
-const oldSpan = Effect.withSpan("bench.span", { kind: "internal" }, { captureStackTrace: false })(
-  Effect.void
-)
-const newSpan = withSpanWhenEnabled(
-  "bench.span",
-  { kind: "internal" },
-  { captureStackTrace: false }
-)(Effect.void)
+const oldSpan = Effect.withSpan("bench.span", { kind: "internal" }, { captureStackTrace: false })(Effect.void)
+const newSpan = withSpanWhenEnabled("bench.span", { kind: "internal" }, { captureStackTrace: false })(Effect.void)
 
 async function time(program: Effect.Effect<void>): Promise<number> {
   const start = performance.now()
@@ -94,6 +91,6 @@ const median = (values: ReadonlyArray<number>) => {
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(2)
 
 process.stdout.write(
-  `Effect.withSpan: ${(median(oldTimes) * 1_000_000 / iterations).toFixed(0)} ns/op, ${mib(median(oldBytes))} MiB sampled\n` +
-    `withSpanWhenEnabled: ${(median(newTimes) * 1_000_000 / iterations).toFixed(0)} ns/op, ${mib(median(newBytes))} MiB sampled\n`
+  `Effect.withSpan: ${((median(oldTimes) * 1_000_000) / iterations).toFixed(0)} ns/op, ${mib(median(oldBytes))} MiB sampled\n` +
+    `withSpanWhenEnabled: ${((median(newTimes) * 1_000_000) / iterations).toFixed(0)} ns/op, ${mib(median(newBytes))} MiB sampled\n`
 )

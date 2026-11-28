@@ -6,11 +6,11 @@ import type { CollectionService } from "@/collection-service/collection-service.
 import type { AppConfig } from "@/config/index.js"
 import type { Repository } from "@/repository/index.js"
 
-export interface CronDef<R = PlatformServices | AppConfig | Repository | CollectionService> {
+export interface CronDef<R = PlatformServices | AppConfig | Repository | CollectionService, E = unknown> {
   readonly name: string
   readonly description?: string
   readonly schedule: Schedule.Schedule<unknown, unknown, Cron.CronParseError>
-  readonly handler: () => Effect.Effect<void, unknown, R>
+  readonly handler: () => Effect.Effect<void, E, R>
 }
 
 export interface CronContext {
@@ -36,7 +36,7 @@ export interface CronFinishedContext {
   readonly scheduledAt: Date
   readonly durationMs: number
   readonly status: "success" | "error"
-  readonly error: unknown | undefined
+  readonly error: unknown
 }
 
 export interface CronState {
@@ -46,9 +46,10 @@ export interface CronState {
   readonly lastRunAt: Date | undefined
   readonly lastStatus: "success" | "error" | undefined
   readonly lastDurationMs: number | undefined
-  readonly lastError: unknown | undefined
+  readonly lastError: unknown
 }
 
 export class CronNotFoundError extends Data.TaggedError("CronNotFoundError")<{
+  // oxlint-disable-next-line effecttsgo/error-payload-shadows-name -- the cron name is part of the public error shape and is read by consumers
   readonly name: string
 }> {}

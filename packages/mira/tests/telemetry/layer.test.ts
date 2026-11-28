@@ -21,14 +21,9 @@ import {
   TelemetryStoreError
 } from "@/telemetry/store.js"
 
-function makeLayer(
-  logConsole = false,
-  options: { flushBatchSize?: number; flushInterval?: Duration.Input } = {}
-) {
+function makeLayer(logConsole = false, options: { flushBatchSize?: number; flushInterval?: Duration.Input } = {}) {
   const database = SqliteDatabase({ filename: ":memory:" })
-  const store = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(
-    Layer.provide(database.layer)
-  )
+  const store = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(Layer.provide(database.layer))
 
   const config = {
     logConsole,
@@ -53,9 +48,7 @@ const queryLogs = <A extends object>(statement: string) =>
     return yield* sql.unsafe<A>(statement)
   })
 
-const consoleLogLineSchema = Schema.fromJsonString(
-  Schema.Struct({ message: Schema.String })
-)
+const consoleLogLineSchema = Schema.fromJsonString(Schema.Struct({ message: Schema.String }))
 const decodeConsoleLogLine = Schema.decodeUnknownOption(consoleLogLineSchema)
 
 const readLogs = (store: TelemetryStoreShape) =>
@@ -68,9 +61,7 @@ describe("makeTelemetryLayerForClient", () => {
       yield* Effect.logInfo("hello sqlite")
       yield* Effect.promise(drainMicrotasks)
 
-      const rows = yield* queryLogs<{ level: string; message: string }>(
-        "SELECT level, message FROM logs"
-      )
+      const rows = yield* queryLogs<{ level: string; message: string }>("SELECT level, message FROM logs")
       const row = rows.find((candidate) => candidate.message === "hello sqlite")
       expect(row?.level).toBe("INFO")
     }).pipe(Effect.provide(makeLayer()))
@@ -103,18 +94,14 @@ describe("makeTelemetryLayerForClient", () => {
     const calls = spy.mock.calls.slice()
     spy.mockRestore()
     const call = calls.find((candidate) =>
-      decodeConsoleLogLine(candidate[0]).pipe(
-        Option.exists((line) => line.message === "console check")
-      )
+      decodeConsoleLogLine(candidate[0]).pipe(Option.exists((line) => line.message === "console check"))
     )
     expect(call).toBeDefined()
   })
 
   it.effect("writes span rows and JSON attributes", () =>
     Effect.gen(function* () {
-      yield* Effect.void.pipe(
-        Effect.withSpan("attr-span", { attributes: { "cache.hit": true, count: 42 } })
-      )
+      yield* Effect.void.pipe(Effect.withSpan("attr-span", { attributes: { "cache.hit": true, count: 42 } }))
       yield* Effect.promise(drainMicrotasks)
 
       const rows = yield* queryLogs<{ name: string; status: string; attributes: string }>(
@@ -122,12 +109,9 @@ describe("makeTelemetryLayerForClient", () => {
       )
       const row = rows.find((candidate) => candidate.name === "attr-span")
       expect(row?.status).toBe("ok")
-      const decoded = yield* Schema.decodeUnknownEffect(
+      const decoded = yield* Schema.decodeEffect(
         Schema.fromJsonString(
-          Schema.Record(
-            Schema.String,
-            Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
-          )
+          Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]))
         )
       )(row?.attributes ?? "{}").pipe(Effect.orDie)
       expect(decoded["cache.hit"]).toBe(true)
@@ -150,9 +134,7 @@ describe("makeTelemetryLayerForClient", () => {
 
   it.effect("creates the dedicated metadata tables", () =>
     Effect.gen(function* () {
-      const names = yield* queryLogs<{ name: string }>(
-        "SELECT name FROM _collections ORDER BY name"
-      )
+      const names = yield* queryLogs<{ name: string }>("SELECT name FROM _collections ORDER BY name")
       expect(names.map((row) => row.name)).toContain("logs")
       expect(names.map((row) => row.name)).toContain("spans")
     }).pipe(Effect.provide(makeLayer()))
@@ -162,22 +144,13 @@ describe("makeTelemetryLayerForClient", () => {
     const dir = mkdtempSync(join(tmpdir(), "mira-telemetry-drain-"))
     const filename = join(dir, "telemetry.db")
     const database = SqliteDatabase({ filename })
-    const store = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(
-      Layer.provide(database.layer)
-    )
-    const layer = makeTelemetryLayerForClient().pipe(
-      Layer.provideMerge(store),
-      Layer.provide(NodeCryptoLayer)
-    )
+    const store = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(Layer.provide(database.layer))
+    const layer = makeTelemetryLayerForClient().pipe(Layer.provideMerge(store), Layer.provide(NodeCryptoLayer))
 
     try {
       await Effect.runPromise(
-        Effect.gen(function* () {
-          yield* Effect.forEach(
-            Array.from({ length: 500 }),
-            (_, index) => Effect.logInfo(`drain-${index}`),
-            { discard: true }
-          )
+        Effect.forEach(Array.from({ length: 500 }), (_, index) => Effect.logInfo(`drain-${index}`), {
+          discard: true
         }).pipe(Effect.provide(layer), Effect.scoped)
       )
 
@@ -197,11 +170,9 @@ describe("makeTelemetryLayerForClient", () => {
 
   it.effect("batches rows with flushBatchSize", () =>
     Effect.gen(function* () {
-      yield* Effect.forEach(
-        Array.from({ length: 25 }),
-        (_, index) => Effect.logInfo(`batched-${index}`),
-        { discard: true }
-      )
+      yield* Effect.forEach(Array.from({ length: 25 }), (_, index) => Effect.logInfo(`batched-${index}`), {
+        discard: true
+      })
       yield* Effect.promise(drainMicrotasks)
 
       const rows = yield* queryLogs<{ count: number }>(
@@ -217,16 +188,9 @@ describe("makeTelemetryLayerForClient", () => {
         yield* Effect.logInfo("interval-sql")
         yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 300)))
 
-        const rows = yield* queryLogs<{ message: string }>(
-          "SELECT message FROM logs WHERE message = 'interval-sql'"
-        )
+        const rows = yield* queryLogs<{ message: string }>("SELECT message FROM logs WHERE message = 'interval-sql'")
         expect(rows).toHaveLength(1)
-      }).pipe(
-        Effect.provide(
-          makeLayer(false, { flushBatchSize: 100, flushInterval: "50 millis" })
-        ),
-        Effect.scoped
-      )
+      }).pipe(Effect.provide(makeLayer(false, { flushBatchSize: 100, flushInterval: "50 millis" })), Effect.scoped)
     )
   })
 })
@@ -261,9 +225,7 @@ describe("logCleanupCronDef", () => {
 
   it("has the correct name and description", () => {
     expect(logCleanupCronDef.name).toBe("mira:log-cleanup")
-    expect(logCleanupCronDef.description).toBe(
-      "Delete logs and spans older than logRetentionDays days"
-    )
+    expect(logCleanupCronDef.description).toBe("Delete logs and spans older than logRetentionDays days")
   })
 
   it.effect("deletes old rows through the store and logs actual counts", () =>

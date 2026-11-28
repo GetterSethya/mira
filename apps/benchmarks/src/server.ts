@@ -11,13 +11,20 @@ import {
   Mira,
   MiraPlugin
 } from "@gettersethya/mira"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { SqlClient } from "effect/sql"
 
 if (process.env.BENCH_STACK_TRACES === "off") {
   Error.stackTraceLimit = 0
 }
+
+const InspectorProfileResultSchema = Schema.Struct({
+  profile: Schema.optional(Schema.Unknown)
+})
+
+const decodeInspectorProfileResult = Schema.decodeUnknownSync(InspectorProfileResultSchema)
+const encodeJsonValue = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const platformName = process.env.BENCH_PLATFORM
 if (platformName !== "node" && platformName !== "bun") {
@@ -53,11 +60,7 @@ const platform =
         database: m.SqliteDatabase
       }))
 
-const pingRoute = HttpRouter.route(
-  "GET",
-  "/__bench/ping",
-  Effect.succeed(HttpServerResponse.jsonUnsafe({ ok: true }))
-)
+const pingRoute = HttpRouter.route("GET", "/__bench/ping", Effect.succeed(HttpServerResponse.jsonUnsafe({ ok: true })))
 
 const repoListRoute = HttpRouter.route(
   "GET",
@@ -97,12 +100,7 @@ const batchStatsRoute = HttpRouter.route(
     return HttpServerResponse.jsonUnsafe(yield* stats.snapshot)
   }).pipe(
     Effect.catchCause(() =>
-      Effect.succeed(
-        HttpServerResponse.jsonUnsafe(
-          { error: "batch_stats_unavailable" },
-          { status: 503 }
-        )
-      )
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "batch_stats_unavailable" }, { status: 503 }))
     )
   )
 )
@@ -118,12 +116,7 @@ const resetBatchStatsRoute = HttpRouter.route(
     return HttpServerResponse.jsonUnsafe({ ok: true })
   }).pipe(
     Effect.catchCause(() =>
-      Effect.succeed(
-        HttpServerResponse.jsonUnsafe(
-          { error: "batch_stats_unavailable" },
-          { status: 503 }
-        )
-      )
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "batch_stats_unavailable" }, { status: 503 }))
     )
   )
 )
@@ -138,9 +131,7 @@ const countRoute = HttpRouter.route(
     const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM ${sql("posts")}`
     return HttpServerResponse.jsonUnsafe({ count: Number(rows[0]?.count ?? 0) })
   }).pipe(
-    Effect.catchCause(() =>
-      Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "count failed" }, { status: 500 }))
-    )
+    Effect.catchCause(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "count failed" }, { status: 500 })))
   )
 )
 
@@ -216,13 +207,11 @@ const profileStopRoute = HttpRouter.route(
       session.disconnect()
       return { cpu, heap }
     })
-    const cpuProfile = profiles.cpu as { profile?: unknown } | undefined
-    yield* Effect.sync(() => writeFileSync(file, JSON.stringify(cpuProfile?.profile ?? profiles.cpu)))
+    const cpuResult = decodeInspectorProfileResult(profiles.cpu)
+    yield* Effect.sync(() => writeFileSync(file, encodeJsonValue(cpuResult.profile ?? profiles.cpu)))
     if (profiles.heap !== null && heapFile !== null) {
-      const heapProfile = profiles.heap as { profile?: unknown } | undefined
-      yield* Effect.sync(() =>
-        writeFileSync(heapFile, JSON.stringify(heapProfile?.profile ?? profiles.heap))
-      )
+      const heapResult = decodeInspectorProfileResult(profiles.heap)
+      yield* Effect.sync(() => writeFileSync(heapFile, encodeJsonValue(heapResult.profile ?? profiles.heap)))
     }
     return HttpServerResponse.jsonUnsafe({ ok: true, file, heapFile })
   }).pipe(
@@ -256,8 +245,7 @@ const benchPlugin = MiraPlugin.define<Repository | BatchMutationStats | SqlClien
 })
 
 const syncEnv = process.env.BENCH_SYNCHRONOUS
-const synchronous =
-  syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : undefined
+const synchronous = syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : undefined
 const cacheEnabled = process.env.BENCH_CACHE !== "off"
 
 const createBatchEnabled = process.env.BENCH_CREATE_BATCH !== "off"

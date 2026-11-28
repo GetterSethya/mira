@@ -15,18 +15,8 @@ import type {
   TranslatePlanContext,
   ViewShape
 } from "./dialect.js"
-import {
-  errorHasCode,
-  hasUniqueViolationReason,
-  retryableByCauseCode,
-  translateStep
-} from "./dialect.js"
-import {
-  affectedViews,
-  normalizeIdentifier,
-  topologicalViewOrder,
-  viewDependencies
-} from "./view-dependencies.js"
+import { errorHasCode, hasUniqueViolationReason, retryableByCauseCode, translateStep } from "./dialect.js"
+import { affectedViews, normalizeIdentifier, topologicalViewOrder, viewDependencies } from "./view-dependencies.js"
 
 const quote: Quote = (name) => `"${name.replaceAll('"', '""')}"`
 
@@ -37,21 +27,12 @@ const isoFormat = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`
 /** One backslash that PostgreSQL treats as the LIKE escape character. */
 const ILIKE_ESCAPE = String.raw`ESCAPE E'\\'`
 
-const castValue = (expr: string, type: FieldValueType) =>
-  `${expr}::${type === "number" ? "double precision" : type}`
+const castValue = (expr: string, type: FieldValueType) => `${expr}::${type === "number" ? "double precision" : type}`
 
-const timestampAdd = (
-  expr: string,
-  amount: number,
-  unit: TimestampUnit
-) =>
+const timestampAdd = (expr: string, amount: number, unit: TimestampUnit) =>
   `to_char(((${expr})::timestamptz + interval '${amount} ${unit}') AT TIME ZONE 'UTC', ${isoFormat})`
 
-const timestampDiff = (
-  left: string,
-  right: string,
-  unit: TimestampUnit
-): string => {
+const timestampDiff = (left: string, right: string, unit: TimestampUnit): string => {
   const divisor = unit === "day" ? 86400 : unit === "hour" ? 3600 : 60
   return `(EXTRACT(EPOCH FROM ((${left})::timestamptz - (${right})::timestamptz)) / ${divisor})`
 }
@@ -63,8 +44,7 @@ const timestampDiff = (
  */
 export const postgresRuleSql: RuleSqlDialect = {
   quoteIdentifier: quote,
-  currentTimestamp: () =>
-    `to_char(now() AT TIME ZONE 'UTC', ${isoFormat})`,
+  currentTimestamp: () => `to_char(now() AT TIME ZONE 'UTC', ${isoFormat})`,
   timestampAdd,
   timestampDiff,
   caseInsensitiveLike: (left, right, mode) =>
@@ -84,13 +64,19 @@ export const postgresFilterSql: Pick<DialectType, "caseInsensitivePattern"> = {
   caseInsensitivePattern: (left, right) => `${left} ILIKE ${right} ${ILIKE_ESCAPE}`
 }
 
+const unknownToText = (value: unknown): string => {
+  if (value instanceof Error) return `${value.name}: ${value.message}`
+  if (typeof value === "object" && value !== null) return Object.prototype.toString.call(value)
+  return String(value)
+}
+
 const quoteLiteral = (value: unknown): string => {
   if (value === null || value === undefined) return "NULL"
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
   if (typeof value === "number") {
     return Number.isFinite(value) ? String(value) : "NULL"
   }
-  return `E'${String(value).replaceAll("\\", "\\\\").replaceAll("'", "''")}'`
+  return `E'${unknownToText(value).replaceAll("\\", "\\\\").replaceAll("'", "''")}'`
 }
 
 /** SQLSTATE 23505 is `unique_violation`; the reason tag is a driver fallback. */
@@ -108,6 +94,28 @@ export const postgresStoreSql: StoreSqlCapabilities = {
     "SET LOCAL lock_timeout = '5s'",
     "SELECT pg_advisory_xact_lock(hashtextextended('mira.system-tables', 0))"
   ],
+  keyColumnType: "TEXT",
+  textColumnType: "TEXT",
+  bucketColumnType: "TEXT",
+  bucketMaxLength: 1_000_000,
+  createIndexIfNotExists: (name, table, columns, unique) =>
+    `CREATE ${unique ? "UNIQUE " : ""}INDEX IF NOT EXISTS ${quote(name)} ON ${quote(table)} (${columns.map(quote).join(", ")})`,
+  isIgnorableBootstrapError: () => false,
+  insertIgnoreClause: (conflictKeys) => `ON CONFLICT (${conflictKeys.map(quote).join(", ")}) DO NOTHING`,
+  upsertClause: (conflictKeys, assignments) =>
+    `ON CONFLICT (${conflictKeys.map(quote).join(", ")}) DO UPDATE SET ${assignments
+      .map((assignment) =>
+        assignment.kind === "excluded"
+          ? `${quote(assignment.column)} = excluded.${quote(assignment.column)}`
+          : `${quote(assignment.column)} = ${quote(assignment.column)} + 1`
+      )
+      .join(", ")}`,
+  mutationResult: { _tag: "returning" },
+  challengeLive: {
+    mode: "partial",
+    indexName: "_auth_challenges_live",
+    indexStatement: `CREATE UNIQUE INDEX IF NOT EXISTS ${quote("_auth_challenges_live")} ON ${quote("_auth_challenges")} (${["collection", "user_id", "purpose"].map(quote).join(", ")}) WHERE ${quote("consumed_at")} IS NULL`
+  },
   columnExistsSql: (table, column) =>
     `SELECT 1 AS present FROM information_schema.columns
      WHERE table_schema = current_schema()
@@ -241,11 +249,7 @@ const columnSql = (col: ColumnDef, syntheticDefault = false) => {
   return parts.join(" ")
 }
 
-const createTableSql = (
-  table: string,
-  columns: ReadonlyArray<ColumnDef>,
-  ifNotExists = false
-) => {
+const createTableSql = (table: string, columns: ReadonlyArray<ColumnDef>, ifNotExists = false) => {
   const cols = columns.map((column) => columnSql(column))
   return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${quote(table)} (\n  ${cols.join(",\n  ")}\n)`
 }
@@ -283,10 +287,7 @@ const indexNameOf = (table: string, fields: ReadonlyArray<string>) => {
   return `${truncateUtf8(raw, budget)}${suffix}`
 }
 
-const createIndexSql = (
-  table: string,
-  index: { readonly fields: ReadonlyArray<string>; readonly unique: boolean }
-) => {
+const createIndexSql = (table: string, index: { readonly fields: ReadonlyArray<string>; readonly unique: boolean }) => {
   const unique = index.unique ? "UNIQUE " : ""
   const columns = index.fields.map(quote).join(", ")
   return `CREATE ${unique}INDEX ${quote(indexNameOf(table, index.fields))} ON ${quote(table)} (${columns})`
@@ -391,15 +392,11 @@ const translate = (step: MigrationStep): Array<string> => {
     case "dropColumn":
       return [`ALTER TABLE ${quote(step.table)} DROP COLUMN ${quote(step.column)}`]
     case "renameColumn":
-      return [
-        `ALTER TABLE ${quote(step.table)} RENAME COLUMN ${quote(step.from)} TO ${quote(step.to)}`
-      ]
+      return [`ALTER TABLE ${quote(step.table)} RENAME COLUMN ${quote(step.from)} TO ${quote(step.to)}`]
     case "alterColumn":
       return alterColumnSql(step)
     case "createIndex":
-      return [
-        createIndexSql(step.table, { fields: step.fields, unique: step.unique })
-      ]
+      return [createIndexSql(step.table, { fields: step.fields, unique: step.unique })]
     case "dropIndex":
       return [`DROP INDEX IF EXISTS ${quote(indexNameOf(step.table, step.fields))}`]
     case "createSystemTable":
@@ -440,11 +437,7 @@ const collectPreflightErrors = (
     }
   }
 
-  const checkColumn = (
-    column: ColumnDef,
-    table: string,
-    step: MigrationStep["kind"]
-  ) => {
+  const checkColumn = (column: ColumnDef, table: string, step: MigrationStep["kind"]) => {
     checkIdentifier(column.name, step)
     const error = validateColumn(column, table, step)
     if (error !== undefined) errors.push(error)
@@ -521,10 +514,7 @@ const collectPreflightErrors = (
   }
 
   for (const [name, shape] of ctx.views) {
-    if (
-      shape.desired !== null &&
-      (shape.desired.query === null || shape.desired.query.trim() === "")
-    ) {
+    if (shape.desired !== null && (shape.desired.query === null || shape.desired.query.trim() === "")) {
       errors.push(
         new UnsupportedMigrationStepError({
           step: "createView",
@@ -550,10 +540,7 @@ const collectPreflightErrors = (
   return errors
 }
 
-const translatePlan = (
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-) =>
+const translatePlan = (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) =>
   Effect.gen(function* () {
     const changedTables = new Set<string>()
     for (const step of steps) {
@@ -582,7 +569,7 @@ const translatePlan = (
 
     const errors = collectPreflightErrors(steps, ctx, droppedViews, changedTables)
     const firstError = errors[0]
-    if (firstError !== undefined) return yield* Effect.fail(firstError)
+    if (firstError !== undefined) return yield* firstError
 
     const affected = affectedViews(ctx.views, droppedViews, changedTables)
 
@@ -599,10 +586,7 @@ const translatePlan = (
       const raw = entry?.raw ?? explicit
       if (raw === undefined) continue
       const stored = entry?.shape.stored
-      if (
-        explicit === undefined &&
-        (stored === undefined || stored === null || stored.query === null)
-      ) {
+      if (explicit === undefined && (stored === undefined || stored === null || stored.query === null)) {
         continue
       }
       dropRaw.push(raw)
@@ -638,7 +622,7 @@ const translatePlan = (
     for (const raw of dropRaw) checkViewIdentifier(raw, "dropView")
     for (const raw of createRaw.values()) checkViewIdentifier(raw, "createView")
     const firstViewError = viewErrors[0]
-    if (firstViewError !== undefined) return yield* Effect.fail(firstViewError)
+    if (firstViewError !== undefined) return yield* firstViewError
 
     const statements: Array<string> = []
     const notes: Array<string> = []
@@ -654,10 +638,7 @@ const translatePlan = (
       statements.push(...rendered)
     }
 
-    const order = topologicalViewOrder(
-      new Set(createRaw.keys()),
-      viewDependencies(ctx.views, "desired")
-    )
+    const order = topologicalViewOrder(new Set(createRaw.keys()), viewDependencies(ctx.views, "desired"))
     for (const normalized of order) {
       const raw = createRaw.get(normalized)
       const query = createQuery.get(normalized)
@@ -683,11 +664,7 @@ export const postgresDdlSql: DdlSqlDialect = {
   storesBooleanAsInteger: false
 }
 
-const upsertSql = (
-  table: string,
-  record: Readonly<Record<string, unknown>>,
-  conflictKeys: ReadonlyArray<string>
-) => {
+const upsertSql = (table: string, record: Readonly<Record<string, unknown>>, conflictKeys: ReadonlyArray<string>) => {
   const keys = Object.keys(record)
   const columns = keys.map(quote).join(", ")
   const values = keys.map((key) => quoteLiteral(record[key])).join(", ")
@@ -729,7 +706,6 @@ export const postgresDialect: DialectType = {
     "SELECT pg_advisory_xact_lock(hashtextextended('mira.migrations', 0))",
     "SET LOCAL lock_timeout = '5s'"
   ],
-  migrationPreviewLockSql:
-    'SELECT pg_try_advisory_xact_lock(hashtextextended(\'mira.migrations\', 0)) AS "acquired"',
+  migrationPreviewLockSql: "SELECT pg_try_advisory_xact_lock(hashtextextended('mira.migrations', 0)) AS \"acquired\"",
   normalizesBigintSeqId: true
 }

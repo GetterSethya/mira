@@ -88,21 +88,15 @@ function sqlError(message: string): SqlError.SqlError {
  * rejected, so a second statement cannot ride along. Every other statement
  * fails with an `SqlError` before reaching the driver.
  */
-function makeReadonlyQueryGuard(
-  run: TranslatePlanContext["readonlyQuery"]
-): TranslatePlanContext["readonlyQuery"] {
+function makeReadonlyQueryGuard(run: TranslatePlanContext["readonlyQuery"]): TranslatePlanContext["readonlyQuery"] {
   return (statement) => {
     const trimmed = statement.trim()
     const firstToken = trimmed.split(/\s+/, 1)[0]?.toUpperCase() ?? ""
     if (firstToken !== "SELECT") {
-      return Effect.fail(
-        sqlError(`readonlyQuery rejected a statement that does not start with SELECT: ${trimmed}`)
-      )
+      return Effect.fail(sqlError(`readonlyQuery rejected a statement that does not start with SELECT: ${trimmed}`))
     }
     if (trimmed.includes(";")) {
-      return Effect.fail(
-        sqlError(`readonlyQuery rejected a statement containing a semicolon: ${trimmed}`)
-      )
+      return Effect.fail(sqlError(`readonlyQuery rejected a statement containing a semicolon: ${trimmed}`))
     }
     return run(trimmed)
   }
@@ -113,23 +107,15 @@ function isCollectionSchema(value: unknown): value is CollectionSchema {
 }
 
 function decodeStoredSchema(json: string) {
-  return Schema.decodeUnknownEffect(parseJsonSchema)(json).pipe(
-    Effect.mapError(
-      (e: Schema.SchemaError) => sqlError(`Invalid stored schema: ${e.message}`)
-    ),
-    Effect.flatMap((v) =>
-      isCollectionSchema(v)
-        ? Effect.succeed(v)
-        : Effect.fail(sqlError("Invalid stored schema: missing properties"))
-    )
+  return Schema.decodeEffect(parseJsonSchema)(json).pipe(
+    Effect.mapError((e: Schema.SchemaError) => sqlError(`Invalid stored schema: ${e.message}`)),
+    Effect.filterOrFail(isCollectionSchema, () => sqlError("Invalid stored schema: missing properties"))
   )
 }
 
 function encodeStoredSchema(schema: CollectionSchema) {
   return Schema.encodeEffect(parseJsonSchema)(schema).pipe(
-    Effect.mapError(
-      (e: Schema.SchemaError) => sqlError(`Failed to serialize schema: ${e.message}`)
-    )
+    Effect.mapError((e: Schema.SchemaError) => sqlError(`Failed to serialize schema: ${e.message}`))
   )
 }
 
@@ -147,10 +133,7 @@ const migrationsColumns: Array<ColumnDef> = [
 ]
 
 /** DDL steps to bootstrap the collection and migration metadata tables. */
-export function systemTableSteps(
-  schemaTable = "_collections",
-  migrationsTable = "_migrations"
-): Array<MigrationStep> {
+export function systemTableSteps(schemaTable = "_collections", migrationsTable = "_migrations"): Array<MigrationStep> {
   return [
     {
       kind: "createSystemTable",
@@ -173,8 +156,7 @@ const metadataFor = (options?: MigrateOptions) => ({
   migrationsTable: options?.migrationsTable ?? "_migrations"
 })
 
-const compareTextFor = (dialect: MigrationDialect) =>
-  dialect.reconcilesTextLength === true
+const compareTextFor = (dialect: MigrationDialect) => dialect.reconcilesTextLength === true
 
 const planOptionsFor = (dialect: MigrationDialect, options?: MigrateOptions) => ({
   ...options,
@@ -187,13 +169,13 @@ const auditTextShapeSafe = (
 ): Effect.Effect<ReadonlyArray<string>> =>
   dialect.auditTextShape === undefined
     ? Effect.succeed([])
-    : dialect.auditTextShape(ctx).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning(`Text-shape audit failed: ${Cause.pretty(cause)}`).pipe(
-            Effect.as([])
+    : dialect
+        .auditTextShape(ctx)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(`Text-shape audit failed: ${Cause.pretty(cause)}`).pipe(Effect.as([]))
           )
         )
-      )
 
 /**
  * Effect `Context.Tag` for the migration service.
@@ -208,7 +190,10 @@ export class Migrator extends Context.Service<
   Migrator,
   {
     readonly migrate: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<void, MigrationError>
-    readonly plan: (schemas: Array<NamedSchema>, options?: MigrateOptions) => Effect.Effect<MigrationPlan, MigrationError>
+    readonly plan: (
+      schemas: Array<NamedSchema>,
+      options?: MigrateOptions
+    ) => Effect.Effect<MigrationPlan, MigrationError>
     readonly status: (
       schemas: Array<NamedSchema>,
       options?: MigrateOptions
@@ -273,16 +258,12 @@ function isExecutable(statement: string) {
  * The dialect may read the catalog through `ctx.readonlyQuery` while rendering.
  * A statement-mode drift therefore fails before any plan DDL.
  */
-function renderPlan(
-  dialect: MigrationDialect,
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-) {
+function renderPlan(dialect: MigrationDialect, steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) {
   return Effect.gen(function* () {
     const translated = yield* dialect.translatePlan(steps, ctx)
     for (const statement of [...translated.statements, ...(translated.validations ?? [])]) {
       if (!isExecutable(statement)) {
-        return yield* Effect.fail(new InvalidMigrationStatementError({ statement }))
+        return yield* new InvalidMigrationStatementError({ statement })
       }
     }
     return translated
@@ -317,9 +298,9 @@ function runCleanup(executor: MigrationExecutor, statements: ReadonlyArray<strin
   return Effect.forEach(
     statements,
     (statement) =>
-      executor.run(statement).pipe(
-        Effect.catchCause(() => Effect.logWarning(`Migration cleanup statement failed: ${statement}`))
-      ),
+      executor
+        .run(statement)
+        .pipe(Effect.catchCause(() => Effect.logWarning(`Migration cleanup statement failed: ${statement}`))),
     { discard: true }
   )
 }
@@ -332,11 +313,9 @@ function runSessionRestore(executor: MigrationExecutor, statements: ReadonlyArra
   return Effect.forEach(
     statements,
     (statement) =>
-      executor.run(statement).pipe(
-        Effect.catchCause(() =>
-          Effect.logError(`Migration session restore statement failed: ${statement}`)
-        )
-      ),
+      executor
+        .run(statement)
+        .pipe(Effect.catchCause(() => Effect.logError(`Migration session restore statement failed: ${statement}`))),
     { discard: true }
   )
 }
@@ -375,11 +354,9 @@ export function readDatabaseName(
   return Effect.gen(function* () {
     const name = yield* readDatabaseNameRaw(executor, lock)
     if (name === null) {
-      return yield* Effect.fail(
-        new MigrationLockError({
-          detail: "No database is selected on the connection; include a database in the URL"
-        })
-      )
+      return yield* new MigrationLockError({
+        detail: "No database is selected on the connection; include a database in the URL"
+      })
     }
     return name
   })
@@ -395,13 +372,11 @@ export function assertSameDatabase(
     const lockDb = yield* readDatabaseNameRaw(lockExecutor, lock)
     const ddlDb = yield* readDatabaseNameRaw(ddlExecutor, lock)
     if (lockDb !== null && ddlDb !== null && lockDb !== ddlDb) {
-      return yield* Effect.fail(
-        new MigrationLockError({
-          detail:
-            `The dedicated lock connection targets database '${lockDb}' but the DDL connection ` +
-            `targets '${ddlDb}'; the lock would not protect the migration target.`
-        })
-      )
+      return yield* new MigrationLockError({
+        detail:
+          `The dedicated lock connection targets database '${lockDb}' but the DDL connection ` +
+          `targets '${ddlDb}'; the lock would not protect the migration target.`
+      })
     }
   })
 }
@@ -423,22 +398,14 @@ function isHeldByLock(
 }
 
 /** Never fails; an unreadable state is treated as still held unless the session is gone. */
-function isHeldByLockSafe(
-  executor: MigrationExecutor,
-  lock: MigrationLock,
-  name: string
-): Effect.Effect<boolean> {
+function isHeldByLockSafe(executor: MigrationExecutor, lock: MigrationLock, name: string): Effect.Effect<boolean> {
   return Effect.exit(isHeldByLock(executor, lock, name)).pipe(
     Effect.map((exit) => (Exit.isSuccess(exit) ? exit.value : !isSessionLoss(exit.cause)))
   )
 }
 
 /** Reads the holder connection id for diagnostics; errors are ignored. */
-function holderId(
-  executor: MigrationExecutor,
-  lock: MigrationLock,
-  name: string
-): Effect.Effect<string | undefined> {
+function holderId(executor: MigrationExecutor, lock: MigrationLock, name: string): Effect.Effect<string | undefined> {
   return executor.queryParameterized(lock.holderStatement(name)).pipe(
     Effect.map((rows) => {
       const value = rows[0]?.["holder"]
@@ -447,7 +414,7 @@ function holderId(
       if (typeof value === "string") return value
       return undefined
     }),
-    Effect.catchCause(() => Effect.succeed(undefined))
+    Effect.catchCause(() => Effect.undefined)
   )
 }
 
@@ -482,18 +449,14 @@ export function acquireSessionLock(
         operation === "migrate"
           ? `A migration is in progress: migration lock '${name}' was not acquired within ${timeoutSeconds}s`
           : `${operation} cannot run: a migration or preview holds lock '${name}'`
-      return yield* Effect.fail(
-        new MigrationBusyError({
-          operation,
-          message: holder === undefined ? base : `${base} (holder ${holder})`
-        })
-      )
-    }
-    return yield* Effect.fail(
-      new MigrationLockError({
-        detail: `Migration lock '${name}' returned an unexpected result: ${String(value)}`
+      return yield* new MigrationBusyError({
+        operation,
+        message: holder === undefined ? base : `${base} (holder ${holder})`
       })
-    )
+    }
+    return yield* new MigrationLockError({
+      detail: `Migration lock '${name}' returned an unexpected result: ${String(value)}`
+    })
   })
 }
 
@@ -523,11 +486,9 @@ export function clearReservedName(
     }
     const stillHeld = yield* isHeldByLock(executor, lock, name)
     if (stillHeld) {
-      return yield* Effect.fail(
-        new MigrationLockError({
-          detail: `Migration lock '${name}' is still held by this connection after eight releases.`
-        })
-      )
+      return yield* new MigrationLockError({
+        detail: `Migration lock '${name}' is still held by this connection after eight releases.`
+      })
     }
     return cleared
   })
@@ -575,10 +536,7 @@ function resolveTimeoutSeconds(
   lock: MigrationLock,
   options: MigrateOptions | undefined
 ): Effect.Effect<number, MigrationLockError> {
-  const resolved = resolveLockTimeoutSeconds(
-    options?.migrationLockTimeoutSeconds,
-    lock.defaultTimeoutSeconds
-  )
+  const resolved = resolveLockTimeoutSeconds(options?.migrationLockTimeoutSeconds, lock.defaultTimeoutSeconds)
   if ("detail" in resolved) {
     return Effect.fail(new MigrationLockError({ detail: resolved.detail }))
   }
@@ -595,9 +553,7 @@ function startLockHeartbeat(
     while (true) {
       yield* Effect.sleep(Duration.seconds(intervalSeconds))
       if (yield* Ref.get(stop)) return
-      const exit = yield* Effect.exit(
-        executor.query("SELECT 1 AS ok").pipe(Effect.timeout(HEARTBEAT_QUERY_TIMEOUT))
-      )
+      const exit = yield* Effect.exit(executor.query("SELECT 1 AS ok").pipe(Effect.timeout(HEARTBEAT_QUERY_TIMEOUT)))
       if (Exit.isFailure(exit)) {
         yield* Ref.set(lost, true)
         return
@@ -651,9 +607,9 @@ function prepareLockHandle(
 function startHeartbeatFor(handle: LockHandle, lock: MigrationLock) {
   if (handle.dedicated === undefined) return Effect.void
   const interval = lock.heartbeatIntervalSeconds ?? 60
-  return Effect.forkScoped(
-    startLockHeartbeat(handle.executor, interval, handle.heartbeatStop, handle.lockLost)
-  ).pipe(Effect.asVoid)
+  return Effect.forkScoped(startLockHeartbeat(handle.executor, interval, handle.heartbeatStop, handle.lockLost)).pipe(
+    Effect.asVoid
+  )
 }
 
 function lockLost(name: string, where: string): MigrationLockError {
@@ -662,16 +618,12 @@ function lockLost(name: string, where: string): MigrationLockError {
   })
 }
 
-function assertLockHeld(
-  handle: LockHandle,
-  lock: MigrationLock,
-  where: string
-): Effect.Effect<void, MigrationError> {
+function assertLockHeld(handle: LockHandle, lock: MigrationLock, where: string): Effect.Effect<void, MigrationError> {
   return Effect.gen(function* () {
     const lost = yield* Ref.get(handle.lockLost)
-    if (lost) return yield* Effect.fail(lockLost(handle.name, where))
+    if (lost) return yield* lockLost(handle.name, where)
     const held = yield* isHeldByLock(handle.executor, lock, handle.name)
-    if (!held) return yield* Effect.fail(lockLost(handle.name, where))
+    if (!held) return yield* lockLost(handle.name, where)
   })
 }
 
@@ -723,18 +675,12 @@ function acquireMigrationPreviewLock(
     const rows = yield* executor.query(lockSql)
     const acquired = rows[0]?.["acquired"]
     if (acquired !== true) {
-      return yield* Effect.fail(
-        new MigrationBusyError({ operation, message: MIGRATION_BUSY_MESSAGE })
-      )
+      return yield* new MigrationBusyError({ operation, message: MIGRATION_BUSY_MESSAGE })
     }
   })
 }
 
-function readStoredSchemas(
-  executor: MigrationExecutor,
-  dialect: MigrationDialect,
-  schemaTable: string
-) {
+function readStoredSchemas(executor: MigrationExecutor, dialect: MigrationDialect, schemaTable: string) {
   return Effect.gen(function* () {
     const rows = yield* executor.query(
       `SELECT ${dialect.quoteIdentifier("name")}, ${dialect.quoteIdentifier("schema")} FROM ${dialect.quoteIdentifier(schemaTable)}`
@@ -744,7 +690,7 @@ function readStoredSchemas(
       const name = row["name"]
       const schema = row["schema"]
       if (typeof name !== "string" || typeof schema !== "string") {
-        return yield* Effect.fail(sqlError("Invalid stored schema row"))
+        return yield* sqlError("Invalid stored schema row")
       }
       storedRecord[name] = yield* decodeStoredSchema(schema)
     }
@@ -752,24 +698,14 @@ function readStoredSchemas(
   })
 }
 
-function tableExists(
-  executor: MigrationExecutor,
-  dialect: MigrationDialect,
-  table: string
-) {
+function tableExists(executor: MigrationExecutor, dialect: MigrationDialect, table: string) {
   if (dialect.migrationModel.kind !== "statement") {
     return Effect.succeed(true)
   }
-  return executor
-    .query(dialect.migrationModel.systemTableExistsSql(table))
-    .pipe(Effect.map((rows) => rows.length > 0))
+  return executor.query(dialect.migrationModel.systemTableExistsSql(table)).pipe(Effect.map((rows) => rows.length > 0))
 }
 
-function readStoredSchemasIfPresent(
-  executor: MigrationExecutor,
-  dialect: MigrationDialect,
-  schemaTable: string
-) {
+function readStoredSchemasIfPresent(executor: MigrationExecutor, dialect: MigrationDialect, schemaTable: string) {
   return Effect.gen(function* () {
     const exists = yield* tableExists(executor, dialect, schemaTable)
     if (!exists) return {}
@@ -779,11 +715,9 @@ function readStoredSchemasIfPresent(
 
 const transactionalExecutor = (sql: SqlClient.SqlClient): MigrationExecutor => ({
   run: (statement) => sql.unsafe(statement).pipe(Effect.asVoid),
-  runParameterized: (statement) =>
-    sql.unsafe(statement.sql, [...statement.params]).pipe(Effect.asVoid),
+  runParameterized: (statement) => sql.unsafe(statement.sql, [...statement.params]).pipe(Effect.asVoid),
   query: (statement) => sql.unsafe<Record<string, unknown>>(statement),
-  queryParameterized: (statement) =>
-    sql.unsafe<Record<string, unknown>>(statement.sql, [...statement.params])
+  queryParameterized: (statement) => sql.unsafe<Record<string, unknown>>(statement.sql, [...statement.params])
 })
 
 const connectionExecutor = (conn: Connection): MigrationExecutor => ({
@@ -791,8 +725,7 @@ const connectionExecutor = (conn: Connection): MigrationExecutor => ({
   runParameterized: (statement) =>
     conn.executeUnprepared(statement.sql, [...statement.params], undefined).pipe(Effect.asVoid),
   query: (statement) => conn.executeUnprepared(statement, [], undefined),
-  queryParameterized: (statement) =>
-    conn.executeUnprepared(statement.sql, [...statement.params], undefined)
+  queryParameterized: (statement) => conn.executeUnprepared(statement.sql, [...statement.params], undefined)
 })
 
 const makeRunner = (
@@ -815,96 +748,96 @@ function migrateTransactional(
   const executor = transactionalExecutor(sql)
   let cleanupStatements: ReadonlyArray<string> = []
   return Effect.gen(function* () {
-    const transaction = sql.withTransaction(
-      Effect.gen(function* () {
-        yield* Effect.logDebug("Starting migration transaction")
-        yield* runStatements(executor, dialect.migrationTransactionSetupSql ?? [])
+    const transaction = sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* Effect.logDebug("Starting migration transaction")
+          yield* runStatements(executor, dialect.migrationTransactionSetupSql ?? [])
 
-        yield* Effect.logDebug("Creating system tables if not exist")
-        yield* runStatements(
-          executor,
-          systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
-        )
-
-        yield* Effect.logInfo(`Migrating ${schemas.length} collections...`)
-        const storedRecord = yield* readStoredSchemas(executor, dialect, schemaTable)
-        yield* Effect.logDebug(`Stored schemas: ${Object.keys(storedRecord).length} found`)
-
-        const plan = computePlan(schemas, storedRecord, planOptionsFor(dialect, options))
-        yield* Effect.logDebug(`Diff: ${plan.steps.length} steps computed`)
-        if (plan.steps.length === 0) {
-          yield* Effect.logInfo("All collections up to date - nothing to migrate")
-          return
-        }
-        yield* Effect.logInfo(`Migration plan: ${plan.steps.length} steps (destructive: ${plan.destructive})`)
-
-        if (plan.destructive && !options?.allowDestructive) {
-          yield* Effect.logWarning(
-            "Destructive steps detected but allowDestructive is false - skipping. Re-run with allowDestructive: true to proceed."
+          yield* Effect.logDebug("Creating system tables if not exist")
+          yield* runStatements(
+            executor,
+            systemTableSteps(schemaTable, migrationsTable).flatMap((step) => dialect.translate(step))
           )
-          for (const step of plan.steps.filter(isDestructiveStep)) {
-            const tableLabel = "table" in step ? step.table : "unknown"
-            yield* Effect.logWarning(`  Destructive step: ${step.kind} on ${tableLabel}`)
+
+          yield* Effect.logInfo(`Migrating ${schemas.length} collections...`)
+          const storedRecord = yield* readStoredSchemas(executor, dialect, schemaTable)
+          yield* Effect.logDebug(`Stored schemas: ${Object.keys(storedRecord).length} found`)
+
+          const plan = computePlan(schemas, storedRecord, planOptionsFor(dialect, options))
+          yield* Effect.logDebug(`Diff: ${plan.steps.length} steps computed`)
+          if (plan.steps.length === 0) {
+            yield* Effect.logInfo("All collections up to date - nothing to migrate")
+            return
           }
-          return
-        }
+          yield* Effect.logInfo(`Migration plan: ${plan.steps.length} steps (destructive: ${plan.destructive})`)
 
-        for (let i = 0; i < plan.steps.length; i++) {
-          const step = plan.steps[i]
-          yield* Effect.logInfo(
-            `Step [${i + 1}/${plan.steps.length}]: ${step.kind} on ${"table" in step ? step.table : ""}`
-          )
-        }
-
-        const translated = yield* renderPlan(
-          dialect,
-          plan.steps,
-          buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(executor.query))
-        )
-        cleanupStatements = translated.cleanup
-
-        for (const note of translated.notes ?? []) {
-          yield* Effect.logInfo(note)
-        }
-
-        const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
-          Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
-        )
-        const schemaJsonByName = new Map<string, string>()
-        for (const { name, schema } of schemas) {
-          schemaJsonByName.set(name, yield* encodeStoredSchema(schema))
-        }
-        const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-        const migrationName = schemas.map((s) => s.name).join(", ")
-
-        yield* Effect.logDebug(`Steps: ${stepsJson}`)
-        yield* runStatements(executor, translated.statements)
-        yield* runStatements(executor, translated.validations ?? [])
-        yield* sql`INSERT INTO ${sql(migrationsTable)} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
-
-        for (const [name, schemaJson] of schemaJsonByName) {
-          yield* Effect.logDebug(`Writing schema for ${name}`)
-          yield* sql.unsafe(
-            dialect.upsert(
-              schemaTable,
-              {
-                name,
-                schema: schemaJson,
-                updated_at: new Date().toJSON()
-              },
-              ["name"]
+          if (plan.destructive && !options?.allowDestructive) {
+            yield* Effect.logWarning(
+              "Destructive steps detected but allowDestructive is false - skipping. Re-run with allowDestructive: true to proceed."
             )
+            for (const step of plan.steps.filter(isDestructiveStep)) {
+              const tableLabel = "table" in step ? step.table : "unknown"
+              yield* Effect.logWarning(`  Destructive step: ${step.kind} on ${tableLabel}`)
+            }
+            return
+          }
+
+          for (let i = 0; i < plan.steps.length; i++) {
+            const step = plan.steps[i]
+            yield* Effect.logInfo(
+              `Step [${i + 1}/${plan.steps.length}]: ${step.kind} on ${"table" in step ? step.table : ""}`
+            )
+          }
+
+          const translated = yield* renderPlan(
+            dialect,
+            plan.steps,
+            buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(executor.query))
           )
-        }
-      })
-    ).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logError(`Migration failed: ${Cause.pretty(cause)}`).pipe(
-          Effect.andThen(Effect.failCause(cause))
-        )
-      ),
-      Effect.ensuring(Effect.suspend(() => runCleanup(executor, cleanupStatements)))
-    )
+          cleanupStatements = translated.cleanup
+
+          for (const note of translated.notes ?? []) {
+            yield* Effect.logInfo(note)
+          }
+
+          const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
+            Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
+          )
+          const schemaJsonByName = new Map<string, string>()
+          for (const { name, schema } of schemas) {
+            schemaJsonByName.set(name, yield* encodeStoredSchema(schema))
+          }
+          const migrationId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          const migrationName = schemas.map((s) => s.name).join(", ")
+
+          yield* Effect.logDebug(`Steps: ${stepsJson}`)
+          yield* runStatements(executor, translated.statements)
+          yield* runStatements(executor, translated.validations ?? [])
+          yield* sql`INSERT INTO ${sql(migrationsTable)} ${sql.insert({ id: migrationId, name: migrationName, steps: stepsJson, applied_at: new Date().toJSON() })}`
+
+          for (const [name, schemaJson] of schemaJsonByName) {
+            yield* Effect.logDebug(`Writing schema for ${name}`)
+            yield* sql.unsafe(
+              dialect.upsert(
+                schemaTable,
+                {
+                  name,
+                  schema: schemaJson,
+                  updated_at: new Date().toJSON()
+                },
+                ["name"]
+              )
+            )
+          }
+        })
+      )
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError(`Migration failed: ${Cause.pretty(cause)}`).pipe(Effect.andThen(Effect.failCause(cause)))
+        ),
+        Effect.ensuring(Effect.suspend(() => runCleanup(executor, cleanupStatements)))
+      )
 
     yield* transaction
     yield* Effect.logInfo(`Migration complete - ${schemas.length} collections migrated`)
@@ -922,12 +855,10 @@ function writeStatementMetadata(
   return Effect.gen(function* () {
     const upsert = dialect.upsertStatement
     if (upsert === undefined) {
-      return yield* Effect.fail(
-        new UnsupportedMigrationStepError({
-          step: "createTable",
-          detail: "statement mode requires a parameterized upsertStatement"
-        })
-      )
+      return yield* new UnsupportedMigrationStepError({
+        step: "createTable",
+        detail: "statement mode requires a parameterized upsertStatement"
+      })
     }
 
     const stepsJson = yield* Schema.encodeEffect(parseJsonSchema)(plan.steps).pipe(
@@ -956,11 +887,7 @@ function writeStatementMetadata(
       )
       for (const [name, schemaJson] of schemaJsonByName) {
         yield* runner.runParameterized(
-          upsert(
-            schemaTable,
-            { name, schema: schemaJson, updated_at: new Date().toJSON() },
-            ["name"]
-          )
+          upsert(schemaTable, { name, schema: schemaJson, updated_at: new Date().toJSON() }, ["name"])
         )
       }
       yield* runner.commit()
@@ -969,11 +896,13 @@ function writeStatementMetadata(
     yield* write.pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
-          yield* runner.rollback().pipe(
-            Effect.catchCause((rollbackCause) =>
-              Effect.die(new MigrationRollbackError({ cause: Cause.pretty(rollbackCause) }))
+          yield* runner
+            .rollback()
+            .pipe(
+              Effect.catchCause((rollbackCause) =>
+                Effect.die(new MigrationRollbackError({ cause: Cause.pretty(rollbackCause) }))
+              )
             )
-          )
           return yield* Effect.failCause(cause)
         })
       )
@@ -1026,13 +955,7 @@ function migrateStatement(
           const timeoutSeconds = yield* resolveTimeoutSeconds(lockConfig, options)
           const prepared = yield* prepareLockHandle(lockConfig, ddlExecutor)
           handle = prepared
-          yield* acquireSessionLock(
-            prepared.executor,
-            lockConfig,
-            prepared.name,
-            timeoutSeconds,
-            "migrate"
-          )
+          yield* acquireSessionLock(prepared.executor, lockConfig, prepared.name, timeoutSeconds, "migrate")
           yield* Effect.logDebug(`Acquired migration lock '${prepared.name}'`)
           yield* startHeartbeatFor(prepared, lockConfig)
         }
@@ -1042,9 +965,7 @@ function migrateStatement(
           let preflightStored: Record<string, CollectionSchema> = {}
           let runPreflight = true
           if (exists) {
-            const read = yield* Effect.result(
-              readStoredSchemas(ddlExecutor, dialect, schemaTable)
-            )
+            const read = yield* Effect.result(readStoredSchemas(ddlExecutor, dialect, schemaTable))
             if (read._tag === "Success") {
               preflightStored = read.success
             } else {
@@ -1055,19 +976,10 @@ function migrateStatement(
             }
           }
           if (runPreflight) {
-            const preflightSteps = computePlan(
-              schemas,
-              preflightStored,
-              planOptionsFor(dialect, options)
-            ).steps
+            const preflightSteps = computePlan(schemas, preflightStored, planOptionsFor(dialect, options)).steps
             yield* dialect.preflightPlan(
               preflightSteps,
-              buildPlanContext(
-                schemas,
-                preflightStored,
-                makeReadonlyQueryGuard(ddlExecutor.query),
-                true
-              )
+              buildPlanContext(schemas, preflightStored, makeReadonlyQueryGuard(ddlExecutor.query), true)
             )
           }
         }
@@ -1090,12 +1002,7 @@ function migrateStatement(
         if (options?.auditTextShape === true && dialect.auditTextShape !== undefined) {
           const drift = yield* auditTextShapeSafe(
             dialect,
-            buildPlanContext(
-              schemas,
-              storedRecord,
-              makeReadonlyQueryGuard(ddlExecutor.query),
-              true
-            )
+            buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(ddlExecutor.query), true)
           )
           for (const detail of drift) yield* Effect.logWarning(detail)
         }
@@ -1116,12 +1023,10 @@ function migrateStatement(
 
           const skipped = translated.skipped
           if (skipped === undefined) {
-            return yield* Effect.fail(
-              new UnsupportedMigrationStepError({
-                step: "createTable",
-                detail: "statement mode requires TranslatedPlan.skipped"
-              })
-            )
+            return yield* new UnsupportedMigrationStepError({
+              step: "createTable",
+              detail: "statement mode requires TranslatedPlan.skipped"
+            })
           }
           const pending = plan.steps.filter((_, index) => !skipped.includes(index))
 
@@ -1148,15 +1053,9 @@ function migrateStatement(
           const check = (statementIndex: number): Effect.Effect<void, MigrationError> =>
             handle === undefined || lockConfig === undefined
               ? Effect.void
-              : assertLockHeld(
-                  handle,
-                  lockConfig,
-                  `before statement ${statementIndex}; the plan is not recorded`
-                )
+              : assertLockHeld(handle, lockConfig, `before statement ${statementIndex}; the plan is not recorded`)
 
-          const exit = yield* Effect.exit(
-            runStatementsWithLockCheck(ddlExecutor, translated.statements, check)
-          )
+          const exit = yield* Effect.exit(runStatementsWithLockCheck(ddlExecutor, translated.statements, check))
           if (Exit.isSuccess(exit)) {
             applied = translated
             break
@@ -1192,19 +1091,13 @@ function migrateStatement(
         }
 
         if (applied === undefined) {
-          return yield* Effect.fail(
-            new UnsupportedMigrationStepError({
-              step: "createTable",
-              detail: "statement migration did not complete an apply attempt"
-            })
-          )
+          return yield* new UnsupportedMigrationStepError({
+            step: "createTable",
+            detail: "statement migration did not complete an apply attempt"
+          })
         }
 
-        const verifyContext = buildPlanContext(
-          schemas,
-          storedRecord,
-          makeReadonlyQueryGuard(ddlExecutor.query)
-        )
+        const verifyContext = buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(ddlExecutor.query))
         yield* verifyPlan(plan.steps, verifyContext)
         yield* runStatements(ddlExecutor, applied.validations ?? [])
 
@@ -1212,14 +1105,7 @@ function migrateStatement(
           yield* assertLockHeld(handle, lockConfig, "before metadata; the plan is not recorded")
         }
 
-        yield* writeStatementMetadata(
-          runner,
-          dialect,
-          plan,
-          schemas,
-          schemaTable,
-          migrationsTable
-        )
+        yield* writeStatementMetadata(runner, dialect, plan, schemas, schemaTable, migrationsTable)
       })
 
       yield* Effect.onExit(body, (exit) =>
@@ -1228,12 +1114,10 @@ function migrateStatement(
             let outcome: LockReleaseResult = { released: true, killed: false }
             let destroyed = false
 
-            const step = (effect: Effect.Effect<unknown, unknown>) =>
+            const step = (effect: Effect.Effect<unknown, SqlError.SqlError>) =>
               restore(effect).pipe(
                 Effect.timeout(LOCK_STEP_TIMEOUT),
-                Effect.catchCause((cause) =>
-                  Effect.logError(`Migration finalizer step failed: ${Cause.pretty(cause)}`)
-                )
+                Effect.catchCause((cause) => Effect.logError(`Migration finalizer step failed: ${Cause.pretty(cause)}`))
               )
 
             if (handle !== undefined) {
@@ -1241,9 +1125,7 @@ function migrateStatement(
             }
             yield* step(runCleanup(ddlExecutor, cleanupStatements))
             if (handle !== undefined && lockConfig !== undefined) {
-              outcome = yield* restore(
-                releaseSessionLock(handle.executor, lockConfig, handle.name)
-              ).pipe(
+              outcome = yield* restore(releaseSessionLock(handle.executor, lockConfig, handle.name)).pipe(
                 Effect.timeout(LOCK_STEP_TIMEOUT),
                 Effect.catchCause(() => Effect.succeed({ released: false, killed: false }))
               )
@@ -1253,8 +1135,7 @@ function migrateStatement(
               yield* step(handle.dedicated.destroy)
             }
 
-            const shouldRestore =
-              lockConfig === undefined || handle?.dedicated !== undefined || outcome.released
+            const shouldRestore = lockConfig === undefined || handle?.dedicated !== undefined || outcome.released
             if (shouldRestore && model.session !== undefined && previousSession !== undefined) {
               yield* step(runSessionRestore(ddlExecutor, model.session.restoreSql(previousSession)))
             }
@@ -1338,9 +1219,7 @@ function migrateTransactionalPlan(
         Effect.mapError((e: Schema.SchemaError) => sqlError(String(e)))
       )
       yield* Effect.logDebug(`Steps: ${planJson}`)
-      return translated.notes !== undefined && translated.notes.length > 0
-        ? { ...plan, notes: translated.notes }
-        : plan
+      return translated.notes !== undefined && translated.notes.length > 0 ? { ...plan, notes: translated.notes } : plan
     })
   )
 }
@@ -1414,7 +1293,7 @@ function withStatementPreview<A>(
             let outcome: LockReleaseResult = { released: true, killed: false }
             let destroyed = false
 
-            const step = (effect: Effect.Effect<unknown, unknown>) =>
+            const step = (effect: Effect.Effect<unknown, SqlError.SqlError>) =>
               restore(effect).pipe(
                 Effect.timeout(LOCK_STEP_TIMEOUT),
                 Effect.catchCause((cause) =>
@@ -1426,9 +1305,7 @@ function withStatementPreview<A>(
               yield* step(Ref.set(handle.heartbeatStop, true))
             }
             if (handle !== undefined && lockConfig !== undefined) {
-              outcome = yield* restore(
-                releaseSessionLock(handle.executor, lockConfig, handle.name)
-              ).pipe(
+              outcome = yield* restore(releaseSessionLock(handle.executor, lockConfig, handle.name)).pipe(
                 Effect.timeout(LOCK_STEP_TIMEOUT),
                 Effect.catchCause(() => Effect.succeed({ released: false, killed: false }))
               )
@@ -1440,8 +1317,7 @@ function withStatementPreview<A>(
               yield* step(handle.dedicated.destroy)
             }
 
-            const shouldRestore =
-              handle === undefined || handle.dedicated !== undefined || outcome.released
+            const shouldRestore = handle === undefined || handle.dedicated !== undefined || outcome.released
             if (shouldRestore && session !== undefined && previous !== undefined) {
               yield* step(runSessionRestore(ddlExecutor, session.restoreSql(previous)))
             }
@@ -1480,11 +1356,7 @@ function planStatement(
     Effect.gen(function* () {
       const storedRecord = yield* readStoredSchemasIfPresent(executor, dialect, schemaTable)
       const plan = computePlan(schemas, storedRecord, planOptionsFor(dialect, options))
-      const ctx = buildPlanContext(
-        schemas,
-        storedRecord,
-        makeReadonlyQueryGuard(executor.query)
-      )
+      const ctx = buildPlanContext(schemas, storedRecord, makeReadonlyQueryGuard(executor.query))
       const translated = yield* renderPlan(dialect, plan.steps, ctx)
       const audit =
         options?.auditTextShape === true && dialect.auditTextShape !== undefined
@@ -1532,11 +1404,7 @@ export function classifyStatus(
   return hasNew || textIncrease ? "behind" : "ahead"
 }
 
-function statusFor(
-  schemas: Array<NamedSchema>,
-  stored: Record<string, CollectionSchema>,
-  dialect: MigrationDialect
-) {
+function statusFor(schemas: Array<NamedSchema>, stored: Record<string, CollectionSchema>, dialect: MigrationDialect) {
   const storedMap = new Map(Object.entries(stored))
   const result: Array<{ name: string; status: "current" | "ahead" | "behind" }> = []
   for (const { name, schema: desired } of schemas) {
@@ -1549,12 +1417,7 @@ function statusFor(
       })
       result.push({
         name,
-        status: classifyStatus(
-          steps,
-          compareTextFor(dialect),
-          keyedForSchema(storedSchema),
-          keyedForSchema(desired)
-        )
+        status: classifyStatus(steps, compareTextFor(dialect), keyedForSchema(storedSchema), keyedForSchema(desired))
       })
     }
   }
@@ -1628,9 +1491,7 @@ function statusStatement(
               ? Effect.logWarning("catalog ahead of metadata; run migrate to reconcile")
               : Effect.void
           ),
-          Effect.catchCause((cause) =>
-            Effect.logWarning(`Migration status preview failed: ${Cause.pretty(cause)}`)
-          )
+          Effect.catchCause((cause) => Effect.logWarning(`Migration status preview failed: ${Cause.pretty(cause)}`))
         )
       }
       const result = statusFor(schemas, storedRecord, dialect)
@@ -1645,9 +1506,7 @@ function statusStatement(
           const match = /^(?:table|text column) "([^"]+)"/.exec(detail)
           if (match?.[1] !== undefined) driftTables.add(match[1])
         }
-        return result.map((entry) =>
-          driftTables.has(entry.name) ? { ...entry, status: "behind" as const } : entry
-        )
+        return result.map((entry) => (driftTables.has(entry.name) ? { ...entry, status: "behind" as const } : entry))
       }
       return result
     })
@@ -1685,12 +1544,9 @@ const makeMigrator = (sql: SqlClient.SqlClient, dialect: MigrationDialect) => ({
   },
   plan: (schemas: Array<NamedSchema>, options?: MigrateOptions) => {
     const level = toEffectLogLevel(options?.logLevel)
-    return planImplWith(sql, dialect, schemas, options).pipe(
-      Effect.provideService(References.MinimumLogLevel, level)
-    )
+    return planImplWith(sql, dialect, schemas, options).pipe(Effect.provideService(References.MinimumLogLevel, level))
   },
-  status: (schemas: Array<NamedSchema>, options?: MigrateOptions) =>
-    statusImplWith(sql, dialect, schemas, options)
+  status: (schemas: Array<NamedSchema>, options?: MigrateOptions) => statusImplWith(sql, dialect, schemas, options)
 })
 
 /**
@@ -1722,4 +1578,3 @@ export const makeMigratorLive = (dialect: MigrationDialect) =>
       return makeMigrator(sql, dialect)
     })
   )
-

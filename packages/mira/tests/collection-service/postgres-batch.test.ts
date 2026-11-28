@@ -69,9 +69,7 @@ if (postgresUrl === undefined) {
     const dialect: DialectType = { ...postgresDialect, transactionProbe }
     return Layer.merge(
       makeMutationBatcherLayer(batchedConfig, statsLayer).pipe(
-        Layer.provideMerge(
-          Layer.merge(PgClient.layer({ url: Redacted.make(url) }), Layer.succeed(Dialect, dialect))
-        )
+        Layer.provideMerge(Layer.merge(PgClient.layer({ url: Redacted.make(url) }), Layer.succeed(Dialect, dialect)))
       ),
       statsLayer
     )
@@ -109,7 +107,7 @@ if (postgresUrl === undefined) {
         yield* Effect.yieldNow
         yield* tick
       }
-      return yield* Effect.fail(new WaitTimeout({ what }))
+      return yield* new WaitTimeout({ what })
     })
 
   /** Deferreds are completed before stats are recorded, so poll counters separately. */
@@ -259,9 +257,7 @@ if (postgresUrl === undefined) {
         yield* resetFixture
         const sql = yield* SqlClient.SqlClient
 
-        const probe = yield* sql.withTransaction(
-          probeTransactionAlive(sql, "nested-begin")
-        )
+        const probe = yield* sql.withTransaction(probeTransactionAlive(sql, "nested-begin"))
 
         expect(probe.alive).toBe(false)
       }).pipe(Effect.provide(makeLayer("select-only")))

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SMTPServer } from "smtp-server"
-import { Context, Effect, Layer, Result, Stream } from "effect"
+import { Context, Data, Effect, Layer, Result, Schema, Stream } from "effect"
+import type { Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import {
   AppConfig,
@@ -40,7 +41,42 @@ type BunImagePipeline = {
 
 type BunImageConstructor = new (input: Uint8Array) => BunImagePipeline
 
-const BunImage = (Bun as unknown as { Image?: BunImageConstructor }).Image
+const isBunImageConstructor = (value: unknown): value is BunImageConstructor => typeof value === "function"
+
+const bunImage = (): BunImageConstructor | undefined => {
+  const bun: unknown = Reflect.get(globalThis, "Bun")
+  if (typeof bun !== "object" || bun === null) return undefined
+  const Image: unknown = Reflect.get(bun, "Image")
+  return isBunImageConstructor(Image) ? Image : undefined
+}
+
+const BunImage = bunImage()
+
+const EmptyCollectionSchema = Schema.fromJsonString(
+  Schema.Struct({ items: Schema.optional(Schema.Array(Schema.Unknown)) })
+)
+const decodeEmptyCollection = Schema.decodeUnknownSync(EmptyCollectionSchema)
+const encodeEmptyCollection = Schema.encodeSync(EmptyCollectionSchema)
+
+const PostListSchema = Schema.fromJsonString(
+  Schema.Struct({
+    items: Schema.optional(Schema.Array(Schema.Struct({ title: Schema.optional(Schema.String) })))
+  })
+)
+const decodePostList = Schema.decodeUnknownSync(PostListSchema)
+const encodePostList = Schema.encodeSync(PostListSchema)
+
+const StorageStateSchema = Schema.fromJsonString(
+  Schema.Struct({
+    key: Schema.String,
+    exists: Schema.Boolean,
+    listedKeys: Schema.Array(Schema.String)
+  })
+)
+const encodeStorageState = Schema.encodeSync(StorageStateSchema)
+
+const CreatePostSchema = Schema.fromJsonString(Schema.Struct({ title: Schema.String }))
+const encodeCreatePost = Schema.encodeSync(CreatePostSchema)
 
 const startedSmtp = await new Promise<{
   readonly port: number
@@ -63,7 +99,11 @@ const startedSmtp = await new Promise<{
   })
   server.on("error", reject)
   server.listen(0, "127.0.0.1", () => {
-    const address = (server as unknown as { server: { address(): { port: number } } }).server.address()
+    const address = server.server.address()
+    if (address === null || typeof address === "string") {
+      reject(new Error("SMTP server did not bind a TCP address"))
+      return
+    }
     resolve({
       port: address.port,
       received,
@@ -118,14 +158,30 @@ const app = Mira.builder()
   .build()
   .extend(MiraDashboard)
 
+/** Expected smoke failures surface as typed errors; failed assertions are defects. */
+class SmokeFailure extends Data.TaggedError("SmokeFailure")<{
+  readonly message: string
+}> {}
+
 const request = (path: string, init?: RequestInit) =>
   Effect.tryPromise({
     try: () => fetch(`http://127.0.0.1:${requestPort}${path}`, init),
-    catch: (error) => new Error(`fetch ${path} failed: ${String(error)}`)
+    catch: (error) => new SmokeFailure({ message: `fetch ${path} failed: ${String(error)}` })
   })
 
+const die = (message: string): Effect.Effect<never> => Effect.die(new Error(message))
+
+// The built layer is closed at runtime, but the plugin graph widens RIn to
+// `any`, so pin the closed run type before building it. MiraPlugin's layer type
+// is outside this package, so the narrowing can only happen at this boundary.
+// oxlint-disable effecttsgo/any-unknown-in-error-context, effecttsgo/unsafe-effect-type-assertion, typescript/consistent-type-assertions -- built layer is closed at runtime; any comes from the plugin layer type
+const builtAppLayer = app.buildLayer({ port, maxPortAttempts: 5 })
+type BuiltAppLayer = typeof builtAppLayer
+const appLayer = builtAppLayer as Layer.Layer<Layer.Success<BuiltAppLayer>, Layer.Error<BuiltAppLayer>, Scope.Scope>
+// oxlint-enable effecttsgo/any-unknown-in-error-context, effecttsgo/unsafe-effect-type-assertion, typescript/consistent-type-assertions
+
 const program = Effect.gen(function* () {
-  const context = yield* Layer.build(app.buildLayer({ port, maxPortAttempts: 5 }))
+  const context = yield* Layer.build(appLayer)
   requestPort = Context.get(context, AppConfig).port
 
   // SQLite telemetry: one log and one span must reach the dedicated database.
@@ -136,9 +192,9 @@ const program = Effect.gen(function* () {
   const mainSql = Context.get(context, SqlClient.SqlClient)
   const mainJournal = yield* mainSql<{ journal_mode: string }>`PRAGMA journal_mode`
   if (mainJournal[0]?.journal_mode !== "wal") {
-    throw new Error(`main SQLite database is not in WAL mode: ${mainJournal[0]?.journal_mode ?? "missing"}`)
+    return yield* die(`main SQLite database is not in WAL mode: ${mainJournal[0]?.journal_mode ?? "missing"}`)
   }
-  if (store.read === null) throw new Error("telemetry store has no read capability")
+  if (store.read === null) return yield* die("telemetry store has no read capability")
   const logPage = yield* store.read.listLogs({
     limit: 1000,
     after: null,
@@ -154,61 +210,61 @@ const program = Effect.gen(function* () {
   const logCount = logPage.total
   const spanCount = spanPage.total
   if (logCount === 0 || spanCount === 0) {
-    throw new Error(`telemetry rows missing: logs=${logCount} spans=${spanCount}`)
+    return yield* die(`telemetry rows missing: logs=${logCount} spans=${spanCount}`)
   }
 
   // Native Bun crypto: hashing and UUIDv7.
   const sha = yield* sha256Base64Url("hello")
   if (sha !== "LPJNul-wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ") {
-    throw new Error(`unexpected SHA-256 vector: ${sha}`)
+    return yield* die(`unexpected SHA-256 vector: ${sha}`)
   }
   const hmac = yield* hmacSha256Base64Url("secret", "hello")
   if (hmac !== "iKqz7ejTrflNJquQ07r9SiCDBww7zOnAFO4EpEOEfAs") {
-    throw new Error(`unexpected HMAC-SHA-256 vector: ${hmac}`)
+    return yield* die(`unexpected HMAC-SHA-256 vector: ${hmac}`)
   }
   const cryptoService = Context.get(context, CryptoService)
   const uuid = yield* cryptoService.randomUUID()
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uuid)) {
-    throw new Error(`expected a UUIDv7 from BunCryptoLayer, got ${uuid}`)
+    return yield* die(`expected a UUIDv7 from BunCryptoLayer, got ${uuid}`)
   }
 
   // Native Bun password hashing, including a Node-created scrypt row.
   const auth = Context.get(context, AuthService)
   const passwordHash = yield* auth.hashPassword("correct horse battery staple")
   if (!passwordHash.startsWith("$argon2id$")) {
-    throw new Error(`expected an Argon2id hash, got ${passwordHash.slice(0, 24)}`)
+    return yield* die(`expected an Argon2id hash, got ${passwordHash.slice(0, 24)}`)
   }
   if (!(yield* auth.verifyPassword("correct horse battery staple", passwordHash))) {
-    throw new Error("Bun.password could not verify its own hash")
+    return yield* die("Bun.password could not verify its own hash")
   }
   if (yield* auth.verifyPassword("wrong password", passwordHash)) {
-    throw new Error("Bun.password accepted the wrong password")
+    return yield* die("Bun.password accepted the wrong password")
   }
   const legacySalt = "00112233445566778899aabbccddeeff"
   const legacyHash = `scrypt$${legacySalt}$${scryptSync("legacy password", legacySalt, 64).toString("hex")}`
   if (!(yield* auth.verifyPassword("legacy password", legacyHash))) {
-    throw new Error("legacy scrypt verification failed under Bun")
+    return yield* die("legacy scrypt verification failed under Bun")
   }
   if (auth.needsRehash?.(legacyHash) !== true) {
-    throw new Error("legacy scrypt row should be scheduled for an Argon2id rehash")
+    return yield* die("legacy scrypt row should be scheduled for an Argon2id rehash")
   }
   if (auth.needsRehash?.(passwordHash) === true) {
-    throw new Error("Argon2id row should not be rehashed")
+    return yield* die("Argon2id row should not be rehashed")
   }
 
-  if (BunImage === undefined) throw new Error("Bun.Image is unavailable")
+  if (BunImage === undefined) return yield* die("Bun.Image is unavailable")
 
   // Native Bun.Image for contain/fill; cover stays on Photon (no native crop).
   const thumbnail = Context.get(context, ThumbnailService)
   const widePng = yield* Effect.tryPromise({
     try: () => new BunImage(png).resize(8, 4).png().bytes(),
-    catch: (error) => new Error(`Bun.Image fixture failed: ${String(error)}`)
+    catch: (error) => new SmokeFailure({ message: `Bun.Image fixture failed: ${String(error)}` })
   })
   const containSpec = parseThumbSpec("4x4b")
   const fillSpec = parseThumbSpec("4x4f")
   const coverSpec = parseThumbSpec("4x4")
   if (containSpec === null || fillSpec === null || coverSpec === null) {
-    throw new Error("invalid thumb spec")
+    return yield* die("invalid thumb spec")
   }
   const containBytes = yield* thumbnail.resize(widePng, "image/png", containSpec)
   const fillBytes = yield* thumbnail.resize(widePng, "image/png", fillSpec)
@@ -216,19 +272,19 @@ const program = Effect.gen(function* () {
   const readDimensions = (bytes: Uint8Array) =>
     Effect.tryPromise({
       try: () => new BunImage(bytes).metadata(),
-      catch: (error) => new Error(`Bun.Image metadata failed: ${String(error)}`)
+      catch: (error) => new SmokeFailure({ message: `Bun.Image metadata failed: ${String(error)}` })
     })
   const containMeta = yield* readDimensions(containBytes)
   const fillMeta = yield* readDimensions(fillBytes)
   const coverMeta = yield* readDimensions(coverBytes)
   if (containMeta.width !== 4 || containMeta.height !== 2) {
-    throw new Error(`contain resize returned ${containMeta.width}x${containMeta.height}`)
+    return yield* die(`contain resize returned ${containMeta.width}x${containMeta.height}`)
   }
   if (fillMeta.width !== 4 || fillMeta.height !== 4) {
-    throw new Error(`fill resize returned ${fillMeta.width}x${fillMeta.height}`)
+    return yield* die(`fill resize returned ${fillMeta.width}x${fillMeta.height}`)
   }
   if (coverMeta.width !== 4 || coverMeta.height !== 4) {
-    throw new Error(`cover resize returned ${coverMeta.width}x${coverMeta.height}`)
+    return yield* die(`cover resize returned ${coverMeta.width}x${coverMeta.height}`)
   }
 
   // Prove the native path: with Photon fallback disabled, contain must still
@@ -239,7 +295,7 @@ const program = Effect.gen(function* () {
     return yield* service.resize(widePng, "image/png", containSpec)
   }).pipe(Effect.provide(strictNative))
   if (nativeContain.length === 0) {
-    throw new Error("strict native contain resize produced no bytes")
+    return yield* die("strict native contain resize produced no bytes")
   }
 
   // The header budget is enforced before decode and before any Photon fallback.
@@ -249,7 +305,7 @@ const program = Effect.gen(function* () {
     return yield* service.resize(widePng, "image/png", containSpec).pipe(Effect.result)
   }).pipe(Effect.provide(guarded))
   if (Result.isSuccess(guardResult)) {
-    throw new Error("maxPixels guard accepted an 8x4 image with maxPixels=4")
+    return yield* die("maxPixels guard accepted an 8x4 image with maxPixels=4")
   }
 
   const storage = Context.get(context, FileStorage)
@@ -262,12 +318,8 @@ const program = Effect.gen(function* () {
   const exists = yield* storage.exists(key)
   const listedKeys = yield* storage.list("smoke/")
   yield* storage.delete(key)
-  if (
-    new TextDecoder().decode(stored) !== "hello storage" ||
-    !exists ||
-    !listedKeys.includes(key)
-  ) {
-    throw new Error(`storage round-trip failed: ${JSON.stringify({ key, exists, listedKeys })}`)
+  if (new TextDecoder().decode(stored) !== "hello storage" || !exists || !listedKeys.includes(key)) {
+    return yield* die(`storage round-trip failed: ${encodeStorageState({ key, exists, listedKeys })}`)
   }
 
   const limiter = Context.get(context, RateLimiter)
@@ -279,38 +331,34 @@ const program = Effect.gen(function* () {
   }
   const first = yield* limiter.consume(policy, "smoke-key")
   const second = yield* limiter.consume(policy, "smoke-key")
-  if (first.blocked !== null) throw new Error("first rate-limit consume was blocked")
-  if (second.blocked === null) throw new Error("second rate-limit consume was not blocked")
+  if (first.blocked !== null) return yield* die("first rate-limit consume was blocked")
+  if (second.blocked === null) return yield* die("second rate-limit consume was not blocked")
 
   const empty = yield* request("/api/collections/posts")
-  if (!empty.ok) throw new Error(`GET /api/collections/posts returned ${empty.status}`)
-  const emptyBody = (yield* Effect.tryPromise(() => empty.json())) as {
-    readonly items?: ReadonlyArray<unknown>
-  }
+  if (!empty.ok) return yield* die(`GET /api/collections/posts returned ${empty.status}`)
+  const emptyBody = decodeEmptyCollection(yield* Effect.tryPromise(() => empty.text()))
   if (emptyBody.items?.length !== 0) {
-    throw new Error(`expected an empty collection, got ${JSON.stringify(emptyBody)}`)
+    return yield* die(`expected an empty collection, got ${encodeEmptyCollection(emptyBody)}`)
   }
 
   const created = yield* request("/api/collections/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: "hello bun" })
+    body: encodeCreatePost({ title: "hello bun" })
   })
   if (created.status !== 201) {
-    throw new Error(`POST /api/collections/posts returned ${created.status}`)
+    return yield* die(`POST /api/collections/posts returned ${created.status}`)
   }
 
   const listed = yield* request("/api/collections/posts")
-  if (!listed.ok) throw new Error(`GET /api/collections/posts returned ${listed.status}`)
-  const body = (yield* Effect.tryPromise(() => listed.json())) as {
-    readonly items?: ReadonlyArray<{ readonly title?: string }>
-  }
+  if (!listed.ok) return yield* die(`GET /api/collections/posts returned ${listed.status}`)
+  const body = decodePostList(yield* Effect.tryPromise(() => listed.text()))
   if (body.items?.length !== 1 || body.items[0]?.title !== "hello bun") {
-    throw new Error(`unexpected list response: ${JSON.stringify(body)}`)
+    return yield* die(`unexpected list response: ${encodePostList(body)}`)
   }
 
   const dashboard = yield* request("/_dashboard/api/bootstrap-status")
-  if (!dashboard.ok) throw new Error(`dashboard status returned ${dashboard.status}`)
+  if (!dashboard.ok) return yield* die(`dashboard status returned ${dashboard.status}`)
 
   const email = Context.get(context, EmailService)
   yield* email.send(
@@ -322,7 +370,7 @@ const program = Effect.gen(function* () {
     { purpose: "password_reset", collection: "posts" }
   )
   if (startedSmtp.received.length !== 1) {
-    throw new Error(`expected one SMTP message, got ${startedSmtp.received.length}`)
+    return yield* die(`expected one SMTP message, got ${startedSmtp.received.length}`)
   }
 
   return {
@@ -352,42 +400,49 @@ const program = Effect.gen(function* () {
 }).pipe(
   Effect.scoped,
   Effect.ensuring(
-    Effect.sync(() => {
-      blocker.stop(true)
-      rmSync(dir, { recursive: true, force: true })
+    Effect.gen(function* () {
+      yield* Effect.promise(() => blocker.stop(true))
+      yield* Effect.sync(() => rmSync(dir, { recursive: true, force: true }))
     })
   ),
   Effect.ensuring(Effect.promise(() => startedSmtp.close()))
 )
 
-type SmokeResult = {
-  readonly http: { readonly listed: number; readonly created: number; readonly dashboard: number }
-  readonly thumbnailBytes: number
-  readonly native: {
-    readonly password: string
-    readonly uuidVersion: string
-    readonly hmac: string
-    readonly thumbnail: {
-      readonly contain: string
-      readonly fill: string
-      readonly cover: string
-      readonly strictNative: boolean
-      readonly pixelGuard: boolean
-    }
-  }
-  readonly emailReceived: number
-  readonly storage: { readonly key: string; readonly listed: number }
-  readonly sqlite: {
-    readonly mainJournal: string | undefined
-  }
-  readonly telemetry: { readonly logs: number; readonly spans: number }
-  readonly port: number
-  readonly rateLimit: { readonly first: boolean; readonly second: string | undefined }
+const SmokeResultFields = {
+  http: Schema.Struct({ listed: Schema.Finite, created: Schema.Finite, dashboard: Schema.Finite }),
+  thumbnailBytes: Schema.Finite,
+  native: Schema.Struct({
+    password: Schema.String,
+    uuidVersion: Schema.String,
+    hmac: Schema.String,
+    thumbnail: Schema.Struct({
+      contain: Schema.String,
+      fill: Schema.String,
+      cover: Schema.String,
+      strictNative: Schema.Boolean,
+      pixelGuard: Schema.Boolean
+    })
+  }),
+  emailReceived: Schema.Finite,
+  storage: Schema.Struct({ key: Schema.String, listed: Schema.Finite }),
+  sqlite: Schema.Struct({ mainJournal: Schema.UndefinedOr(Schema.String) }),
+  telemetry: Schema.Struct({ logs: Schema.Finite, spans: Schema.Finite }),
+  port: Schema.Finite,
+  rateLimit: Schema.Struct({ first: Schema.Boolean, second: Schema.UndefinedOr(Schema.String) })
 }
 
-await Effect.runPromise(program as Effect.Effect<SmokeResult, unknown, never>).then(
+const encodeSmokeResult = Schema.encodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      ok: Schema.Boolean,
+      ...SmokeResultFields
+    })
+  )
+)
+
+await Effect.runPromise(program).then(
   (result) => {
-    console.log(JSON.stringify({ ok: true, ...result }, null, 2))
+    console.log(encodeSmokeResult({ ok: true, ...result }))
   },
   (error) => {
     console.error(error)

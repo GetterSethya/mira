@@ -9,7 +9,7 @@ import { Dialect } from "@/dialect/dialect.js"
 import { Repository } from "@/repository/repository.js"
 import { enforcerForAction } from "@/rule/enforcer.js"
 import { FileStorage } from "@/storage/storage.js"
-import { parseThumbSpec,ThumbnailService } from "@/thumbnail/types.js"
+import { parseThumbSpec, ThumbnailService } from "@/thumbnail/types.js"
 
 import { verifyFileToken } from "./auth.js"
 
@@ -64,10 +64,7 @@ function dispositionFilename(filename: string): string {
   return cleaned.length > 0 ? cleaned : "file"
 }
 
-function getQueryParam(
-  req: HttpServerRequest.HttpServerRequest,
-  name: string
-): string | undefined {
+function getQueryParam(req: HttpServerRequest.HttpServerRequest, name: string): string | undefined {
   const queryStr = req.url.includes("?") ? req.url.split("?")[1] : ""
   return new URLSearchParams(queryStr).get(name) ?? undefined
 }
@@ -89,15 +86,11 @@ export function makeFileServeRoute(
     const filename = routeCtx.params["filename"]
 
     if (colName === undefined || recordId === undefined || filename === undefined) {
-      return Effect.succeed(
-        HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
-      )
+      return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 }))
     }
     // Reject unsafe filename segments before touching storage or the DB.
     if (!isSafeFilenameSegment(filename)) {
-      return Effect.succeed(
-        HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 })
-      )
+      return Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 }))
     }
     const collection = collectionMap.get(colName)
     if (collection === undefined) {
@@ -110,10 +103,8 @@ export function makeFileServeRoute(
     }
 
     return Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
-      Effect.catchCause(
-        serveFile(collection, recordId, filename, req, adminSet),
-        () =>
-          Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
+      Effect.catchCause(serveFile(collection, recordId, filename, req, adminSet), () =>
+        Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "internal" }, { status: 500 }))
       )
     )
   })
@@ -173,9 +164,7 @@ function serveFile(
         return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
 
-      const tokenPayload = yield* verifyFileToken(tokenParam, jwtSecret).pipe(
-        Effect.orElseSucceed(() => null)
-      )
+      const tokenPayload = yield* verifyFileToken(tokenParam, jwtSecret).pipe(Effect.orElseSucceed(() => null))
       if (tokenPayload === null || tokenPayload.filecol !== collection.name) {
         return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
       }
@@ -204,13 +193,9 @@ function serveFile(
           return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
         }
 
-        const ruleWhere = yield* resolveCtxPlaceholders(
-          ruleResult,
-          ctx,
-          collection.name,
-          "view",
-          resolveOptions
-        ).pipe(Effect.catchTag("ForbiddenError", () => Effect.succeed(null)))
+        const ruleWhere = yield* resolveCtxPlaceholders(ruleResult, ctx, collection.name, "view", resolveOptions).pipe(
+          Effect.catchTag("ForbiddenError", () => Effect.succeed(null))
+        )
 
         if (ruleWhere === null) {
           return HttpServerResponse.jsonUnsafe({ error: "forbidden" }, { status: 403 })
@@ -251,14 +236,10 @@ function serveFile(
         }
 
         // On thumb error fall back to original rather than returning an error
-        const resized = yield* thumbSvc
-          .resize(original, mimeType, thumbSpec)
-          .pipe(Effect.catch(() => Effect.succeed(original)))
+        const resized = yield* thumbSvc.resize(original, mimeType, thumbSpec).pipe(Effect.orElseSucceed(() => original))
 
         // Best-effort: persist the thumbnail for future requests
-        yield* fileStorage
-          .upload(cacheKey, Stream.fromArray([resized]), mimeType)
-          .pipe(Effect.catch(() => Effect.void))
+        yield* fileStorage.upload(cacheKey, Stream.fromArray([resized]), mimeType).pipe(Effect.catch(() => Effect.void))
 
         bytes = resized
       }

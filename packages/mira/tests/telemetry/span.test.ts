@@ -19,15 +19,14 @@ describe("withSpanWhenEnabled", () => {
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
       const tracer = makeTracer(queue)
-      yield* Effect.gen(function* () {
-        yield* annotateCurrentSpanWhenEnabled((span) => span.attribute("helper.attribute", "yes"))
-      }).pipe(
+      yield* annotateCurrentSpanWhenEnabled((span) => span.attribute("helper.attribute", "yes")).pipe(
         withSpanWhenEnabled(
           "helper.span",
           { kind: "internal", attributes: { helper: true } },
           { captureStackTrace: false }
-        )
-      ).pipe(Effect.provideService(Tracer.Tracer, tracer))
+        ),
+        Effect.provideService(Tracer.Tracer, tracer)
+      )
 
       const spans = yield* Queue.clear(queue)
       const span = spans.find((candidate) => candidate.name === "helper.span")
@@ -41,16 +40,11 @@ describe("withSpanWhenEnabled", () => {
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<CompletedSpan>()
       const tracer = makeTracer(queue)
-      yield* Effect.gen(function* () {
-        yield* annotateCurrentSpanWhenEnabled((span) => span.attribute("must.not.leak", true))
-      }).pipe(
-        withSpanWhenEnabled(
-          "helper.disabled",
-          { kind: "internal" },
-          { captureStackTrace: false }
-        ),
-        Effect.withTracerEnabled(false)
-      ).pipe(Effect.provideService(Tracer.Tracer, tracer))
+      yield* annotateCurrentSpanWhenEnabled((span) => span.attribute("must.not.leak", true)).pipe(
+        withSpanWhenEnabled("helper.disabled", { kind: "internal" }, { captureStackTrace: false }),
+        Effect.withTracerEnabled(false),
+        Effect.provideService(Tracer.Tracer, tracer)
+      )
 
       expect(yield* Queue.clear(queue)).toHaveLength(0)
     })
@@ -59,11 +53,7 @@ describe("withSpanWhenEnabled", () => {
   it.effect("preserves the operation name in a failure cause when disabled", () =>
     Effect.gen(function* () {
       const exit = yield* Effect.fail(new HelperFailure()).pipe(
-        withSpanWhenEnabled(
-          "helper.failure",
-          { kind: "internal" },
-          { captureStackTrace: false }
-        ),
+        withSpanWhenEnabled("helper.failure", { kind: "internal" }, { captureStackTrace: false }),
         Effect.withTracerEnabled(false),
         Effect.exit
       )
@@ -76,10 +66,8 @@ describe("withSpanWhenEnabled", () => {
   )
 
   it.effect("annotation is a no-op when tracing is enabled but no span is installed", () =>
-    Effect.gen(function* () {
-      yield* annotateCurrentSpanWhenEnabled(() => {
-        throw new Error("must not run")
-      })
+    annotateCurrentSpanWhenEnabled(() => {
+      throw new Error("must not run")
     })
   )
 })
