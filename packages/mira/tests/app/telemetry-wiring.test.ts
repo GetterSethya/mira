@@ -189,9 +189,15 @@ describe("telemetry app wiring", () => {
       const beforeJournal = yield* sql<{ journal_mode: string }>`PRAGMA journal_mode`
 
       yield* Effect.logInfo("shared-wiring-log")
-      yield* delay(100)
 
-      const logs = yield* readLogs(store)
+      let logs = yield* readLogs(store)
+      for (let attempt = 0; attempt < 40; attempt++) {
+        if (logs.items.some((row) => row.message === "shared-wiring-log")) {
+          break
+        }
+        yield* delay(50)
+        logs = yield* readLogs(store)
+      }
       expect(logs.items.some((row) => row.message === "shared-wiring-log")).toBe(true)
 
       const after = yield* sql<{ synchronous: number }>`PRAGMA synchronous`
