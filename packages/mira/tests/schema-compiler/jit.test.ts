@@ -19,8 +19,8 @@ describe("schema JIT compiler", () => {
       const valid = { title: "hello", body: "body", published: true }
       const invalid = { title: 42 }
 
-      const beforeValue = yield* Schema.decodeUnknownEffect(before.create)(valid)
-      const beforeResult = yield* Effect.result(Schema.decodeUnknownEffect(before.create)(invalid))
+      const beforeValue = yield* Schema.decodeEffect(before.create)(valid)
+      const beforeResult = yield* Effect.result(Schema.decodeEffect(before.create)(invalid))
       const beforeIssues = Result.isFailure(beforeResult)
         ? parseErrToValidationError("jit_posts")(beforeResult.failure).issues
         : []
@@ -35,8 +35,8 @@ describe("schema JIT compiler", () => {
       registerSchemaJitRoot(after.create)
       registerSchemaJitRoot(after.update)
 
-      const afterValue = yield* Schema.decodeUnknownEffect(after.create)(valid)
-      const afterResult = yield* Effect.result(Schema.decodeUnknownEffect(after.create)(invalid))
+      const afterValue = yield* Schema.decodeEffect(after.create)(valid)
+      const afterResult = yield* Effect.result(Schema.decodeEffect(after.create)(invalid))
       const afterIssues = Result.isFailure(afterResult)
         ? parseErrToValidationError("jit_posts")(afterResult.failure).issues
         : []
@@ -51,7 +51,7 @@ describe("schema JIT compiler", () => {
       enableSchemaJit()
       registerSchemaJitRoot(Schema.FiniteFromString)
 
-      const value = yield* Schema.decodeUnknownEffect(Schema.FiniteFromString)("42")
+      const value = yield* Schema.decodeEffect(Schema.FiniteFromString)("42")
       expect(value).toBe(42)
     })
   )
