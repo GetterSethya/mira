@@ -99,6 +99,17 @@ const postsRules = defineRule(PostsDef, (R) => ({
   delete: R.public()
 }))
 
+const AgedDef = BaseCollection.define("e2e_mysql_aged", {
+  age: Field.integer({ required: true })
+})
+const agedRules = defineRule(AgedDef, (R) => ({
+  list: R.public(),
+  view: R.public(),
+  create: R.field("age").gte(R.literal(18)),
+  update: R.request("body", "age").neq(R.literal("17")),
+  delete: R.public()
+}))
+
 const LockedDef = BaseCollection.define("e2e_mysql_locked", {
   title: Field.text({ required: true })
 })
@@ -135,11 +146,11 @@ const viewRules = defineRule(ViewDef, (R) => ({
   view: R.public()
 }))
 
-const [Posts, Locked, Users, Cursor, PostsView] = applyRulesToCollections(
-  [PostsDef, LockedDef, UsersDef, CursorDef, ViewDef],
-  [postsRules, lockedRules, usersRules, cursorRules, viewRules]
+const [Posts, Aged, Locked, Users, Cursor, PostsView] = applyRulesToCollections(
+  [PostsDef, AgedDef, LockedDef, UsersDef, CursorDef, ViewDef],
+  [postsRules, agedRules, lockedRules, usersRules, cursorRules, viewRules]
 )
-const collections = [Posts, Locked, Users, Cursor, PostsView]
+const collections = [Posts, Aged, Locked, Users, Cursor, PostsView]
 
 const AuthRecord = Schema.Struct({
   id: Schema.String,
@@ -286,6 +297,83 @@ for (const engine of engines) {
               const meBody = yield* json(me, MeBody)
               expect(meBody.collection).toBe("e2e_mysql_users")
               expect(meBody.record.id).toBe(user.id)
+
+              const secondRegistered = yield* HttpClient.execute(
+                HttpClientRequest.post("/api/collections/e2e_mysql_users").pipe(
+                  HttpClientRequest.bodyJsonUnsafe({
+                    email: "e2e-mysql-2@example.com",
+                    password: "correct-password",
+                    passwordConfirm: "correct-password"
+                  })
+                )
+              )
+              expect(secondRegistered.status).toBe(201)
+              const secondUser = yield* json(secondRegistered, AuthRecord)
+              const secondLogin = yield* HttpClient.execute(
+                HttpClientRequest.post(
+                  "/api/collections/e2e_mysql_users/auth-with-password"
+                ).pipe(
+                  HttpClientRequest.bodyJsonUnsafe({
+                    email: "e2e-mysql-2@example.com",
+                    password: "correct-password"
+                  })
+                )
+              )
+              expect(secondLogin.status).toBe(200)
+              const secondToken = (yield* json(secondLogin, LoginBody)).token
+
+              const forbiddenDelete = yield* HttpClient.execute(
+                HttpClientRequest.delete(
+                  `/api/collections/e2e_mysql_users/${user.id}`
+                ).pipe(
+                  HttpClientRequest.setHeader(
+                    "Authorization",
+                    `Bearer ${secondToken}`
+                  )
+                )
+              )
+              expect(forbiddenDelete.status).toBe(403)
+
+              const ownDelete = yield* HttpClient.execute(
+                HttpClientRequest.delete(
+                  `/api/collections/e2e_mysql_users/${secondUser.id}`
+                ).pipe(
+                  HttpClientRequest.setHeader(
+                    "Authorization",
+                    `Bearer ${secondToken}`
+                  )
+                )
+              )
+              expect(ownDelete.status).toBe(204)
+
+              const young = yield* HttpClient.execute(
+                HttpClientRequest.post("/api/collections/e2e_mysql_aged").pipe(
+                  HttpClientRequest.bodyJsonUnsafe({ age: 17 })
+                )
+              )
+              expect(young.status).toBe(403)
+              const adult = yield* HttpClient.execute(
+                HttpClientRequest.post("/api/collections/e2e_mysql_aged").pipe(
+                  HttpClientRequest.bodyJsonUnsafe({ age: 18 })
+                )
+              )
+              expect(adult.status).toBe(201)
+              const adultBody = yield* json(
+                adult,
+                Schema.Struct({ id: Schema.String })
+              )
+              const blockedUpdate = yield* HttpClient.execute(
+                HttpClientRequest.patch(
+                  `/api/collections/e2e_mysql_aged/${adultBody.id}`
+                ).pipe(HttpClientRequest.bodyJsonUnsafe({ age: 17 }))
+              )
+              expect(blockedUpdate.status).toBe(403)
+              const allowedUpdate = yield* HttpClient.execute(
+                HttpClientRequest.patch(
+                  `/api/collections/e2e_mysql_aged/${adultBody.id}`
+                ).pipe(HttpClientRequest.bodyJsonUnsafe({ age: 20 }))
+              )
+              expect(allowedUpdate.status).toBe(200)
 
               const created = yield* HttpClient.execute(
                 HttpClientRequest.post("/api/collections/e2e_mysql_posts").pipe(
