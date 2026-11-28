@@ -169,7 +169,7 @@ Mira.builder()
 | Step | Required | Description |
 |---|---|---|
 | `.platform(p)` | yes | Runtime environment. `NodePlatform`, or `BunPlatform` from the `@gettersethya/mira/bun` entry. |
-| `.database(d)` | yes | SQL backend. `SqliteDatabase({ filename })`, `BunSqliteDatabase({ filename })` on Bun, `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` / `TursoDatabase` on Node, or `PostgresDatabase({ url, maxConnections?, idleTimeout?, prepare?, ssl?, migrateAtStartup? })` on Node and Bun. |
+| `.database(d)` | yes | SQL backend. `SqliteDatabase({ filename })`, `BunSqliteDatabase({ filename })` on Bun, `LibsqlDatabase({ url, authToken?, syncUrl?, syncInterval?, synchronous? })` / `TursoDatabase` on Node, `PostgresDatabase({ url, maxConnections?, idleTimeout?, prepare?, ssl?, migrateAtStartup? })`, or `MysqlDatabase({ url, maxConnections?, connectionTTL?, ssl?, connectTimeout?, disablePreparedStatements?, migrateAtStartup? })` on Node and Bun. |
 | `.storage(s)` | yes | File storage. `LocalFileStorage({ directory })` for local disk, or `S3CompatibleStorage({ endpoint, bucketName, regionName, accessKey, secret })` for S3-compatible buckets (AWS S3, MinIO, R2, LocalStack). |
 | `.email(e)` | no | Email transport. `SmtpEmail({ host, port, secure, auth, from })`. Without it, a no-op `EmailService` is used. |
 | `.emailTemplates(t)` | no | Auth email overrides: `{ defaults?, collections? }`. Resolution is per-collection → app-wide → built-in. |
@@ -185,8 +185,10 @@ Mira.builder()
 ### Databases
 
 SQLite is available on Node (`SqliteDatabase`) and Bun (`BunSqliteDatabase`).
-PostgreSQL 15+ is available on Node and Bun through `PostgresDatabase`. libSQL
-is available on Node as `LibsqlDatabase`, with `TursoDatabase` as an alias:
+PostgreSQL 15+ is available on Node and Bun through `PostgresDatabase`. MySQL
+8.4 and MariaDB 11.4.6+ are available on Node and Bun through `MysqlDatabase`.
+libSQL is available on Node as `LibsqlDatabase`, with `TursoDatabase` as an
+alias:
 
 ```typescript
 import { LibsqlDatabase } from "@gettersethya/mira"

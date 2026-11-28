@@ -168,6 +168,16 @@ export type TelemetryDialectHooks = {
   /** Whether a failed setup or migration should be retried. */
   readonly isRetryable: (error: unknown) => boolean
   /**
+   * Whether the store should retry a failed append or retention delete.
+   * Defaults to false. MySQL sets it and provides `isDmlRetryable`.
+   */
+  readonly retryDml?: boolean
+  /**
+   * Retry classifier for append and retention deletes. It must exclude errors
+   * that already ended the caller's transaction, such as a MySQL deadlock.
+   */
+  readonly isDmlRetryable?: (error: unknown) => boolean
+  /**
    * Suffix appended to a telemetry batch insert so a duplicate row id becomes a
    * no-op instead of a constraint error.
    *
@@ -185,7 +195,78 @@ export type TelemetryDialectHooks = {
  * The HTTP auth email flow also reads `isDuplicateKey` when a confirmation
  * update loses a race for a unique email address.
  */
+
+/** One assignment in a dialect-rendered upsert clause. */
+export type StoreUpsertAssignment =
+  | { readonly column: string; readonly kind: "excluded" }
+  | { readonly column: string; readonly kind: "increment-by-one" }
+
+/**
+ * How the auth challenge store keeps one live row per
+ * `(collection, user_id, purpose)`.
+ *
+ * `partial` is the SQLite and PostgreSQL partial unique index. `generated` is
+ * the MySQL generated column plus a unique index, because MySQL cannot express
+ * a partial index. The statements are dialect-rendered and fully quoted.
+ */
+export type StoreChallengeLive =
+  | {
+      readonly mode: "partial"
+      readonly indexName: string
+      readonly indexStatement: string
+    }
+  | {
+      readonly mode: "generated"
+      readonly column: string
+      readonly addColumnStatement: string
+      readonly indexName: string
+      readonly indexStatement: string
+    }
+
+/**
+ * How a store reads an UPDATE result.
+ *
+ * `returning` means the statement may use a RETURNING clause.
+ * `affectedRows` means the store reads `.raw` through the supplied reader.
+ * The rate-limit and challenge-attempt paths additionally use the tag to
+ * choose the locked-transaction strategy, because MySQL has neither a
+ * guarded conditional upsert nor UPDATE RETURNING. A simple UPDATE (for
+ * example consume-by-id) only needs the reader, not a transaction.
+ */
+export type StoreMutationResult = Exclude<
+  DeleteResultStrategy,
+  { readonly _tag: "precheck" }
+>
+
 export type StoreSqlCapabilities = {
+  /** Text type for any indexed text column. */
+  readonly keyColumnType: string
+  /** Text type for non-keyed text columns. */
+  readonly textColumnType: string
+  /** Text type for the rate-limit bucket column. */
+  readonly bucketColumnType: string
+  /** Maximum code points allowed in a rate-limit bucket. */
+  readonly bucketMaxLength: number
+  /** Renders a complete index statement for this dialect. */
+  readonly createIndexIfNotExists: (
+    name: string,
+    table: string,
+    columns: ReadonlyArray<string>,
+    unique: boolean
+  ) => string
+  /** Whether a duplicate column/index bootstrap error can be ignored. */
+  readonly isIgnorableBootstrapError: (error: unknown) => boolean
+  /** Renders the conflict clause that ignores a duplicate key. */
+  readonly insertIgnoreClause: (conflictKeys: ReadonlyArray<string>) => string
+  /** Renders the conflict clause for an upsert. */
+  readonly upsertClause: (
+    conflictKeys: ReadonlyArray<string>,
+    assignments: ReadonlyArray<StoreUpsertAssignment>
+  ) => string
+  /** How UPDATE results are reported. */
+  readonly mutationResult: StoreMutationResult
+  /** How the challenge store enforces one live row. */
+  readonly challengeLive: StoreChallengeLive
   /**
    * Returns a complete SQL query with one row when the column exists and zero
    * rows when it does not. The caller executes it with `sql.unsafe(query)` and
@@ -200,6 +281,11 @@ export type StoreSqlCapabilities = {
    * text.
    */
   readonly isDuplicateKey: (error: unknown) => boolean
+  /**
+   * Session statements for the bootstrap transaction, such as a metadata-lock
+   * timeout. Only the transaction arm uses them.
+   */
+  readonly bootstrapSetupSql?: ReadonlyArray<string>
   /**
    * Optional transaction-local lock timeout for request-path write
    * transactions. SQLite omits it. PostgreSQL uses

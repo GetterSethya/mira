@@ -71,6 +71,15 @@ const run = <A extends object>(
 const retryPredicate = (dialect: DialectType) =>
   dialect.telemetry?.isRetryable ?? (() => false)
 
+const dmlRetry = (dialect: DialectType) =>
+  Effect.retry({
+    while: (error: unknown) =>
+      dialect.telemetry?.retryDml === true &&
+      dialect.telemetry.isDmlRetryable?.(error) === true,
+    schedule: migrationRetrySchedule,
+    times: 1
+  })
+
 const resolveConflictClause = (dialect: DialectType) => {
   const quotedId = dialect.quoteIdentifier("id")
   return (
@@ -111,6 +120,7 @@ const appendRows = <A extends { readonly id: string } & Record<string, unknown>>
     if (rows.length === 0) return
 
     yield* makeInsertStatement(sql, dialect, table, rows).pipe(
+      dmlRetry(dialect),
       Effect.asVoid,
       Effect.mapError((error) => mapStoreError(operation, error))
     )
@@ -408,12 +418,18 @@ const deleteBatch = (
           dialect,
           statement.sql,
           statement.params
-        ).pipe(Effect.mapError((error) => mapStoreError("deleteOlderThan", error)))
+        ).pipe(
+          dmlRetry(dialect),
+          Effect.mapError((error) => mapStoreError("deleteOlderThan", error))
+        )
         count = rows.length
       } else {
         const raw = yield* sql
           .unsafe(rewritePlaceholders(statement.sql, dialect), [...statement.params])
-          .raw.pipe(Effect.mapError((error) => mapStoreError("deleteOlderThan", error)))
+          .raw.pipe(
+            dmlRetry(dialect),
+            Effect.mapError((error) => mapStoreError("deleteOlderThan", error))
+          )
 
         const context = `table=${table} deleted_before=${deleted} batch=${batch}`
         const read = yield* Effect.try({

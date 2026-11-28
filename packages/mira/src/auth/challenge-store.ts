@@ -1,9 +1,14 @@
-import { Context, Effect, Layer } from "effect"
+import { Context, Data, Effect, Layer, Option, Schedule } from "effect"
 import type { SqlError } from "effect/sql"
 import { SqlClient } from "effect/sql"
 
 import { Dialect } from "@/dialect/dialect.js"
-import { withStoreBootstrap } from "@/dialect/store-sql.js"
+import { ensureStoreColumn, ensureStoreIndex, withStoreBootstrap } from "@/dialect/store-sql.js"
+
+/** The driver returned a raw UPDATE result the dialect could not read. */
+class AuthChallengeResultUnknownError extends Data.TaggedError(
+  "AuthChallengeResultUnknownError"
+)<{ readonly id: string }> {}
 
 export type ChallengePurpose =
   | "password_reset"
@@ -192,45 +197,74 @@ export const AuthChallengeStoreLive = Layer.effect(
     const sql = yield* SqlClient.SqlClient
     const dialect = yield* Dialect
     const store = dialect.store
+    const quote = dialect.quoteIdentifier
+    const table = "_auth_challenges"
 
     yield* withStoreBootstrap(sql, store, (tx) =>
       Effect.gen(function* () {
         yield* tx.unsafe(
-          `CREATE TABLE IF NOT EXISTS _auth_challenges (
-            id TEXT PRIMARY KEY,
-            collection TEXT NOT NULL,
-            user_id TEXT NOT NULL,
-            purpose TEXT NOT NULL,
-            token_hash TEXT NOT NULL,
-            expires_at BIGINT NOT NULL,
-            consumed_at BIGINT,
-            attempts INTEGER NOT NULL DEFAULT 0,
-            created_at BIGINT NOT NULL,
-            new_email TEXT
+          `CREATE TABLE IF NOT EXISTS ${quote(table)} (
+            ${quote("id")} ${store.keyColumnType} PRIMARY KEY,
+            ${quote("collection")} ${store.keyColumnType} NOT NULL,
+            ${quote("user_id")} ${store.keyColumnType} NOT NULL,
+            ${quote("purpose")} ${store.keyColumnType} NOT NULL,
+            ${quote("token_hash")} ${store.keyColumnType} NOT NULL,
+            ${quote("expires_at")} BIGINT NOT NULL,
+            ${quote("consumed_at")} BIGINT,
+            ${quote("attempts")} INTEGER NOT NULL DEFAULT 0,
+            ${quote("created_at")} BIGINT NOT NULL,
+            ${quote("new_email")} ${store.textColumnType}
           )`
         )
 
-        const challengeColumns = yield* tx.unsafe<{ name: string }>(
-          store.columnExistsSql("_auth_challenges", "new_email")
+        yield* ensureStoreColumn(
+          tx,
+          store,
+          table,
+          "new_email",
+          `ALTER TABLE ${quote(table)} ADD COLUMN ${quote("new_email")} ${store.textColumnType}`
         )
-        if (challengeColumns.length === 0) {
-          yield* tx.unsafe(`ALTER TABLE _auth_challenges ADD COLUMN new_email TEXT`)
+
+        if (store.challengeLive.mode === "generated") {
+          yield* ensureStoreColumn(
+            tx,
+            store,
+            table,
+            store.challengeLive.column,
+            store.challengeLive.addColumnStatement
+          )
         }
-        yield* tx.unsafe(
-          `CREATE UNIQUE INDEX IF NOT EXISTS _auth_challenges_live
-           ON _auth_challenges (collection, user_id, purpose)
-           WHERE consumed_at IS NULL`
+
+        yield* ensureStoreIndex(tx, store, store.challengeLive.indexStatement)
+        yield* ensureStoreIndex(
+          tx,
+          store,
+          store.createIndexIfNotExists(
+            "_auth_challenges_hash",
+            table,
+            ["collection", "purpose", "token_hash"],
+            false
+          )
         )
-        yield* tx.unsafe(
-          `CREATE INDEX IF NOT EXISTS _auth_challenges_hash
-           ON _auth_challenges (collection, purpose, token_hash)`
+        yield* ensureStoreIndex(
+          tx,
+          store,
+          store.createIndexIfNotExists(
+            "_auth_challenges_user",
+            table,
+            ["collection", "user_id", "purpose", "created_at"],
+            false
+          )
         )
-        yield* tx.unsafe(
-          `CREATE INDEX IF NOT EXISTS _auth_challenges_user
-           ON _auth_challenges (collection, user_id, purpose, created_at)`
-        )
-        yield* tx.unsafe(
-          `CREATE INDEX IF NOT EXISTS _auth_challenges_expires ON _auth_challenges (expires_at)`
+        yield* ensureStoreIndex(
+          tx,
+          store,
+          store.createIndexIfNotExists(
+            "_auth_challenges_expires",
+            table,
+            ["expires_at"],
+            false
+          )
         )
       })
     )
@@ -293,39 +327,118 @@ export const AuthChallengeStoreLive = Layer.effect(
           AND consumed_at IS NULL
       `.pipe(Effect.asVoid)
 
-    const attemptAndConsume: AuthChallengeStoreShape["attemptAndConsume"] = (id, maxAttempts, now) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ attempts: number }>`
-          UPDATE ${sql("_auth_challenges")}
-          SET attempts = attempts + 1,
-              consumed_at = CASE WHEN attempts + 1 >= ${maxAttempts} THEN ${now} ELSE consumed_at END
-          WHERE id = ${id} AND consumed_at IS NULL AND expires_at > ${now} AND attempts < ${maxAttempts}
-          RETURNING attempts
-        `
-        const row = rows[0]
-        return row === undefined ? null : { attempts: Number(row.attempts), consumed: Number(row.attempts) >= maxAttempts }
-      })
+    const attemptAndConsume: AuthChallengeStoreShape["attemptAndConsume"] = (id, maxAttempts, now) => {
+      if (store.mutationResult._tag === "returning") {
+        return Effect.gen(function* () {
+          const rows = yield* sql<{ attempts: number }>`
+            UPDATE ${sql("_auth_challenges")}
+            SET attempts = attempts + 1,
+                consumed_at = CASE WHEN attempts + 1 >= ${maxAttempts} THEN ${now} ELSE consumed_at END
+            WHERE id = ${id} AND consumed_at IS NULL AND expires_at > ${now} AND attempts < ${maxAttempts}
+            RETURNING attempts
+          `
+          const row = rows[0]
+          return row === undefined
+            ? null
+            : { attempts: Number(row.attempts), consumed: Number(row.attempts) >= maxAttempts }
+        })
+      }
 
-    const consumeById: AuthChallengeStoreShape["consumeById"] = (id, now) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ id: string }>`
-          UPDATE ${sql("_auth_challenges")} SET consumed_at = ${now}
-          WHERE id = ${id} AND consumed_at IS NULL AND expires_at > ${now}
-          RETURNING id
-        `
-        return rows.length > 0
-      })
+      return sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* sql<{
+              attempts: number
+              consumed_at: number | string | null
+              expires_at: number | string
+            }>`
+              SELECT attempts, consumed_at, expires_at
+              FROM ${sql("_auth_challenges")}
+              WHERE id = ${id}
+              FOR UPDATE NOWAIT
+            `
+            const row = rows[0]
+            if (row === undefined) return null
+            if (row.consumed_at !== null || Number(row.expires_at) <= now) return null
+            const current = Number(row.attempts)
+            if (current >= maxAttempts) return null
 
-    const consumeToken: AuthChallengeStoreShape["consumeToken"] = (collection, purpose, tokenHash, now) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ id: string }>`
-          UPDATE ${sql("_auth_challenges")} SET consumed_at = ${now}
-          WHERE collection = ${collection} AND purpose = ${purpose} AND token_hash = ${tokenHash}
-            AND consumed_at IS NULL AND expires_at > ${now}
-          RETURNING id
-        `
-        return rows.length > 0
+            const next = current + 1
+            const consumed = next >= maxAttempts
+            yield* sql`
+              UPDATE ${sql("_auth_challenges")}
+              SET attempts = ${next},
+                  consumed_at = ${consumed ? now : row.consumed_at}
+              WHERE id = ${id}
+            `
+            return { attempts: next, consumed }
+          })
+        )
+        .pipe(
+          Effect.retry({
+            while: store.isRetryable,
+            schedule: Schedule.spaced("10 millis"),
+            times: 1
+          })
+        )
+    }
+
+    const consumeById: AuthChallengeStoreShape["consumeById"] = (id, now) => {
+      const mutationResult = store.mutationResult
+      if (mutationResult._tag === "returning") {
+        return Effect.gen(function* () {
+          const rows = yield* sql<{ id: string }>`
+            UPDATE ${sql("_auth_challenges")} SET consumed_at = ${now}
+            WHERE id = ${id} AND consumed_at IS NULL AND expires_at > ${now}
+            RETURNING id
+          `
+          return rows.length > 0
+        })
+      }
+
+      return Effect.gen(function* () {
+        const raw = yield* sql
+          .unsafe(
+            `UPDATE ${quote("_auth_challenges")} SET ${quote("consumed_at")} = ? WHERE ${quote("id")} = ? AND ${quote("consumed_at")} IS NULL AND ${quote("expires_at")} > ?`,
+            [now, id, now]
+          )
+          .raw
+        const affected = mutationResult.read(raw)
+        if (Option.isNone(affected)) {
+          return yield* Effect.die(new AuthChallengeResultUnknownError({ id }))
+        }
+        return affected.value > 0
       })
+    }
+
+    const consumeToken: AuthChallengeStoreShape["consumeToken"] = (collection, purpose, tokenHash, now) => {
+      const mutationResult = store.mutationResult
+      if (mutationResult._tag === "returning") {
+        return Effect.gen(function* () {
+          const rows = yield* sql<{ id: string }>`
+            UPDATE ${sql("_auth_challenges")} SET consumed_at = ${now}
+            WHERE collection = ${collection} AND purpose = ${purpose} AND token_hash = ${tokenHash}
+              AND consumed_at IS NULL AND expires_at > ${now}
+            RETURNING id
+          `
+          return rows.length > 0
+        })
+      }
+
+      return Effect.gen(function* () {
+        const raw = yield* sql
+          .unsafe(
+            `UPDATE ${quote("_auth_challenges")} SET ${quote("consumed_at")} = ? WHERE ${quote("collection")} = ? AND ${quote("purpose")} = ? AND ${quote("token_hash")} = ? AND ${quote("consumed_at")} IS NULL AND ${quote("expires_at")} > ?`,
+            [now, collection, purpose, tokenHash, now]
+          )
+          .raw
+        const affected = mutationResult.read(raw)
+        if (Option.isNone(affected)) {
+          return yield* Effect.die(new AuthChallengeResultUnknownError({ id: tokenHash }))
+        }
+        return affected.value > 0
+      })
+    }
 
     const consumeAllForUser: AuthChallengeStoreShape["consumeAllForUser"] = (collection, userId, now) =>
       sql`

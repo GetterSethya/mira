@@ -202,3 +202,11 @@ its module graph.
 - The environment-gated `tests/telemetry/postgres-shared.test.ts` runs against
   `MIRA_TEST_POSTGRES_URL`, creates both `logs` and `spans`, and covers the
   high-water retention subquery. It self-skips without the URL.
+
+## MySQL and MariaDB telemetry (issue #30)
+
+- `mysqlTelemetry` has empty `setup` and `cleanup`; there is no PRAGMA and no WAL checkpoint.
+- `isRetryable` covers `1205` and `1213` for setup/migration. `retryDml: true` adds a one-attempt retry for appends and retention deletes through `isDmlRetryable`, which covers `1205` only. A `1213` deadlock already rolled back the caller's transaction, so re-issuing the insert would not preserve atomicity.
+- Duplicate telemetry ids are ignored with `ON DUPLICATE KEY UPDATE <id> = <id>`; the telemetry store's batch-size bound is unchanged.
+- Shared mode is recommended and uses the app pool. Dedicated mode needs its own `MysqlDatabase` and database. Retention uses the derived-table `seqId` subquery and does not run `OPTIMIZE TABLE`.
+- The telemetry read path is numeric and exact only below 2^53. Retention is safe because it deletes through a `seqId` subquery.

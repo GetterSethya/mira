@@ -108,6 +108,29 @@ export const postgresStoreSql: StoreSqlCapabilities = {
     "SET LOCAL lock_timeout = '5s'",
     "SELECT pg_advisory_xact_lock(hashtextextended('mira.system-tables', 0))"
   ],
+  keyColumnType: "TEXT",
+  textColumnType: "TEXT",
+  bucketColumnType: "TEXT",
+  bucketMaxLength: 1_000_000,
+  createIndexIfNotExists: (name, table, columns, unique) =>
+    `CREATE ${unique ? "UNIQUE " : ""}INDEX IF NOT EXISTS ${quote(name)} ON ${quote(table)} (${columns.map(quote).join(", ")})`,
+  isIgnorableBootstrapError: () => false,
+  insertIgnoreClause: (conflictKeys) =>
+    `ON CONFLICT (${conflictKeys.map(quote).join(", ")}) DO NOTHING`,
+  upsertClause: (conflictKeys, assignments) =>
+    `ON CONFLICT (${conflictKeys.map(quote).join(", ")}) DO UPDATE SET ${assignments
+      .map((assignment) =>
+        assignment.kind === "excluded"
+          ? `${quote(assignment.column)} = excluded.${quote(assignment.column)}`
+          : `${quote(assignment.column)} = ${quote(assignment.column)} + 1`
+      )
+      .join(", ")}`,
+  mutationResult: { _tag: "returning" },
+  challengeLive: {
+    mode: "partial",
+    indexName: "_auth_challenges_live",
+    indexStatement: `CREATE UNIQUE INDEX IF NOT EXISTS ${quote("_auth_challenges_live")} ON ${quote("_auth_challenges")} (${["collection", "user_id", "purpose"].map(quote).join(", ")}) WHERE ${quote("consumed_at")} IS NULL`
+  },
   columnExistsSql: (table, column) =>
     `SELECT 1 AS present FROM information_schema.columns
      WHERE table_schema = current_schema()

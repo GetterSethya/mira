@@ -17,6 +17,13 @@ import { Effect, Schema } from "effect"
 import { UnsupportedMigrationStepError } from "@/migrator/errors.js"
 import type { ColumnDef, IndexShape, MigrationStep } from "@/migrator/types.js"
 
+import {
+  MYSQL_MAX_IDENTIFIER_CODE_POINTS as MAX_IDENTIFIER_CODE_POINTS,
+  mysqlIndexName,
+  mysqlQuoteIdentifier,
+  mysqlQuoteLiteral
+} from "./dialect-mysql-core.js"
+import { errorHasCode } from "./dialect.js"
 import type {
   MigrationModel,
   ParameterizedStatement,
@@ -24,7 +31,6 @@ import type {
   TranslatePlanContext,
   ViewShape
 } from "./dialect.js"
-import { errorHasCode } from "./dialect.js"
 import {
   mysqlEmailCollation,
   mysqlMaxIndexKeyBytes,
@@ -37,9 +43,6 @@ import {
   topologicalViewOrder,
   viewDependencies
 } from "./view-dependencies.js"
-
-/** MySQL and MariaDB cap identifiers at 64 characters. */
-const MAX_IDENTIFIER_CODE_POINTS = 64
 
 /** The length #68 rendered for a keyed text column before #71. */
 const PROVISIONAL_TEXT_LENGTH = 255
@@ -60,41 +63,11 @@ const UNBOUNDED_TEXT_TYPES: ReadonlySet<string> = new Set([
   "longtext"
 ])
 
-const quoteIdentifier = (name: string) => `\`${name.replaceAll("`", "``")}\``
-
-const quoteLiteral = (value: unknown): string => {
-  if (value === null || value === undefined) return "NULL"
-  if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL"
-  return `'${String(value).replaceAll("\\", "\\\\").replaceAll("'", "''")}'`
-}
+const quoteIdentifier = mysqlQuoteIdentifier
+const quoteLiteral = mysqlQuoteLiteral
+const indexNameOf = mysqlIndexName
 
 const codePointLength = (value: string) => [...value].length
-
-const truncateCodePoints = (value: string, budget: number) =>
-  [...value].slice(0, budget).join("")
-
-const fnv1a64 = (value: string) => {
-  let hash = 0xcbf29ce484222325n
-  for (const byte of new TextEncoder().encode(value)) {
-    hash ^= BigInt(byte)
-    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn
-  }
-  return hash.toString(16).padStart(16, "0")
-}
-
-/**
- * Deterministic index name. Names over 64 code points are truncated with a
- * stable 64-bit FNV-1a suffix; they are never rejected.
- */
-const indexNameOf = (table: string, fields: ReadonlyArray<string>) => {
-  const raw = `idx_${table}_${fields.join("_")}`
-  if (codePointLength(raw) <= MAX_IDENTIFIER_CODE_POINTS) return raw
-
-  const suffix = `_${fnv1a64(raw)}`
-  const budget = MAX_IDENTIFIER_CODE_POINTS - codePointLength(suffix)
-  return `${truncateCodePoints(raw, budget)}${suffix}`
-}
 
 const isKeyedColumn = (col: ColumnDef, indexes: ReadonlyArray<IndexShape>) =>
   col.primaryKey === true ||

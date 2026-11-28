@@ -1025,6 +1025,29 @@ function classifyCatalogPlan(
 
 export const sqliteStoreSql: StoreSqlCapabilities = {
   bootstrapMode: "plain",
+  keyColumnType: "TEXT",
+  textColumnType: "TEXT",
+  bucketColumnType: "TEXT",
+  bucketMaxLength: 1_000_000,
+  createIndexIfNotExists: (name, table, columns, unique) =>
+    `CREATE ${unique ? "UNIQUE " : ""}INDEX IF NOT EXISTS ${quote(name)} ON ${quote(table)} (${columns.map(quote).join(", ")})`,
+  isIgnorableBootstrapError: () => false,
+  insertIgnoreClause: (conflictKeys) =>
+    `ON CONFLICT (${conflictKeys.map(quote).join(", ")}) DO NOTHING`,
+  upsertClause: (conflictKeys, assignments) =>
+    `ON CONFLICT (${conflictKeys.map(quote).join(", ")}) DO UPDATE SET ${assignments
+      .map((assignment) =>
+        assignment.kind === "excluded"
+          ? `${quote(assignment.column)} = excluded.${quote(assignment.column)}`
+          : `${quote(assignment.column)} = ${quote(assignment.column)} + 1`
+      )
+      .join(", ")}`,
+  mutationResult: { _tag: "returning" },
+  challengeLive: {
+    mode: "partial",
+    indexName: "_auth_challenges_live",
+    indexStatement: `CREATE UNIQUE INDEX IF NOT EXISTS ${quote("_auth_challenges_live")} ON ${quote("_auth_challenges")} (${["collection", "user_id", "purpose"].map(quote).join(", ")}) WHERE ${quote("consumed_at")} IS NULL`
+  },
   columnExistsSql: sqliteColumnExistsSql,
   isRetryable: isSqliteBusy,
   isDuplicateKey: isSqliteStoreDuplicateKey

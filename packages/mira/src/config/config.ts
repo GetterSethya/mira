@@ -5,7 +5,7 @@ import { CryptoService } from "@/crypto/crypto.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { withStoreBootstrap } from "@/dialect/store-sql.js"
 
-import { CONFIG_TABLE_DDL } from "./config-sql.js"
+import { configTableDdl } from "./config-sql.js"
 import type { AppConfigShape, S3Config } from "./types.js"
 
 const ConfigRowSchema = Schema.Struct({
@@ -56,20 +56,21 @@ export const AppConfigLive = Layer.effect(
     const dialect = yield* Dialect
 
     yield* withStoreBootstrap(sql, dialect.store, (tx) =>
-      tx.unsafe(CONFIG_TABLE_DDL).pipe(Effect.asVoid)
+      tx.unsafe(configTableDdl(dialect)).pipe(Effect.asVoid)
     )
 
     const readConfig = () =>
       SqlSchema.findAll({
         Request: Schema.Void,
         Result: ConfigRowSchema,
-        execute: () => sql`SELECT key, value FROM ${sql("_config")}`
+        execute: () =>
+          sql`SELECT ${sql("key")}, ${sql("value")} FROM ${sql("_config")}`
       })(undefined)
 
     const insertIfAbsent = (key: string, value: string) =>
       sql`
         INSERT INTO ${sql("_config")} ${sql.insert({ key, value })}
-        ON CONFLICT (key) DO NOTHING
+        ${sql.literal(dialect.store.insertIgnoreClause(["key"]))}
       `.pipe(Effect.asVoid)
 
     yield* insertIfAbsent("app_name", "mira")
@@ -81,12 +82,9 @@ export const AppConfigLive = Layer.effect(
     if (beforeSecret.get("jwt_secret") === undefined) {
       const cryptoSvc = yield* CryptoService
       const candidate = Buffer.from(yield* cryptoSvc.randomBytes(48)).toString("hex")
-      const inserted = yield* sql`
-        INSERT INTO ${sql("_config")} ${sql.insert({ key: "jwt_secret", value: candidate })}
-        ON CONFLICT (key) DO NOTHING
-        RETURNING key
-      `
-      if (inserted.length > 0) {
+      yield* insertIfAbsent("jwt_secret", candidate)
+      const afterInsert = new Map((yield* readConfig()).map((row) => [row.key, row.value]))
+      if (afterInsert.get("jwt_secret") === candidate) {
         yield* Effect.logInfo("jwt_secret generated and persisted to _config table.")
       }
     }

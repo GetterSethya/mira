@@ -1,5 +1,7 @@
 export { SqliteDatabase } from "./sqlite.js"
 export type { LibsqlDatabaseConfig } from "./libsql.js"
 export { LibsqlConfigError, LibsqlDatabase, TursoDatabase } from "./libsql.js"
+export type { MysqlDatabaseConfig, MysqlSslOptions } from "./mysql.js"
+export { MysqlConfigError, MysqlDatabase } from "./mysql.js"
 export type { PostgresDatabaseConfig } from "./postgres.js"
 export { PostgresConfigError, PostgresDatabase } from "./postgres.js"

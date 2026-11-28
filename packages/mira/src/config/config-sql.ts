@@ -1,3 +1,9 @@
+import type { DialectType } from "@/dialect/dialect.js"
+
 /** The single production DDL source for the `_config` system table. */
-export const CONFIG_TABLE_DDL =
-  "CREATE TABLE IF NOT EXISTS _config (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+export const configTableDdl = (
+  dialect: Pick<DialectType, "quoteIdentifier" | "store">
+) => {
+  const quote = dialect.quoteIdentifier
+  return `CREATE TABLE IF NOT EXISTS ${quote("_config")} (${quote("key")} ${dialect.store.keyColumnType} PRIMARY KEY, ${quote("value")} ${dialect.store.textColumnType} NOT NULL)`
+}

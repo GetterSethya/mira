@@ -149,6 +149,29 @@ Mira.builder()
 
 Set `prepare: false` for a statement-mode pooler such as PgBouncer. The Bun smoke `packages/mira/tests/databases/postgres-bun.e2e.ts` runs the preset, migrates a collection, inserts, and asserts a native boolean and a restarted `BIGINT` sequence. It runs only when `MIRA_TEST_POSTGRES_URL` is set.
 
+## MySQL and MariaDB
+
+The Bun entry also exports `MysqlDatabase`, backed by `@effect/sql-mysql2`. MySQL 8.4 and MariaDB 11.4.6 or newer are supported; 8.4.13 and 11.4.13 are the validated versions. The preset supports `maxConnections`, `connectionTTL`, `ssl`, `connectTimeout`, `disablePreparedStatements`, and `migrateAtStartup`:
+
+```typescript
+import { BunPlatform, LocalFileStorage, Mira, MysqlDatabase } from "@gettersethya/mira/bun"
+import { Redacted } from "effect"
+
+Mira.builder()
+  .platform(BunPlatform)
+  .database(MysqlDatabase({
+    url: Redacted.make(process.env.MYSQL_URL!),
+    maxConnections: 10,
+    ssl: true
+  }))
+  .storage(LocalFileStorage({ directory: "./bun-uploads" }))
+  .collections([Posts])
+  .build()
+  .serve()
+```
+
+The Bun smoke `packages/mira/tests/databases/mysql-bun.e2e.ts` runs the preset against MySQL and MariaDB, migrates a collection, inserts two rows above 2^53, and asserts a string `seqId` and `0`/`1` booleans. It runs in the MySQL CI job with `MIRA_TEST_MYSQL_URL` set to each engine URL in turn.
+
 ## Telemetry
 
 Console telemetry is the default and has no SQLite dependency. To persist logs and spans under Bun, use a Bun database preset for dedicated telemetry:
@@ -190,7 +213,7 @@ The `packages/bun-e2e` smoke is the runtime proof. It does not replace the Node 
 
 ## What is not covered
 
-- Deno and MySQL.
+- Deno.
 - Bun versions older than `1.3.14`. `BunPlatform` fails fast on them.
 - A Bun-native SMTP client. `nodemailer` uses Bun's native `node:net` and TLS implementation.
 - Native `cover` thumbnails. `Bun.Image` has no centre-crop operation yet, so `cover` uses Photon.

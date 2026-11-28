@@ -1,6 +1,8 @@
 import { Effect, HashMap, Schema } from "effect"
-import type { SqlClient} from "effect/sql";
 import { SqlSchema } from "effect/sql"
+import type { SqlClient } from "effect/sql"
+
+import type { DialectType } from "@/dialect/dialect.js"
 
 import type { CronState } from "./types.js"
 
@@ -19,14 +21,15 @@ export type PersistedCronState = typeof PersistedCronStateSchema.Type
 
 const ConfigRowSchema = Schema.Struct({ value: Schema.String })
 
-export function loadPersistedCronState(sql: SqlClient.SqlClient) {
+export function loadPersistedCronState(sql: SqlClient.SqlClient, _dialect: DialectType) {
   return Effect.gen(function* () {
     const emptyState: PersistedCronState = {}
 
     const rows = yield* SqlSchema.findAll({
       Request: Schema.String,
       Result: ConfigRowSchema,
-      execute: (key) => sql`SELECT value FROM ${sql("_config")} WHERE key = ${key}`
+      execute: (key) =>
+        sql`SELECT ${sql("value")} FROM ${sql("_config")} WHERE ${sql("key")} = ${key}`
     })(CRON_STATE_CONFIG_KEY)
 
     const row = rows[0]
@@ -47,7 +50,11 @@ export function loadPersistedCronState(sql: SqlClient.SqlClient) {
   )
 }
 
-export function savePersistedCronState(sql: SqlClient.SqlClient, states: HashMap.HashMap<string, CronState>) {
+export function savePersistedCronState(
+  sql: SqlClient.SqlClient,
+  states: HashMap.HashMap<string, CronState>,
+  dialect: DialectType
+) {
   return Effect.gen(function* () {
     const blob: { [key: string]: typeof PersistedCronEntrySchema.Type } = {}
     for (const state of HashMap.values(states)) {
@@ -61,7 +68,9 @@ export function savePersistedCronState(sql: SqlClient.SqlClient, states: HashMap
     const json = yield* Schema.encodeEffect(Schema.fromJsonString(PersistedCronStateSchema))(blob)
     yield* sql`
       INSERT INTO ${sql("_config")} ${sql.insert({ key: CRON_STATE_CONFIG_KEY, value: json })}
-      ON CONFLICT (key) DO UPDATE SET value = excluded.value
+      ${sql.literal(
+        dialect.store.upsertClause(["key"], [{ column: "value", kind: "excluded" }])
+      )}
     `
   }).pipe(
     Effect.withSpan("cron.persistence.save", {
@@ -71,3 +80,5 @@ export function savePersistedCronState(sql: SqlClient.SqlClient, states: HashMap
     Effect.catchCause((cause) => Effect.logWarning(`[cron] failed to persist cron_state: ${String(cause)}`))
   )
 }
+
+

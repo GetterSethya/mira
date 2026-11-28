@@ -27,10 +27,7 @@ describe("withStoreBootstrap", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const store: StoreSqlCapabilities = {
-        bootstrapMode: "plain",
-        columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false,
-        isDuplicateKey: () => false
+        ...sqliteDialect.store
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>
@@ -45,14 +42,12 @@ describe("withStoreBootstrap", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const store: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
         bootstrapMode: "transaction",
         bootstrapSql: [
           "CREATE TABLE _bootstrap_gate (id INTEGER)",
           "INSERT INTO _bootstrap_gate (id) VALUES (1)"
-        ],
-        columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false,
-        isDuplicateKey: () => false
+        ]
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>
@@ -72,11 +67,9 @@ describe("withStoreBootstrap", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const store: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
         bootstrapMode: "transaction",
-        bootstrapSql: ["CREATE TABLE _rollback_gate (id INTEGER)"],
-        columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: () => false,
-        isDuplicateKey: () => false
+        bootstrapSql: ["CREATE TABLE _rollback_gate (id INTEGER)"]
       }
 
       const exit = yield* Effect.exit(
@@ -99,11 +92,10 @@ describe("withStoreBootstrap", () => {
       const sql = yield* SqlClient.SqlClient
       let attempts = 0
       const store: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
         bootstrapMode: "transaction",
         bootstrapSql: ["SELECT 1"],
-        columnExistsSql: () => "SELECT 1 AS present LIMIT 0",
-        isRetryable: (error) => error instanceof TestError && error.retryable,
-        isDuplicateKey: () => false
+        isRetryable: (error) => error instanceof TestError && error.retryable
       }
 
       yield* withStoreBootstrap(sql, store, (tx) =>

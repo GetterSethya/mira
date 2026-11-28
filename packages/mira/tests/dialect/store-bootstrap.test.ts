@@ -16,11 +16,9 @@ import { RateLimitStore } from "@/rate-limit/index.js"
 import { SqlRateLimitStoreLive } from "@/rate-limit/sql.js"
 
 const transactionalStore: StoreSqlCapabilities = {
+  ...sqliteDialect.store,
   bootstrapMode: "transaction",
-  bootstrapSql: ["SELECT 1"],
-  columnExistsSql: sqliteDialect.store.columnExistsSql,
-  isRetryable: sqliteDialect.store.isRetryable,
-  isDuplicateKey: sqliteDialect.store.isDuplicateKey
+  bootstrapSql: ["SELECT 1"]
 }
 
 const transactionalDialect: DialectType = {

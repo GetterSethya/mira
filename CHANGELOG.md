@@ -17,6 +17,32 @@ published by CI.
 
 ### Added
 
+- **MySQL 8.4 and MariaDB 11.4 support (#30).** `mysqlDialect` composes the
+  merged migration, text, and transaction capabilities with the remaining
+  `DialectType` surface. `MysqlDatabase` backs the preset with
+  `@effect/sql-mysql2`, exposes `maxConnections`, `connectionTTL`, `ssl`,
+  `connectTimeout`, `disablePreparedStatements`, and `migrateAtStartup`, and is
+  exported from the main, Bun, and new `@gettersethya/mira/mysql` entries.
+  MySQL 8.4 is validated at 8.4.13; MariaDB 11.4 requires 11.4.6 or newer
+  because earlier patches lack the `utf8mb4_0900_*` collations, and is validated
+  at 11.4.13.
+- **MySQL/MariaDB internal stores.** Config, cron, token, rate-limit, and auth
+  challenge stores use the extended `StoreSqlCapabilities` seam. MySQL gets
+  quoted reserved identifiers, `ON DUPLICATE KEY UPDATE` clauses, `LONGTEXT`
+  values, a generated `live_key` column for the challenge live-row invariant, a
+  locked `FOR UPDATE NOWAIT` rate-limit path with all-or-nothing rollback, and
+  `SQL_CALC`-free batch retention. SQLite and PostgreSQL keep their existing
+  schema and behavior.
+- **MySQL/MariaDB telemetry.** The dialect hooks have no setup or cleanup
+  statements, retry `1205`/`1213` on setup/migration, retry `1205` on appends
+  and retention, and ignore duplicate telemetry ids with
+  `ON DUPLICATE KEY UPDATE id = id`. Shared and dedicated modes are covered on
+  both engines.
+- **MySQL/MariaDB real-engine coverage.** Docker-backed suites cover HTTP CRUD,
+  list/filter/sort/cursor, rules, auth, bulk endpoints, views, migrations,
+  internal stores, concurrency, telemetry, retention, and batching on MySQL 8.4
+  and MariaDB 11.4, plus a Bun smoke for both engines. CI pins `mysql:8.4.13`
+  and `mariadb:11.4.13`.
 - **MySQL/MariaDB transaction probe.** `TransactionProbeStrategy` gains an
   `error-classified` object form that carries a dialect-supplied
   `isTransactionFatal` predicate. The batcher runs the classifier on the failed
@@ -83,6 +109,14 @@ published by CI.
 
 ### Fixed
 
+- **MySQL/MariaDB internal stores now boot.** The previous SQL used
+  `TEXT PRIMARY KEY`, unquoted `key`, `CREATE INDEX IF NOT EXISTS`, partial
+  indexes, `ON CONFLICT`, and `UPDATE ... RETURNING`, all rejected by one or
+  both engines. The portable DDL/DML and the MySQL-only generated live column
+  replace them.
+- **Rate-limit retention on MySQL/MariaDB.** The `prune` statement no longer
+  puts `LIMIT` inside an `IN` subquery; expired buckets are deleted in batches
+  on both engines.
 - **The MySQL/MariaDB transaction probe could report a dead transaction as
   usable.** `select-only` succeeds after InnoDB rolls a deadlock back, and
   `nested-begin` is unusable on MySQL (`ER_UNSUPPORTED_PS` on the prepared
@@ -116,6 +150,14 @@ published by CI.
 
 ### Changed
 
+- **`StoreSqlCapabilities` gained required members.** Custom dialects must now
+  supply `keyColumnType`, `textColumnType`, `bucketColumnType`,
+  `bucketMaxLength`, `createIndexIfNotExists`, `isIgnorableBootstrapError`,
+  `insertIgnoreClause`, `upsertClause`, `mutationResult`, and `challengeLive`.
+  The built-in SQLite, libSQL, PostgreSQL, MySQL, and MariaDB dialects already
+  do. Internal store DDL identifiers are now quoted on every engine, and the
+  rate-limit retention delete uses one derived-table shape on every engine;
+  schema and semantics are unchanged.
 - **The migrator has a catalog-guarded statement mode for engines where DDL
   commits implicitly.** `DialectType.migrationModel` selects `transaction` or
   `statement`. Statement mode reserves one connection, applies DDL outside a

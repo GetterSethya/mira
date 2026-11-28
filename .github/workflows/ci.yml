@@ -107,10 +107,10 @@ jobs:
   mysql-e2e:
     name: MySQL/MariaDB e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     services:
       mysql:
-        image: mysql:8.4
+        image: mysql:8.4.13
         env:
           MYSQL_ROOT_PASSWORD: mira
           MYSQL_DATABASE: mira_test
@@ -122,7 +122,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
       mariadb:
-        image: mariadb:11.4
+        image: mariadb:11.4.13
         env:
           MARIADB_ROOT_PASSWORD: mira
           MARIADB_DATABASE: mira_test
@@ -151,14 +151,31 @@ jobs:
           node-version: "24"
           package-manager-cache: false
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
       - name: Install
         run: pnpm install --frozen-lockfile
 
       - name: Build packages
         run: pnpm build
 
-      - name: Run MySQL/MariaDB e2e
-        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql-migrator.e2e.test.ts tests/databases/mysql-retention.e2e.test.ts tests/databases/mysql-batch.e2e.test.ts --no-file-parallelism
+      - name: Assert engine URLs are present
+        run: test -n "$MIRA_TEST_MYSQL_URL" && test -n "$MIRA_TEST_MARIADB_URL"
+
+      - name: Run legacy MySQL/MariaDB e2e (shared base database)
+        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql-migrator.e2e.test.ts tests/databases/mysql-batch.e2e.test.ts --no-file-parallelism
+
+      - name: Run database-isolated MySQL/MariaDB e2e
+        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql.e2e.test.ts tests/databases/mysql-stores.e2e.test.ts tests/databases/mysql-telemetry.e2e.test.ts tests/databases/mysql-retention.e2e.test.ts
+
+      - name: Bun MySQL smoke
+        run: bun run packages/mira/tests/databases/mysql-bun.e2e.ts
+
+      - name: Bun MariaDB smoke
+        run: MIRA_TEST_MYSQL_URL="$MIRA_TEST_MARIADB_URL" bun run packages/mira/tests/databases/mysql-bun.e2e.ts
 
   bun-smoke:
     name: Bun smoke

@@ -43,3 +43,10 @@ falls back to another port can report the real one.
 
 - Run: `pnpm --filter @gettersethya/mira test`
 - Typecheck: `pnpm --filter @gettersethya/mira typecheck`
+
+## MySQL `_config` (issue #30)
+
+- `configTableDdl(dialect)` renders `_config` with `store.keyColumnType` for the reserved `key` column and `store.textColumnType` for `value`. MySQL uses `VARCHAR(191) ... utf8mb4_0900_bin` and `LONGTEXT`; SQLite and PostgreSQL use `TEXT`.
+- Reads quote `key` and `value`. Seeding uses `sql.insert({ key, value })` and appends `store.insertIgnoreClause(["key"])` with `sql.literal`.
+- The `jwt_secret` path no longer uses `RETURNING key`. It inserts the candidate, re-reads `_config`, and logs only when the stored value equals this process's candidate.
+- `cron-service.ts` and the config store both call `configTableDdl(dialect)`.

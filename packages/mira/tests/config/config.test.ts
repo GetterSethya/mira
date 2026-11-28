@@ -5,7 +5,7 @@ import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { AppConfig, AppConfigLive } from "@/config/index.js"
-import { CONFIG_TABLE_DDL } from "@/config/config-sql.js"
+import { configTableDdl } from "@/config/config-sql.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
@@ -21,7 +21,7 @@ function preSeeded(rows: Record<string, string>) {
   return Layer.unwrap(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* sql.unsafe(CONFIG_TABLE_DDL)
+      yield* sql.unsafe(configTableDdl(sqliteDialect))
       for (const [key, value] of Object.entries(rows)) {
         yield* sql`INSERT INTO ${sql("_config")} ${sql.insert({ key, value })}`
       }

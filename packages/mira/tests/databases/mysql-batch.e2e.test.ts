@@ -12,7 +12,7 @@
  * file in parallel with itself: the fixed internal tables would collide.
  *
  * The batch entries run raw MySQL SQL. The `Dialect` value spreads
- * `sqliteDialect` only to satisfy the full `DialectType` shape; the batcher
+ * `mysqlDialect` and override only the transaction probe; the batcher
  * reads `transactionProbe` and nothing else, so no SQLite DDL or native-type
  * behavior is exercised.
  */
@@ -37,7 +37,7 @@ import {
   isMysqlTransactionFatal,
   mysqlTransactionProbe
 } from "@/dialect/dialect-mysql-transactions.js"
-import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
+import { mysqlDialect } from "@/dialect/dialect-mysql.js"
 
 type EngineConfig = {
   readonly label: string
@@ -76,7 +76,7 @@ const makeLayer = (
 ) => {
   const base = MysqlClient.layer({ url: Redacted.make(url), maxConnections })
   const statsLayer = makeBatchMutationStatsLayer()
-  const dialect: DialectType = { ...sqliteDialect, transactionProbe }
+  const dialect: DialectType = { ...mysqlDialect, transactionProbe }
   return Layer.mergeAll(
     base,
     statsLayer,
@@ -505,3 +505,4 @@ defineSuite({
   fallbackUrl: "mysql://root:mira@127.0.0.1:53306/mira_test",
   prefix: "e2e_mariadb_batch_"
 })
+

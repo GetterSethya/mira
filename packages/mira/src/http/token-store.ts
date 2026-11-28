@@ -22,7 +22,7 @@ import type { SqlError } from "effect/sql"
 import { SqlClient } from "effect/sql"
 
 import { Dialect } from "@/dialect/dialect.js"
-import { withStoreBootstrap } from "@/dialect/store-sql.js"
+import { ensureStoreIndex, withStoreBootstrap } from "@/dialect/store-sql.js"
 
 /**
  * The behaviour every `TokenStore` implementation must provide. The SQL-backed
@@ -118,17 +118,28 @@ export const TokenStoreLive = Layer.effect(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const dialect = yield* Dialect
+    const store = dialect.store
+    const quote = dialect.quoteIdentifier
 
-    yield* withStoreBootstrap(sql, dialect.store, (tx) =>
+    yield* withStoreBootstrap(sql, store, (tx) =>
       Effect.gen(function* () {
         yield* tx.unsafe(
-          `CREATE TABLE IF NOT EXISTS _revoked_tokens (jti TEXT PRIMARY KEY, expires_at BIGINT NOT NULL)`
+          `CREATE TABLE IF NOT EXISTS ${quote("_revoked_tokens")} (${quote("jti")} ${store.keyColumnType} PRIMARY KEY, ${quote("expires_at")} BIGINT NOT NULL)`
         )
-        yield* tx.unsafe(`CREATE INDEX IF NOT EXISTS _revoked_tokens_expires ON _revoked_tokens (expires_at)`)
+        yield* ensureStoreIndex(
+          tx,
+          store,
+          store.createIndexIfNotExists(
+            "_revoked_tokens_expires",
+            "_revoked_tokens",
+            ["expires_at"],
+            false
+          )
+        )
         yield* tx.unsafe(
-          `CREATE TABLE IF NOT EXISTS _auth_generations (` +
-            `collection TEXT NOT NULL, user_id TEXT NOT NULL, gen INTEGER NOT NULL DEFAULT 0, ` +
-            `PRIMARY KEY (collection, user_id))`
+          `CREATE TABLE IF NOT EXISTS ${quote("_auth_generations")} (` +
+            `${quote("collection")} ${store.keyColumnType} NOT NULL, ${quote("user_id")} ${store.keyColumnType} NOT NULL, ${quote("gen")} INTEGER NOT NULL DEFAULT 0, ` +
+            `PRIMARY KEY (${quote("collection")}, ${quote("user_id")}))`
         )
       })
     )
@@ -136,11 +147,11 @@ export const TokenStoreLive = Layer.effect(
     const revoke = (jti: string, expiresAtMs: number) =>
       Effect.gen(function* () {
         // Prune on the write path only; the read path stays indexed/O(1)-ish.
-        yield* sql`DELETE FROM ${sql("_revoked_tokens")} WHERE expires_at <= ${Date.now()}`
+        yield* sql`DELETE FROM ${sql("_revoked_tokens")} WHERE ${sql("expires_at")} <= ${Date.now()}`
         yield* sql`
-          INSERT INTO ${sql("_revoked_tokens")} (jti, expires_at)
+          INSERT INTO ${sql("_revoked_tokens")} (${sql("jti")}, ${sql("expires_at")})
           VALUES (${jti}, ${expiresAtMs})
-          ON CONFLICT (jti) DO NOTHING
+          ${sql.literal(store.insertIgnoreClause(["jti"]))}
         `
       })
 
@@ -148,7 +159,7 @@ export const TokenStoreLive = Layer.effect(
       Effect.gen(function* () {
         const rows = yield* sql<{ ok: number }>`
           SELECT 1 AS ok FROM ${sql("_revoked_tokens")}
-          WHERE jti = ${jti} AND expires_at > ${Date.now()}
+          WHERE ${sql("jti")} = ${jti} AND ${sql("expires_at")} > ${Date.now()}
           LIMIT 1
         `
         return rows.length > 0
@@ -157,8 +168,8 @@ export const TokenStoreLive = Layer.effect(
     const currentGeneration = (collection: string, userId: string) =>
       Effect.gen(function* () {
         const rows = yield* sql<{ gen: number }>`
-          SELECT gen FROM ${sql("_auth_generations")}
-          WHERE collection = ${collection} AND user_id = ${userId}
+          SELECT ${sql("gen")} FROM ${sql("_auth_generations")}
+          WHERE ${sql("collection")} = ${collection} AND ${sql("user_id")} = ${userId}
           LIMIT 1
         `
         const row = rows[0]
@@ -167,11 +178,17 @@ export const TokenStoreLive = Layer.effect(
 
     const bumpGeneration = (collection: string, userId: string) =>
       sql`
-        INSERT INTO ${sql("_auth_generations")} (collection, user_id, gen)
+        INSERT INTO ${sql("_auth_generations")} (${sql("collection")}, ${sql("user_id")}, ${sql("gen")})
         VALUES (${collection}, ${userId}, 1)
-        ON CONFLICT(collection, user_id) DO UPDATE SET gen = gen + 1
+        ${sql.literal(
+          store.upsertClause(
+            ["collection", "user_id"],
+            [{ column: "gen", kind: "increment-by-one" }]
+          )
+        )}
       `.pipe(Effect.asVoid)
 
     return { revoke, isRevoked, currentGeneration, bumpGeneration }
   })
 )
+
