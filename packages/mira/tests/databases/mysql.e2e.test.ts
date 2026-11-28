@@ -616,6 +616,17 @@ for (const engine of engines) {
               expect(res.status).toBe(200)
               const body = yield* json(res, CursorListBody)
               expect(body.nextCursor).toBe("9007199254740993")
+              expect(body.items[0]?.id).toBe("big-1")
+
+              const second = yield* HttpClient.execute(
+                HttpClientRequest.get(
+                  "/api/collections/e2e_mysql_cursor?limit=1&after=9007199254740993"
+                )
+              )
+              expect(second.status).toBe(200)
+              const secondBody = yield* json(second, CursorListBody)
+              expect(secondBody.items[0]?.id).toBe("big-2")
+              expect(secondBody.nextCursor).toBeNull()
             }).pipe(
               Effect.provide(
                 Layer.merge(app.buildServiceLayer(), NodeHttpServer.layerTest)

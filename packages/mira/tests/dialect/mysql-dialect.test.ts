@@ -16,6 +16,7 @@ import {
   readMysqlAffectedRows
 } from "@/dialect/dialect-mysql-core.js"
 import { mysqlDialect, mysqlStoreSql, mysqlTelemetry } from "@/dialect/dialect-mysql.js"
+import { makeRetentionDeleteStatement } from "@/telemetry/sql-store.js"
 
 describe("mysql dialect", () => {
   it("composes the required members", () => {
@@ -131,5 +132,18 @@ describe("mysql dialect", () => {
     expect(mysqlTelemetry.insertConflictClause?.("`id`")).toBe(
       "ON DUPLICATE KEY UPDATE `id` = `id`"
     )
+    expect(mysqlTelemetry.insertConflictClause?.("`id`")).not.toContain(
+      "ON CONFLICT"
+    )
+
+    const retention = makeRetentionDeleteStatement(
+      mysqlDialect,
+      "logs",
+      false,
+      "2026-11-25T00:00:00.000Z"
+    )
+    expect(retention.sql).toContain("DELETE FROM `logs`")
+    expect(retention.sql).not.toContain("RETURNING")
+    expect(retention.sql).not.toContain("PRAGMA")
   })
 })

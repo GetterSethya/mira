@@ -23,7 +23,7 @@ To see how one request travels from a collection definition through rules and th
 - **Rules:** `Rule`, `defineRule`, `applyRulesToCollections`
 - **Client:** `createMiraClient`, `CollectionClient`, `BrowserAuth`, `ServerAuth`
 - **Adapter:** `collectionAdapter`, `createCollectionAdapter`, `withCollections`
-- **Runtime:** `NodePlatform`, `SqliteDatabase`, `LibsqlDatabase`, `PostgresDatabase`, `MysqlDatabase`, `BunPlatform`, `BunSqliteDatabase`
+- **Runtime:** `NodePlatform`, `SqliteDatabase`, `LibsqlDatabase`, `PostgresDatabase`, `MysqlDatabase`, `MysqlConfigError`, `mysqlDialect`, `BunPlatform`, `BunSqliteDatabase`
 - **Operations:** `SmtpEmail`, `RateLimiter`, `ThumbnailService`, `makeTelemetryLayer`
 
 ## Source and contracts

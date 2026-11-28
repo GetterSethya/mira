@@ -229,6 +229,23 @@ for (const engine of engines) {
             ])
             expect(afterBlockedDuplicate).toEqual({ ok: true, counts: [1] })
 
+            const tooLong = yield* Effect.result(
+              limits.increment([
+                {
+                  bucket: "x".repeat(513),
+                  limit: 1,
+                  cost: 1,
+                  expiresAt: now + 60_000
+                }
+              ])
+            )
+            expect(Result.isFailure(tooLong)).toBe(true)
+            if (Result.isFailure(tooLong)) {
+              expect(Predicate.isTagged(tooLong.failure, "RateLimitStoreError")).toBe(
+                true
+              )
+            }
+
             const expired = now - 10 * 60_000
             yield* limits.increment([
               { bucket: "e2e-prune", limit: 1, cost: 1, expiresAt: expired }
@@ -487,6 +504,16 @@ for (const engine of engines) {
             )
             expect(secrets[0]).toBe(secrets[1])
             expect(secrets[0]).toMatch(/^[0-9a-f]{96}$/)
+
+            const stored = yield* Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const rows = yield* sql<{ n: number }>`
+                SELECT COUNT(*) AS n FROM ${sql("_config")}
+                WHERE \`key\` = 'jwt_secret'
+              `
+              return Number(rows[0]?.n)
+            }).pipe(Effect.provide(makeLayer(dbUrl)))
+            expect(stored).toBe(1)
           })
         ),
       180_000

@@ -19,8 +19,8 @@ falls back to another port can report the real one.
 
 ## Invariants
 
-- `_config` is created if absent as `key TEXT PRIMARY KEY, value TEXT NOT NULL` through `withStoreBootstrap` with the shared `CONFIG_TABLE_DDL` [config.ts:AppConfigLive] [config-sql.ts:CONFIG_TABLE_DDL]
-- Seed defaults are `app_name = "mira"`, `port = "8080"`, `use_s3 = "false"`, and `log_retention_days = "30"`; an existing value always wins because each insert is `ON CONFLICT DO NOTHING` [config.ts:AppConfigLive]
+- `_config` is created if absent with the dialect-rendered `configTableDdl(dialect)` through `withStoreBootstrap`; MySQL uses `VARCHAR(191)` binary keys [config.ts:AppConfigLive] [config-sql.ts:configTableDdl]
+- Seed defaults are `app_name = "mira"`, `port = "8080"`, `use_s3 = "false"`, and `log_retention_days = "30"`; an existing value always wins because each insert uses the dialect's insert-ignore clause (`ON CONFLICT DO NOTHING` or `ON DUPLICATE KEY UPDATE`) [config.ts:AppConfigLive]
 - `application_url` is inserted only when absent and derives its default from the stored `port`, not this process's local candidate. A stored custom URL is never overwritten [config.ts:AppConfigLive]
 - `jwt_secret` is generated as hex of 48 random bytes and inserted with the dialect's insert-ignore clause; the final value always comes from the post-insert re-read so concurrent replicas converge on one secret [config.ts:AppConfigLive]
 - `jwtSecret` is always a `Redacted<string>` [config.ts:AppConfigLive]

@@ -227,6 +227,12 @@ for (const engine of engines) {
               expect(
                 afterDelete.items.filter((row) => row.id === "e2e-mysql-dup")
               ).toHaveLength(1)
+              expect(
+                afterDelete.items.filter((row) => row.id === "e2e-mysql-old")
+              ).toHaveLength(0)
+              expect(
+                afterDelete.items.filter((row) => row.id === "e2e-mysql-recent")
+              ).toHaveLength(1)
 
               const firstPage = yield* read.listLogs({
                 limit: 1,

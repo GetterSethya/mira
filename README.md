@@ -340,11 +340,13 @@ and `seqId` identity values restart rather than preserving the old SQLite
 values. Password hashes copy unchanged. Reverting the configuration does not copy
 PostgreSQL data back, so any rows written after cutover stay in PostgreSQL.
 
-The main and Bun entries keep SQLite, libSQL, and PostgreSQL. A PostgreSQL-only
+The main and Bun entries keep SQLite, libSQL, PostgreSQL, MySQL, and MariaDB. A PostgreSQL-only
 Node app can import `@gettersethya/mira/postgres` instead; that subpath exports
 the app builder, Node platform, local storage, `PostgresDatabase`, and `Migrator`
-without the SQLite/libSQL preset barrel. The Bun entry exports
-`PostgresDatabase` as well.
+without the SQLite/libSQL preset barrel. A MySQL-only Node app can import
+`@gettersethya/mira/mysql` for the same builder and platform plus
+`MysqlDatabase` and `mysqlDialect`. The Bun entry exports `PostgresDatabase`
+and `MysqlDatabase` as well.
 
 The CI `postgres-e2e` job runs the gated PostgreSQL behavior, migration, cursor,
 batch, and shared telemetry suites against `postgres:17.12-alpine`, then runs
