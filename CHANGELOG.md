@@ -112,6 +112,7 @@ idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
   nodes and runtimes that block `new Function` stay interpreted. Decoded values
   and validation issues are unchanged. Off by default, process-wide once
   enabled. `BENCH_SCHEMA_JIT=on` exposes the switch in the benchmark harness.
+  (#79)
 
 ### Fixed
 
