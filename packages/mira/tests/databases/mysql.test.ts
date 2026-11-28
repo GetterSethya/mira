@@ -4,6 +4,7 @@ import { expect } from "vitest"
 
 import { mysqlDialect } from "@/dialect/dialect-mysql.js"
 import {
+  checkMysqlVersion,
   MysqlConfigError,
   MysqlDatabase,
   mysqlPoolOptions
@@ -89,5 +90,18 @@ describe("MysqlDatabase", () => {
 
   it("exports the mysql dialect from the preset module", () => {
     expect(mysqlDialect.store.mutationResult._tag).toBe("affectedRows")
+  })
+
+  it("checks the documented engine version floor", () => {
+    expect(checkMysqlVersion("8.4.13")).toBe("supported")
+    expect(checkMysqlVersion("8.4.0")).toBe("supported")
+    expect(checkMysqlVersion("9.1.0")).toBe("supported")
+    expect(checkMysqlVersion("8.0.36")).toBe("unsupported")
+    expect(checkMysqlVersion("11.4.13-MariaDB-ubu2404")).toBe("supported")
+    expect(checkMysqlVersion("11.4.6-MariaDB")).toBe("supported")
+    expect(checkMysqlVersion("11.4.5-MariaDB")).toBe("unsupported")
+    expect(checkMysqlVersion("12.0.1-MariaDB")).toBe("supported")
+    expect(checkMysqlVersion("10.11.6-MariaDB")).toBe("unsupported")
+    expect(checkMysqlVersion("not-a-version")).toBe("unparseable")
   })
 })

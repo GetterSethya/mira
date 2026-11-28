@@ -1,15 +1,16 @@
 import { MysqlClient } from "@effect/sql-mysql2"
 import { describe, it } from "@effect/vitest"
-import { Effect, Exit, Layer, Redacted, Schedule } from "effect"
+import { Effect, Exit, Layer, Redacted, Result, Schedule } from "effect"
 import { SqlClient } from "effect/sql"
 import mysql from "mysql2/promise"
+import type { RowDataPacket } from "mysql2/promise"
 import { expect } from "vitest"
 
 import { AuthChallengeStore, AuthChallengeStoreLive } from "@/auth/index.js"
 import { AppConfig, AppConfigLive } from "@/config/index.js"
 import { CronService, makeCronServiceLayer } from "@/cron/cron-service.js"
 import { NodeCryptoLayer } from "@/crypto/node.js"
-import { Dialect } from "@/dialect/dialect.js"
+import { Dialect, errorHasCode } from "@/dialect/dialect.js"
 import { mysqlDialect } from "@/dialect/dialect-mysql.js"
 import { TokenStore, TokenStoreLive } from "@/http/token-store.js"
 import { makeHookServiceLayer } from "@/hooks/hook-service.js"
@@ -92,7 +93,10 @@ const makeLayer = (url: string) => {
 
 const withEngine = <A, E>(
   url: string,
-  body: (layer: ReturnType<typeof makeLayer>) => Effect.Effect<A, E>
+  body: (
+    layer: ReturnType<typeof makeLayer>,
+    dbUrl: string
+  ) => Effect.Effect<A, E>
 ) =>
   Effect.scoped(
     Effect.acquireRelease(
@@ -106,11 +110,36 @@ const withEngine = <A, E>(
         Effect.gen(function* () {
           yield* createDatabase(url, name)
           const layer = makeLayer(databaseUrl(url, name))
-          return yield* body(layer)
+          return yield* body(layer, databaseUrl(url, name))
         })
       )
     )
   )
+
+const readGlobalInnodbWait = (url: string) =>
+  Effect.promise(async () => {
+    const connection = await mysql.createConnection(adminUrl(url))
+    try {
+      const [rows] = await connection.query<Array<RowDataPacket>>(
+        "SELECT @@GLOBAL.innodb_lock_wait_timeout AS value"
+      )
+      return Number(rows[0]?.["value"])
+    } finally {
+      await connection.end()
+    }
+  })
+
+const setGlobalInnodbWait = (url: string, value: number) =>
+  Effect.promise(async () => {
+    const connection = await mysql.createConnection(adminUrl(url))
+    try {
+      await connection.query(
+        `SET GLOBAL innodb_lock_wait_timeout = ${Math.trunc(value)}`
+      )
+    } finally {
+      await connection.end()
+    }
+  })
 
 for (const engine of engines) {
   const enabled = engine.envUrl !== undefined
@@ -227,6 +256,62 @@ for (const engine of engines) {
               { concurrency: "unbounded" }
             )
             expect(raceResults.filter((result) => result?.consumed === true)).toHaveLength(1)
+            expect(raceResults.filter((result) => result === null)).toHaveLength(1)
+            const raceWinner = raceResults.find((result) => result !== null)
+            expect(raceWinner).toEqual({ attempts: 2, consumed: true })
+
+            const supersedeTarget = {
+              id: "e2e-challenge-supersede",
+              collection: "users",
+              userId: "u5",
+              purpose: "login_otp" as const,
+              tokenHash: "hash-supersede",
+              expiresAt: now + 60_000,
+              consumedAt: null,
+              attempts: 0,
+              createdAt: now,
+              newEmail: null
+            }
+            yield* challenges.create(supersedeTarget)
+            yield* challenges.supersedeLive("users", "u5", "login_otp", now + 1)
+            expect(
+              yield* challenges.findLatestForUser("users", "u5", "login_otp")
+            ).toBeUndefined()
+            const superseded = yield* challenges.findById(
+              "users",
+              "e2e-challenge-supersede",
+              "login_otp"
+            )
+            expect(superseded?.consumedAt).toBe(now + 1)
+
+            yield* challenges.create({
+              ...supersedeTarget,
+              id: "e2e-challenge-many-a",
+              tokenHash: "hash-many-a"
+            })
+            expect(
+              yield* challenges.findLatestForUser("users", "u5", "login_otp")
+            ).toBeDefined()
+            yield* challenges.consumeAllForUser("users", "u5", now + 2)
+            const remainingLive = yield* sql<{ id: string }>`
+              SELECT id FROM ${sql("_auth_challenges")}
+              WHERE collection = 'users' AND user_id = 'u5' AND consumed_at IS NULL
+            `
+            expect(remainingLive).toHaveLength(0)
+
+            yield* challenges.create({
+              ...supersedeTarget,
+              id: "e2e-challenge-expired",
+              tokenHash: "hash-expired",
+              userId: "u6",
+              expiresAt: now - 1
+            })
+            yield* challenges.deleteExpired(now)
+            const expiredRows = yield* sql<{ id: string }>`
+              SELECT id FROM ${sql("_auth_challenges")}
+              WHERE id = 'e2e-challenge-expired'
+            `
+            expect(expiredRows).toHaveLength(0)
 
             const liveChallenge = {
               id: "e2e-challenge-live",
@@ -241,10 +326,22 @@ for (const engine of engines) {
               newEmail: null
             }
             yield* challenges.create(liveChallenge)
-            const duplicateLive = yield* Effect.exit(
-              challenges.create({ ...liveChallenge, id: "e2e-challenge-live-2", tokenHash: "hash-live-2" })
+            const duplicateLiveAttempt = yield* Effect.result(
+              challenges.create({
+                ...liveChallenge,
+                id: "e2e-challenge-live-2",
+                tokenHash: "hash-live-2"
+              })
             )
-            expect(Exit.isFailure(duplicateLive)).toBe(true)
+            expect(Result.isFailure(duplicateLiveAttempt)).toBe(true)
+            if (Result.isFailure(duplicateLiveAttempt)) {
+              expect(
+                errorHasCode(duplicateLiveAttempt.failure, [
+                  1062,
+                  "ER_DUP_ENTRY"
+                ])
+              ).toBe(true)
+            }
 
             const consumeChallenge = {
               id: "e2e-challenge-consume",
@@ -314,16 +411,139 @@ for (const engine of engines) {
             `
             expect(tables.length).toBe(5)
             for (let attempt = 0; attempt < 5; attempt++) {
-              const lockWait = yield* sql<{ value: number }>`
-                SELECT @@SESSION.innodb_lock_wait_timeout AS value
+              const session = yield* sql<{
+                sessionLockWait: number
+                globalLockWait: number
+                sessionInnodbWait: number
+                globalInnodbWait: number
+              }>`
+                SELECT @@SESSION.lock_wait_timeout AS sessionLockWait,
+                       @@GLOBAL.lock_wait_timeout AS globalLockWait,
+                       @@SESSION.innodb_lock_wait_timeout AS sessionInnodbWait,
+                       @@GLOBAL.innodb_lock_wait_timeout AS globalInnodbWait
               `
-              expect(Number(lockWait[0]?.value)).not.toBe(5)
+              expect(Number(session[0]?.sessionLockWait)).toBe(
+                Number(session[0]?.globalLockWait)
+              )
+              expect(Number(session[0]?.sessionInnodbWait)).toBe(
+                Number(session[0]?.globalInnodbWait)
+              )
             }
 
             yield* Effect.scoped(Layer.build(layer))
+            const afterRebuild = yield* sql<{ name: string }>`
+              SELECT TABLE_NAME AS name FROM information_schema.tables
+              WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME IN ('_config', '_auth_challenges', '_rate_limits', '_revoked_tokens', '_auth_generations')
+            `
+            expect(afterRebuild.length).toBe(5)
           }).pipe(Effect.provide(layer))
         ),
       120_000
     )
+    it.live(
+      "converges on one jwt_secret across concurrent first boots",
+      () =>
+        withEngine(url, (_layer, dbUrl) =>
+          Effect.gen(function* () {
+            const readSecret = (layer: ReturnType<typeof makeLayer>) =>
+              Effect.gen(function* () {
+                const config = yield* AppConfig
+                return Redacted.value(config.jwtSecret)
+              }).pipe(Effect.provide(layer))
+
+            const secrets = yield* Effect.all(
+              [readSecret(makeLayer(dbUrl)), readSecret(makeLayer(dbUrl))],
+              { concurrency: "unbounded" }
+            )
+            expect(secrets[0]).toBe(secrets[1])
+            expect(secrets[0]).toMatch(/^[0-9a-f]{96}$/)
+          })
+        ),
+      180_000
+    )
+    it.live(
+      "fails fast when a challenge or rate-limit row lock is held",
+      () =>
+        withEngine(url, (layer, dbUrl) =>
+          Effect.gen(function* () {
+            const originalWait = yield* readGlobalInnodbWait(url)
+            yield* setGlobalInnodbWait(url, 1)
+            return yield* Effect.scoped(
+              Effect.gen(function* () {
+              const challenges = yield* AuthChallengeStore
+              const limits = yield* RateLimitStore
+              const now = Date.now()
+              yield* challenges.create({
+                id: "e2e-challenge-held",
+                collection: "users",
+                userId: "u9",
+                purpose: "login_otp",
+                tokenHash: "hash-held",
+                expiresAt: now + 60_000,
+                consumedAt: null,
+                attempts: 0,
+                createdAt: now,
+                newEmail: null
+              })
+              yield* limits.increment([
+                { bucket: "e2e-held", limit: 10, cost: 1, expiresAt: now + 60_000 }
+              ])
+
+              const holder = yield* Effect.acquireRelease(
+                Effect.promise(() => mysql.createConnection(dbUrl)),
+                (connection) => Effect.promise(() => connection.end())
+              )
+              yield* Effect.promise(() => holder.beginTransaction())
+              yield* Effect.promise(() =>
+                holder.query(
+                  "SELECT id FROM `_auth_challenges` WHERE id = ? FOR UPDATE",
+                  ["e2e-challenge-held"]
+                )
+              )
+              yield* Effect.promise(() =>
+                holder.query(
+                  "SELECT bucket FROM `_rate_limits` WHERE bucket = ? FOR UPDATE",
+                  ["e2e-held"]
+                )
+              )
+
+              const challengeStarted = Date.now()
+              const challengeExit = yield* Effect.exit(
+                challenges.attemptAndConsume("e2e-challenge-held", 2, now + 1)
+              )
+              const challengeElapsed = Date.now() - challengeStarted
+              expect(Exit.isFailure(challengeExit)).toBe(true)
+              expect(challengeElapsed).toBeLessThan(15_000)
+
+              const limitStarted = Date.now()
+              const limitExit = yield* Effect.exit(
+                limits.increment([
+                  { bucket: "e2e-held", limit: 10, cost: 1, expiresAt: now + 60_000 }
+                ])
+              )
+              const limitElapsed = Date.now() - limitStarted
+              expect(Exit.isFailure(limitExit)).toBe(true)
+              expect(limitElapsed).toBeLessThan(15_000)
+
+              yield* Effect.promise(() => holder.rollback())
+
+              expect(
+                yield* challenges.attemptAndConsume("e2e-challenge-held", 2, now + 2)
+              ).toEqual({ attempts: 1, consumed: false })
+              expect(
+                yield* limits.increment([
+                  { bucket: "e2e-held", limit: 10, cost: 1, expiresAt: now + 60_000 }
+                ])
+              ).toEqual({ ok: true, counts: [2] })
+            }).pipe(
+              Effect.provide(layer)
+            )
+            ).pipe(Effect.ensuring(setGlobalInnodbWait(url, originalWait)))
+          })
+        ),
+      180_000
+    )
   })
 }
+

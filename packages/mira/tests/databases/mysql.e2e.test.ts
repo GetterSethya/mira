@@ -302,6 +302,13 @@ for (const engine of engines) {
               expect(post.published).toBe(true)
               expect(post.views).toBe(3)
 
+              const fetched = yield* HttpClient.execute(
+                HttpClientRequest.get(`/api/collections/e2e_mysql_posts/${post.id}`)
+              )
+              expect(fetched.status).toBe(200)
+              const fetchedPost = yield* json(fetched, PostItem)
+              expect(fetchedPost.id).toBe(post.id)
+
               const second = yield* HttpClient.execute(
                 HttpClientRequest.post("/api/collections/e2e_mysql_posts").pipe(
                   HttpClientRequest.bodyJsonUnsafe({
@@ -353,6 +360,13 @@ for (const engine of engines) {
                 )
               )
               expect(sorted.status).toBe(200)
+              const sortedPage = yield* json(sorted, ListBody)
+              const sortedTitles = sortedPage.items.map((item) => item.title)
+              expect(sortedTitles.indexOf("Alpha")).toBeGreaterThanOrEqual(0)
+              expect(sortedTitles.indexOf("Beta")).toBeGreaterThanOrEqual(0)
+              expect(sortedTitles.indexOf("Alpha")).toBeLessThan(
+                sortedTitles.indexOf("Beta")
+              )
 
               const updated = yield* HttpClient.execute(
                 HttpClientRequest.patch(`/api/collections/e2e_mysql_posts/${post.id}`).pipe(

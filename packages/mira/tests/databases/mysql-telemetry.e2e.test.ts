@@ -6,6 +6,7 @@ import { describe, it } from "@effect/vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { Effect, Redacted } from "effect"
 import mysql from "mysql2/promise"
+import type { RowDataPacket } from "mysql2/promise"
 import { expect } from "vitest"
 
 import { applyRulesToCollections, defineRule, Mira } from "@/app/index.js"
@@ -226,6 +227,24 @@ for (const engine of engines) {
               expect(
                 afterDelete.items.filter((row) => row.id === "e2e-mysql-dup")
               ).toHaveLength(1)
+
+              const firstPage = yield* read.listLogs({
+                limit: 1,
+                after: null,
+                filter: null,
+                traceId: null
+              })
+              expect(firstPage.items).toHaveLength(1)
+              if (firstPage.nextCursor !== null) {
+                const secondPage = yield* read.listLogs({
+                  limit: 1,
+                  after: firstPage.nextCursor,
+                  filter: null,
+                  traceId: null
+                })
+                expect(secondPage.items).toHaveLength(1)
+                expect(secondPage.items[0]?.id).not.toBe(firstPage.items[0]?.id)
+              }
             }).pipe(Effect.provide(appInstance.buildServiceLayer()))
           })
         ),
@@ -262,9 +281,24 @@ for (const engine of engines) {
               })
               expect(logs.items.some((row) => row.id === "e2e-mysql-dedicated")).toBe(true)
             }).pipe(Effect.provide(appInstance.buildServiceLayer()))
+
+            const appTables = yield* Effect.promise(async () => {
+              const connection = await mysql.createConnection(databaseUrlValue)
+              try {
+                const [rows] = await connection.query<Array<RowDataPacket>>(
+                  "SELECT TABLE_NAME AS name FROM information_schema.tables WHERE TABLE_SCHEMA = DATABASE()"
+                )
+                return rows.map((row) => String(row["name"]))
+              } finally {
+                await connection.end()
+              }
+            })
+            expect(appTables).not.toContain("logs")
+            expect(appTables).not.toContain("spans")
           })
         ),
       120_000
     )
   })
 }
+

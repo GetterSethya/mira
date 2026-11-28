@@ -30,7 +30,7 @@ published by CI.
   challenge stores use the extended `StoreSqlCapabilities` seam. MySQL gets
   quoted reserved identifiers, `ON DUPLICATE KEY UPDATE` clauses, `LONGTEXT`
   values, a generated `live_key` column for the challenge live-row invariant, a
-  locked `FOR UPDATE NOWAIT` rate-limit path with all-or-nothing rollback, and
+  locked `FOR UPDATE` rate-limit path with all-or-nothing rollback, and
   `SQL_CALC`-free batch retention. SQLite and PostgreSQL keep their existing
   schema and behavior.
 - **MySQL/MariaDB telemetry.** The dialect hooks have no setup or cleanup

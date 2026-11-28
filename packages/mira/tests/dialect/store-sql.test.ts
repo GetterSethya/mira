@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, it } from "@effect/vitest"
-import { Data, Effect, Result } from "effect"
+import { Data, Effect, Exit, Result } from "effect"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -8,7 +8,11 @@ import type { StoreSqlCapabilities } from "@/dialect/dialect.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import { libsqlDialect } from "@/dialect/dialect-libsql.js"
 import { postgresStoreSql } from "@/dialect/dialect-postgres.js"
-import { withStoreBootstrap } from "@/dialect/store-sql.js"
+import {
+  ensureStoreColumn,
+  ensureStoreIndex,
+  withStoreBootstrap
+} from "@/dialect/store-sql.js"
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 
@@ -136,6 +140,53 @@ describe("store capabilities", () => {
     expect(postgresStoreSql.isRetryable({ code: "23505" })).toBe(false)
     expect(postgresStoreSql.transactionLockTimeoutSql).toContain("2s")
   })
+})
+
+describe("ensureStoreIndex and ensureStoreColumn", () => {
+  it.effect("ignores only classified bootstrap errors", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const lenient: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
+        isIgnorableBootstrapError: () => true
+      }
+      yield* ensureStoreIndex(sql, lenient, "THIS IS NOT VALID SQL")
+
+      const strict: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
+        isIgnorableBootstrapError: () => false
+      }
+      const exit = yield* Effect.exit(
+        ensureStoreIndex(sql, strict, "THIS IS NOT VALID SQL")
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+    }).pipe(Effect.provide(sqliteLayer))
+  )
+
+  it.effect("adds a missing column once and reports whether it ran", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe("CREATE TABLE _column_probe (id INTEGER)")
+
+      const added = yield* ensureStoreColumn(
+        sql,
+        sqliteDialect.store,
+        "_column_probe",
+        "extra",
+        "ALTER TABLE _column_probe ADD COLUMN extra TEXT"
+      )
+      expect(added).toBe(true)
+
+      const again = yield* ensureStoreColumn(
+        sql,
+        sqliteDialect.store,
+        "_column_probe",
+        "extra",
+        "ALTER TABLE _column_probe ADD COLUMN extra TEXT"
+      )
+      expect(again).toBe(false)
+    }).pipe(Effect.provide(sqliteLayer))
+  )
 })
 
 describe("duplicate key classifiers", () => {

@@ -27,11 +27,6 @@ export const withStoreBootstrap = <E, R>(
   return sql
     .withTransaction(
       Effect.gen(function* () {
-        yield* Effect.forEach(
-          [...store.bootstrapSql, ...(store.bootstrapSetupSql ?? [])],
-          (statement) => sql.unsafe(statement).pipe(Effect.asVoid),
-          { discard: true }
-        )
         const restore = Effect.forEach(
           store.bootstrapRestoreSql ?? [],
           (statement) =>
@@ -41,7 +36,15 @@ export const withStoreBootstrap = <E, R>(
             ),
           { discard: true }
         )
-        return yield* f(sql).pipe(Effect.ensuring(restore))
+        const bootstrap = Effect.gen(function* () {
+          yield* Effect.forEach(
+            [...store.bootstrapSql, ...(store.bootstrapSetupSql ?? [])],
+            (statement) => sql.unsafe(statement).pipe(Effect.asVoid),
+            { discard: true }
+          )
+          return yield* f(sql)
+        })
+        return yield* bootstrap.pipe(Effect.ensuring(restore))
       })
     )
     .pipe(

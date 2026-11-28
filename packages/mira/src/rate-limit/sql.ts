@@ -201,9 +201,11 @@ export const SqlRateLimitStoreLive = Layer.effect(
                 const lockedRow = locked[0]
                 if (lockedRow === undefined) {
                   current = undefined
+                  initialUsed.delete(entry.bucket)
                 } else {
                   current = Number(lockedRow.used)
                   usedByBucket.set(entry.bucket, current)
+                  initialUsed.set(entry.bucket, current)
                 }
               }
 

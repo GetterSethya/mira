@@ -16,6 +16,25 @@ export class MysqlConfigError extends Error {
   }
 }
 
+export type MysqlVersionSupport = "supported" | "unsupported" | "unparseable"
+
+/**
+ * Classifies a `VERSION()` string against the documented server floor:
+ * MySQL 8.4+ or MariaDB 11.4.6+. Newer majors of either flavor are accepted.
+ */
+export const checkMysqlVersion = (version: string): MysqlVersionSupport => {
+  const parsed = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
+  if (parsed === null) return "unparseable"
+  const major = Number(parsed[1])
+  const minor = Number(parsed[2])
+  const patch = Number(parsed[3])
+  const isMariaDb = version.toLowerCase().includes("mariadb")
+  const supported = isMariaDb
+    ? major > 11 || (major === 11 && (minor > 4 || (minor === 4 && patch >= 6)))
+    : major > 8 || (major === 8 && minor >= 4)
+  return supported ? "supported" : "unsupported"
+}
+
 export type MysqlSslOptions = {
   readonly ca?: string
   readonly cert?: string
@@ -149,23 +168,15 @@ export const MysqlDatabase = (config: MysqlDatabaseConfig): MiraDatabase => {
              WHERE collation_name = 'utf8mb4_0900_bin') AS collation_present
         `
         const version = rows[0]?.version ?? ""
-        const parsed = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
-        if (parsed === null) {
+        const support = checkMysqlVersion(version)
+        if (support === "unparseable") {
           return yield* Effect.die(
             new MysqlConfigError(
               `could not parse the MySQL/MariaDB version from "${version}"`
             )
           )
         }
-        const major = Number(parsed[1])
-        const minor = Number(parsed[2])
-        const patch = Number(parsed[3])
-        const isMariaDb = version.toLowerCase().includes("mariadb")
-        const supported = isMariaDb
-          ? major > 11 ||
-            (major === 11 && (minor > 4 || (minor === 4 && patch >= 6)))
-          : major > 8 || (major === 8 && minor >= 4)
-        if (!supported) {
+        if (support === "unsupported") {
           return yield* Effect.die(
             new MysqlConfigError(
               `unsupported MySQL/MariaDB version ${version}; use MySQL 8.4+ or MariaDB 11.4.6+`

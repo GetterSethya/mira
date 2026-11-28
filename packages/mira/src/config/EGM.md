@@ -22,7 +22,7 @@ falls back to another port can report the real one.
 - `_config` is created if absent as `key TEXT PRIMARY KEY, value TEXT NOT NULL` through `withStoreBootstrap` with the shared `CONFIG_TABLE_DDL` [config.ts:AppConfigLive] [config-sql.ts:CONFIG_TABLE_DDL]
 - Seed defaults are `app_name = "mira"`, `port = "8080"`, `use_s3 = "false"`, and `log_retention_days = "30"`; an existing value always wins because each insert is `ON CONFLICT DO NOTHING` [config.ts:AppConfigLive]
 - `application_url` is inserted only when absent and derives its default from the stored `port`, not this process's local candidate. A stored custom URL is never overwritten [config.ts:AppConfigLive]
-- `jwt_secret` is generated as hex of 48 random bytes and inserted with `ON CONFLICT DO NOTHING RETURNING key`; the final value always comes from the post-insert re-read so concurrent replicas converge on one secret [config.ts:AppConfigLive]
+- `jwt_secret` is generated as hex of 48 random bytes and inserted with the dialect's insert-ignore clause; the final value always comes from the post-insert re-read so concurrent replicas converge on one secret [config.ts:AppConfigLive]
 - `jwtSecret` is always a `Redacted<string>` [config.ts:AppConfigLive]
 - S3 keys `s3_endpoint`, `s3_bucket_name`, `s3_region_name`, `s3_access_key`, `s3_secret` are mandatory when `use_s3 = "true"`; a missing one dies via `require` [config.ts:require]
 - `s3Config` is `Option.none()` when `useS3` is false and `Option.some(...)` only when true [config.ts:s3Config]
@@ -34,7 +34,7 @@ falls back to another port can report the real one.
 ## Side Effects
 
 - Emits `CREATE TABLE IF NOT EXISTS _config (...)` through the shared store bootstrap [config.ts:AppConfigLive]
-- Reads the whole `_config` table with `SqlSchema.findAll`, inserts missing seed rows with `ON CONFLICT DO NOTHING`, and re-reads after the inserts [config.ts:AppConfigLive]
+- Reads the whole `_config` table with `SqlSchema.findAll`, inserts missing seed rows with the dialect's insert-ignore clause (`ON CONFLICT DO NOTHING` or `INSERT IGNORE`/`ON DUPLICATE KEY UPDATE`), and re-reads after the inserts [config.ts:AppConfigLive]
 - Emits `Effect.logInfo` when it generates and persists `jwt_secret` [config.ts:AppConfigLive]
 - Consumes the `CryptoService` dependency to generate the initial `jwt_secret` (OS-backed `node:crypto` behind the Node layer) [config.ts:AppConfigLive]
 - Mutates in-process `boundPort` / `boundUrl` state via `updateBoundPort` after a port fallback [config.ts:updateBoundPort]
