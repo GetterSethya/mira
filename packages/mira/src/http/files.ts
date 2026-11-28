@@ -1,5 +1,5 @@
 import type { CollectionSchema } from "@gettersethya/mira-client"
-import { Cause, Effect, Exit, Option, Ref, Stream } from "effect"
+import { Cause, Effect, Option, Ref, Stream } from "effect"
 import type { HttpServerRequest } from "effect/http"
 import * as Multipart from "effect/http/Multipart"
 
@@ -54,11 +54,7 @@ export function uploadBudget(schema: CollectionSchema) {
  * part-count reasons surface as `PayloadTooLargeError` (413); every parse
  * problem (and an over-long form field) surfaces as `ValidationError` (422).
  */
-function multipartErrorToCollectionError(
-  collectionName: string,
-  budget: number,
-  error: Multipart.MultipartError
-) {
+function multipartErrorToCollectionError(collectionName: string, budget: number, error: Multipart.MultipartError) {
   switch (error.reason._tag) {
     case "TooManyParts":
       return new PayloadTooLargeError({
@@ -179,11 +175,7 @@ export function processMultipartUpload(
 
     const deleteCreated = Ref.get(createdKeys).pipe(
       Effect.flatMap((keys) =>
-        Effect.forEach(
-          keys,
-          (key) => fileStorage.delete(key).pipe(Effect.catch(() => Effect.void)),
-          { concurrency: "unbounded" }
-        )
+        Effect.forEach(keys, (key) => Effect.ignore(fileStorage.delete(key)), { concurrency: "unbounded" })
       )
     )
 
@@ -210,11 +202,7 @@ export function processMultipartUpload(
               }
 
               const allowedMimes = prop["x-mimeTypes"]
-              if (
-                allowedMimes !== undefined &&
-                allowedMimes.length > 0 &&
-                !allowedMimes.includes(part.contentType)
-              ) {
+              if (allowedMimes !== undefined && allowedMimes.length > 0 && !allowedMimes.includes(part.contentType)) {
                 return yield* new ValidationError({
                   collection: collectionName,
                   issues: [
@@ -237,7 +225,7 @@ export function processMultipartUpload(
 
               const overLimit = yield* Ref.get(exceeded)
               if (overLimit) {
-                yield* fileStorage.delete(key).pipe(Effect.catch(() => Effect.void))
+                yield* Effect.ignore(fileStorage.delete(key))
                 yield* Ref.update(violation, (v) => (v === null ? { field: part.key, maxSize } : v))
               } else {
                 fileKeys[part.key] = key
@@ -266,9 +254,7 @@ export function processMultipartUpload(
       if (violationEntry !== null) {
         return yield* new ValidationError({
           collection: collectionName,
-          issues: [
-            `File on field "${violationEntry.field}" exceeds maximum size of ${violationEntry.maxSize} bytes`
-          ]
+          issues: [`File on field "${violationEntry.field}" exceeds maximum size of ${violationEntry.maxSize} bytes`]
         })
       }
 
@@ -293,9 +279,7 @@ export function processMultipartUpload(
 
     // Clean up every allocated file on any failure or interruption, but keep
     // them on success.
-    return yield* parse.pipe(
-      Effect.onExit((exit) => (Exit.isFailure(exit) ? deleteCreated : Effect.void))
-    )
+    return yield* parse.pipe(Effect.onError(() => deleteCreated))
   }).pipe(
     Effect.provideContext(
       Multipart.limitsServices({

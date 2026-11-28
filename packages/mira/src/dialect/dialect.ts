@@ -233,10 +233,7 @@ export type StoreChallengeLive =
  * guarded conditional upsert nor UPDATE RETURNING. A simple UPDATE (for
  * example consume-by-id) only needs the reader, not a transaction.
  */
-export type StoreMutationResult = Exclude<
-  DeleteResultStrategy,
-  { readonly _tag: "precheck" }
->
+export type StoreMutationResult = Exclude<DeleteResultStrategy, { readonly _tag: "precheck" }>
 
 export type StoreSqlCapabilities = {
   /** Text type for any indexed text column. */
@@ -347,12 +344,8 @@ export type TranslatedPlan = {
  */
 export type LockExecutor = {
   readonly run: (statement: string) => Effect.Effect<void, SqlError.SqlError>
-  readonly runParameterized: (
-    statement: ParameterizedStatement
-  ) => Effect.Effect<void, SqlError.SqlError>
-  readonly query: (
-    statement: string
-  ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, SqlError.SqlError>
+  readonly runParameterized: (statement: ParameterizedStatement) => Effect.Effect<void, SqlError.SqlError>
+  readonly query: (statement: string) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, SqlError.SqlError>
   readonly queryParameterized: (
     statement: ParameterizedStatement
   ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, SqlError.SqlError>
@@ -434,9 +427,7 @@ export type MigrationModel =
         readonly setupSql: ReadonlyArray<string>
         /** Session settings for a read-only preview. */
         readonly previewSetupSql?: ReadonlyArray<string>
-        readonly restoreSql: (
-          previous: Readonly<Record<string, unknown>>
-        ) => ReadonlyArray<string>
+        readonly restoreSql: (previous: Readonly<Record<string, unknown>>) => ReadonlyArray<string>
       }
       /**
        * Session-scoped migration lock. Omitted when the engine needs none.
@@ -481,11 +472,7 @@ export type DialectType = {
   /** Difference between two timestamp expressions in the requested unit. */
   timestampDiff: (left: string, right: string, unit: TimestampUnit) => string
   /** Case-insensitive prefix or infix match. */
-  caseInsensitiveLike: (
-    left: string,
-    right: string,
-    mode: "prefix" | "contains"
-  ) => string
+  caseInsensitiveLike: (left: string, right: string, mode: "prefix" | "contains") => string
   /**
    * Renders a case-insensitive match of `left` against a complete pattern
    * expression `right`.
@@ -535,11 +522,7 @@ export type DialectType = {
    * through {@link quoteLiteral}. Schema JSON can contain quotes and
    * backslashes.
    */
-  upsert: (
-    table: string,
-    record: Readonly<Record<string, unknown>>,
-    conflictKeys: ReadonlyArray<string>
-  ) => string
+  upsert: (table: string, record: Readonly<Record<string, unknown>>, conflictKeys: ReadonlyArray<string>) => string
   /**
    * Parameterized form of {@link upsert}. A statement-mode dialect must supply
    * it so metadata JSON is bound instead of escaped.
@@ -616,9 +599,7 @@ export type DialectType = {
    * Read-only catalog audit of every desired collection's text shape. Returns
    * human-readable drift strings. The audit never repairs.
    */
-  readonly auditTextShape?: (
-    ctx: TranslatePlanContext
-  ) => Effect.Effect<ReadonlyArray<string>, SqlError.SqlError>
+  readonly auditTextShape?: (ctx: TranslatePlanContext) => Effect.Effect<ReadonlyArray<string>, SqlError.SqlError>
 }
 
 /** The dialect surface the migrator needs. */
@@ -649,12 +630,7 @@ export type StatementMigrationDialect = MigrationDialect & {
 /** Narrow dialect view used by rule compilation, caching, and cache tags. */
 export type RuleSqlDialect = Pick<
   DialectType,
-  | "quoteIdentifier"
-  | "currentTimestamp"
-  | "timestampAdd"
-  | "timestampDiff"
-  | "caseInsensitiveLike"
-  | "castValue"
+  "quoteIdentifier" | "currentTimestamp" | "timestampAdd" | "timestampDiff" | "caseInsensitiveLike" | "castValue"
 >
 
 /**
@@ -678,18 +654,12 @@ export type DdlSqlDialect = Pick<
  * Rewrites anonymous `?` tokens to the dialect's placeholders. Quoted
  * identifiers and string literals are left untouched.
  */
-export function rewritePlaceholders(
-  statement: string,
-  dialect: Pick<DialectType, "placeholder">
-): string {
+export function rewritePlaceholders(statement: string, dialect: Pick<DialectType, "placeholder">): string {
   let index = 0
-  return transformSqlCode(statement, (code) =>
-    code.replace(/\?/g, () => dialect.placeholder(++index))
-  )
+  return transformSqlCode(statement, (code) => code.replace(/\?/g, () => dialect.placeholder(++index)))
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 const DEFAULT_ERROR_CODE_KEYS = ["code", "errno", "errstr"] as const
 
@@ -718,7 +688,13 @@ export function errorHasCode(
 
     for (const key of keys) {
       const candidate = value[key]
-      if (candidate !== undefined && wanted.has(String(candidate))) return true
+      const text =
+        typeof candidate === "string"
+          ? candidate
+          : typeof candidate === "number" || typeof candidate === "bigint"
+            ? String(candidate)
+            : undefined
+      if (text !== undefined && wanted.has(text)) return true
     }
 
     for (const key of ["reason", "cause", "error", "details"] as const) {
@@ -768,9 +744,7 @@ export function translateStep(
 }
 
 /** `translatePlan` for dialects that can express every step on its own. */
-export function perStepPlan(
-  translate: (step: MigrationStep) => Array<string>
-): DialectType["translatePlan"] {
+export function perStepPlan(translate: (step: MigrationStep) => Array<string>): DialectType["translatePlan"] {
   return (steps) =>
     Effect.gen(function* () {
       const statements: Array<string> = []

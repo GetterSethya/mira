@@ -83,11 +83,11 @@ const syncEnv = process.env.BENCH_SYNCHRONOUS
 const synchronous = syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : "default"
 
 const MemorySchema = Schema.Struct({
-  rss: Schema.Number,
-  heapTotal: Schema.Number,
-  heapUsed: Schema.Number,
-  external: Schema.Number,
-  arrayBuffers: Schema.Number
+  rss: Schema.Finite,
+  heapTotal: Schema.Finite,
+  heapUsed: Schema.Finite,
+  external: Schema.Finite,
+  arrayBuffers: Schema.Finite
 })
 
 const ListFilterSchema = Schema.Struct({

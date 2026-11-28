@@ -72,8 +72,9 @@ export const ensureStoreIndex = (
 ): Effect.Effect<void, SqlError.SqlError> =>
   sql.unsafe(statement).pipe(
     Effect.asVoid,
-    Effect.catch((error) =>
-      store.isIgnorableBootstrapError(error) ? Effect.void : Effect.fail(error)
+    Effect.catchIf(
+      (error) => store.isIgnorableBootstrapError(error),
+      () => Effect.void
     )
   )
 
@@ -90,15 +91,14 @@ export const ensureStoreColumn = (
   addStatement: string
 ): Effect.Effect<boolean, SqlError.SqlError> =>
   Effect.gen(function* () {
-    const rows = yield* sql.unsafe<Record<string, unknown>>(
-      store.columnExistsSql(table, column)
-    )
+    const rows = yield* sql.unsafe<Record<string, unknown>>(store.columnExistsSql(table, column))
     if (rows.length > 0) return false
 
     yield* sql.unsafe(addStatement).pipe(
       Effect.asVoid,
-      Effect.catch((error) =>
-        store.isIgnorableBootstrapError(error) ? Effect.void : Effect.fail(error)
+      Effect.catchIf(
+        (error) => store.isIgnorableBootstrapError(error),
+        () => Effect.void
       )
     )
     return true

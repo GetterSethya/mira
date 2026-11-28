@@ -1,7 +1,7 @@
 import type { AnyCollectionDef } from "@gettersethya/mira-collection"
-import { Bytes,Field } from "@gettersethya/mira-collection"
+import { Bytes, Field } from "@gettersethya/mira-collection"
 import { Effect, MutableRef, Option, Schedule } from "effect"
-import type { HttpClientRequest } from "effect/http";
+import type { HttpClientRequest } from "effect/http"
 import { describe, expect, it } from "vitest"
 
 import { makeCollectionClient } from "@/client/collection.js"
@@ -64,9 +64,7 @@ const FileCollection: AnyCollectionDef = {
   }
 }
 
-function makeTestExecute(
-  captured: Array<{ method: string; url: string }>
-): ExecuteFn {
+function makeTestExecute(captured: Array<{ method: string; url: string }>): ExecuteFn {
   return (req: HttpClientRequest.HttpClientRequest) =>
     Effect.sync(() => {
       captured.push({
@@ -113,7 +111,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     await client.getList().raw()
@@ -133,16 +131,18 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
-    await client.getList({
-      filter: (f) => f.field("completed").eq(false),
-      sort: "title",
-      order: "asc",
-      cursor: 10,
-      limit: 20
-    }).raw()
+    await client
+      .getList({
+        filter: (f) => f.field("completed").eq(false),
+        sort: "title",
+        order: "asc",
+        cursor: 10,
+        limit: 20
+      })
+      .raw()
 
     expect(captured[0].url).toContain("filter=")
     expect(captured[0].url).toContain("sort=title")
@@ -163,7 +163,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     await client.getList({ cursor: 42 }).raw()
@@ -183,7 +183,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     await client.getList({ cursor: "9007199254740993" }).raw()
@@ -202,7 +202,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     await client.getOne("abc123").raw()
@@ -222,7 +222,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     await client.create().raw({ title: "New Task" })
@@ -251,7 +251,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     const records = await client.createMany().raw([{ title: "A" }, { title: "B" }])
@@ -282,12 +282,13 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
-    const records = await client
-      .updateMany()
-      .raw([{ id: "1", data: { title: "A2" } }, { id: "2", data: { title: "B2" } }])
+    const records = await client.updateMany().raw([
+      { id: "1", data: { title: "A2" } },
+      { id: "2", data: { title: "B2" } }
+    ])
     expect(captured[0].method).toBe("PATCH")
     expect(captured[0].url).toBe("/api/collections/tasks/bulk")
     expect(records.map((r) => r.title)).toEqual(["A2", "B2"])
@@ -309,7 +310,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     const deleted = await client.deleteMany().raw(["a", "b"])
@@ -330,7 +331,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     await client.update().raw({ id: "abc123", data: { title: "Updated" } })
@@ -350,7 +351,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     await client.delete().raw("abc123")
@@ -370,12 +371,13 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: true,
+      isAuth: true
     })
 
-    const authWithPassword = client.authWithPassword
-    if (!authWithPassword) throw new Error("authWithPassword should be defined when isAuth=true")
-    const result = await authWithPassword().raw({ email: "test@example.com", password: "secret" })
+    if (client.authWithPassword === undefined) {
+      throw new Error("authWithPassword should be defined when isAuth=true")
+    }
+    const result = await client.authWithPassword().raw({ email: "test@example.com", password: "secret" })
     expect(captured[0].method).toBe("POST")
     expect(captured[0].url).toBe("/api/collections/users/auth-with-password")
     if (!("token" in result)) throw new Error("Expected a token result")
@@ -394,12 +396,13 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: true,
+      isAuth: true
     })
 
-    const register = client.register
-    if (!register) throw new Error("register should be defined when isAuth=true")
-    await register().raw({ name: "New User", email: "a@b.com", password: "secret", passwordConfirm: "secret" })
+    if (client.register === undefined) {
+      throw new Error("register should be defined when isAuth=true")
+    }
+    await client.register().raw({ name: "New User", email: "a@b.com", password: "secret", passwordConfirm: "secret" })
     expect(captured[0].method).toBe("POST")
     expect(captured[0].url).toBe("/api/collections/users")
   })
@@ -416,12 +419,13 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: true,
+      isAuth: true
     })
 
-    const requestEmailChange = client.requestEmailChange
-    if (!requestEmailChange) throw new Error("requestEmailChange should be defined when isAuth=true")
-    await requestEmailChange().raw({ newEmail: "new@example.com", oldPassword: "secret" })
+    if (client.requestEmailChange === undefined) {
+      throw new Error("requestEmailChange should be defined when isAuth=true")
+    }
+    await client.requestEmailChange().raw({ newEmail: "new@example.com", oldPassword: "secret" })
     expect(captured[0].method).toBe("POST")
     expect(captured[0].url).toBe("/api/collections/users/request-email-change")
   })
@@ -439,12 +443,13 @@ describe("CollectionClient", () => {
       authTokenRef,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: true,
+      isAuth: true
     })
 
-    const confirmEmailChange = client.confirmEmailChange
-    if (!confirmEmailChange) throw new Error("confirmEmailChange should be defined when isAuth=true")
-    await confirmEmailChange().raw({ token: "confirm-token" })
+    if (client.confirmEmailChange === undefined) {
+      throw new Error("confirmEmailChange should be defined when isAuth=true")
+    }
+    await client.confirmEmailChange().raw({ token: "confirm-token" })
     expect(captured[0].method).toBe("POST")
     expect(captured[0].url).toBe("/api/collections/users/confirm-email-change")
     expect(MutableRef.get(authTokenRef)).toBeNull()
@@ -462,10 +467,10 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
-    expect(client.register).toBeUndefined()
+    expect("register" in client).toBe(false)
   })
 
   it("me → GET /api/auth/me and unwraps the envelope to the record", async () => {
@@ -484,12 +489,11 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: true,
+      isAuth: true
     })
 
-    const me = client.me
-    if (!me) throw new Error("me should be defined when isAuth=true")
-    const record = await me().raw()
+    if (client.me === undefined) throw new Error("me should be defined when isAuth=true")
+    const record = await client.me().raw()
     expect(captured[0].method).toBe("GET")
     expect(captured[0].url).toBe("/api/auth/me")
     expect(record).toEqual({ id: "1", created: "", updated: "", name: "Budi" })
@@ -507,12 +511,11 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: true,
+      isAuth: true
     })
 
-    const me = client.me
-    if (!me) throw new Error("me should be defined when isAuth=true")
-    await expect(me().raw()).rejects.toMatchObject({ status: 401 })
+    if (client.me === undefined) throw new Error("me should be defined when isAuth=true")
+    await expect(client.me().raw()).rejects.toMatchObject({ status: 401 })
   })
 
   it("me is undefined on non-auth collections", async () => {
@@ -527,10 +530,10 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
-    expect(client.me).toBeUndefined()
+    expect("me" in client).toBe(false)
   })
 
   it("create with Blob value → uses FormData body", async () => {
@@ -545,7 +548,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     const blob = new Blob(["data"], { type: "text/plain" })
@@ -565,7 +568,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     await client.create().raw({ label: "test", attachment: "existing-file.png" })
@@ -584,7 +587,7 @@ describe("CollectionClient", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
 
     const blob = new Blob(["new content"], { type: "text/plain" })
@@ -604,17 +607,16 @@ describe("getFirstOrNone", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
   }
 
   it("returns Option.Some when an item matches the filter", async () => {
     const record = { id: "1", seqId: 1, created: "", updated: "", title: "Hello", completed: false }
-    const execute: ExecuteFn = () =>
-      Effect.succeed(mockResponse({ items: [record], nextCursor: null }))
+    const execute: ExecuteFn = () => Effect.succeed(mockResponse({ items: [record], nextCursor: null }))
 
     const result = await makeClient(execute)
-      .getFirstOrNone(f => f.field("completed").eq(false))
+      .getFirstOrNone((f) => f.field("completed").eq(false))
       .raw()
 
     expect(Option.isSome(result)).toBe(true)
@@ -622,11 +624,10 @@ describe("getFirstOrNone", () => {
   })
 
   it("returns Option.None when no item matches", async () => {
-    const execute: ExecuteFn = () =>
-      Effect.succeed(mockResponse({ items: [], nextCursor: null }))
+    const execute: ExecuteFn = () => Effect.succeed(mockResponse({ items: [], nextCursor: null }))
 
     const result = await makeClient(execute)
-      .getFirstOrNone(f => f.field("completed").eq(true))
+      .getFirstOrNone((f) => f.field("completed").eq(true))
       .raw()
 
     expect(Option.isNone(result)).toBe(true)
@@ -640,7 +641,7 @@ describe("getFirstOrNone", () => {
     }
 
     await makeClient(execute)
-      .getFirstOrNone(f => f.field("completed").eq(false))
+      .getFirstOrNone((f) => f.field("completed").eq(false))
       .raw()
 
     expect(captured[0].url).toContain("limit=1")
@@ -654,7 +655,7 @@ describe("getFirstOrNone", () => {
     }
 
     await makeClient(execute)
-      .getFirstOrNone(f => f.field("completed").eq(false))
+      .getFirstOrNone((f) => f.field("completed").eq(false))
       .raw()
 
     expect(captured[0].url).toContain("filter=")
@@ -668,7 +669,7 @@ describe("getFirstOrNone", () => {
     }
 
     await makeClient(execute)
-      .getFirstOrNone(f => f.field("completed").eq(false), { sort: "title", order: "desc" })
+      .getFirstOrNone((f) => f.field("completed").eq(false), { sort: "title", order: "desc" })
       .raw()
 
     expect(captured[0].url).toContain("sort=title")
@@ -687,7 +688,7 @@ describe("getFullList", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
   }
 
@@ -717,10 +718,9 @@ describe("getFullList", () => {
   it("returns a flat array unwrapped from the items envelope", async () => {
     const records = [
       { id: "1", seqId: 1, created: "", updated: "", title: "A", completed: false },
-      { id: "2", seqId: 2, created: "", updated: "", title: "B", completed: true },
+      { id: "2", seqId: 2, created: "", updated: "", title: "B", completed: true }
     ]
-    const execute: ExecuteFn = () =>
-      Effect.succeed(mockResponse({ items: records, nextCursor: null }))
+    const execute: ExecuteFn = () => Effect.succeed(mockResponse({ items: records, nextCursor: null }))
 
     const result = await makeClient(execute).getFullList().raw()
     expect(result).toEqual(records)
@@ -745,7 +745,7 @@ describe("getFullList", () => {
     }
 
     await makeClient(execute)
-      .getFullList({ filter: f => f.field("completed").eq(true), sort: "title", order: "asc" })
+      .getFullList({ filter: (f) => f.field("completed").eq(true), sort: "title", order: "asc" })
       .raw()
 
     expect(captured[0].url).toContain("filter=")
@@ -761,7 +761,7 @@ describe("retryOptions", () => {
       Effect.gen(function* () {
         count++
         if (count <= failCount) {
-          return yield* Effect.fail(new MiraError({ status: 503, body: "unavailable" }))
+          return yield* new MiraError({ status: 503, body: "unavailable" })
         }
         if (req.method === "DELETE") return mockResponse(undefined)
         if (req.url.includes("auth-with-password")) return mockResponse({ token: "tok", record: { id: "u1" } })
@@ -771,7 +771,10 @@ describe("retryOptions", () => {
     return { execute, callsMade: () => count }
   }
 
-  function makeClient(execute: ExecuteFn, defaultRetryOptions?: { schedule: Schedule.Schedule<unknown, MiraError, never> }) {
+  function makeClient(
+    execute: ExecuteFn,
+    defaultRetryOptions?: { schedule: Schedule.Schedule<unknown, MiraError, never> }
+  ) {
     return makeCollectionClient({
       collectionName: "tasks",
       schema: TestCollection.schema,
@@ -790,7 +793,9 @@ describe("retryOptions", () => {
 
   it("getList retries on failure and succeeds", async () => {
     const { callsMade, execute } = makeRetryExecute(2)
-    await makeClient(execute).getList({ retryOptions: { schedule: retrySchedule } }).raw()
+    await makeClient(execute)
+      .getList({ retryOptions: { schedule: retrySchedule } })
+      .raw()
     expect(callsMade()).toBe(3)
   })
 
@@ -799,18 +804,22 @@ describe("retryOptions", () => {
     const execute: ExecuteFn = () =>
       Effect.gen(function* () {
         calls++
-        return yield* Effect.fail(new MiraError({ status: 500, body: { error: "internal" } }))
+        return yield* new MiraError({ status: 500, body: { error: "internal" } })
       })
 
     await expect(
-      makeClient(execute).getOne("1", { retryOptions: { schedule: retrySchedule } }).raw()
+      makeClient(execute)
+        .getOne("1", { retryOptions: { schedule: retrySchedule } })
+        .raw()
     ).rejects.toBeInstanceOf(MiraError)
     expect(calls).toBe(1)
   })
 
   it("getOne retries on failure and succeeds", async () => {
     const { callsMade, execute } = makeRetryExecute(2)
-    await makeClient(execute).getOne("1", { retryOptions: { schedule: retrySchedule } }).raw()
+    await makeClient(execute)
+      .getOne("1", { retryOptions: { schedule: retrySchedule } })
+      .raw()
     expect(callsMade()).toBe(3)
   })
 
@@ -822,7 +831,9 @@ describe("retryOptions", () => {
 
   it("update retries on failure via defaultRetryOptions", async () => {
     const { callsMade, execute } = makeRetryExecute(2)
-    await makeClient(execute, { schedule: retrySchedule }).update().raw({ id: "1", data: { title: "t" } })
+    await makeClient(execute, { schedule: retrySchedule })
+      .update()
+      .raw({ id: "1", data: { title: "t" } })
     expect(callsMade()).toBe(3)
   })
 
@@ -844,18 +855,21 @@ describe("retryOptions", () => {
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
       isAuth: true,
-      defaultRetryOptions: { schedule: retrySchedule },
+      defaultRetryOptions: { schedule: retrySchedule }
     })
-    const authWithPassword = client.authWithPassword
-    if (!authWithPassword) throw new Error("authWithPassword should be defined when isAuth=true")
-    await authWithPassword().raw({ email: "u@test.com", password: "pass" })
+    if (client.authWithPassword === undefined) {
+      throw new Error("authWithPassword should be defined when isAuth=true")
+    }
+    await client.authWithPassword().raw({ email: "u@test.com", password: "pass" })
     expect(callsMade()).toBe(3)
   })
 
   it("propagates error once the retry schedule is exhausted", async () => {
     const { callsMade, execute } = makeRetryExecute(Infinity)
     await expect(
-      makeClient(execute).getOne("1", { retryOptions: { schedule: retrySchedule } }).raw()
+      makeClient(execute)
+        .getOne("1", { retryOptions: { schedule: retrySchedule } })
+        .raw()
     ).rejects.toBeInstanceOf(MiraError)
     expect(callsMade()).toBe(3)
   })
@@ -878,7 +892,7 @@ describe("retryOptions", () => {
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
       isAuth: false,
-      defaultRetryOptions: { schedule: retrySchedule },
+      defaultRetryOptions: { schedule: retrySchedule }
     })
     await client.getOne("1").raw()
     expect(callsMade()).toBe(3)
@@ -896,7 +910,7 @@ describe("retryOptions", () => {
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
       isAuth: false,
-      defaultRetryOptions: { schedule: Schedule.recurs(5) },
+      defaultRetryOptions: { schedule: Schedule.recurs(5) }
     })
     await client.getOne("1", { retryOptions: { schedule: Schedule.recurs(1) } }).raw()
     expect(callsMade()).toBe(2)
@@ -928,7 +942,7 @@ describe("literalText field — filter builder", () => {
       authTokenRef: null,
       loggedInRef: null,
       fileTokenCacheRef: MutableRef.make(new Map()),
-      isAuth: false,
+      isAuth: false
     })
   }
 
@@ -939,9 +953,11 @@ describe("literalText field — filter builder", () => {
       return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
-    await makeClient(execute).getList({
-      filter: (f) => f.field("role").eq("admin")
-    }).raw()
+    await makeClient(execute)
+      .getList({
+        filter: (f) => f.field("role").eq("admin")
+      })
+      .raw()
 
     expect(captured[0].url).toContain("filter=")
   })
@@ -953,9 +969,11 @@ describe("literalText field — filter builder", () => {
       return Effect.succeed(mockResponse({ items: [], nextCursor: null }))
     }
 
-    await makeClient(execute).getList({
-      filter: (f) => f.field("role").in(["admin", "agent"])
-    }).raw()
+    await makeClient(execute)
+      .getList({
+        filter: (f) => f.field("role").in(["admin", "agent"])
+      })
+      .raw()
 
     expect(captured[0].url).toContain("filter=")
   })

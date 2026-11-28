@@ -29,13 +29,10 @@ const serveErrorFromCause = (cause: Cause.Cause<unknown>): ServeError | null => 
   for (const reason of cause.reasons) {
     if (Cause.isFailReason(reason)) {
       const error: unknown = reason.error
-      const errorCause: unknown =
-        typeof error === "object" && error !== null ? Reflect.get(error, "cause") : undefined
+      const errorCause: unknown = typeof error === "object" && error !== null ? Reflect.get(error, "cause") : undefined
       const isServeError =
         error instanceof ServeError ||
-        (typeof error === "object" &&
-          error !== null &&
-          Reflect.get(error, "_tag") === "ServeError")
+        (typeof error === "object" && error !== null && Reflect.get(error, "_tag") === "ServeError")
       if (isServeError && isAddressInUseValue(errorCause)) {
         return error instanceof ServeError ? error : new ServeError({ cause: errorCause })
       }
@@ -87,12 +84,10 @@ export const makePortRetryServerLayer = (
               return Effect.gen(function* () {
                 yield* Scope.close(scope, Exit.fail(error))
                 if (isAddressInUseValue(error.cause) && remaining > 0) {
-                  yield* Effect.logWarning(
-                    `Port ${candidate} is already in use — trying port ${candidate + 1}...`
-                  )
+                  yield* Effect.logWarning(`Port ${candidate} is already in use — trying port ${candidate + 1}...`)
                   return yield* attempt(candidate + 1, remaining - 1)
                 }
-                return yield* Effect.fail(error)
+                return yield* error
               })
             })
           )

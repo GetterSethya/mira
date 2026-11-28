@@ -23,12 +23,7 @@ import mysql from "mysql2/promise"
 import type { RowDataPacket } from "mysql2"
 import { expect } from "vitest"
 
-import type {
-  LockConnection,
-  LockExecutor,
-  MigrationDialect,
-  TranslatePlanContext
-} from "@/dialect/dialect.js"
+import type { LockConnection, LockExecutor, MigrationDialect, TranslatePlanContext } from "@/dialect/dialect.js"
 import { mysqlMigrationDialect } from "@/dialect/dialect-mysql-migrations.js"
 import type { MigrationError } from "@/migrator/errors.js"
 import { boundLockName } from "@/migrator/lock.js"
@@ -90,9 +85,7 @@ const todosV2 = (): CollectionSchema => {
 
 const todosV2WithTitleIndex = (maxLength?: number): CollectionSchema => {
   const schema = todosV2()
-  const title = maxLength === undefined
-    ? { type: "string" as const }
-    : { type: "string" as const, maxLength }
+  const title = maxLength === undefined ? { type: "string" as const } : { type: "string" as const, maxLength }
   return {
     ...schema,
     properties: { ...schema.properties, title },
@@ -152,10 +145,7 @@ const simpleTable = (): CollectionSchema => {
   }
 }
 
-const todoView = (
-  query: string,
-  properties: ReadonlyArray<string>
-): CollectionSchema => {
+const todoView = (query: string, properties: ReadonlyArray<string>): CollectionSchema => {
   const definitions: CollectionSchema["properties"] = {
     id: { type: "string", "x-system": true, "x-view-only": true },
     seqId: {
@@ -181,10 +171,7 @@ const todoView = (
   }
 }
 
-const withoutProperty = (
-  schema: CollectionSchema,
-  name: string
-): CollectionSchema => {
+const withoutProperty = (schema: CollectionSchema, name: string): CollectionSchema => {
   const properties = { ...schema.properties }
   delete properties[name]
   return { ...schema, properties }
@@ -383,22 +370,16 @@ const defineSuite = (config: EngineConfig) => {
 
   const expectV2Physical = Effect.gen(function* () {
     const columns = yield* columnRows(todosTable)
-    const typeByName = new Map(
-      columns.map((column) => [column.column_name, normalizeType(column.column_type)])
-    )
+    const typeByName = new Map(columns.map((column) => [column.column_name, normalizeType(column.column_type)]))
     expect(typeByName.get("notes")).toBe("longtext")
     expect(typeByName.get("grade")).toBe("int")
     expect(typeByName.get("priority")).toBe("int")
 
-    const indexNames = new Set(
-      (yield* indexRows(todosTable)).map((index) => index.index_name)
-    )
+    const indexNames = new Set((yield* indexRows(todosTable)).map((index) => index.index_name))
     expect(indexNames.has(`idx_${todosTable}_score`)).toBe(true)
     expect(indexNames.has(`idx_${todosTable}_priority`)).toBe(false)
 
-    const viewColumns = (yield* columnRows(todosView)).map(
-      (column) => column.column_name
-    )
+    const viewColumns = (yield* columnRows(todosView)).map((column) => column.column_name)
     expect(viewColumns).toEqual(["id", "seqId", "title", "notes"])
   })
 
@@ -413,18 +394,12 @@ const defineSuite = (config: EngineConfig) => {
       expect(rows).toEqual([{ id: "t1", grade }])
     })
 
-  const makeLayer = (
-    dialect: MigrationDialect,
-    maxConnections: number
-  ) => {
+  const makeLayer = (dialect: MigrationDialect, maxConnections: number) => {
     const base = MysqlClient.layer({
       url: Redacted.make(url),
       maxConnections
     })
-    return Layer.merge(
-      base,
-      makeMigratorLive(dialect).pipe(Layer.provide(base))
-    )
+    return Layer.merge(base, makeMigratorLive(dialect).pipe(Layer.provide(base)))
   }
 
   const runWithEngine = <A, E>(
@@ -488,10 +463,7 @@ const defineSuite = (config: EngineConfig) => {
       }
     })
 
-  const withHeldLock = <A, E>(
-    name: string,
-    body: Effect.Effect<A, E, Migrator | SqlClient.SqlClient>
-  ) =>
+  const withHeldLock = <A, E>(name: string, body: Effect.Effect<A, E, Migrator | SqlClient.SqlClient>) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       return yield* Effect.scoped(
@@ -499,9 +471,7 @@ const defineSuite = (config: EngineConfig) => {
           const conn = yield* sql.reserve
           yield* conn.executeUnprepared("SELECT GET_LOCK(?, 0) AS acquired", [name], undefined)
           const result = yield* body
-          yield* conn
-            .executeUnprepared("SELECT RELEASE_LOCK(?) AS released", [name], undefined)
-            .pipe(Effect.ignore)
+          yield* conn.executeUnprepared("SELECT RELEASE_LOCK(?) AS released", [name], undefined).pipe(Effect.ignore)
           return result
         })
       )
@@ -528,9 +498,7 @@ const defineSuite = (config: EngineConfig) => {
         })
         yield* Effect.tryPromise({
           try: async () => {
-            await conn.query("SET SESSION wait_timeout = ?", [
-              settings?.lockWaitTimeoutSeconds ?? 600
-            ])
+            await conn.query("SET SESSION wait_timeout = ?", [settings?.lockWaitTimeoutSeconds ?? 600])
           },
           catch: toSqlError
         })
@@ -562,11 +530,8 @@ const defineSuite = (config: EngineConfig) => {
             Effect.gen(function* () {
               if (statement.includes("SELECT 1 AS ok")) {
                 heartbeatCalls++
-                if (
-                  settings?.failHeartbeatAfter !== undefined &&
-                  heartbeatCalls > settings.failHeartbeatAfter
-                ) {
-                  return yield* Effect.fail(toSqlError(new Error("heartbeat failed")))
+                if (settings?.failHeartbeatAfter !== undefined && heartbeatCalls > settings.failHeartbeatAfter) {
+                  return yield* toSqlError(new Error("heartbeat failed"))
                 }
               }
               const [rows] = yield* Effect.tryPromise({
@@ -594,16 +559,12 @@ const defineSuite = (config: EngineConfig) => {
     let releaseCalls = 0
     const lock = {
       ...lockWithoutKill,
-      ...(settings?.omitKill || killSelfStatement === undefined
-        ? {}
-        : { killSelfStatement }),
+      ...(settings?.omitKill || killSelfStatement === undefined ? {} : { killSelfStatement }),
       ...(settings?.releaseReturnsZero
         ? {
             releaseStatement: (name: string) => {
               releaseCalls++
-              return releaseCalls === 1
-                ? { sql: "SELECT 0 AS released", params: [] }
-                : baseLock.releaseStatement(name)
+              return releaseCalls === 1 ? { sql: "SELECT 0 AS released", params: [] } : baseLock.releaseStatement(name)
             }
           }
         : {}),
@@ -641,9 +602,7 @@ const defineSuite = (config: EngineConfig) => {
           ...baseLock,
           releaseStatement: (name) => {
             releaseCalls++
-            return releaseCalls === 1
-              ? { sql: "SELECT 0 AS released", params: [] }
-              : baseLock.releaseStatement(name)
+            return releaseCalls === 1 ? { sql: "SELECT 0 AS released", params: [] } : baseLock.releaseStatement(name)
           }
         }
       }
@@ -654,11 +613,7 @@ const defineSuite = (config: EngineConfig) => {
     let seen = 0
     return {
       ...mysqlMigrationDialect,
-      upsertStatement: (
-        table: string,
-        record: Readonly<Record<string, unknown>>,
-        keys: ReadonlyArray<string>
-      ) => {
+      upsertStatement: (table: string, record: Readonly<Record<string, unknown>>, keys: ReadonlyArray<string>) => {
         if (table === targetTable) {
           seen += 1
           if (seen === 1) {
@@ -670,17 +625,11 @@ const defineSuite = (config: EngineConfig) => {
     }
   }
 
-  const interruptedAddDialect = (
-    table: string,
-    column: string
-  ): MigrationDialect => {
+  const interruptedAddDialect = (table: string, column: string): MigrationDialect => {
     let intercepted = false
     return {
       ...mysqlMigrationDialect,
-      translatePlan: (
-        steps: ReadonlyArray<MigrationStep>,
-        ctx: TranslatePlanContext
-      ) =>
+      translatePlan: (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) =>
         mysqlMigrationDialect.translatePlan(steps, ctx).pipe(
           Effect.map((translated) => {
             if (intercepted) return translated
@@ -692,39 +641,26 @@ const defineSuite = (config: EngineConfig) => {
             if (start < 0) return translated
 
             intercepted = true
-            const statements = translated.statements.filter(
-              (statement, index) => {
-                if (index <= start) return true
-                if (
-                  index === start + 1 &&
-                  statement.startsWith("UPDATE ") &&
-                  statement.includes(quoteName(column))
-                ) {
-                  return false
-                }
-                if (
-                  index === start + 2 &&
-                  statement.includes(`MODIFY COLUMN ${quoteName(column)}`)
-                ) {
-                  return false
-                }
-                return true
+            const statements = translated.statements.filter((statement, index) => {
+              if (index <= start) return true
+              if (index === start + 1 && statement.startsWith("UPDATE ") && statement.includes(quoteName(column))) {
+                return false
               }
-            )
+              if (index === start + 2 && statement.includes(`MODIFY COLUMN ${quoteName(column)}`)) {
+                return false
+              }
+              return true
+            })
             return { ...translated, statements }
           })
         )
     }
   }
 
-  const catchUnsupported = <A>(
-    effect: Effect.Effect<A, MigrationError, never>
-  ) =>
+  const catchUnsupported = <A>(effect: Effect.Effect<A, MigrationError, never>) =>
     effect.pipe(
       Effect.as(undefined),
-      Effect.catchTag("UnsupportedMigrationStepError", (error) =>
-        Effect.succeed(error)
-      )
+      Effect.catchTag("UnsupportedMigrationStepError", (error) => Effect.succeed(error))
     )
 
   describeSuite(`${config.label} migrations`, () => {
@@ -742,12 +678,7 @@ const defineSuite = (config: EngineConfig) => {
             yield* insertTodo("1")
 
             const columns = yield* columnRows(todosTable)
-            const typeByName = new Map(
-              columns.map((column) => [
-                column.column_name,
-                normalizeType(column.column_type)
-              ])
-            )
+            const typeByName = new Map(columns.map((column) => [column.column_name, normalizeType(column.column_type)]))
             expect(typeByName.get("seqId")).toBe("bigint")
             expect(typeByName.get("id")).toBe("varchar(255)")
             expect(typeByName.get("title")).toBe("longtext")
@@ -757,18 +688,10 @@ const defineSuite = (config: EngineConfig) => {
             expect(typeByName.get("priority")).toBe("int")
 
             const indexes = yield* indexRows(todosTable)
+            expect(indexes.some((index) => index.column_name === "id" && Number(index.non_unique) === 0)).toBe(true)
             expect(
               indexes.some(
-                (index) =>
-                  index.column_name === "id" &&
-                  Number(index.non_unique) === 0
-              )
-            ).toBe(true)
-            expect(
-              indexes.some(
-                (index) =>
-                  index.index_name === `idx_${todosTable}_priority` &&
-                  Number(index.non_unique) === 1
+                (index) => index.index_name === `idx_${todosTable}_priority` && Number(index.non_unique) === 1
               )
             ).toBe(true)
 
@@ -834,12 +757,8 @@ const defineSuite = (config: EngineConfig) => {
 
             expect(yield* storedSchema(todosTable)).not.toContain('"notes"')
             const columns = yield* columnRows(todosTable)
-            expect(columns.map((column) => column.column_name)).toContain(
-              "notes"
-            )
-            const indexNames = new Set(
-              (yield* indexRows(todosTable)).map((index) => index.index_name)
-            )
+            expect(columns.map((column) => column.column_name)).toContain("notes")
+            const indexNames = new Set((yield* indexRows(todosTable)).map((index) => index.index_name))
             expect(indexNames.has(`idx_${todosTable}_priority`)).toBe(false)
             expect(indexNames.has(`idx_${todosTable}_score`)).toBe(false)
             expect(yield* tablesNamed([todosView])).toEqual([])
@@ -863,9 +782,7 @@ const defineSuite = (config: EngineConfig) => {
       () =>
         Effect.scoped(
           Effect.gen(function* () {
-            const normalCtx = yield* Layer.build(
-              makeLayer(mysqlMigrationDialect, 2)
-            )
+            const normalCtx = yield* Layer.build(makeLayer(mysqlMigrationDialect, 2))
             yield* resetEngine.pipe(Effect.provide(normalCtx))
 
             yield* Effect.gen(function* () {
@@ -877,9 +794,7 @@ const defineSuite = (config: EngineConfig) => {
               yield* sql`DELETE FROM ${sql(migrationsTable)}`
             }).pipe(Effect.provide(normalCtx))
 
-            const failingCtx = yield* Layer.build(
-              makeLayer(failingMetadataDialect(migrationsTable), 2)
-            )
+            const failingCtx = yield* Layer.build(makeLayer(failingMetadataDialect(migrationsTable), 2))
             yield* Effect.gen(function* () {
               const migrator = yield* Migrator
 
@@ -921,9 +836,7 @@ const defineSuite = (config: EngineConfig) => {
       () =>
         Effect.scoped(
           Effect.gen(function* () {
-            const normalCtx = yield* Layer.build(
-              makeLayer(mysqlMigrationDialect, 2)
-            )
+            const normalCtx = yield* Layer.build(makeLayer(mysqlMigrationDialect, 2))
             yield* resetEngine.pipe(Effect.provide(normalCtx))
 
             yield* Effect.gen(function* () {
@@ -935,9 +848,7 @@ const defineSuite = (config: EngineConfig) => {
               yield* sql`DELETE FROM ${sql(migrationsTable)}`
             }).pipe(Effect.provide(normalCtx))
 
-            const failingCtx = yield* Layer.build(
-              makeLayer(failingMetadataDialect(schemaTable), 2)
-            )
+            const failingCtx = yield* Layer.build(makeLayer(failingMetadataDialect(schemaTable), 2))
             yield* Effect.gen(function* () {
               const migrator = yield* Migrator
 
@@ -967,21 +878,14 @@ const defineSuite = (config: EngineConfig) => {
       () =>
         Effect.scoped(
           Effect.gen(function* () {
-            const first = yield* Layer.build(
-              makeLayer(mysqlMigrationDialect, 2)
-            )
-            const second = yield* Layer.build(
-              makeLayer(mysqlMigrationDialect, 2)
-            )
+            const first = yield* Layer.build(makeLayer(mysqlMigrationDialect, 2))
+            const second = yield* Layer.build(makeLayer(mysqlMigrationDialect, 2))
             yield* resetEngine.pipe(Effect.provide(first))
 
             const firstMigrator = Context.get(first, Migrator)
             const secondMigrator = Context.get(second, Migrator)
             const results = yield* Effect.all(
-              [
-                firstMigrator.migrate(v1Schemas(), options),
-                secondMigrator.migrate(v1Schemas(), options)
-              ],
+              [firstMigrator.migrate(v1Schemas(), options), secondMigrator.migrate(v1Schemas(), options)],
               { concurrency: "unbounded" }
             )
             expect(results).toHaveLength(2)
@@ -1012,9 +916,7 @@ const defineSuite = (config: EngineConfig) => {
             const status = yield* migrator.status(schemas, options)
             expect(status).toEqual([{ name: todosTable, status: "behind" }])
 
-            expect(yield* tablesNamed([schemaTable, migrationsTable])).toEqual(
-              []
-            )
+            expect(yield* tablesNamed([schemaTable, migrationsTable])).toEqual([])
             expect(yield* tablesNamed([todosTable])).toEqual([])
           })
         ),
@@ -1062,9 +964,7 @@ const defineSuite = (config: EngineConfig) => {
             const migrator = yield* Migrator
             const sql = yield* SqlClient.SqlClient
 
-            yield* sql.unsafe(
-              `CREATE TABLE ${quoteName(driftTable)} (${quoteName("id")} INT PRIMARY KEY)`
-            )
+            yield* sql.unsafe(`CREATE TABLE ${quoteName(driftTable)} (${quoteName("id")} INT PRIMARY KEY)`)
 
             const failure = yield* catchUnsupported(
               migrator.migrate(
@@ -1098,15 +998,10 @@ const defineSuite = (config: EngineConfig) => {
             const migrator = yield* Migrator
             const sql = yield* SqlClient.SqlClient
 
-            yield* sql.unsafe(
-              `CREATE TABLE ${quoteName(schemaTable)} (${quoteName("name")} VARCHAR(255) PRIMARY KEY)`
-            )
+            yield* sql.unsafe(`CREATE TABLE ${quoteName(schemaTable)} (${quoteName("name")} VARCHAR(255) PRIMARY KEY)`)
 
             const failure = yield* catchUnsupported(
-              migrator.migrate(
-                [{ name: todosTable, schema: todosV1() }],
-                options
-              )
+              migrator.migrate([{ name: todosTable, schema: todosV1() }], options)
             )
             expect(failure).toBeDefined()
             if (failure !== undefined) {
@@ -1132,14 +1027,10 @@ const defineSuite = (config: EngineConfig) => {
             const after = yield* sessionValues
 
             expect(after?.sql_mode).toBe(before?.sql_mode)
-            expect(Number(after?.lock_wait_timeout)).toBe(
-              Number(before?.lock_wait_timeout)
-            )
+            expect(Number(after?.lock_wait_timeout)).toBe(Number(before?.lock_wait_timeout))
             expect(Number(after?.wait_timeout)).toBe(Number(before?.wait_timeout))
             const columns = yield* columnRows(todosTable)
-            expect(columns.map((column) => column.column_name)).toContain(
-              "seqId"
-            )
+            expect(columns.map((column) => column.column_name)).toContain("seqId")
           })
         ),
       120_000
@@ -1154,17 +1045,14 @@ const defineSuite = (config: EngineConfig) => {
           Effect.gen(function* () {
             const migrator = yield* Migrator
 
-            yield* migrator.migrate(
-              [{ name: todosTable, schema: todosV1() }],
-              options
-            )
+            yield* migrator.migrate([{ name: todosTable, schema: todosV1() }], options)
             yield* insertTodo("1")
 
             const failure = yield* catchUnsupported(
-              migrator.migrate(
-                [{ name: todosTable, schema: todosV2WithTitleIndex() }],
-                { ...options, allowDestructive: true }
-              )
+              migrator.migrate([{ name: todosTable, schema: todosV2WithTitleIndex() }], {
+                ...options,
+                allowDestructive: true
+              })
             )
             expect(failure).toBeDefined()
             if (failure !== undefined) {
@@ -1173,20 +1061,11 @@ const defineSuite = (config: EngineConfig) => {
             }
 
             const columns = yield* columnRows(todosTable)
-            expect(columns.map((column) => column.column_name)).not.toContain(
-              "notes"
-            )
-            const typeByName = new Map(
-              columns.map((column) => [
-                column.column_name,
-                normalizeType(column.column_type)
-              ])
-            )
+            expect(columns.map((column) => column.column_name)).not.toContain("notes")
+            const typeByName = new Map(columns.map((column) => [column.column_name, normalizeType(column.column_type)]))
             expect(typeByName.get("grade")).toBe("longtext")
 
-            const indexNames = new Set(
-              (yield* indexRows(todosTable)).map((index) => index.index_name)
-            )
+            const indexNames = new Set((yield* indexRows(todosTable)).map((index) => index.index_name))
             expect(indexNames.has(`idx_${todosTable}_title`)).toBe(false)
             expect(indexNames.has(`idx_${todosTable}_priority`)).toBe(true)
             expect(yield* storedSchema(todosTable)).not.toContain('"notes"')
@@ -1204,25 +1083,20 @@ const defineSuite = (config: EngineConfig) => {
           Effect.gen(function* () {
             const migrator = yield* Migrator
 
-            yield* migrator.migrate(
-              [{ name: todosTable, schema: todosV1() }],
-              options
-            )
+            yield* migrator.migrate([{ name: todosTable, schema: todosV1() }], options)
             yield* insertTodo("1")
 
-            yield* migrator.migrate(
-              [{ name: todosTable, schema: todosV2WithTitleIndex(200) }],
-              { ...options, allowDestructive: true }
-            )
+            yield* migrator.migrate([{ name: todosTable, schema: todosV2WithTitleIndex(200) }], {
+              ...options,
+              allowDestructive: true
+            })
 
             const columns = yield* columnRows(todosTable)
             const title = columns.find((column) => column.column_name === "title")
             expect(title?.column_type).toBe("varchar(200)")
             expect(title?.collation_name).toBe("utf8mb4_0900_bin")
 
-            const indexNames = new Set(
-              (yield* indexRows(todosTable)).map((index) => index.index_name)
-            )
+            const indexNames = new Set((yield* indexRows(todosTable)).map((index) => index.index_name))
             expect(indexNames.has(`idx_${todosTable}_title`)).toBe(true)
           })
         ),
@@ -1239,10 +1113,7 @@ const defineSuite = (config: EngineConfig) => {
             const migrator = yield* Migrator
             const sql = yield* SqlClient.SqlClient
 
-            yield* migrator.migrate(
-              [{ name: textTable, schema: textTableSchema(768) }],
-              options
-            )
+            yield* migrator.migrate([{ name: textTable, schema: textTableSchema(768) }], options)
 
             const row = (id: string, name: string) => ({
               id,
@@ -1267,16 +1138,14 @@ const defineSuite = (config: EngineConfig) => {
             expect(yield* countRows(textTable)).toBe(6)
 
             const failure = yield* catchUnsupported(
-              migrator.migrate(
-                [{ name: textTable, schema: textTableSchema(100) }],
-                { ...options, allowDestructive: true }
-              )
+              migrator.migrate([{ name: textTable, schema: textTableSchema(100) }], {
+                ...options,
+                allowDestructive: true
+              })
             )
             expect(failure?.detail).toContain("cannot narrow")
 
-            const name = (yield* columnRows(textTable)).find(
-              (column) => column.column_name === "name"
-            )
+            const name = (yield* columnRows(textTable)).find((column) => column.column_name === "name")
             expect(name?.column_type).toBe("varchar(768)")
           })
         ),
@@ -1301,20 +1170,13 @@ const defineSuite = (config: EngineConfig) => {
 
             const droppedGrade = withoutProperty(todosV1(), "grade")
             const failure = yield* catchUnsupported(
-              migrator.migrate(
-                [{ name: todosTable, schema: droppedGrade }],
-                { ...options, allowDestructive: true }
-              )
+              migrator.migrate([{ name: todosTable, schema: droppedGrade }], { ...options, allowDestructive: true })
             )
             expect(failure).toBeDefined()
             if (failure !== undefined) {
               expect(failure.detail).toContain(untrackedView)
             }
-            expect(
-              (yield* columnRows(todosTable)).map(
-                (column) => column.column_name
-              )
-            ).toContain("grade")
+            expect((yield* columnRows(todosTable)).map((column) => column.column_name)).toContain("grade")
             expect(yield* tablesNamed([untrackedView])).toHaveLength(1)
 
             yield* sql.unsafe(`DROP VIEW ${quoteName(untrackedView)}`)
@@ -1324,23 +1186,15 @@ const defineSuite = (config: EngineConfig) => {
                 { name: todosTable, schema: droppedGrade },
                 {
                   name: todosView,
-                  schema: todoView(`${v1ViewQuery} WHERE 1 = 1`, [
-                    "id",
-                    "seqId",
-                    "title"
-                  ])
+                  schema: todoView(`${v1ViewQuery} WHERE 1 = 1`, ["id", "seqId", "title"])
                 }
               ],
               { ...options, allowDestructive: true }
             )
 
             const columns = yield* columnRows(todosTable)
-            expect(columns.map((column) => column.column_name)).not.toContain(
-              "grade"
-            )
-            const viewColumns = (yield* columnRows(todosView)).map(
-              (column) => column.column_name
-            )
+            expect(columns.map((column) => column.column_name)).not.toContain("grade")
+            const viewColumns = (yield* columnRows(todosView)).map((column) => column.column_name)
             expect(viewColumns).toEqual(["id", "seqId", "title"])
             expect(yield* tablesNamed([todosView])).toHaveLength(1)
           })
@@ -1401,14 +1255,10 @@ const defineSuite = (config: EngineConfig) => {
             expect(status).toEqual([{ name: todosTable, status: "behind" }])
             const after = yield* sessionValues
 
-            expect(Number(after?.lock_wait_timeout)).toBe(
-              Number(before?.lock_wait_timeout)
-            )
+            expect(Number(after?.lock_wait_timeout)).toBe(Number(before?.lock_wait_timeout))
             expect(Number(after?.wait_timeout)).toBe(Number(before?.wait_timeout))
             expect(after?.sql_mode).toBe(before?.sql_mode)
-            expect(yield* tablesNamed([schemaTable, migrationsTable])).toEqual(
-              []
-            )
+            expect(yield* tablesNamed([schemaTable, migrationsTable])).toEqual([])
           })
         ),
       120_000
@@ -1419,18 +1269,13 @@ const defineSuite = (config: EngineConfig) => {
       () =>
         Effect.scoped(
           Effect.gen(function* () {
-            const interruptedCtx = yield* Layer.build(
-              makeLayer(interruptedAddDialect(requiredTable, "code"), 1)
-            )
+            const interruptedCtx = yield* Layer.build(makeLayer(interruptedAddDialect(requiredTable, "code"), 1))
             yield* resetEngine.pipe(Effect.provide(interruptedCtx))
 
             yield* Effect.gen(function* () {
               const migrator = yield* Migrator
 
-              yield* migrator.migrate(
-                [{ name: requiredTable, schema: requiredV1() }],
-                options
-              )
+              yield* migrator.migrate([{ name: requiredTable, schema: requiredV1() }], options)
               yield* insertRow(requiredTable, {
                 id: "t1",
                 title: "one",
@@ -1439,37 +1284,25 @@ const defineSuite = (config: EngineConfig) => {
               })
 
               const exit = yield* Effect.exit(
-                migrator.migrate(
-                  [{ name: requiredTable, schema: requiredV2() }],
-                  options
-                )
+                migrator.migrate([{ name: requiredTable, schema: requiredV2() }], options)
               )
               expect(Exit.isFailure(exit)).toBe(true)
 
               const columns = yield* columnRows(requiredTable)
-              const byName = new Map(
-                columns.map((column) => [column.column_name, column])
-              )
+              const byName = new Map(columns.map((column) => [column.column_name, column]))
               expect(byName.get("code")?.is_nullable).toBe("YES")
               expect(yield* storedSchema(requiredTable)).not.toContain('"code"')
             }).pipe(Effect.provide(interruptedCtx))
 
-            const normalCtx = yield* Layer.build(
-              makeLayer(mysqlMigrationDialect, 1)
-            )
+            const normalCtx = yield* Layer.build(makeLayer(mysqlMigrationDialect, 1))
             yield* Effect.gen(function* () {
               const migrator = yield* Migrator
               const sql = yield* SqlClient.SqlClient
 
-              yield* migrator.migrate(
-                [{ name: requiredTable, schema: requiredV2() }],
-                options
-              )
+              yield* migrator.migrate([{ name: requiredTable, schema: requiredV2() }], options)
 
               const columns = yield* columnRows(requiredTable)
-              const byName = new Map(
-                columns.map((column) => [column.column_name, column])
-              )
+              const byName = new Map(columns.map((column) => [column.column_name, column]))
               expect(byName.get("code")?.is_nullable).toBe("NO")
 
               const rows = yield* sql<{ code: string }>`
@@ -1512,9 +1345,7 @@ const defineSuite = (config: EngineConfig) => {
             const sql = yield* SqlClient.SqlClient
             const name = yield* expectedLockName
 
-            yield* sql.unsafe(
-              `CREATE TABLE ${quoteName(driftTable)} (${quoteName("id")} INT PRIMARY KEY)`
-            )
+            yield* sql.unsafe(`CREATE TABLE ${quoteName(driftTable)} (${quoteName("id")} INT PRIMARY KEY)`)
             const failure = yield* catchUnsupported(
               migrator.migrate([{ name: driftTable, schema: simpleTable() }], options)
             )
@@ -1697,9 +1528,7 @@ const defineSuite = (config: EngineConfig) => {
       () =>
         runWithEngine(
           2,
-          slowPlanDialect(
-            dedicatedLockDialect({ heartbeatIntervalSeconds: 1, lockWaitTimeoutSeconds: 2 })
-          ),
+          slowPlanDialect(dedicatedLockDialect({ heartbeatIntervalSeconds: 1, lockWaitTimeoutSeconds: 2 })),
           Effect.gen(function* () {
             const migrator = yield* Migrator
             const name = yield* expectedLockName
@@ -1746,9 +1575,7 @@ const defineSuite = (config: EngineConfig) => {
             const migrator = yield* Migrator
             const name = yield* expectedLockName
 
-            const exit = yield* Effect.exit(
-              migrator.migrate(v1Schemas(), options).pipe(Effect.timeout("1 second"))
-            )
+            const exit = yield* Effect.exit(migrator.migrate(v1Schemas(), options).pipe(Effect.timeout("1 second")))
             expect(Exit.isFailure(exit)).toBe(true)
             expect(yield* isUsedLock(name)).toBeNull()
           })
@@ -1820,7 +1647,3 @@ defineSuite({
   fallbackUrl: "mysql://root:mira@127.0.0.1:53306/mira_test",
   prefix: "e2e_mariadb_"
 })
-
-
-
-

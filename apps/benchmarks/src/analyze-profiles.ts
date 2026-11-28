@@ -26,21 +26,21 @@ type Profile = {
 const CallFrameSchema = Schema.Struct({
   functionName: Schema.String,
   url: Schema.String,
-  lineNumber: Schema.Number
+  lineNumber: Schema.Finite
 })
 
 const ProfileSchema = Schema.Struct({
   nodes: Schema.Array(
     Schema.Struct({
-      id: Schema.Number,
+      id: Schema.Finite,
       callFrame: CallFrameSchema,
-      children: Schema.optional(Schema.Array(Schema.Number))
+      children: Schema.optional(Schema.Array(Schema.Finite))
     })
   ),
-  samples: Schema.Array(Schema.Number),
-  timeDeltas: Schema.Array(Schema.Number),
-  startTime: Schema.Number,
-  endTime: Schema.Number
+  samples: Schema.Array(Schema.Finite),
+  timeDeltas: Schema.Array(Schema.Finite),
+  startTime: Schema.Finite,
+  endTime: Schema.Finite
 })
 
 const profileDir = process.argv[2] ?? ".egm/perf-audit-2026-11-15"

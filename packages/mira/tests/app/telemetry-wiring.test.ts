@@ -14,15 +14,13 @@ import { NodePlatform } from "@/platforms/node.js"
 import { LocalFileStorage } from "@/storage/local-preset.js"
 import { makeTelemetryLayerForClient } from "@/telemetry/core.js"
 import { makeTelemetryLayer } from "@/telemetry/layer.js"
-import {
-  type TelemetryStoreShape,
-  TelemetryStore
-} from "@/telemetry/store.js"
+import { type TelemetryStoreShape, TelemetryStore } from "@/telemetry/store.js"
 
 function closeEffect<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> {
   // The built app layer is closed at runtime; the test graph widens R through
-  // plugin/cron config, so this helper restores the closed run type.
-  // oxlint-disable-next-line typescript/consistent-type-assertions
+  // plugin/cron config, so this helper restores the closed run type. The cast is
+  // a deliberate boundary, not a test assertion.
+  // oxlint-disable-next-line typescript/consistent-type-assertions, effecttsgo/unsafe-effect-type-assertion -- closed at runtime, R is widened only by the test graph types
   return effect as Effect.Effect<A, E, never>
 }
 
@@ -38,8 +36,7 @@ const readSpans = (store: TelemetryStoreShape) =>
   store.read?.listSpans({ limit: 100, after: null, filter: null, traceId: null }) ??
   Effect.succeed({ items: [], total: 0, nextCursor: null })
 
-const delay = (millis: number) =>
-  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, millis)))
+const delay = (millis: number) => Effect.promise(() => new Promise((resolve) => setTimeout(resolve, millis)))
 
 describe("telemetry app wiring", () => {
   it("exposes a dedicated TelemetryStore and keeps the app database separate", async () => {
@@ -147,11 +144,7 @@ describe("telemetry app wiring", () => {
       .database(SqliteDatabase({ filename: appDb }))
       .storage(LocalFileStorage({ directory: uploads }))
       .collections([Posts])
-      .telemetry(
-        makeTelemetryLayerForClient().pipe(
-          Layer.provideMerge(Layer.succeed(TelemetryStore, store))
-        )
-      )
+      .telemetry(makeTelemetryLayerForClient().pipe(Layer.provideMerge(Layer.succeed(TelemetryStore, store))))
       .build()
 
     const program = Effect.gen(function* () {

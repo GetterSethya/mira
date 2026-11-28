@@ -11,7 +11,7 @@
  * Internal flag --server: start the HTTP server child process directly.
  */
 
-import { HttpServer } from "effect/http"
+import { HttpRouter } from "effect/http"
 import { NodeFileSystem, NodeHttpServer, NodePath, NodeRuntime } from "@effect/platform-node"
 import { SqlClient } from "effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
@@ -650,7 +650,7 @@ function runServerMode(): void {
     Effect.map(AppConfig, (cfg) => NodeHttpServer.layer(() => createServer(), { port: cfg.port }))
   )
 
-  const appLayer = HttpServer.serve(router).pipe(
+  const appLayer = HttpRouter.serve(HttpRouter.addAll(router)).pipe(
     Layer.provideMerge(serverLayer),
     Layer.provideMerge(Layer.merge(collectionLayer, configLayer))
   )

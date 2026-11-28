@@ -67,7 +67,7 @@ export const deleteSuperadminRoute = Effect.flatMap(HttpRouter.RouteContext, (ro
       return HttpServerResponse.jsonUnsafe({ error: "last_superadmin" }, { status: 409 })
     }
 
-    yield* svc.delete(SuperAdminCollection, id, adminCtx).pipe(Effect.catch(() => Effect.void))
+    yield* svc.delete(SuperAdminCollection, id, adminCtx).pipe(Effect.ignore)
 
     return HttpServerResponse.empty({ status: 204 })
   })

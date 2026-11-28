@@ -33,10 +33,7 @@ import {
 } from "@/collection-service/mutation-batcher.js"
 import { Dialect } from "@/dialect/dialect.js"
 import type { DialectType, TransactionProbeStrategy } from "@/dialect/dialect.js"
-import {
-  isMysqlTransactionFatal,
-  mysqlTransactionProbe
-} from "@/dialect/dialect-mysql-transactions.js"
+import { isMysqlTransactionFatal, mysqlTransactionProbe } from "@/dialect/dialect-mysql-transactions.js"
 import { mysqlDialect } from "@/dialect/dialect-mysql.js"
 
 type EngineConfig = {
@@ -69,11 +66,7 @@ class InterfererFinished extends Data.TaggedError("InterfererFinished")<{}> {}
 
 const quote = (name: string) => `\`${name.replaceAll("`", "``")}\``
 
-const makeLayer = (
-  url: string,
-  maxConnections: number,
-  transactionProbe: TransactionProbeStrategy
-) => {
+const makeLayer = (url: string, maxConnections: number, transactionProbe: TransactionProbeStrategy) => {
   const base = MysqlClient.layer({ url: Redacted.make(url), maxConnections })
   const statsLayer = makeBatchMutationStatsLayer()
   const dialect: DialectType = { ...mysqlDialect, transactionProbe }
@@ -138,9 +131,7 @@ const defineSuite = (config: EngineConfig) => {
         id VARCHAR(64) PRIMARY KEY
       )
     `)
-    yield* sql.unsafe(
-      `INSERT INTO ${quote(accounts)} (id, v) VALUES (1, 100), (2, 200), (3, 300), (4, 400)`
-    )
+    yield* sql.unsafe(`INSERT INTO ${quote(accounts)} (id, v) VALUES (1, 100), (2, 200), (3, 300), (4, 400)`)
     yield* sql.unsafe(`INSERT INTO ${quote(uniqueRows)} (id, code) VALUES ('seed', 'alpha')`)
   })
 
@@ -180,9 +171,7 @@ const defineSuite = (config: EngineConfig) => {
 
             const ctx = yield* Layer.build(makeLayer(url, 2, probe))
             yield* reset.pipe(Effect.provide(ctx))
-            const ctxB = yield* Layer.build(
-              MysqlClient.layer({ url: Redacted.make(url), maxConnections: 1 })
-            )
+            const ctxB = yield* Layer.build(MysqlClient.layer({ url: Redacted.make(url), maxConnections: 1 }))
 
             const aLocked = yield* Deferred.make<void>()
             const bReady = yield* Deferred.make<void>()
@@ -198,7 +187,7 @@ const defineSuite = (config: EngineConfig) => {
                       yield* Deferred.succeed(bReady, undefined)
                       yield* Deferred.await(aLocked)
                       yield* sqlB`UPDATE ${sqlB(accounts)} SET v = v + 1 WHERE id = 1`
-                      return yield* Effect.fail(new InterfererFinished())
+                      return yield* new InterfererFinished()
                     })
                   )
                   .pipe(Effect.exit)
@@ -226,10 +215,7 @@ const defineSuite = (config: EngineConfig) => {
               yield* waitForAdmitted(1)
               const second = yield* Effect.forkChild(
                 batcher.submit(
-                  makeEntry(
-                    sql`UPDATE ${sql(accounts)} SET v = v + 1 WHERE id = 2`.pipe(Effect.asVoid),
-                    "second"
-                  )
+                  makeEntry(sql`UPDATE ${sql(accounts)} SET v = v + 1 WHERE id = 2`.pipe(Effect.asVoid), "second")
                 )
               )
               yield* waitForAdmitted(2)
@@ -276,9 +262,7 @@ const defineSuite = (config: EngineConfig) => {
 
             const ctx = yield* Layer.build(makeLayer(url, 2, probe))
             yield* reset.pipe(Effect.provide(ctx))
-            const ctxB = yield* Layer.build(
-              MysqlClient.layer({ url: Redacted.make(url), maxConnections: 1 })
-            )
+            const ctxB = yield* Layer.build(MysqlClient.layer({ url: Redacted.make(url), maxConnections: 1 }))
 
             const aLocked = yield* Deferred.make<void>()
             const bReady = yield* Deferred.make<void>()
@@ -294,7 +278,7 @@ const defineSuite = (config: EngineConfig) => {
                       yield* Deferred.succeed(bReady, undefined)
                       yield* Deferred.await(aLocked)
                       yield* sqlB`UPDATE ${sqlB(accounts)} SET v = v + 1 WHERE id = 1`
-                      return yield* Effect.fail(new InterfererFinished())
+                      return yield* new InterfererFinished()
                     })
                   )
                   .pipe(Effect.exit)
@@ -310,14 +294,11 @@ const defineSuite = (config: EngineConfig) => {
               const entry = yield* Effect.forkChild(
                 (yield* MutationBatcher).submit(
                   makeEntry(
-                    sql`UPDATE ${sql(accounts)} SET v = v + 1 WHERE id = 1`
-                      .pipe(Effect.andThen(Deferred.succeed(aLocked, undefined)))
-                      .pipe(
-                        Effect.andThen(
-                          sql`UPDATE ${sql(accounts)} SET v = v + 1 WHERE id = 2`
-                        )
-                      )
-                      .pipe(Effect.asVoid),
+                    sql`UPDATE ${sql(accounts)} SET v = v + 1 WHERE id = 1`.pipe(
+                      Effect.andThen(Deferred.succeed(aLocked, undefined)),
+                      Effect.andThen(sql`UPDATE ${sql(accounts)} SET v = v + 1 WHERE id = 2`),
+                      Effect.asVoid
+                    ),
                     "only"
                   )
                 )
@@ -372,9 +353,7 @@ const defineSuite = (config: EngineConfig) => {
               const duplicate = yield* Effect.forkChild(
                 batcher.submit(
                   makeEntry(
-                    sql`INSERT INTO ${sql(uniqueRows)} (id, code) VALUES ('dup', 'alpha')`.pipe(
-                      Effect.asVoid
-                    ),
+                    sql`INSERT INTO ${sql(uniqueRows)} (id, code) VALUES ('dup', 'alpha')`.pipe(Effect.asVoid),
                     "dup"
                   )
                 )
@@ -383,9 +362,7 @@ const defineSuite = (config: EngineConfig) => {
               const other = yield* Effect.forkChild(
                 batcher.submit(
                   makeEntry(
-                    sql`INSERT INTO ${sql(uniqueRows)} (id, code) VALUES ('new', 'beta')`.pipe(
-                      Effect.asVoid
-                    ),
+                    sql`INSERT INTO ${sql(uniqueRows)} (id, code) VALUES ('new', 'beta')`.pipe(Effect.asVoid),
                     "new"
                   )
                 )
@@ -399,10 +376,7 @@ const defineSuite = (config: EngineConfig) => {
               expect(Exit.isSuccess(otherExit)).toBe(true)
               expect(classified.length).toBeGreaterThan(0)
               expect(classified.every((error) => !isMysqlTransactionFatal(error))).toBe(true)
-              expect((yield* readCodes.pipe(Effect.provide(ctx))).map((row) => row.code)).toEqual([
-                "alpha",
-                "beta"
-              ])
+              expect((yield* readCodes.pipe(Effect.provide(ctx))).map((row) => row.code)).toEqual(["alpha", "beta"])
 
               const snapshot = yield* stats.snapshot
               expect(snapshot.commits).toBe(1)
@@ -430,9 +404,7 @@ const defineSuite = (config: EngineConfig) => {
 
             const ctx = yield* Layer.build(makeLayer(url, 1, probe))
             yield* reset.pipe(Effect.provide(ctx))
-            const adminCtx = yield* Layer.build(
-              MysqlClient.layer({ url: Redacted.make(url), maxConnections: 1 })
-            )
+            const adminCtx = yield* Layer.build(MysqlClient.layer({ url: Redacted.make(url), maxConnections: 1 }))
 
             yield* Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -459,12 +431,7 @@ const defineSuite = (config: EngineConfig) => {
               )
               yield* waitForAdmitted(1)
               const second = yield* Effect.forkChild(
-                batcher.submit(
-                  makeEntry(
-                    sql`INSERT INTO ${sql(marker)} (id) VALUES ('e2')`.pipe(Effect.asVoid),
-                    "e2"
-                  )
-                )
+                batcher.submit(makeEntry(sql`INSERT INTO ${sql(marker)} (id) VALUES ('e2')`.pipe(Effect.asVoid), "e2"))
               )
               yield* waitForAdmitted(2)
 

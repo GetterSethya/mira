@@ -23,21 +23,15 @@ import {
 
 const RETENTION_BATCH_SIZE = 1_000
 const MAX_RETENTION_BATCHES = 1_000
-const SPAN_ATTRIBUTE_VALUE = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
-const SpanAttributesSchema = Schema.fromJsonString(
-  Schema.Record(Schema.String, SPAN_ATTRIBUTE_VALUE)
-)
+const SPAN_ATTRIBUTE_VALUE = Schema.Union([Schema.String, Schema.Finite, Schema.Boolean])
+const SpanAttributesSchema = Schema.fromJsonString(Schema.Record(Schema.String, SPAN_ATTRIBUTE_VALUE))
 const parseAttributes = Schema.decodeUnknownEffect(SpanAttributesSchema)
 const encodeAttributes = Schema.encodeSync(SpanAttributesSchema)
 
 const decodeAttributes = (raw: string) =>
-  parseAttributes(raw).pipe(
-    Effect.orElseSucceed((): Record<string, string | number | boolean> => ({}))
-  )
+  parseAttributes(raw).pipe(Effect.orElseSucceed((): Record<string, string | number | boolean> => ({})))
 
-const migrationRetrySchedule = Schedule.exponential("100 millis").pipe(
-  Schedule.upTo({ times: 4 })
-)
+const migrationRetrySchedule = Schedule.exponential("100 millis").pipe(Schedule.upTo({ times: 4 }))
 
 type RawSpanRow = {
   readonly seqId: number | string
@@ -58,8 +52,7 @@ const asNumber = (value: unknown) => Number(value ?? 0)
 
 const asSpanStatus = (value: string): "ok" | "error" => (value === "error" ? "error" : "ok")
 
-const mapStoreError = (operation: string, cause: unknown) =>
-  new TelemetryStoreError({ operation, cause })
+const mapStoreError = (operation: string, cause: unknown) => new TelemetryStoreError({ operation, cause })
 
 const run = <A extends object>(
   sql: SqlClient.SqlClient,
@@ -68,24 +61,19 @@ const run = <A extends object>(
   params: ReadonlyArray<unknown> = []
 ) => sql.unsafe<A>(rewritePlaceholders(statement, dialect), params)
 
-const retryPredicate = (dialect: DialectType) =>
-  dialect.telemetry?.isRetryable ?? (() => false)
+const retryPredicate = (dialect: DialectType) => dialect.telemetry?.isRetryable ?? (() => false)
 
 export const dmlRetry = (dialect: DialectType) =>
   Effect.retry({
     while: (error: unknown) =>
-      dialect.telemetry?.retryDml === true &&
-      dialect.telemetry.isDmlRetryable?.(error) === true,
+      dialect.telemetry?.retryDml === true && dialect.telemetry.isDmlRetryable?.(error) === true,
     schedule: migrationRetrySchedule,
     times: 1
   })
 
 const resolveConflictClause = (dialect: DialectType) => {
   const quotedId = dialect.quoteIdentifier("id")
-  return (
-    dialect.telemetry?.insertConflictClause?.(quotedId) ??
-    `ON CONFLICT (${quotedId}) DO NOTHING`
-  )
+  return dialect.telemetry?.insertConflictClause?.(quotedId) ?? `ON CONFLICT (${quotedId}) DO NOTHING`
 }
 
 /**
@@ -94,20 +82,14 @@ const resolveConflictClause = (dialect: DialectType) => {
  *
  * The caller must pass at least one row; `appendRows` guards empty input.
  */
-export const makeInsertStatement = <
-  A extends { readonly id: string } & Record<string, unknown>
->(
+export const makeInsertStatement = <A extends { readonly id: string } & Record<string, unknown>>(
   sql: SqlClient.SqlClient,
   dialect: DialectType,
   table: string,
   rows: ReadonlyArray<A>
-) =>
-  sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} ${sql.literal(
-    resolveConflictClause(dialect)
-  )}`
+) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} ${sql.literal(resolveConflictClause(dialect))}`
 
-const inList = (values: ReadonlyArray<unknown>) =>
-  values.length === 0 ? "NULL" : values.map(() => "?").join(", ")
+const inList = (values: ReadonlyArray<unknown>) => (values.length === 0 ? "NULL" : values.map(() => "?").join(", "))
 
 const appendRows = <A extends { readonly id: string } & Record<string, unknown>>(
   sql: SqlClient.SqlClient,
@@ -126,9 +108,7 @@ const appendRows = <A extends { readonly id: string } & Record<string, unknown>>
     )
   })
 
-const mapLogEntry = (
-  entry: TelemetryLogEntry
-): { readonly id: string } & Record<string, unknown> => ({
+const mapLogEntry = (entry: TelemetryLogEntry): { readonly id: string } & Record<string, unknown> => ({
   id: entry.id,
   level: entry.level,
   message: entry.message,
@@ -138,9 +118,7 @@ const mapLogEntry = (
   spanId: entry.spanId
 })
 
-const mapSpanEntry = (
-  entry: TelemetrySpanEntry
-): { readonly id: string } & Record<string, unknown> => ({
+const mapSpanEntry = (entry: TelemetrySpanEntry): { readonly id: string } & Record<string, unknown> => ({
   id: entry.id,
   name: entry.name,
   traceId: entry.traceId,
@@ -179,7 +157,7 @@ type QueryParts = {
 
 const filterParts = (
   filter: FilterNode | null,
-  schema: typeof LogsCollection.schema | typeof SpansCollection.schema,
+  schema: typeof LogsCollection.schema,
   collection: string,
   dialect: DialectType
 ): Effect.Effect<QueryParts, ValidationError> =>
@@ -187,18 +165,14 @@ const filterParts = (
     if (filter === null) return { where: "", params: [] }
     const compiled = yield* filterNodeToWhereClause(filter, schema, collection, {
       quoteIdentifier: dialect.quoteIdentifier,
-      caseInsensitivePattern: (left, right) =>
-        dialect.caseInsensitivePattern(left, right),
+      caseInsensitivePattern: (left, right) => dialect.caseInsensitivePattern(left, right),
       castValue: dialect.castValue,
       encodeValue: (_field, value) => value
     })
     return { where: compiled.sql, params: compiled.params }
   })
 
-const makeRead = (
-  sql: SqlClient.SqlClient,
-  dialect: DialectType
-): TelemetryReadShape => {
+const makeRead = (sql: SqlClient.SqlClient, dialect: DialectType): TelemetryReadShape => {
   const q = dialect.quoteIdentifier
   const quoteTable = (table: string) => q(table)
 
@@ -290,8 +264,7 @@ const makeRead = (
         const selected = hasMore ? raw.slice(0, query.limit) : raw
         const items = yield* Effect.forEach(selected, parseSpanRow, { concurrency: "unbounded" })
         const lastSelected = selected.at(-1)
-        const nextCursor =
-          hasMore && lastSelected !== undefined ? asNumber(lastSelected.seqId) : null
+        const nextCursor = hasMore && lastSelected !== undefined ? asNumber(lastSelected.seqId) : null
 
         return {
           items,
@@ -318,8 +291,7 @@ const makeRead = (
       const hasMore = traceRows.length > query.limit
       const paged = hasMore ? traceRows.slice(0, query.limit) : traceRows
       const lastPaged = paged.at(-1)
-      const nextCursor =
-        hasMore && lastPaged !== undefined ? asNumber(lastPaged.maxSeqId) : null
+      const nextCursor = hasMore && lastPaged !== undefined ? asNumber(lastPaged.maxSeqId) : null
       const total = asNumber(totalRows[0]?.cnt)
 
       if (paged.length === 0) {
@@ -341,10 +313,7 @@ const makeRead = (
   return { listLogs, listSpans }
 }
 
-const cleanup = (
-  sql: SqlClient.SqlClient,
-  dialect: DialectType
-): Effect.Effect<void> =>
+const cleanup = (sql: SqlClient.SqlClient, dialect: DialectType): Effect.Effect<void> =>
   Effect.forEach(
     dialect.telemetry?.cleanup ?? [],
     (statement) =>
@@ -394,42 +363,28 @@ const deleteBatch = (
   return Effect.gen(function* () {
     const strategy = dialect.deleteResult
     if (strategy._tag === "precheck") {
-      return yield* Effect.fail(
-        new TelemetryStoreError({
-          operation: "deleteOlderThan",
-          cause: "the active dialect does not expose an affected-row count"
-        })
-      )
+      return yield* new TelemetryStoreError({
+        operation: "deleteOlderThan",
+        cause: "the active dialect does not expose an affected-row count"
+      })
     }
 
-    const statement = makeRetentionDeleteStatement(
-      dialect,
-      table,
-      strategy._tag === "returning",
-      cutoff
-    )
+    const statement = makeRetentionDeleteStatement(dialect, table, strategy._tag === "returning", cutoff)
 
     let deleted = 0
     for (let batch = 1; batch <= MAX_RETENTION_BATCHES; batch++) {
       let count = 0
       if (strategy._tag === "returning") {
-        const rows = yield* run<Record<string, unknown>>(
-          sql,
-          dialect,
-          statement.sql,
-          statement.params
-        ).pipe(
+        const rows = yield* run<Record<string, unknown>>(sql, dialect, statement.sql, statement.params).pipe(
           dmlRetry(dialect),
           Effect.mapError((error) => mapStoreError("deleteOlderThan", error))
         )
         count = rows.length
       } else {
-        const raw = yield* sql
-          .unsafe(rewritePlaceholders(statement.sql, dialect), [...statement.params])
-          .raw.pipe(
-            dmlRetry(dialect),
-            Effect.mapError((error) => mapStoreError("deleteOlderThan", error))
-          )
+        const raw = yield* sql.unsafe(rewritePlaceholders(statement.sql, dialect), [...statement.params]).raw.pipe(
+          dmlRetry(dialect),
+          Effect.mapError((error) => mapStoreError("deleteOlderThan", error))
+        )
 
         const context = `table=${table} deleted_before=${deleted} batch=${batch}`
         const read = yield* Effect.try({
@@ -441,35 +396,25 @@ const deleteBatch = (
             )
         })
         if (Option.isNone(read)) {
-          return yield* Effect.fail(
-            new TelemetryStoreError({
-              operation: "deleteOlderThan",
-              cause: `${context}: the affected-row count was unreadable; the current batch may already be committed`
-            })
-          )
+          return yield* new TelemetryStoreError({
+            operation: "deleteOlderThan",
+            cause: `${context}: the affected-row count was unreadable; the current batch may already be committed`
+          })
         }
 
         const value = read.value
-        if (
-          !Number.isSafeInteger(value) ||
-          value < 0 ||
-          value > RETENTION_BATCH_SIZE
-        ) {
-          return yield* Effect.fail(
-            new TelemetryStoreError({
-              operation: "deleteOlderThan",
-              cause: `${context}: the affected-row count was ${String(value)}; the current batch may already have committed`
-            })
-          )
+        if (!Number.isSafeInteger(value) || value < 0 || value > RETENTION_BATCH_SIZE) {
+          return yield* new TelemetryStoreError({
+            operation: "deleteOlderThan",
+            cause: `${context}: the affected-row count was ${String(value)}; the current batch may already have committed`
+          })
         }
         count = value
       }
 
       if (count === 0) {
         if (deleted === 0) {
-          yield* Effect.logWarning(
-            `[telemetry] ${table} retention made no progress at cutoff ${cutoff}`
-          )
+          yield* Effect.logWarning(`[telemetry] ${table} retention made no progress at cutoff ${cutoff}`)
         }
         return deleted
       }
@@ -488,15 +433,9 @@ const deleteBatch = (
   })
 }
 
-const makeStore = (
-  sql: SqlClient.SqlClient,
-  dialect: DialectType,
-  manageConnection: boolean
-): TelemetryStoreShape => ({
-  appendLogs: (rows) =>
-    appendRows(sql, dialect, "logs", "appendLogs", rows.map(mapLogEntry)),
-  appendSpans: (rows) =>
-    appendRows(sql, dialect, "spans", "appendSpans", rows.map(mapSpanEntry)),
+const makeStore = (sql: SqlClient.SqlClient, dialect: DialectType, manageConnection: boolean): TelemetryStoreShape => ({
+  appendLogs: (rows) => appendRows(sql, dialect, "logs", "appendLogs", rows.map(mapLogEntry)),
+  appendSpans: (rows) => appendRows(sql, dialect, "spans", "appendSpans", rows.map(mapSpanEntry)),
   deleteOlderThan: (cutoff) =>
     Effect.gen(function* () {
       const logs = yield* deleteBatch(sql, dialect, "logs", cutoff)
@@ -547,9 +486,7 @@ export const makeSqlTelemetryStoreLayer = (
           { discard: true }
         ).pipe(
           Effect.retry({ while: retryPredicate(dialect), schedule: migrationRetrySchedule }),
-          Effect.catchCause((cause) =>
-            Effect.fail(mapStoreError("setup", cause))
-          )
+          Effect.catchCause((cause) => Effect.fail(mapStoreError("setup", cause)))
         )
       }
 
@@ -557,12 +494,7 @@ export const makeSqlTelemetryStoreLayer = (
         Effect.gen(function* () {
           const context = yield* Layer.build(
             MigratorLive.pipe(
-              Layer.provide(
-                Layer.mergeAll(
-                  Layer.succeed(SqlClient.SqlClient, sql),
-                  Layer.succeed(Dialect, dialect)
-                )
-              )
+              Layer.provide(Layer.mergeAll(Layer.succeed(SqlClient.SqlClient, sql), Layer.succeed(Dialect, dialect)))
             )
           )
           return Context.get(context, Migrator)

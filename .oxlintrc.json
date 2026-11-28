@@ -75,11 +75,20 @@
     "typescript/no-duplicate-type-constituents": "warn",
     "effecttsgo/any-unknown-in-error-context": "warn",
     "effecttsgo/unsafe-effect-type-assertion": "warn",
+    "effecttsgo/lazy-effect": "off",
     "effecttsgo/unstable-api-usage": "off"
   },
   "env": {
     "builtin": true
   },
+  "overrides": [
+    {
+      "files": ["**/tests/**/*.ts", "**/*.test.ts"],
+      "rules": {
+        "effecttsgo/any-unknown-in-error-context": "off"
+      }
+    }
+  ],
   "ignorePatterns": [
     "**/dist/**",
     "**/node_modules/**",

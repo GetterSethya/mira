@@ -45,9 +45,8 @@ function executeAndTrack<R>(
 
     const startedAt = Date.now()
     const exit = yield* Effect.exit(
-      def.handler().pipe(
-        Effect.withSpan("cron.execute", { kind: "internal" })
-      )
+      // oxlint-disable-next-line effecttsgo/any-unknown-in-error-context -- CronDef.handler deliberately accepts arbitrary user failures
+      def.handler().pipe(Effect.withSpan("cron.execute", { kind: "internal" }))
     )
     const durationMs = Date.now() - startedAt
 
@@ -101,6 +100,7 @@ function executeAndTrack<R>(
       }
       yield* Effect.forkDetach(hookService.runCronError(errorCtx))
       yield* Effect.forkDetach(hookService.runCronFinished(finishedCtx))
+      // oxlint-disable-next-line effecttsgo/any-unknown-in-error-context -- re-raises the handler's arbitrary failure cause
       return yield* Effect.failCause(exit.cause)
     }
   }).pipe(
@@ -108,7 +108,8 @@ function executeAndTrack<R>(
       kind: "server",
       attributes: { "cron.name": def.name, "cron.scheduled_at": ctx.scheduledAt.toISOString() }
     }),
-    Effect.provideContext(env)
+    Effect.provideContext(env),
+    Effect.ignoreCause
   )
 }
 
@@ -125,9 +126,7 @@ function runOneTick<R>(
     let ctx: CronContext = { name: def.name, scheduledAt }
     ctx = yield* hookService.runCronStart(ctx)
     ctx = yield* hookService.runCronExecute(ctx)
-    yield* Effect.forkDetach(
-      executeAndTrack(def, stateRef, ctx, hookService, env, sql, dialect).pipe(Effect.catchCause(() => Effect.void))
-    )
+    yield* Effect.forkDetach(executeAndTrack(def, stateRef, ctx, hookService, env, sql, dialect))
   })
 }
 
@@ -184,10 +183,7 @@ export function makeCronServiceLayer<R>(defs: ReadonlyArray<CronDef<R>>) {
             return Effect.void
           }
           return runOneTick(def, stateRef, hookService, env, sql, dialect)
-        }).pipe(
-          Effect.repeat(def.schedule),
-          Effect.forkScoped
-        )
+        }).pipe(Effect.repeat(def.schedule), Effect.forkScoped)
       }
 
       return CronService.of({
@@ -201,11 +197,7 @@ export function makeCronServiceLayer<R>(defs: ReadonlyArray<CronDef<R>>) {
             }
             const scheduledAt = new Date()
             const ctx: CronContext = { name, scheduledAt }
-            yield* Effect.forkDetach(
-              executeAndTrack(def, stateRef, ctx, hookService, env, sql, dialect).pipe(
-                Effect.catchCause(() => Effect.void)
-              )
-            )
+            yield* Effect.forkDetach(executeAndTrack(def, stateRef, ctx, hookService, env, sql, dialect))
           })
       })
     })

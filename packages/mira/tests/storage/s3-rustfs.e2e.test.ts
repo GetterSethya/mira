@@ -95,15 +95,15 @@ const ensureBucket = Effect.tryPromise({
       })
     }
   },
-  catch: (cause) =>
-    cause instanceof BucketSetupError
-      ? cause
-      : new BucketSetupError({ reason: String(cause) })
+  catch: (cause) => (cause instanceof BucketSetupError ? cause : new BucketSetupError({ reason: String(cause) }))
 }).pipe(Effect.orDie)
 
 const bucketLayer = Layer.effectDiscard(ensureBucket)
 
-const testLayer = Layer.mergeAll(app.buildServiceLayer(), NodeHttpServer.layerTest, bucketLayer)
+const testLayer = Layer.mergeAll(
+  app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest)),
+  bucketLayer
+)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,8 +114,7 @@ const serveRouter = Effect.flatMap(
   HttpServer.serveEffect()
 )
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 function requireString(value: unknown, field: string): string {
   if (!isRecord(value)) throw new Error(`expected an object response, got ${typeof value}`)
@@ -126,18 +125,13 @@ function requireString(value: unknown, field: string): string {
   return candidate
 }
 
-const responseText = (res: HttpClientResponse.HttpClientResponse) =>
-  res.text.pipe(Effect.orElseSucceed(() => ""))
+const responseText = (res: HttpClientResponse.HttpClientResponse) => res.text.pipe(Effect.orElseSucceed(() => ""))
 
 /** Remove every object in the dedicated e2e bucket before each test. */
 const clearBucket = Effect.gen(function* () {
   const storage = yield* FileStorage
   const keys = yield* storage.list("")
-  yield* Effect.forEach(
-    keys,
-    (key) => storage.delete(key).pipe(Effect.ignore),
-    { concurrency: "unbounded" }
-  )
+  yield* Effect.forEach(keys, (key) => storage.delete(key).pipe(Effect.ignore), { concurrency: "unbounded" })
 })
 
 // ---------------------------------------------------------------------------
@@ -185,9 +179,7 @@ describeE2E("S3CompatibleStorage E2E (RustFS)", () => {
       assert.strictEqual(requireString(record, "attachment"), key)
 
       // Deleting the record cleans the object up (best-effort file cleanup).
-      const deleteRes = yield* HttpClient.execute(
-        HttpClientRequest.delete(`/api/collections/docs/${id}`)
-      )
+      const deleteRes = yield* HttpClient.execute(HttpClientRequest.delete(`/api/collections/docs/${id}`))
       assert.strictEqual(deleteRes.status, 204)
       assert.strictEqual(yield* storage.exists(key), false)
     }).pipe(Effect.provide(testLayer))

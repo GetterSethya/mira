@@ -32,7 +32,8 @@ import {
   postJson,
   seedProfile,
   seedUser,
-  setupTables
+  setupTables,
+  toJsonText
 } from "./_harness.js"
 
 const buildCtxCacheTag = (
@@ -95,7 +96,7 @@ function pretty(value: unknown): string {
     return `{${entries.map(([k, v]) => `${k}: ${pretty(v)}`).join(", ")}}`
   }
   if (typeof value === "string") return `"${value}"`
-  return String(value)
+  return toJsonText(value)
 }
 
 /** Number of items in a decoded list body, or -1 when the shape is wrong. */
@@ -135,9 +136,11 @@ const AppConfigTest = Layer.succeed(
 )
 
 /** Fresh layer per test: the cached service + all of its dependencies. */
-function makeCachedSecurityLayer(collections: ReadonlyArray<typeof CACHED_COLLECTIONS[number]>) {
+function makeCachedSecurityLayer(collections: ReadonlyArray<(typeof CACHED_COLLECTIONS)[number]>) {
   const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
-  const repoWithSql = RepositoryLive.pipe(Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect))))
+  const repoWithSql = RepositoryLive.pipe(
+    Layer.provide(Layer.mergeAll(sqliteLayer, NodeCryptoLayer, Layer.succeed(Dialect, sqliteDialect)))
+  )
   const DialectTest = Layer.succeed(Dialect, sqliteDialect)
 
   // >>> the swap <<< — uses the cached collection service
@@ -197,10 +200,7 @@ const setupExtraTables = Effect.gen(function* () {
   yield* sql`DELETE FROM ${sql("query_rules")}`
 })
 
-function seedRow(
-  table: string,
-  data: Record<string, unknown>
-): Effect.Effect<void, never, Repository> {
+function seedRow(table: string, data: Record<string, unknown>): Effect.Effect<void, never, Repository> {
   return Effect.gen(function* () {
     const repo = yield* Repository
     yield* repo.create(table, data).pipe(Effect.orDie)
@@ -208,81 +208,77 @@ function seedRow(
 }
 
 describe("H1: cached cross-requester isolation (owner-only view rule)", () => {
-  it.effect(
-    "owner read is cached; non-owner and anonymous never receive the owner's cached row",
-    () =>
-      Effect.gen(function* () {
-        yield* setupTables
-        yield* setupExtraTables
+  it.effect("owner read is cached; non-owner and anonymous never receive the owner's cached row", () =>
+    Effect.gen(function* () {
+      yield* setupTables
+      yield* setupExtraTables
 
-        const userAId = yield* seedUser("cache-a@example.com", "pw")
-        const userBId = yield* seedUser("cache-b@example.com", "pw")
-        const profileId = yield* seedProfile({
-          email: "a-private@example.com",
-          ssn: "111-22-3333",
-          ownerId: userAId
-        })
-        yield* serveCachedRouter()
+      const userAId = yield* seedUser("cache-a@example.com", "pw")
+      const userBId = yield* seedUser("cache-b@example.com", "pw")
+      const profileId = yield* seedProfile({
+        email: "a-private@example.com",
+        ssn: "111-22-3333",
+        ownerId: userAId
+      })
+      yield* serveCachedRouter()
 
-        const tokenA = yield* login("cache-a@example.com", "pw")
-        const tokenB = yield* login("cache-b@example.com", "pw")
+      const tokenA = yield* login("cache-a@example.com", "pw")
+      const tokenB = yield* login("cache-b@example.com", "pw")
 
-        const repo = yield* Repository
+      const repo = yield* Repository
 
-        // ---- 1. owner A reads (populates the cache under A's ctxTag) --------
-        const a1 = yield* get(`/api/collections/private_profiles/${profileId}`, tokenA)
-        const a1Body = yield* a1.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] A read #1          status=${a1.status} body=${pretty(a1Body)}`)
-        assert.strictEqual(a1.status, 200)
-        assert.strictEqual(at(a1Body, "ssn"), "111-22-3333")
+      // ---- 1. owner A reads (populates the cache under A's ctxTag) --------
+      const a1 = yield* get(`/api/collections/private_profiles/${profileId}`, tokenA)
+      const a1Body = yield* a1.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] A read #1          status=${a1.status} body=${pretty(a1Body)}`)
+      assert.strictEqual(a1.status, 200)
+      assert.strictEqual(at(a1Body, "ssn"), "111-22-3333")
 
-        // ---- 2. mutate the row OUT OF BAND (bypasses cache invalidation) ----
-        yield* repo.update("private_profiles", profileId, { ssn: "999-88-7777" }).pipe(Effect.orDie)
+      // ---- 2. mutate the row OUT OF BAND (bypasses cache invalidation) ----
+      yield* repo.update("private_profiles", profileId, { ssn: "999-88-7777" }).pipe(Effect.orDie)
 
-        // ---- 3. owner A reads again: STALE value proves a cache hit ---------
-        const a2 = yield* get(`/api/collections/private_profiles/${profileId}`, tokenA)
-        const a2Body = yield* a2.json
-        // eslint-disable-next-line no-console
-        console.log(
-          `[H1] A read #2 (stale?) status=${a2.status} body=${pretty(a2Body)} (DB now has 999-88-7777)`
-        )
-        assert.strictEqual(a2.status, 200)
-        assert.strictEqual(
-          at(a2Body, "ssn"),
-          "111-22-3333",
-          "cache must be engaged: out-of-band update not seen within TTL"
-        )
+      // ---- 3. owner A reads again: STALE value proves a cache hit ---------
+      const a2 = yield* get(`/api/collections/private_profiles/${profileId}`, tokenA)
+      const a2Body = yield* a2.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] A read #2 (stale?) status=${a2.status} body=${pretty(a2Body)} (DB now has 999-88-7777)`)
+      assert.strictEqual(a2.status, 200)
+      assert.strictEqual(
+        at(a2Body, "ssn"),
+        "111-22-3333",
+        "cache must be engaged: out-of-band update not seen within TTL"
+      )
 
-        // ---- 4. non-owner B must NOT be served A's cached row ---------------
-        const b1 = yield* get(`/api/collections/private_profiles/${profileId}`, tokenB)
-        const b1Body = yield* b1.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] B read             status=${b1.status} body=${pretty(b1Body)}`)
-        assert.notStrictEqual(b1.status, 200, "non-owner must be denied")
-        assert.strictEqual(at(b1Body, "ssn"), undefined, "non-owner must not receive the ssn")
+      // ---- 4. non-owner B must NOT be served A's cached row ---------------
+      const b1 = yield* get(`/api/collections/private_profiles/${profileId}`, tokenB)
+      const b1Body = yield* b1.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] B read             status=${b1.status} body=${pretty(b1Body)}`)
+      assert.notStrictEqual(b1.status, 200, "non-owner must be denied")
+      assert.strictEqual(at(b1Body, "ssn"), undefined, "non-owner must not receive the ssn")
 
-        // ---- 5. anonymous must NOT be served A's cached row -----------------
-        const anon = yield* get(`/api/collections/private_profiles/${profileId}`)
-        const anonBody = yield* anon.json
-        // eslint-disable-next-line no-console
-        console.log(`[H1] anon read          status=${anon.status} body=${pretty(anonBody)}`)
-        assert.notStrictEqual(anon.status, 200, "anonymous must be denied")
-        assert.strictEqual(at(anonBody, "ssn"), undefined)
+      // ---- 5. anonymous must NOT be served A's cached row -----------------
+      const anon = yield* get(`/api/collections/private_profiles/${profileId}`)
+      const anonBody = yield* anon.json
+      // eslint-disable-next-line no-console
+      console.log(`[H1] anon read          status=${anon.status} body=${pretty(anonBody)}`)
+      assert.notStrictEqual(anon.status, 200, "anonymous must be denied")
+      assert.strictEqual(at(anonBody, "ssn"), undefined)
 
-        // ---- 6. raw cache-key evidence --------------------------------------
-        const ctxA: RequestCtx = { auth: { collection: "users", record: { id: userAId } }, headers: {}, query: {} }
-        const ctxB: RequestCtx = { auth: { collection: "users", record: { id: userBId } }, headers: {}, query: {} }
-        const ctxAnon: RequestCtx = { headers: {}, query: {} }
-        const tagA = buildCtxCacheTag(PrivateProfiles, "view", ctxA)
-        const tagB = buildCtxCacheTag(PrivateProfiles, "view", ctxB)
-        const tagAnon = buildCtxCacheTag(PrivateProfiles, "view", ctxAnon)
-        // eslint-disable-next-line no-console
-        console.log(`[H1] cache tags: A=${tagA} | B=${tagB} | anon=${tagAnon}`)
-        assert.notStrictEqual(tagA, tagB)
-        assert.notStrictEqual(tagA, tagAnon)
-        assert.notStrictEqual(tagB, tagAnon)
-      }).pipe(Effect.provide(makeCachedSecurityLayer(CACHED_COLLECTIONS)))
+      // ---- 6. raw cache-key evidence --------------------------------------
+      const ctxA: RequestCtx = { auth: { collection: "users", record: { id: userAId } }, headers: {}, query: {} }
+      const ctxB: RequestCtx = { auth: { collection: "users", record: { id: userBId } }, headers: {}, query: {} }
+      const ctxAnon: RequestCtx = { headers: {}, query: {} }
+      const tagA = buildCtxCacheTag(PrivateProfiles, "view", ctxA)
+      const tagB = buildCtxCacheTag(PrivateProfiles, "view", ctxB)
+      const tagAnon = buildCtxCacheTag(PrivateProfiles, "view", ctxAnon)
+      // eslint-disable-next-line no-console
+      console.log(`[H1] cache tags: A=${tagA} | B=${tagB} | anon=${tagAnon}`)
+      assert.notStrictEqual(tagA, tagB)
+      assert.notStrictEqual(tagA, tagAnon)
+      assert.notStrictEqual(tagB, tagAnon)
+    }).pipe(Effect.provide(makeCachedSecurityLayer(CACHED_COLLECTIONS)))
   )
 
   it.effect("admin-populated record cache is not served to a non-admin requester", () =>
@@ -362,9 +358,7 @@ describe("H2: @request_body_* rule on list/view (fail-closed?)", () => {
 
       // ---- 1. request WITH the header ----
       const withHeader = yield* HttpClient.execute(
-        HttpClientRequest.get("/api/collections/body_rules").pipe(
-          HttpClientRequest.setHeader("token", "body-secret")
-        )
+        HttpClientRequest.get("/api/collections/body_rules").pipe(HttpClientRequest.setHeader("token", "body-secret"))
       )
       const withHeaderBody = yield* withHeader.json
       // eslint-disable-next-line no-console
@@ -385,11 +379,7 @@ describe("H2: @request_body_* rule on list/view (fail-closed?)", () => {
       )
 
       assert.strictEqual(withHeader.status, 200)
-      assert.strictEqual(
-        itemCount(withHeaderBody),
-        0,
-        "a header must not satisfy a @request_body_* list rule"
-      )
+      assert.strictEqual(itemCount(withHeaderBody), 0, "a header must not satisfy a @request_body_* list rule")
       assert.strictEqual(withoutHeader.status, 200)
       assert.strictEqual(
         itemCount(withoutHeaderBody),
@@ -434,11 +424,7 @@ describe("H3: cached view/list invalidation after a write by a different request
       assert.strictEqual(at(beforeBody, "ssn"), "111-00-0000")
 
       // a DIFFERENT requester (admin) updates through the service (invalidates)
-      const upd = yield* patchJson(
-        `/api/collections/private_profiles/${profileId}`,
-        { ssn: "555-66-7777" },
-        adminToken
-      )
+      const upd = yield* patchJson(`/api/collections/private_profiles/${profileId}`, { ssn: "555-66-7777" }, adminToken)
       const updBody = yield* upd.json
       // eslint-disable-next-line no-console
       console.log(`[H3] admin update          status=${upd.status} body=${pretty(updBody)}`)
@@ -481,17 +467,13 @@ describe("H3: cached view/list invalidation after a write by a different request
       const list2Body = yield* list2.json
       // eslint-disable-next-line no-console
       console.log(`[H3b] list after create    status=${list2.status} items=${itemCount(list2Body)}`)
-      assert.strictEqual(
-        itemCount(list2Body),
-        1,
-        "create must nuke the list cache -> new row visible within TTL"
-      )
+      assert.strictEqual(itemCount(list2Body), 1, "create must nuke the list cache -> new row visible within TTL")
     }).pipe(Effect.provide(makeCachedSecurityLayer(CACHED_COLLECTIONS)))
   )
 })
 
 describe("H4 (REGRESSION): a request whose rule value differs from the one that warmed the cache tag must not receive the cached row", () => {
-  it.effect("unauthorised `?token=a&token=b` (resolves \"a\") must NOT replay the row authorised by `?token=a,b`", () =>
+  it.effect('unauthorised `?token=a&token=b` (resolves "a") must NOT replay the row authorised by `?token=a,b`', () =>
     Effect.gen(function* () {
       yield* setupTables
       yield* setupExtraTables
@@ -545,9 +527,7 @@ describe("H4 (REGRESSION): a request whose rule value differs from the one that 
       const scalarTag = buildCtxCacheTag(QueryRule, "list", scalarCtx)
       const repeatedTag = buildCtxCacheTag(QueryRule, "list", repeatedCtx)
       // eslint-disable-next-line no-console
-      console.log(
-        `[H4] VULNERABLE EVIDENCE: cache tags scalar=${scalarTag} repeated=${repeatedTag} (must differ)`
-      )
+      console.log(`[H4] VULNERABLE EVIDENCE: cache tags scalar=${scalarTag} repeated=${repeatedTag} (must differ)`)
 
       assert.strictEqual(
         itemCount(repeatedBody),
@@ -595,9 +575,7 @@ describe("H4 (REGRESSION): a request whose rule value differs from the one that 
       const emptyTag = buildCtxCacheTag(QueryRule, "list", { headers: {}, query: { token: "" } })
       const missingTag = buildCtxCacheTag(QueryRule, "list", { headers: {}, query: {} })
       // eslint-disable-next-line no-console
-      console.log(
-        `[H4b] VULNERABLE EVIDENCE: cache tags empty=${emptyTag} missing=${missingTag} (must differ)`
-      )
+      console.log(`[H4b] VULNERABLE EVIDENCE: cache tags empty=${emptyTag} missing=${missingTag} (must differ)`)
       assert.strictEqual(
         itemCount(missingParamBody),
         0,
@@ -623,9 +601,7 @@ describe("H4 (REGRESSION): a request whose rule value differs from the one that 
       const coldMissing = yield* get("/api/collections/query_rules")
       const coldMissingBody = yield* coldMissing.json
       // eslint-disable-next-line no-console
-      console.log(
-        `[H4c] control: cold (no token) status=${coldMissing.status} items=${itemCount(coldMissingBody)}`
-      )
+      console.log(`[H4c] control: cold (no token) status=${coldMissing.status} items=${itemCount(coldMissingBody)}`)
       assert.strictEqual(itemCount(coldMissingBody), 0, "control: missing param resolves to NULL")
 
       // the AUTHORISED request must see its own row — not the cold entry.

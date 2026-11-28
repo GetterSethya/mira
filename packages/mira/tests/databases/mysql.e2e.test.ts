@@ -4,12 +4,7 @@ import { join } from "node:path"
 
 import { NodeHttpServer } from "@effect/platform-node"
 import { describe, it } from "@effect/vitest"
-import {
-  AuthCollection,
-  BaseCollection,
-  Field,
-  ViewCollection
-} from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection, Field, ViewCollection } from "@gettersethya/mira-client"
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
@@ -22,6 +17,13 @@ import { readMysqlAffectedRows } from "@/dialect/dialect-mysql-core.js"
 import { makeCollectionRouter } from "@/http/router.js"
 import { NodePlatform } from "@/platforms/node.js"
 import { LocalFileStorage } from "@/storage/local-preset.js"
+
+function closeEffect<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> {
+  // The app layer is closed at runtime; the test graph widens R through
+  // plugin/cron config, so this helper restores the closed run type.
+  // oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion, typescript/consistent-type-assertions
+  return effect as Effect.Effect<A, E, never>
+}
 
 type EngineConfig = {
   readonly label: string
@@ -166,19 +168,19 @@ const PostItem = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   published: Schema.Boolean,
-  views: Schema.Number
+  views: Schema.Finite
 })
 const ListBody = Schema.Struct({
   items: Schema.Array(PostItem),
-  nextCursor: Schema.NullOr(Schema.Union([Schema.String, Schema.Number]))
+  nextCursor: Schema.NullOr(Schema.Union([Schema.String, Schema.Finite]))
 })
 const ViewList = Schema.Struct({
   items: Schema.Array(
     Schema.Struct({
       id: Schema.String,
       title: Schema.String,
-      total: Schema.Number,
-      total_views: Schema.Number
+      total: Schema.Finite,
+      total_views: Schema.Finite
     })
   )
 })
@@ -187,22 +189,18 @@ const BulkBody = Schema.Struct({
 })
 const CursorListBody = Schema.Struct({
   items: Schema.Array(Schema.Struct({ id: Schema.String })),
-  nextCursor: Schema.NullOr(Schema.Union([Schema.String, Schema.Number]))
+  nextCursor: Schema.NullOr(Schema.Union([Schema.String, Schema.Finite]))
 })
 
 const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
   res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
 
 const encodeFilter = Schema.encodeSync(
-  Schema.fromJsonString(
-    Schema.Struct({ op: Schema.String, field: Schema.String, value: Schema.Unknown })
-  )
+  Schema.fromJsonString(Schema.Struct({ op: Schema.String, field: Schema.String, value: Schema.Unknown }))
 )
 
 const filterQuery = (op: string, field: string, value: unknown) =>
-  `/api/collections/e2e_mysql_posts?filter=${encodeURIComponent(
-    encodeFilter({ op, field, value })
-  )}`
+  `/api/collections/e2e_mysql_posts?filter=${encodeURIComponent(encodeFilter({ op, field, value }))}`
 
 const serveRouter = Effect.flatMap(
   HttpRouter.toHttpEffect(HttpRouter.addAll(makeCollectionRouter(collections))),
@@ -221,23 +219,19 @@ const createApp = (url: string) =>
     .collections(collections)
     .build()
 
-const withEngine = <A, E, R>(
-  url: string,
-  body: (url: string) => Effect.Effect<A, E, R>
-): Effect.Effect<A, E, R> =>
-  Effect.scoped(
-    Effect.acquireRelease(
-      Effect.sync(
-        () =>
-          `mira_e2e_http_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      ),
-      (name) => dropDatabase(url, name)
-    ).pipe(
-      Effect.flatMap((name) =>
-        Effect.gen(function* () {
-          yield* createDatabase(url, name)
-          return yield* body(databaseUrl(url, name))
-        })
+const withEngine = <A, E, R>(url: string, body: (url: string) => Effect.Effect<A, E, R>): Effect.Effect<A, E, never> =>
+  closeEffect(
+    Effect.scoped(
+      Effect.acquireRelease(
+        Effect.sync(() => `mira_e2e_http_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+        (name) => dropDatabase(url, name)
+      ).pipe(
+        Effect.flatMap((name) =>
+          Effect.gen(function* () {
+            yield* createDatabase(url, name)
+            return yield* body(databaseUrl(url, name))
+          })
+        )
       )
     )
   )
@@ -254,10 +248,7 @@ for (const engine of engines) {
         withEngine(url, (databaseUrlValue) =>
           Effect.gen(function* () {
             const app = createApp(databaseUrlValue)
-            const appLayer = Layer.mergeAll(
-              app.buildServiceLayer(),
-              NodeHttpServer.layerTest
-            )
+            const appLayer = app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest))
 
             yield* Effect.gen(function* () {
               yield* serveRouter
@@ -276,9 +267,7 @@ for (const engine of engines) {
               expect(user.password).toBeUndefined()
 
               const login = yield* HttpClient.execute(
-                HttpClientRequest.post(
-                  "/api/collections/e2e_mysql_users/auth-with-password"
-                ).pipe(
+                HttpClientRequest.post("/api/collections/e2e_mysql_users/auth-with-password").pipe(
                   HttpClientRequest.bodyJsonUnsafe({
                     email: "e2e-mysql@example.com",
                     password: "correct-password"
@@ -310,9 +299,7 @@ for (const engine of engines) {
               expect(secondRegistered.status).toBe(201)
               const secondUser = yield* json(secondRegistered, AuthRecord)
               const secondLogin = yield* HttpClient.execute(
-                HttpClientRequest.post(
-                  "/api/collections/e2e_mysql_users/auth-with-password"
-                ).pipe(
+                HttpClientRequest.post("/api/collections/e2e_mysql_users/auth-with-password").pipe(
                   HttpClientRequest.bodyJsonUnsafe({
                     email: "e2e-mysql-2@example.com",
                     password: "correct-password"
@@ -323,25 +310,15 @@ for (const engine of engines) {
               const secondToken = (yield* json(secondLogin, LoginBody)).token
 
               const forbiddenDelete = yield* HttpClient.execute(
-                HttpClientRequest.delete(
-                  `/api/collections/e2e_mysql_users/${user.id}`
-                ).pipe(
-                  HttpClientRequest.setHeader(
-                    "Authorization",
-                    `Bearer ${secondToken}`
-                  )
+                HttpClientRequest.delete(`/api/collections/e2e_mysql_users/${user.id}`).pipe(
+                  HttpClientRequest.setHeader("Authorization", `Bearer ${secondToken}`)
                 )
               )
               expect(forbiddenDelete.status).toBe(403)
 
               const ownDelete = yield* HttpClient.execute(
-                HttpClientRequest.delete(
-                  `/api/collections/e2e_mysql_users/${secondUser.id}`
-                ).pipe(
-                  HttpClientRequest.setHeader(
-                    "Authorization",
-                    `Bearer ${secondToken}`
-                  )
+                HttpClientRequest.delete(`/api/collections/e2e_mysql_users/${secondUser.id}`).pipe(
+                  HttpClientRequest.setHeader("Authorization", `Bearer ${secondToken}`)
                 )
               )
               expect(ownDelete.status).toBe(204)
@@ -358,20 +335,17 @@ for (const engine of engines) {
                 )
               )
               expect(adult.status).toBe(201)
-              const adultBody = yield* json(
-                adult,
-                Schema.Struct({ id: Schema.String })
-              )
+              const adultBody = yield* json(adult, Schema.Struct({ id: Schema.String }))
               const blockedUpdate = yield* HttpClient.execute(
-                HttpClientRequest.patch(
-                  `/api/collections/e2e_mysql_aged/${adultBody.id}`
-                ).pipe(HttpClientRequest.bodyJsonUnsafe({ age: 17 }))
+                HttpClientRequest.patch(`/api/collections/e2e_mysql_aged/${adultBody.id}`).pipe(
+                  HttpClientRequest.bodyJsonUnsafe({ age: 17 })
+                )
               )
               expect(blockedUpdate.status).toBe(403)
               const allowedUpdate = yield* HttpClient.execute(
-                HttpClientRequest.patch(
-                  `/api/collections/e2e_mysql_aged/${adultBody.id}`
-                ).pipe(HttpClientRequest.bodyJsonUnsafe({ age: 20 }))
+                HttpClientRequest.patch(`/api/collections/e2e_mysql_aged/${adultBody.id}`).pipe(
+                  HttpClientRequest.bodyJsonUnsafe({ age: 20 })
+                )
               )
               expect(allowedUpdate.status).toBe(200)
 
@@ -435,26 +409,20 @@ for (const engine of engines) {
               const page = yield* json(listed, ListBody)
               expect(page.items.some((item) => item.id === post.id)).toBe(true)
 
-              const filtered = yield* HttpClient.execute(
-                HttpClientRequest.get(filterQuery("like", "title", "%Bet%"))
-              )
+              const filtered = yield* HttpClient.execute(HttpClientRequest.get(filterQuery("like", "title", "%Bet%")))
               expect(filtered.status).toBe(200)
               const filteredPage = yield* json(filtered, ListBody)
               expect(filteredPage.items.some((item) => item.id === post.id)).toBe(true)
 
               const sorted = yield* HttpClient.execute(
-                HttpClientRequest.get(
-                  "/api/collections/e2e_mysql_posts?sort=title&order=asc"
-                )
+                HttpClientRequest.get("/api/collections/e2e_mysql_posts?sort=title&order=asc")
               )
               expect(sorted.status).toBe(200)
               const sortedPage = yield* json(sorted, ListBody)
               const sortedTitles = sortedPage.items.map((item) => item.title)
               expect(sortedTitles.indexOf("Alpha")).toBeGreaterThanOrEqual(0)
               expect(sortedTitles.indexOf("Beta")).toBeGreaterThanOrEqual(0)
-              expect(sortedTitles.indexOf("Alpha")).toBeLessThan(
-                sortedTitles.indexOf("Beta")
-              )
+              expect(sortedTitles.indexOf("Alpha")).toBeLessThan(sortedTitles.indexOf("Beta"))
 
               const updated = yield* HttpClient.execute(
                 HttpClientRequest.patch(`/api/collections/e2e_mysql_posts/${post.id}`).pipe(
@@ -463,9 +431,7 @@ for (const engine of engines) {
               )
               expect(updated.status).toBe(200)
 
-              const view = yield* HttpClient.execute(
-                HttpClientRequest.get("/api/collections/e2e_mysql_view")
-              )
+              const view = yield* HttpClient.execute(HttpClientRequest.get("/api/collections/e2e_mysql_view"))
               expect(view.status).toBe(200)
               const viewBody = yield* json(view, ViewList)
               expect(viewBody.items.length).toBeGreaterThanOrEqual(1)
@@ -548,10 +514,7 @@ for (const engine of engines) {
               )
               .storage(
                 LocalFileStorage({
-                  directory: join(
-                    mkdtempSync(join(tmpdir(), "mira-mysql-nomigrate-")),
-                    "uploads"
-                  )
+                  directory: join(mkdtempSync(join(tmpdir(), "mira-mysql-nomigrate-")), "uploads")
                 })
               )
               .collections(collections)
@@ -573,9 +536,7 @@ for (const engine of engines) {
             const app = createApp(databaseUrlValue)
             yield* Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
-              yield* sql.unsafe(
-                "ALTER TABLE `e2e_mysql_cursor` AUTO_INCREMENT = 9007199254740993"
-              )
+              yield* sql.unsafe("ALTER TABLE `e2e_mysql_cursor` AUTO_INCREMENT = 9007199254740993")
               yield* sql.unsafe(
                 "INSERT INTO `e2e_mysql_cursor` (`id`, `title`, `created`, `updated`) VALUES ('big-1', 'Big One', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'), ('big-2', 'Big Two', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')"
               )
@@ -598,40 +559,30 @@ for (const engine of engines) {
                 created: now,
                 updated: now
               })}`
-              const deletedRaw = yield* sql
-                .unsafe("DELETE FROM `e2e_mysql_posts` WHERE `id` = ?", ["direct-delete"])
+              const deletedRaw = yield* sql.unsafe("DELETE FROM `e2e_mysql_posts` WHERE `id` = ?", ["direct-delete"])
                 .raw
               expect(readMysqlAffectedRows(deletedRaw)).toEqual(Option.some(1))
-              const deletedAgain = yield* sql
-                .unsafe("DELETE FROM `e2e_mysql_posts` WHERE `id` = ?", ["direct-delete"])
+              const deletedAgain = yield* sql.unsafe("DELETE FROM `e2e_mysql_posts` WHERE `id` = ?", ["direct-delete"])
                 .raw
               expect(readMysqlAffectedRows(deletedAgain)).toEqual(Option.some(0))
             }).pipe(Effect.provide(app.buildServiceLayer()))
 
             yield* Effect.gen(function* () {
               yield* serveRouter
-              const res = yield* HttpClient.execute(
-                HttpClientRequest.get("/api/collections/e2e_mysql_cursor?limit=1")
-              )
+              const res = yield* HttpClient.execute(HttpClientRequest.get("/api/collections/e2e_mysql_cursor?limit=1"))
               expect(res.status).toBe(200)
               const body = yield* json(res, CursorListBody)
               expect(body.nextCursor).toBe("9007199254740993")
               expect(body.items[0]?.id).toBe("big-1")
 
               const second = yield* HttpClient.execute(
-                HttpClientRequest.get(
-                  "/api/collections/e2e_mysql_cursor?limit=1&after=9007199254740993"
-                )
+                HttpClientRequest.get("/api/collections/e2e_mysql_cursor?limit=1&after=9007199254740993")
               )
               expect(second.status).toBe(200)
               const secondBody = yield* json(second, CursorListBody)
               expect(secondBody.items[0]?.id).toBe("big-2")
               expect(secondBody.nextCursor).toBeNull()
-            }).pipe(
-              Effect.provide(
-                Layer.merge(app.buildServiceLayer(), NodeHttpServer.layerTest)
-              )
-            )
+            }).pipe(Effect.provide(Layer.merge(app.buildServiceLayer(), NodeHttpServer.layerTest)))
           })
         ),
       180_000

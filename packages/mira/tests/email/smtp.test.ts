@@ -1,6 +1,6 @@
 import { SMTPServer } from "smtp-server"
 import { describe, it } from "@effect/vitest"
-import { Effect, Exit, Layer, Option, Redacted } from "effect"
+import { Data, Effect, Exit, Layer, Option, Redacted } from "effect"
 import { expect } from "vitest"
 
 import { AppConfig } from "@/config/index.js"
@@ -13,6 +13,11 @@ interface FakeSmtp {
   readonly raw: () => string
   readonly close: () => Promise<void>
 }
+
+class FakeSmtpStartError extends Data.TaggedError("FakeSmtpStartError")<{
+  readonly cause: unknown
+  readonly message: string
+}> {}
 
 const startFakeSmtp = () =>
   Effect.tryPromise({
@@ -46,7 +51,11 @@ const startFakeSmtp = () =>
           })
         })
       }),
-    catch: (error) => error
+    catch: (error) =>
+      new FakeSmtpStartError({
+        cause: error,
+        message: `fake SMTP server failed to start: ${String(error)}`
+      })
   })
 
 const withSmtp = <A, E, R>(use: (smtp: FakeSmtp) => Effect.Effect<A, E, R>) =>
@@ -74,10 +83,7 @@ const makeLayer = (port: number) =>
     port,
     secure: false,
     from: "Mira <no-reply@mira.local>"
-  }).layer.pipe(
-    Layer.provide(Layer.mergeAll(NodePlatformLayer, NodeAuthServiceLayer)),
-    Layer.provide(AppConfigTest)
-  )
+  }).layer.pipe(Layer.provide(Layer.mergeAll(NodePlatformLayer, NodeAuthServiceLayer)), Layer.provide(AppConfigTest))
 
 describe("SmtpEmail", () => {
   it.effect("verifies and sends text + html through a local SMTP server", () =>
@@ -113,10 +119,7 @@ describe("SmtpEmail", () => {
     Effect.gen(function* () {
       const email = yield* EmailService
       const result = yield* email
-        .send(
-          { to: "agent@email.com", subject: "fail", text: "fail" },
-          { purpose: "custom" }
-        )
+        .send({ to: "agent@email.com", subject: "fail", text: "fail" }, { purpose: "custom" })
         .pipe(Effect.exit)
       expect(Exit.isFailure(result)).toBe(true)
     }).pipe(Effect.provide(makeLayer(1)))

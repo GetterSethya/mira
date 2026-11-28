@@ -104,24 +104,34 @@ export const makeCursorTestLayer = (map: (row: RepoRecord) => unknown) =>
   )
 
 export const makeRepositoryLayer = Layer.mergeAll(
-  RepositoryLive.pipe(
-    Layer.provide(sqliteLayer),
-    Layer.provide(NodeCryptoLayer),
-    Layer.provide(DialectTest)
-  ),
+  RepositoryLive.pipe(Layer.provide(sqliteLayer), Layer.provide(NodeCryptoLayer), Layer.provide(DialectTest)),
   sqliteLayer,
   NodeCryptoLayer,
   DialectTest
 )
 
 /**
+ * Render a cursor parameter as the text `BigInt` accepts. Cursor params are
+ * scalar driver values; anything else is a harness bug.
+ */
+const cursorText = (value: unknown): string => {
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "bigint":
+    case "boolean":
+      return String(value)
+    default:
+      throw new TypeError(`unsupported cursor value: ${typeof value}`)
+  }
+}
+
+/**
  * A repository that serves exact large `seqId` strings without asking the
  * SQLite driver to read an INTEGER above 2^53. The shipped SQLite driver throws
  * ERR_OUT_OF_RANGE for such rows, so the above-2^53 contract is tested here.
  */
-export const makeFakeLargeRepositoryLayer = (
-  rows: ReadonlyArray<{ id: string; title: string; seqId: string }>
-) =>
+export const makeFakeLargeRepositoryLayer = (rows: ReadonlyArray<{ id: string; title: string; seqId: string }>) =>
   Layer.succeed(
     Repository,
     Repository.of({
@@ -131,15 +141,14 @@ export const makeFakeLargeRepositoryLayer = (
       viewFilter: () => Effect.succeed([]),
       list: (_table, limit, options) => {
         const cursor = options?.where?.params.at(-1)
-        const descending =
-          options?.sort?.direction === "desc" || options?.where?.sql.includes("<") === true
+        const descending = options?.sort?.direction === "desc" || options?.where?.sql.includes("<") === true
         const filtered =
           cursor === undefined || cursor === null
             ? rows
             : rows.filter((row) =>
                 descending
-                  ? BigInt(row.seqId) < BigInt(String(cursor))
-                  : BigInt(row.seqId) > BigInt(String(cursor))
+                  ? BigInt(row.seqId) < BigInt(cursorText(cursor))
+                  : BigInt(row.seqId) > BigInt(cursorText(cursor))
               )
         const sorted = [...filtered].sort((a, b) => {
           const left = BigInt(a.seqId)
@@ -153,9 +162,7 @@ export const makeFakeLargeRepositoryLayer = (
     })
   )
 
-export const makeFakeLargeCursorServiceLayer = (
-  rows: ReadonlyArray<{ id: string; title: string; seqId: string }>
-) =>
+export const makeFakeLargeCursorServiceLayer = (rows: ReadonlyArray<{ id: string; title: string; seqId: string }>) =>
   makeCollectionServiceLayer([Posts]).pipe(
     Layer.provide(makeFakeLargeRepositoryLayer(rows)),
     Layer.provide(sqliteLayer),

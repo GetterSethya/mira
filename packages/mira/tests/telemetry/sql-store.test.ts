@@ -22,32 +22,19 @@ import {
 } from "@/telemetry/store.js"
 
 const databaseLayer = (dialect = sqliteDialect) =>
-  Layer.merge(
-    SqliteClient.layer({ filename: ":memory:" }),
-    Layer.succeed(Dialect, dialect)
-  )
+  Layer.merge(SqliteClient.layer({ filename: ":memory:" }), Layer.succeed(Dialect, dialect))
 
 const makeLayer = (dialect = sqliteDialect) =>
-  makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(
-    Layer.provideMerge(databaseLayer(dialect))
-  )
+  makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(Layer.provideMerge(databaseLayer(dialect)))
 
 const makeSharedLayer = (dialect = sqliteDialect) =>
-  makeSqlTelemetryStoreLayer({ dedicated: false }).pipe(
-    Layer.provideMerge(databaseLayer(dialect))
-  )
+  makeSqlTelemetryStoreLayer({ dedicated: false }).pipe(Layer.provideMerge(databaseLayer(dialect)))
 
 class RollbackError extends Data.TaggedError("RollbackError")<Record<string, never>> {}
 
-class MissingTelemetryHooks extends Data.TaggedError("MissingTelemetryHooks")<
-  Record<string, never>
-> {}
+class MissingTelemetryHooks extends Data.TaggedError("MissingTelemetryHooks")<Record<string, never>> {}
 
-const log = (
-  id: string,
-  message = id,
-  created = new Date().toISOString()
-): TelemetryLogEntry => ({
+const log = (id: string, message = id, created = new Date().toISOString()): TelemetryLogEntry => ({
   id,
   level: "INFO",
   message,
@@ -57,11 +44,7 @@ const log = (
   spanId: null
 })
 
-const span = (
-  id: string,
-  traceId: string,
-  created = new Date().toISOString()
-): TelemetrySpanEntry => ({
+const span = (id: string, traceId: string, created = new Date().toISOString()): TelemetrySpanEntry => ({
   id,
   name: id,
   traceId,
@@ -79,9 +62,7 @@ const span = (
 const count = (table: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql.unsafe<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM "${table}"`
-    )
+    const rows = yield* sql.unsafe<{ count: number }>(`SELECT COUNT(*) AS count FROM "${table}"`)
     return Number(rows[0]?.count ?? 0)
   })
 
@@ -92,7 +73,7 @@ const requireRead = (store: TelemetryStoreShape) => {
   return store.read
 }
 
-const chunk = <A,>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A>> => {
+const chunk = <A>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A>> => {
   const chunks: Array<ReadonlyArray<A>> = []
   for (let index = 0; index < items.length; index += size) {
     chunks.push(items.slice(index, index + size))
@@ -100,9 +81,7 @@ const chunk = <A,>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A
   return chunks
 }
 
-const affectedRowsDialect = (
-  read: (raw: unknown) => Option.Option<number>
-) => ({
+const affectedRowsDialect = (read: (raw: unknown) => Option.Option<number>) => ({
   ...sqliteDialect,
   deleteResult: { _tag: "affectedRows" as const, read }
 })
@@ -113,9 +92,7 @@ describe("dmlRetry", () => {
       let attempts1205 = 0
       const retried = yield* Effect.suspend(() => {
         attempts1205 += 1
-        return attempts1205 === 1
-          ? Effect.fail({ errno: 1205 })
-          : Effect.succeed("ok")
+        return attempts1205 === 1 ? Effect.fail({ errno: 1205 }) : Effect.succeed("ok")
       }).pipe(dmlRetry(mysqlDialect))
       expect(retried).toBe("ok")
       expect(attempts1205).toBe(2)
@@ -188,7 +165,7 @@ describe("SqlTelemetryStore", () => {
       const sql = yield* SqlClient.SqlClient
       const hooks = sqliteDialect.telemetry
       if (hooks === undefined) {
-        return yield* Effect.fail(new MissingTelemetryHooks({}))
+        return yield* new MissingTelemetryHooks({})
       }
       const customDialect = {
         ...sqliteDialect,
@@ -238,7 +215,7 @@ describe("SqlTelemetryStore", () => {
         sql.withTransaction(
           Effect.gen(function* () {
             yield* store.appendLogs([log("rolled-back")])
-            return yield* Effect.fail(new RollbackError({}))
+            return yield* new RollbackError({})
           })
         )
       )
@@ -314,24 +291,17 @@ describe("SqlTelemetryStore", () => {
       const old = "2026-11-20T00:00:00.000Z"
       const cutoff = "2026-11-25T00:00:00.000Z"
       const recent = "2026-11-26T00:00:00.000Z"
-      const rows = Array.from({ length: 2_500 }, (_, index) =>
-        log(`old-${index}`, `old-${index}`, old)
-      )
+      const rows = Array.from({ length: 2_500 }, (_, index) => log(`old-${index}`, `old-${index}`, old))
 
       for (const batch of chunk(rows, 1_000)) {
         yield* store.appendLogs([...batch])
       }
-      yield* store.appendLogs([
-        log("recent", "recent", recent),
-        log("cutoff", "cutoff", cutoff)
-      ])
+      yield* store.appendLogs([log("recent", "recent", recent), log("cutoff", "cutoff", cutoff)])
 
       const deleted = yield* store.deleteOlderThan(cutoff)
       expect(deleted).toEqual({ logs: 2_500, spans: 0 })
 
-      const remaining = yield* sql.unsafe<{ id: string }>(
-        'SELECT "id" FROM "logs" ORDER BY "id"'
-      )
+      const remaining = yield* sql.unsafe<{ id: string }>('SELECT "id" FROM "logs" ORDER BY "id"')
       expect(remaining.map((row) => row.id)).toEqual(["cutoff", "recent"])
     }).pipe(Effect.provide(makeLayer()))
   )
@@ -508,11 +478,7 @@ describe("SqlTelemetryStore", () => {
     Effect.gen(function* () {
       const store = yield* TelemetryStore
       const read = requireRead(store)
-      yield* store.appendSpans([
-        span("a1", "trace-a"),
-        span("a2", "trace-a"),
-        span("b1", "trace-b")
-      ])
+      yield* store.appendSpans([span("a1", "trace-a"), span("a2", "trace-a"), span("b1", "trace-b")])
 
       const page = yield* read.listSpans({
         limit: 10,

@@ -66,13 +66,7 @@ export function makeTelemetryLayer(
       manageConnection: config.storage.manageConnection !== false,
       migrate: config.storage.database.migrateAtStartup !== false
     })
-    return core
-      .pipe(
-        Layer.provideMerge(
-          store.pipe(Layer.provide(config.storage.database.layer))
-        )
-      )
-      .pipe(Layer.orDie)
+    return core.pipe(Layer.provideMerge(store.pipe(Layer.provide(config.storage.database.layer))), Layer.orDie)
   }
 
   const store = makeSqlTelemetryStoreLayer({
@@ -95,16 +89,14 @@ export const logCleanupCronDef: CronDef<TelemetryStore | AppConfig> = {
     Effect.gen(function* () {
       const store = yield* TelemetryStore
       const config = yield* AppConfig
-      const cutoff = new Date(
-        Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000
-      ).toISOString()
-      const deleted = yield* store.deleteOlderThan(cutoff).pipe(
-        Effect.tapError((error) =>
-          Effect.logError(
-            `[mira:log-cleanup] delete failed: ${error._tag} cause=${String(error.cause)}`
+      const cutoff = new Date(Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000).toISOString()
+      const deleted = yield* store
+        .deleteOlderThan(cutoff)
+        .pipe(
+          Effect.tapError((error) =>
+            Effect.logError(`[mira:log-cleanup] delete failed: ${error._tag} cause=${String(error.cause)}`)
           )
         )
-      )
       yield* Effect.logInfo(
         `[mira:log-cleanup] deleted ${deleted.logs} logs and ${deleted.spans} spans older than ${cutoff}`
       )

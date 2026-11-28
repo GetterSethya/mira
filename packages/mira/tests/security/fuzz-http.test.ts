@@ -10,7 +10,16 @@ import { HttpClient, HttpClientRequest } from "effect/http"
 
 import { signJwt } from "@/http/auth.js"
 
-import { login, makeSecurityLayer, postJson, seedPost, seedUser, serveRouter, setupTables, toJsonText } from "./_harness.js"
+import {
+  login,
+  makeSecurityLayer,
+  postJson,
+  seedPost,
+  seedUser,
+  serveRouter,
+  setupTables,
+  toJsonText
+} from "./_harness.js"
 
 const layer = makeSecurityLayer()
 
@@ -46,9 +55,7 @@ function tryExecute(request: HttpClientRequest.HttpClientRequest) {
 function tryGet(path: string, token?: string) {
   const req = HttpClientRequest.get(path)
   return tryExecute(
-    token === undefined
-      ? req
-      : req.pipe(HttpClientRequest.setHeader("Authorization", `Bearer ${token}`))
+    token === undefined ? req : req.pipe(HttpClientRequest.setHeader("Authorization", `Bearer ${token}`))
   )
 }
 
@@ -72,7 +79,7 @@ const INTERNAL_MARKERS = [
   "at async ",
   ".ts:",
   "C:\\",
-  "/src/",
+  "/src/"
 ]
 
 function leakedInternals(text: string) {
@@ -90,7 +97,9 @@ async function signHs256(secret: string, payload: Record<string, unknown>): Prom
   const b64Bytes = (data: Uint8Array) => Buffer.from(data).toString("base64url")
   const header = b64Text(toJsonText({ alg: "HS256", typ: "JWT" }))
   const body = b64Text(toJsonText(payload))
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign"
+  ])
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode(`${header}.${body}`))
   return `${header}.${body}.${b64Bytes(new Uint8Array(sig))}`
 }
@@ -110,7 +119,7 @@ describe("fuzz-defect: non-scalar filter value must be rejected with 422", () =>
         { label: "in(values:[bool])", json: '{"op":"in","field":"title","values":[true]}', expected: 422 },
         { label: "in(values:[array])", json: '{"op":"in","field":"title","values":[["a"]]}', expected: 422 },
         { label: "null value (scalar control)", json: '{"op":"eq","field":"title","value":null}', expected: 200 },
-        { label: "number value (scalar control)", json: '{"op":"eq","field":"title","value":5}', expected: 200 },
+        { label: "number value (scalar control)", json: '{"op":"eq","field":"title","value":5}', expected: 200 }
       ]
 
       const observed: Array<{ label: string; e: Evidence; expected: number }> = []
@@ -174,11 +183,7 @@ describe("fuzz-defect: missing multipart boundary must be 422", () => {
       const noBoundary = yield* rawPost("/api/collections/posts", '{"title":"hi"}', "multipart/form-data")
       yield* logCase("multipart no boundary (expected 422)", noBoundary)
 
-      const emptyBoundary = yield* rawPost(
-        "/api/collections/posts",
-        '{"title":"hi"}',
-        "multipart/form-data; boundary="
-      )
+      const emptyBoundary = yield* rawPost("/api/collections/posts", '{"title":"hi"}', "multipart/form-data; boundary=")
       yield* logCase("multipart empty boundary (expected 422)", emptyBoundary)
 
       // Control: a bounded-but-malformed multipart body is already 422.
@@ -222,11 +227,11 @@ describe("fuzz-defect: file path traversal must not disclose files", () => {
 
       const bodyRes = yield* postJson("/api/collections/posts", {
         title: "t",
-        attachment: "../outside-secret.txt",
+        attachment: "../outside-secret.txt"
       })
       const body = yield* capture(bodyRes)
       yield* logCase("create traversal post", body)
-      const created = yield* Schema.decodeUnknownEffect(
+      const created = yield* Schema.decodeEffect(
         Schema.fromJsonString(Schema.Struct({ id: Schema.String, attachment: Schema.String }))
       )(body.text).pipe(Effect.orDie)
 
@@ -254,7 +259,7 @@ describe("fuzz-defect: x-hidden field must not be a filter/sort oracle", () => {
       const secretValue = "TOPSECRET-INTERNAL-NOTE"
       const createRes = yield* postJson("/api/collections/posts", {
         title: "public",
-        internalNote: secretValue,
+        internalNote: secretValue
       })
       const created = yield* capture(createRes)
       yield* logCase("create post with hidden internalNote", created)
@@ -281,11 +286,7 @@ describe("fuzz-defect: x-hidden field must not be a filter/sort oracle", () => {
         422,
         `hidden filter => ${byFilter.status} body=${byFilter.text.slice(0, 140)}`
       )
-      assert.strictEqual(
-        bySort.status,
-        422,
-        `hidden sort => ${bySort.status} body=${bySort.text.slice(0, 140)}`
-      )
+      assert.strictEqual(bySort.status, 422, `hidden sort => ${bySort.status} body=${bySort.text.slice(0, 140)}`)
     }).pipe(Effect.provide(layer))
   )
 })
@@ -338,26 +339,26 @@ describe("fuzz-secure: pagination", () => {
         ["after=99999999999999999999", "/api/collections/posts?after=99999999999999999999"],
         ["after=9007199254740993", "/api/collections/posts?after=9007199254740993"],
         ["after=9223372036854775808", "/api/collections/posts?after=9223372036854775808"],
-        ["after=1.9&limit=2", "/api/collections/posts?after=1.9&limit=2"],
+        ["after=1.9&limit=2", "/api/collections/posts?after=1.9&limit=2"]
       ]
       for (const [label, url] of cases) {
         const e = yield* tryGet(url)
         yield* logCase(`paginate ${label}`, e)
         assert.strictEqual(e.status, 200)
-        const parsed = yield* Schema.decodeUnknownEffect(
+        const parsed = yield* Schema.decodeEffect(
           Schema.fromJsonString(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))
         )(e.text).pipe(Effect.orDie)
         assert.ok(parsed.items.length <= 100, `limit not clamped for ${label}`)
       }
 
       const outOfRange = yield* tryGet("/api/collections/posts?after=9223372036854775808")
-      const outOfRangeBody = yield* Schema.decodeUnknownEffect(
+      const outOfRangeBody = yield* Schema.decodeEffect(
         Schema.fromJsonString(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))
       )(outOfRange.text).pipe(Effect.orDie)
       assert.strictEqual(outOfRangeBody.items.length, 3, "out-of-range after restarts at the first page")
 
       const largeString = yield* tryGet("/api/collections/posts?after=9007199254740993")
-      const largeStringBody = yield* Schema.decodeUnknownEffect(
+      const largeStringBody = yield* Schema.decodeEffect(
         Schema.fromJsonString(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))
       )(largeString.text).pipe(Effect.orDie)
       assert.strictEqual(largeStringBody.items.length, 0, "a valid large cursor returns an empty page")
@@ -387,7 +388,7 @@ describe("fuzz-secure: sort / select / expand", () => {
         ["sort=%00", "/api/collections/posts?sort=%00"],
         ["expand=profile", "/api/collections/posts?expand=profile"],
         ["expand=unknown", "/api/collections/posts?expand=unknown"],
-        ["expand=%00", "/api/collections/posts?expand=%00"],
+        ["expand=%00", "/api/collections/posts?expand=%00"]
       ]
       for (const [label, url] of cases) {
         const e = yield* tryGet(url)
@@ -419,7 +420,7 @@ describe("fuzz-secure: path / param injection", () => {
         ["record id traversal", "/api/collections/posts/..%2f..%2fposts"],
         ["record id null byte", "/api/collections/posts/abc%00def"],
         ["record id sql", "/api/collections/posts/1'%20OR%20'1'='1"],
-        ["record id unicode", `/api/collections/posts/${encodeURIComponent("💥'--")}`],
+        ["record id unicode", `/api/collections/posts/${encodeURIComponent("💥'--")}`]
       ]
       for (const [label, url] of cases) {
         const e = yield* tryGet(url)
@@ -487,7 +488,7 @@ describe("fuzz-secure: header abuse", () => {
         ["numeric sub", `Bearer ${numericSub}`],
         ["non-auth col (posts)", `Bearer ${nonAuthCol}`],
         ["basic scheme", "Basic dXNlcjpwYXNz"],
-        ["jwt-ish garbage", "Bearer a.b.c"],
+        ["jwt-ish garbage", "Bearer a.b.c"]
       ]
       for (const [label, value] of headers) {
         const e = yield* tryExecute(
@@ -519,17 +520,25 @@ describe("fuzz-secure: error shape consistency", () => {
         ["schema no auth", HttpClientRequest.get("/api/_schema")],
         ["telemetry no auth", HttpClientRequest.get("/api/_telemetry/logs")],
         ["bad filter json", HttpClientRequest.get("/api/collections/posts?filter=%7Bbad")],
-        ["unknown filter field", HttpClientRequest.get(`/api/collections/posts?filter=${encodeURIComponent('{"op":"eq","field":"nope","value":1}')}`)],
-        ["filter wrong op", HttpClientRequest.get(`/api/collections/posts?filter=${encodeURIComponent('{"op":"nope"}')}`)],
+        [
+          "unknown filter field",
+          HttpClientRequest.get(
+            `/api/collections/posts?filter=${encodeURIComponent('{"op":"eq","field":"nope","value":1}')}`
+          )
+        ],
+        [
+          "filter wrong op",
+          HttpClientRequest.get(`/api/collections/posts?filter=${encodeURIComponent('{"op":"nope"}')}`)
+        ]
       ]
       for (const [label, req] of requests) {
         const e = yield* tryExecute(req)
         yield* logCase(`error-shape ${label}`, e)
         assert.ok(e.status < 500, `${label} => ${e.status}`)
         assert.isFalse(leakedInternals(e.text), `${label} leaked internals: ${e.text.slice(0, 200)}`)
-        const parsed = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(Schema.Struct({ error: Schema.String }))
-        )(e.text)
+        const parsed = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Struct({ error: Schema.String })))(
+          e.text
+        )
         assert.ok(parsed.error.length > 0)
       }
     }).pipe(Effect.provide(layer))

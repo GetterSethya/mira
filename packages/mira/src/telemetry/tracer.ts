@@ -17,14 +17,14 @@ export interface CompletedSpan {
   readonly attributes: Record<string, string | number | boolean>
 }
 
-const SpanAttributeValueSchema = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
+const SpanAttributeValueSchema = Schema.Union([Schema.String, Schema.Finite, Schema.Boolean])
 
 const SpanOutputSchema = Schema.Struct({
   span: Schema.String,
   traceId: Schema.String,
   spanId: Schema.String,
   kind: Schema.String,
-  durationMs: Schema.Number,
+  durationMs: Schema.Finite,
   status: Schema.Literals(["ok", "error"]),
   attributes: Schema.optionalKey(Schema.Record(Schema.String, SpanAttributeValueSchema)),
   parentSpanId: Schema.optionalKey(Schema.String),
@@ -52,9 +52,7 @@ export function formatPrettySpan(span: CompletedSpan): string {
   ].join(" ")
   const attributes = Object.entries(span.attributes)
   const attributeText =
-    attributes.length > 0
-      ? " " + chalk.dim(attributes.map(([key, value]) => `${key}=${String(value)}`).join(" "))
-      : ""
+    attributes.length > 0 ? " " + chalk.dim(attributes.map(([key, value]) => `${key}=${String(value)}`).join(" ")) : ""
   const errorText = span.error !== undefined ? `\n${chalk.red(span.error)}` : ""
   return `${header}${attributeText}${errorText}`
 }
@@ -96,10 +94,7 @@ const makePrintSpan = (pretty: boolean): ((span: CompletedSpan) => Effect.Effect
 
 class QueueSpan extends Tracer.NativeSpan {
   readonly #queue: Queue.Queue<CompletedSpan>
-  constructor(
-    queue: Queue.Queue<CompletedSpan>,
-    options: ConstructorParameters<typeof Tracer.NativeSpan>[0]
-  ) {
+  constructor(queue: Queue.Queue<CompletedSpan>, options: ConstructorParameters<typeof Tracer.NativeSpan>[0]) {
     super(options)
     this.#queue = queue
   }
@@ -152,9 +147,7 @@ export function makeConsoleTracer(
  *
  * @param options - Console print options (`pretty`, default `false`)
  */
-export const makeConsoleTracerLayer = (
-  options: ConsolePrintOptions = {}
-): Layer.Layer<never, never, CryptoService> =>
+export const makeConsoleTracerLayer = (options: ConsolePrintOptions = {}): Layer.Layer<never, never, CryptoService> =>
   Layer.effect(
     Tracer.Tracer,
     Effect.gen(function* () {
@@ -164,10 +157,7 @@ export const makeConsoleTracerLayer = (
 
       // Registered first → runs last (LIFO): drain items still in the queue at shutdown.
       yield* Effect.addFinalizer(() =>
-        Queue.clear(queue).pipe(
-          Effect.flatMap(Effect.forEach(printSpan)),
-          Effect.asVoid
-        )
+        Queue.clear(queue).pipe(Effect.flatMap(Effect.forEach(printSpan)), Effect.asVoid)
       )
 
       // Registered second → runs first (LIFO): stop the consumer fiber.

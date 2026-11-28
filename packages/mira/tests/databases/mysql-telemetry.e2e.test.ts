@@ -91,24 +91,25 @@ const app = (url: string, dedicatedUrl?: string) => {
     )
     .collections([Posts])
 
-  return (dedicatedUrl === undefined
-    ? builder.telemetry(
-        makeTelemetryLayer({
-          storage: { mode: "shared" },
-          flushBatchSize: 100,
-          flushInterval: "1 second"
-        })
-      )
-    : builder.telemetry(
-        makeTelemetryLayer({
-          storage: {
-            mode: "dedicated",
-            database: MysqlDatabase({ url: Redacted.make(dedicatedUrl) })
-          },
-          flushBatchSize: 100,
-          flushInterval: "1 second"
-        })
-      )
+  return (
+    dedicatedUrl === undefined
+      ? builder.telemetry(
+          makeTelemetryLayer({
+            storage: { mode: "shared" },
+            flushBatchSize: 100,
+            flushInterval: "1 second"
+          })
+        )
+      : builder.telemetry(
+          makeTelemetryLayer({
+            storage: {
+              mode: "dedicated",
+              database: MysqlDatabase({ url: Redacted.make(dedicatedUrl) })
+            },
+            flushBatchSize: 100,
+            flushInterval: "1 second"
+          })
+        )
   ).build()
 }
 
@@ -118,10 +119,7 @@ const withEngine = <A, E, R>(
 ): Effect.Effect<A, E, R> =>
   Effect.scoped(
     Effect.acquireRelease(
-      Effect.sync(
-        () =>
-          `mira_e2e_telemetry_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      ),
+      Effect.sync(() => `mira_e2e_telemetry_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
       (name) => Effect.all([dropDatabase(url, name), dropDatabase(url, `${name}_dedicated`)])
     ).pipe(
       Effect.flatMap((name) =>
@@ -224,15 +222,9 @@ for (const engine of engines) {
                 filter: null,
                 traceId: null
               })
-              expect(
-                afterDelete.items.filter((row) => row.id === "e2e-mysql-dup")
-              ).toHaveLength(1)
-              expect(
-                afterDelete.items.filter((row) => row.id === "e2e-mysql-old")
-              ).toHaveLength(0)
-              expect(
-                afterDelete.items.filter((row) => row.id === "e2e-mysql-recent")
-              ).toHaveLength(1)
+              expect(afterDelete.items.filter((row) => row.id === "e2e-mysql-dup")).toHaveLength(1)
+              expect(afterDelete.items.filter((row) => row.id === "e2e-mysql-old")).toHaveLength(0)
+              expect(afterDelete.items.filter((row) => row.id === "e2e-mysql-recent")).toHaveLength(1)
 
               const firstPage = yield* read.listLogs({
                 limit: 1,

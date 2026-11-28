@@ -15,7 +15,7 @@ import {
   seedUser,
   serveRouter,
   setupTables,
-  toJsonText,
+  toJsonText
 } from "./_harness.js"
 
 const layer = makeSecurityLayer()
@@ -26,7 +26,7 @@ const layer = makeSecurityLayer()
 
 const ListSchema = Schema.Struct({
   items: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
-  nextCursor: Schema.NullOr(Schema.Number),
+  nextCursor: Schema.NullOr(Schema.Finite)
 })
 
 const RecordSchema = Schema.Record(Schema.String, Schema.Unknown)
@@ -163,7 +163,7 @@ describe("H1 — SQL injection via query parameters", () => {
         `order=${encodeURIComponent("desc;DROP TABLE posts;--")}`,
         `limit=${encodeURIComponent("1;DROP TABLE posts")}`,
         `after=${encodeURIComponent("1;DROP TABLE posts")}`,
-        `expand=${encodeURIComponent(`profile";DROP TABLE posts;--`)}`,
+        `expand=${encodeURIComponent(`profile";DROP TABLE posts;--`)}`
       ]
 
       for (const qs of payloads) {
@@ -189,16 +189,16 @@ describe("H2 — prototype pollution via JSON body", () => {
       yield* setupTables
       yield* serveRouter()
 
-      const res = yield* rawRequest(
-        "POST",
-        "/api/collections/posts",
-        `{"title":"x","__proto__":{"polluted":"yes"}}`
-      )
+      const res = yield* rawRequest("POST", "/api/collections/posts", `{"title":"x","__proto__":{"polluted":"yes"}}`)
       const text = yield* res.text
       yield* log("POST posts body with __proto__", res, text)
 
       assert.ok(res.status === 201 || res.status === 422, `unexpected status ${res.status}`)
-      assert.strictEqual(Reflect.get(Object.prototype, "polluted"), undefined, "Object.prototype.polluted must stay undefined")
+      assert.strictEqual(
+        Reflect.get(Object.prototype, "polluted"),
+        undefined,
+        "Object.prototype.polluted must stay undefined"
+      )
       assert.strictEqual(Reflect.get({}, "polluted"), undefined)
     }).pipe(Effect.provide(layer))
   )
@@ -217,7 +217,11 @@ describe("H2 — prototype pollution via JSON body", () => {
       yield* log("POST posts body with constructor.prototype", res, text)
 
       assert.ok(res.status === 201 || res.status === 422, `unexpected status ${res.status}`)
-      assert.strictEqual(Reflect.get(Object.prototype, "polluted2"), undefined, "Object.prototype.polluted2 must stay undefined")
+      assert.strictEqual(
+        Reflect.get(Object.prototype, "polluted2"),
+        undefined,
+        "Object.prototype.polluted2 must stay undefined"
+      )
       assert.strictEqual(Reflect.get({}, "polluted2"), undefined)
     }).pipe(Effect.provide(layer))
   )
@@ -265,7 +269,7 @@ describe("H3 — mass assignment / system fields", () => {
       const res = yield* postJson("/api/collections/posts", {
         title: "writable",
         content: "body",
-        profile: "some-profile-id",
+        profile: "some-profile-id"
       })
       const text = yield* res.text
       yield* log("create with normal fields", res, text)
@@ -288,7 +292,7 @@ describe("H4 — auth credential enforcement", () => {
         email: "new@example.com",
         password: "pw123",
         passwordConfirm: "pw123",
-        emailVerified: true,
+        emailVerified: true
       })
       const text = yield* res.text
       yield* log("create users emailVerified:true", res, text)
@@ -303,7 +307,7 @@ describe("H4 — auth credential enforcement", () => {
 
       const res = yield* postJson("/api/collections/users", {
         email: "new@example.com",
-        password: "pw123",
+        password: "pw123"
       })
       const text = yield* res.text
       yield* log("create users without passwordConfirm", res, text)
@@ -410,7 +414,7 @@ describe("H5 — JSON body shape fuzzing", () => {
     { label: "array [1,2,3]", body: [1, 2, 3] },
     { label: 'string "x"', body: "x" },
     { label: "number 42", body: 42 },
-    { label: "null", body: null },
+    { label: "null", body: null }
   ]
 
   for (const shape of shapes) {
@@ -505,5 +509,3 @@ describe("H6 — filter field validation", () => {
     }).pipe(Effect.provide(layer))
   )
 })
-
-

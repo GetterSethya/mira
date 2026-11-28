@@ -19,7 +19,12 @@ import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
 import type { CursorPage, RequestCtx } from "./context.js"
 import { cursorFromSeqId } from "./cursor.js"
-import { MutationBatcher, MutationBatcherDisabledLive, estimateRowBytes, makeMutationBatcherLayer } from "./mutation-batcher.js"
+import {
+  MutationBatcher,
+  MutationBatcherDisabledLive,
+  estimateRowBytes,
+  makeMutationBatcherLayer
+} from "./mutation-batcher.js"
 import type {
   BatchMutationStats,
   MutationBatchResult,
@@ -27,12 +32,27 @@ import type {
   ResolvedBatchMutationConfig
 } from "./mutation-batcher.js"
 import type { RowDecoder, RowDecoderSync, RowEncoder } from "./decode.js"
-import { makeListRowMapper, makeProjectedListRowMapper, makeRowDecoder, makeRowEncoder, stripHiddenFields } from "./decode.js"
+import {
+  makeListRowMapper,
+  makeProjectedListRowMapper,
+  makeRowDecoder,
+  makeRowEncoder,
+  stripHiddenFields
+} from "./decode.js"
 import type { CollectionError } from "./errors.js"
 import { ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./errors.js"
 import { buildInputSchemas, parseErrToValidationError } from "./input-schema.js"
 import type { BodyBinding, BodyBindingPlan, ResolveOptions } from "./where.js"
-import { andWhere, cursorClause, extractCtxRefs, idClause, keysetClause, resolveCtxPlaceholders, resolveFieldRefs, seqIdEqualsClause } from "./where.js"
+import {
+  andWhere,
+  cursorClause,
+  extractCtxRefs,
+  idClause,
+  keysetClause,
+  resolveCtxPlaceholders,
+  resolveFieldRefs,
+  seqIdEqualsClause
+} from "./where.js"
 
 /**
  * Collection Service tag — the core business-logic layer sitting between
@@ -153,10 +173,7 @@ const defaultFieldsCache = new WeakMap<
   { readonly user: ReadonlyArray<string>; readonly admin: ReadonlyArray<string> }
 >()
 
-const listFieldsCache = new WeakMap<
-  ReadonlyArray<string>,
-  ReadonlyArray<string>
->()
+const listFieldsCache = new WeakMap<ReadonlyArray<string>, ReadonlyArray<string>>()
 
 function defaultFields(schema: CollectionSchema) {
   const cached = defaultFieldsCache.get(schema)
@@ -179,7 +196,11 @@ function listQueryFields(fields: ReadonlyArray<string>) {
   return value
 }
 
-function resolveFields(schema: CollectionSchema, userSelect: ReadonlyArray<string> | null, admin = false): ReadonlyArray<string> {
+function resolveFields(
+  schema: CollectionSchema,
+  userSelect: ReadonlyArray<string> | null,
+  admin = false
+): ReadonlyArray<string> {
   const properties = schema.properties
   const isVisible = (field: string) => admin || properties[field]["x-hidden"] !== true
 
@@ -254,13 +275,7 @@ function resolveExpand(
       if (targetView === null) continue
 
       // A rule that needs auth with no authenticated actor → do not expand.
-      const resolved = yield* resolveCtxPlaceholders(
-        targetView,
-        ctx,
-        target.name,
-        "view",
-        resolveOptions
-      ).pipe(
+      const resolved = yield* resolveCtxPlaceholders(targetView, ctx, target.name, "view", resolveOptions).pipe(
         Effect.catchTag("ForbiddenError", () => Effect.succeed(null))
       )
       if (resolved === null) continue
@@ -283,14 +298,9 @@ function isNullableSortField(schema: CollectionSchema, field: string): boolean {
   return !(schema.required?.includes(field) ?? false)
 }
 
-function validateSort(
-  schema: CollectionSchema,
-  collectionName: string,
-  sort: SortOrder,
-  admin: boolean
-) {
+function validateSort(schema: CollectionSchema, collectionName: string, sort: SortOrder, admin: boolean) {
   const prop = Object.hasOwn(schema.properties, sort.field) ? schema.properties[sort.field] : undefined
-  if (prop === undefined) return Effect.succeed(undefined)
+  if (prop === undefined) return Effect.undefined
   if (!admin && prop["x-hidden"] === true) {
     return Effect.fail(
       new ValidationError({
@@ -445,15 +455,15 @@ function makeCollectionServiceLayerWith(
         effect: Effect.Effect<A, CollectionError>
       ): Effect.Effect<A, CollectionError> =>
         effect.pipe(
-          Effect.catch((error) =>
-            isSqlError(error) && errorHasCode(error, ["22P02", "22003"])
-              ? Effect.fail(
-                  new ValidationError({
-                    collection: collection.name,
-                    issues: ["Rule comparison value is invalid for the column type"]
-                  })
-                )
-              : Effect.fail(error)
+          Effect.catchIf(
+            (error) => isSqlError(error) && errorHasCode(error, ["22P02", "22003"]),
+            () =>
+              Effect.fail(
+                new ValidationError({
+                  collection: collection.name,
+                  issues: ["Rule comparison value is invalid for the column type"]
+                })
+              )
           )
         )
 
@@ -499,21 +509,13 @@ function makeCollectionServiceLayerWith(
       const decoderMap = new Map<string, RowDecoder>(
         allCollections.map((c) => [
           c.name,
-          makeRowDecoder(
-            c.schema,
-            dialect.storesBooleanAsInteger,
-            dialect.normalizesBigintSeqId === true
-          )
+          makeRowDecoder(c.schema, dialect.storesBooleanAsInteger, dialect.normalizesBigintSeqId === true)
         ])
       )
       const listRowMapperMap = new Map<string, RowDecoderSync>(
         allCollections.map((c) => [
           c.name,
-          makeListRowMapper(
-            c.schema,
-            dialect.storesBooleanAsInteger,
-            dialect.normalizesBigintSeqId === true
-          )
+          makeListRowMapper(c.schema, dialect.storesBooleanAsInteger, dialect.normalizesBigintSeqId === true)
         ])
       )
       const encoderMap = new Map<string, RowEncoder>(
@@ -525,11 +527,7 @@ function makeCollectionServiceLayerWith(
         (decoderMap.get(collection.name) ?? Effect.succeed)(record)
       const getListRowMapper = (collection: AnyCollectionDef): RowDecoderSync =>
         listRowMapperMap.get(collection.name) ??
-        makeListRowMapper(
-          collection.schema,
-          dialect.storesBooleanAsInteger,
-          dialect.normalizesBigintSeqId === true
-        )
+        makeListRowMapper(collection.schema, dialect.storesBooleanAsInteger, dialect.normalizesBigintSeqId === true)
       const projectedListMapperCache = new WeakMap<ReadonlyArray<string>, RowDecoderSync>()
       const getProjectedListMapper = (
         collection: AnyCollectionDef,
@@ -560,8 +558,7 @@ function makeCollectionServiceLayerWith(
         return stripHiddenFields(collection.schema, record)
       }
 
-      const isAuthCollection = (collection: AnyCollectionDef) =>
-        collection.schema["x-collection-kind"] === "auth"
+      const isAuthCollection = (collection: AnyCollectionDef) => collection.schema["x-collection-kind"] === "auth"
 
       const asString = (value: unknown) => (typeof value === "string" ? value : undefined)
 
@@ -607,11 +604,7 @@ function makeCollectionServiceLayerWith(
       // rule can't be gamed by the field it guards) and against the stored record for
       // update. Additive: the base create/update rule still gates access — manage only
       // escalates privileges (email, emailVerified, password without oldPassword).
-      const canManagePayload = (
-        collection: AnyCollectionDef,
-        payload: RepoRecord,
-        ctx: RequestCtx
-      ) =>
+      const canManagePayload = (collection: AnyCollectionDef, payload: RepoRecord, ctx: RequestCtx) =>
         Effect.gen(function* () {
           if (ctx.admin === true) return true
           if (!isAuthCollection(collection) || ctx.auth === undefined) return false
@@ -620,18 +613,11 @@ function makeCollectionServiceLayerWith(
           const resolved = yield* resolveCtxPlaceholders(rule, ctx, collection.name, "manage", resolveOptions)
           const bound = resolveFieldRefs(resolved, { ...payload, emailVerified: false }, resolveOptions)
           const check = renderRuleCheck(bound, dialect)
-          const rows = yield* mapRuleSqlError(
-            collection,
-            sql.unsafe<{ ok: number }>(check.sql, check.params)
-          )
+          const rows = yield* mapRuleSqlError(collection, sql.unsafe<{ ok: number }>(check.sql, check.params))
           return rows.length > 0
         })
 
-      const canManageRecord = (
-        collection: AnyCollectionDef,
-        id: string,
-        ctx: RequestCtx
-      ) =>
+      const canManageRecord = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
         Effect.gen(function* () {
           if (ctx.admin === true) return true
           if (!isAuthCollection(collection) || ctx.auth === undefined) return false
@@ -650,22 +636,19 @@ function makeCollectionServiceLayerWith(
       const credentialError = (collection: AnyCollectionDef, issue: string) =>
         new ValidationError({ collection: collection.name, issues: [issue] })
 
-      const verifyOldPassword = (
-        collection: AnyCollectionDef,
-        raw: RepoRecord,
-        existing: RepoRecord
-      ) =>
+      const verifyOldPassword = (collection: AnyCollectionDef, raw: RepoRecord, existing: RepoRecord) =>
         Effect.gen(function* () {
           const oldPassword = asString(raw["oldPassword"])
           if (oldPassword === undefined || oldPassword.length === 0) {
-            return yield* Effect.fail(credentialError(collection, "oldPassword is required"))
+            return yield* credentialError(collection, "oldPassword is required")
           }
           const stored = asString(existing["password"])
-          const ok = stored !== undefined
-            ? yield* authService.verifyPassword(oldPassword, stored).pipe(Effect.orElseSucceed(() => false))
-            : false
+          const ok =
+            stored !== undefined
+              ? yield* authService.verifyPassword(oldPassword, stored).pipe(Effect.orElseSucceed(() => false))
+              : false
           if (!ok) {
-            return yield* Effect.fail(credentialError(collection, "Missing or invalid old password"))
+            return yield* credentialError(collection, "Missing or invalid old password")
           }
         })
 
@@ -682,11 +665,11 @@ function makeCollectionServiceLayerWith(
           if (password.length > 0) {
             const confirm = asString(raw["passwordConfirm"])
             if (confirm === undefined || confirm !== password) {
-              return yield* Effect.fail(credentialError(collection, "passwordConfirm must match password"))
+              return yield* credentialError(collection, "passwordConfirm must match password")
             }
           }
           if (!canManage && cleaned["emailVerified"] === true) {
-            return yield* Effect.fail(credentialError(collection, "emailVerified cannot be set"))
+            return yield* credentialError(collection, "emailVerified cannot be set")
           }
         })
 
@@ -707,9 +690,7 @@ function makeCollectionServiceLayerWith(
                 : new Set(["password", "emailVerified"])
             const disallowed = Object.keys(cleaned).filter((key) => !allowed.has(key))
             if (disallowed.length > 0) {
-              return yield* Effect.fail(
-                credentialError(collection, `${ctx.internal} cannot update: ${disallowed.join(", ")}`)
-              )
+              return yield* credentialError(collection, `${ctx.internal} cannot update: ${disallowed.join(", ")}`)
             }
             return
           }
@@ -723,7 +704,7 @@ function makeCollectionServiceLayerWith(
           if (passwordChanging) {
             const confirm = asString(raw["passwordConfirm"])
             if (confirm === undefined || confirm !== newPassword) {
-              return yield* Effect.fail(credentialError(collection, "passwordConfirm must match password"))
+              return yield* credentialError(collection, "passwordConfirm must match password")
             }
           }
 
@@ -732,7 +713,7 @@ function makeCollectionServiceLayerWith(
           }
 
           if (!canManage && verifiedChanging) {
-            return yield* Effect.fail(credentialError(collection, "emailVerified cannot be changed"))
+            return yield* credentialError(collection, "emailVerified cannot be changed")
           }
         })
 
@@ -747,21 +728,25 @@ function makeCollectionServiceLayerWith(
         expand?: ReadonlyArray<string> | null
       ) =>
         Effect.gen(function* () {
-          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "list", ctx, dialect, "column", resolveOptions)
+          const ruleWhere = ctx.admin
+            ? null
+            : yield* compileRule(collection, "list", ctx, dialect, "column", resolveOptions)
           const userFilter =
             filter !== undefined
               ? yield* filterNodeToWhereClause(filter, collection.schema, collection.name, {
                   allowHiddenFields: ctx.admin === true,
                   quoteIdentifier: dialect.quoteIdentifier,
-                  caseInsensitivePattern: (left, right) =>
-                    dialect.caseInsensitivePattern(left, right),
+                  caseInsensitivePattern: (left, right) => dialect.caseInsensitivePattern(left, right),
                   castValue: dialect.castValue,
                   encodeValue: encodeFilterValue(collection)
                 })
               : null
           const where: WhereClause | null =
             ruleWhere !== null && userFilter !== null ? andWhere(ruleWhere, userFilter) : (userFilter ?? ruleWhere)
-          const sortOrder = sort !== undefined ? yield* validateSort(collection.schema, collection.name, sort, ctx.admin === true) : undefined
+          const sortOrder =
+            sort !== undefined
+              ? yield* validateSort(collection.schema, collection.name, sort, ctx.admin === true)
+              : undefined
           const effectiveSort: SortOrder = sortOrder ?? { field: "seqId", direction: "asc" }
 
           let cursorWhere: WhereClause | null = null
@@ -770,14 +755,12 @@ function makeCollectionServiceLayerWith(
               cursorWhere = cursorClause(cursor, dialect.quoteIdentifier, effectiveSort.direction)
             } else {
               if (isNullableSortField(collection.schema, effectiveSort.field)) {
-                return yield* Effect.fail(
-                  new ValidationError({
-                    collection: collection.name,
-                    issues: [
-                      `Cannot paginate a sorted list on nullable field "${effectiveSort.field}"; sort by seqId or a non-null field`
-                    ]
-                  })
-                )
+                return yield* new ValidationError({
+                  collection: collection.name,
+                  issues: [
+                    `Cannot paginate a sorted list on nullable field "${effectiveSort.field}"; sort by seqId or a non-null field`
+                  ]
+                })
               }
               const cursorRows = yield* repo.viewFilter(collection.name, {
                 where: seqIdEqualsClause(cursor, dialect.quoteIdentifier),
@@ -786,18 +769,15 @@ function makeCollectionServiceLayerWith(
               const cursorRow = cursorRows[0]
               const value = cursorRow?.[effectiveSort.field]
               if (cursorRow === undefined || value === null || value === undefined) {
-                return yield* Effect.fail(
-                  new ValidationError({
-                    collection: collection.name,
-                    issues: [`Invalid cursor: row ${cursor} no longer exists`]
-                  })
-                )
+                return yield* new ValidationError({
+                  collection: collection.name,
+                  issues: [`Invalid cursor: row ${cursor} no longer exists`]
+                })
               }
               cursorWhere = keysetClause(effectiveSort, value, cursor, dialect.quoteIdentifier)
             }
           }
-          const combined =
-            cursorWhere !== null ? (where !== null ? andWhere(where, cursorWhere) : cursorWhere) : where
+          const combined = cursorWhere !== null ? (where !== null ? andWhere(where, cursorWhere) : cursorWhere) : where
 
           if (perPage <= 0) return { items: [], nextCursor: null }
 
@@ -825,11 +805,7 @@ function makeCollectionServiceLayerWith(
 
           const rows = yield* mapRuleSqlError(
             collection,
-            repo.list(
-              collection.name,
-              perPage + 1,
-              combined !== null ? { ...listOpts, where: combined } : listOpts
-            )
+            repo.list(collection.name, perPage + 1, combined !== null ? { ...listOpts, where: combined } : listOpts)
           )
 
           const hasMore = rows.items.length > perPage
@@ -841,8 +817,7 @@ function makeCollectionServiceLayerWith(
             const lastSeqId = cursorFromSeqId(lastRow?.["seqId"])
             if (lastSeqId === null) {
               const seqIdType = typeof lastRow?.["seqId"]
-              const message =
-                `Collection "${collection.name}" returned a page with more rows and no usable seqId for cursor pagination (seqId type: ${seqIdType})`
+              const message = `Collection "${collection.name}" returned a page with more rows and no usable seqId for cursor pagination (seqId type: ${seqIdType})`
               yield* Effect.logError(message)
               return yield* Effect.die(new Error(message))
             }
@@ -858,10 +833,14 @@ function makeCollectionServiceLayerWith(
           const items = pageItems.map(mapRow)
           return { items, nextCursor }
         }).pipe(
-          withSpanWhenEnabled("collection.list", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.list",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       const view = (
@@ -872,7 +851,9 @@ function makeCollectionServiceLayerWith(
         expand?: ReadonlyArray<string> | null
       ) =>
         Effect.gen(function* () {
-          const ruleWhere = ctx.admin ? null : yield* compileRule(collection, "view", ctx, dialect, "column", resolveOptions)
+          const ruleWhere = ctx.admin
+            ? null
+            : yield* compileRule(collection, "view", ctx, dialect, "column", resolveOptions)
           const combined =
             ruleWhere !== null
               ? andWhere(ruleWhere, idClause(id, dialect.quoteIdentifier))
@@ -903,10 +884,14 @@ function makeCollectionServiceLayerWith(
           }
           return yield* decodeRow(collection, rows[0])
         }).pipe(
-          withSpanWhenEnabled("collection.view", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.view",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       /**
@@ -928,28 +913,18 @@ function makeCollectionServiceLayerWith(
 
           yield* rejectSystemFields(data, collection.schema, collection.name)
           const schemas = getInputSchemas(collection)
-          const cleaned = yield* Schema.decodeUnknownEffect(schemas.create)(data).pipe(
-            Effect.mapError(parseErrToValidationError(collection.name)),
+          const cleaned = yield* Schema.decodeEffect(schemas.create)(data).pipe(
+            Effect.mapError(parseErrToValidationError(collection.name))
           )
 
           if (!ctx.admin) {
             const ctxWithBody: RequestCtx = { ...ctx, body: cleaned }
-            const ruleWhere = yield* compileRule(
-              collection,
-              "create",
-              ctxWithBody,
-              dialect,
-              "param",
-              resolveOptions
-            )
+            const ruleWhere = yield* compileRule(collection, "create", ctxWithBody, dialect, "param", resolveOptions)
 
             // Pre-check: evaluate the create rule against the payload (no table needed).
             const payloadBound = resolveFieldRefs(ruleWhere, cleaned, resolveOptions)
             const check = renderRuleCheck(payloadBound, dialect)
-            const rows = yield* mapRuleSqlError(
-              collection,
-              sql.unsafe<{ ok: number }>(check.sql, check.params)
-            )
+            const rows = yield* mapRuleSqlError(collection, sql.unsafe<{ ok: number }>(check.sql, check.params))
 
             if (rows.length === 0) {
               return yield* new ForbiddenError({ collection: collection.name, action: "create" })
@@ -974,9 +949,7 @@ function makeCollectionServiceLayerWith(
        * returned row is paired with its request only through the entry's
        * `Deferred`.
        */
-      const insertPrepared = (
-        prepared: PreparedCreate
-      ): Effect.Effect<MutationBatchResult, CollectionError> =>
+      const insertPrepared = (prepared: PreparedCreate): Effect.Effect<MutationBatchResult, CollectionError> =>
         Effect.gen(function* () {
           const row = yield* repo.create(prepared.collection.name, prepared.row)
           const decoded = yield* decodeRow(prepared.collection, row)
@@ -1007,10 +980,14 @@ function makeCollectionServiceLayerWith(
           }
           return row
         }).pipe(
-          withSpanWhenEnabled("collection.create", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.create",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       // Prepare outside the transaction, then insert everything in one
@@ -1035,15 +1012,17 @@ function makeCollectionServiceLayerWith(
             concurrency: 1
           })
           if (prepared.length === 0) return []
-          const results = yield* sql.withTransaction(
-            Effect.forEach(prepared, insertPrepared, { concurrency: 1 })
-          )
+          const results = yield* sql.withTransaction(Effect.forEach(prepared, insertPrepared, { concurrency: 1 }))
           return results.map((result) => result.value)
         }).pipe(
-          withSpanWhenEnabled("collection.createMany", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.createMany",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       interface PreparedUpdate {
@@ -1070,15 +1049,11 @@ function makeCollectionServiceLayerWith(
           keys,
           (key) =>
             Effect.gen(function* () {
-              yield* fileStorage.delete(key).pipe(Effect.catch(() => Effect.void))
-              const thumbKeys = yield* fileStorage
-                .list(`_thumbs/${key}/`)
-                .pipe(Effect.orElseSucceed(() => []))
-              yield* Effect.forEach(
-                thumbKeys,
-                (tk) => fileStorage.delete(tk).pipe(Effect.catch(() => Effect.void)),
-                { concurrency: "unbounded" }
-              )
+              yield* fileStorage.delete(key).pipe(Effect.ignore)
+              const thumbKeys = yield* fileStorage.list(`_thumbs/${key}/`).pipe(Effect.orElseSucceed(() => []))
+              yield* Effect.forEach(thumbKeys, (tk) => fileStorage.delete(tk).pipe(Effect.ignore), {
+                concurrency: "unbounded"
+              })
             }),
           { concurrency: "unbounded" }
         )
@@ -1096,7 +1071,7 @@ function makeCollectionServiceLayerWith(
 
           yield* rejectSystemFields(data, collection.schema, collection.name)
           const schemas = getInputSchemas(collection)
-          const cleaned = yield* Schema.decodeUnknownEffect(schemas.update)(data).pipe(
+          const cleaned = yield* Schema.decodeEffect(schemas.update)(data).pipe(
             Effect.mapError(parseErrToValidationError(collection.name))
           )
 
@@ -1109,8 +1084,7 @@ function makeCollectionServiceLayerWith(
           }
 
           const newPassword = asString(cleaned["password"])
-          const passwordChanging =
-            isAuthCollection(collection) && newPassword !== undefined && newPassword.length > 0
+          const passwordChanging = isAuthCollection(collection) && newPassword !== undefined && newPassword.length > 0
 
           if (passwordChanging && ctx.admin !== true && ctx.internal === undefined) {
             const confirm = asString(data["passwordConfirm"])
@@ -1196,9 +1170,7 @@ function makeCollectionServiceLayerWith(
               resolveOptions,
               updateBodyPlan
             )
-            const predicates: [AccessPredicate, ...Array<AccessPredicate>] = [
-              { name: "rule", where: ruleWhere }
-            ]
+            const predicates: [AccessPredicate, ...Array<AccessPredicate>] = [{ name: "rule", where: ruleWhere }]
             if (manageEnforcer !== null && manageBodyPlan !== null) {
               const manageWhere = yield* resolveCtxPlaceholders(
                 manageEnforcer,
@@ -1239,14 +1211,7 @@ function makeCollectionServiceLayerWith(
             }
 
             if (!prepared.admin && prepared.ctx.internal === undefined) {
-              const ruleWhere = yield* compileRule(
-                collection,
-                "update",
-                ctxWithBody,
-                dialect,
-                "column",
-                resolveOptions
-              )
+              const ruleWhere = yield* compileRule(collection, "update", ctxWithBody, dialect, "column", resolveOptions)
               const allowed = yield* mapRuleSqlError(
                 collection,
                 repo.viewFilter(collection.name, {
@@ -1275,34 +1240,27 @@ function makeCollectionServiceLayerWith(
             prepared.ctx
           )
 
-          const updated = yield* repo.update(
-            collection.name,
-            prepared.id,
-            getEncoder(collection)(prepared.hashed)
-          )
+          const updated = yield* repo.update(collection.name, prepared.id, getEncoder(collection)(prepared.hashed))
 
           const challengeCleanup = prepared.passwordKeyPresent
-            ? challengeStore
-                .consumeAllForUser(collection.name, prepared.id, Date.now())
-                .pipe(
-                  Effect.catchCause((cause) =>
-                    Effect.logWarning("auth.password_change.challenge_cleanup_failed", {
-                      cause: String(cause)
-                    })
-                  )
+            ? challengeStore.consumeAllForUser(collection.name, prepared.id, Date.now()).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("auth.password_change.challenge_cleanup_failed", {
+                    cause: String(cause)
+                  })
                 )
+              )
             : Effect.void
 
-          const oldKeys = extractReplacedFileKeys(
-            existingValue,
-            prepared.cleaned,
-            collection.schema
-          )
+          const oldKeys = extractReplacedFileKeys(existingValue, prepared.cleaned, collection.schema)
           const cleanup = challengeCleanup.pipe(Effect.andThen(deleteFiles(oldKeys)))
 
           const value = stripHidden(
             collection,
-            yield* decodeRow(collection, Option.getOrElse(updated, () => existingValue)),
+            yield* decodeRow(
+              collection,
+              Option.getOrElse(updated, () => existingValue)
+            ),
             prepared.admin
           )
 
@@ -1319,10 +1277,14 @@ function makeCollectionServiceLayerWith(
           const result = yield* executeUpdate(prepared, false)
           return result.value
         }).pipe(
-          withSpanWhenEnabled("collection.update", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.update",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       const update = (collection: AnyCollectionDef, id: string, data: RepoRecord, ctx: RequestCtx) =>
@@ -1336,10 +1298,7 @@ function makeCollectionServiceLayerWith(
             execute: executeUpdate(prepared, true),
             estimatedBytes: estimateRowBytes(prepared.cleaned) + id.length * 2
           }
-          const row =
-            ctx.internal !== undefined
-              ? yield* batcher.submitInline(entry)
-              : yield* batcher.submit(entry)
+          const row = ctx.internal !== undefined ? yield* batcher.submitInline(entry) : yield* batcher.submit(entry)
           if (tracingEnabled) {
             yield* Effect.annotateCurrentSpan({
               "batch.wait_ms": (yield* Clock.currentTimeMillis) - startedAt
@@ -1347,10 +1306,14 @@ function makeCollectionServiceLayerWith(
           }
           return row
         }).pipe(
-          withSpanWhenEnabled("collection.update", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.update",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       // Same transaction contract as createMany: one BEGIN, every per-record
@@ -1372,10 +1335,14 @@ function makeCollectionServiceLayerWith(
             })
           )
         }).pipe(
-          withSpanWhenEnabled("collection.updateMany", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.updateMany",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       const prepareDelete = (
@@ -1406,9 +1373,7 @@ function makeCollectionServiceLayerWith(
         Effect.gen(function* () {
           const viewWithAccess = repo.viewWithAccess
           const deleteExisting = repo.deleteExisting
-          const enforcer = prepared.admin
-            ? null
-            : enforcerForAction(prepared.collection.schema, "delete", dialect)
+          const enforcer = prepared.admin ? null : enforcerForAction(prepared.collection.schema, "delete", dialect)
           const refs = enforcer === null ? null : extractCtxRefs(enforcer.sql)
           const fastPath =
             viewWithAccess !== undefined &&
@@ -1431,11 +1396,7 @@ function makeCollectionServiceLayerWith(
             )
             const accesses = yield* mapRuleSqlError(
               prepared.collection,
-              viewWithAccess(
-                prepared.collection.name,
-                prepared.id,
-                [{ name: "rule", where: ruleWhere }]
-              )
+              viewWithAccess(prepared.collection.name, prepared.id, [{ name: "rule", where: ruleWhere }])
             )
             if (Option.isNone(accesses)) {
               return yield* new NotFoundError({
@@ -1500,9 +1461,7 @@ function makeCollectionServiceLayerWith(
             return yield* new NotFoundError({ collection: prepared.collection.name, id: prepared.id })
           }
 
-          const cleanup = deleteFiles(
-            extractFileKeys(existingValue, prepared.collection.schema)
-          )
+          const cleanup = deleteFiles(extractFileKeys(existingValue, prepared.collection.schema))
 
           if (!deferCleanup) {
             yield* cleanup
@@ -1514,13 +1473,16 @@ function makeCollectionServiceLayerWith(
       const deleteOne = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
         Effect.gen(function* () {
           const prepared = yield* prepareDelete(collection, id, ctx)
-          const result = yield* executeDelete(prepared, false)
-          void result
+          yield* executeDelete(prepared, false)
         }).pipe(
-          withSpanWhenEnabled("collection.delete", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.delete",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       const deleteBatched = (collection: AnyCollectionDef, id: string, ctx: RequestCtx) =>
@@ -1545,10 +1507,14 @@ function makeCollectionServiceLayerWith(
             })
           }
         }).pipe(
-          withSpanWhenEnabled("collection.delete", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.delete",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       const deleteMany = (collection: AnyCollectionDef, ids: ReadonlyArray<string>, ctx: RequestCtx) =>
@@ -1556,17 +1522,19 @@ function makeCollectionServiceLayerWith(
           if (collection.schema["x-collection-kind"] === "view") {
             return yield* new ReadOnlyError({ collection: collection.name })
           }
-          yield* sql.withTransaction(
-            Effect.forEach(ids, (id) => deleteOne(collection, id, ctx), { concurrency: 1 })
-          )
+          yield* sql.withTransaction(Effect.forEach(ids, (id) => deleteOne(collection, id, ctx), { concurrency: 1 }))
           // Every id succeeded (otherwise the transaction rolled back), so the
           // input order is also the order of the rows that were actually deleted.
           return ids
         }).pipe(
-          withSpanWhenEnabled("collection.deleteMany", {
-            kind: "internal",
-            attributes: { collection: collection.name }
-          }, { captureStackTrace: false })
+          withSpanWhenEnabled(
+            "collection.deleteMany",
+            {
+              kind: "internal",
+              attributes: { collection: collection.name }
+            },
+            { captureStackTrace: false }
+          )
         )
 
       return { list, view, create, createMany, update, updateMany, delete: deleteBatched, deleteMany }

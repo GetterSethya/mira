@@ -2,6 +2,10 @@ import { Effect } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/http"
 import { CronService, type CronNotFoundError } from "@gettersethya/mira"
 
+// `CronState.lastError` is typed `unknown`, so it has no statically known
+// `toString`. Render it the same way the cron persistence layer does.
+const describeError = (error: unknown) => String(error)
+
 export const cronsRoute = Effect.gen(function* () {
   const cronService = yield* CronService
   const states = yield* cronService.getAll()
@@ -14,7 +18,7 @@ export const cronsRoute = Effect.gen(function* () {
       lastRunAt: s.lastRunAt ? s.lastRunAt.toISOString() : null,
       lastStatus: s.lastStatus ?? null,
       lastDurationMs: s.lastDurationMs ?? null,
-      lastError: s.lastError !== undefined ? String(s.lastError) : null
+      lastError: s.lastError !== undefined ? describeError(s.lastError) : null
     }))
   )
 })

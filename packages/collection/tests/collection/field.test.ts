@@ -96,13 +96,12 @@ describe("Field.literalText", () => {
   it("error callback is preserved", () => {
     const f = Field.literalText({
       literal: ["a", "b"],
-      error: (k) => k === "literal" ? "invalid role" : undefined
+      error: (k) => (k === "literal" ? "invalid role" : undefined)
     })
     expect(typeof f.error).toBe("function")
-    const error = f.error
-    if (error === undefined) throw new Error("expected error callback")
-    expect(error("literal")).toBe("invalid role")
-    expect(error("type")).toBeUndefined()
+    if (f.error === undefined) throw new Error("expected error callback")
+    expect(f.error("literal")).toBe("invalid role")
+    expect(f.error("type")).toBeUndefined()
   })
 })
 
@@ -146,7 +145,11 @@ describe("Field.view()", () => {
   })
 
   it("relation field can be marked view-only", () => {
-    const col: AnyCollectionDef = { name: "users", fields: {}, schema: { "x-collection-kind": "base", type: "object", properties: {} } }
+    const col: AnyCollectionDef = {
+      name: "users",
+      fields: {},
+      schema: { "x-collection-kind": "base", type: "object", properties: {} }
+    }
     const f = Field.relation(col).view()
     expect(f.viewOnly).toBe(true)
     expect(f.kind).toBe("relation")

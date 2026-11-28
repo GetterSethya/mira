@@ -36,21 +36,17 @@ import {
   defaultEmailRateLimitPolicies,
   EmailRateLimitConfig
 } from "@/rate-limit/index.js"
-import {
-  RateLimiterLive,
-  RateLimitKeySecretLive,
-  SqlRateLimitStoreLive
-} from "@/rate-limit/sql.js"
+import { RateLimiterLive, RateLimitKeySecretLive, SqlRateLimitStoreLive } from "@/rate-limit/sql.js"
 import { RepositoryLive } from "@/repository/repository.js"
 import { ThumbnailServicePhotonLive } from "@/thumbnail/lazy.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/types.js"
 
 import type { MiraAppConfig } from "./builder.js"
 import type { RuleBinding } from "./define-rule.js"
-import type { MiraPlugin } from "./plugin.js"
+import type { MiraPlugin, PluginRouteServices } from "./plugin.js"
 
-// oxlint-disable-next-line typescript/no-explicit-any
-type AnyCronDef = CronDef<any>
+type AnyCronDef = CronDef
+type AnyRoute = HttpRouter.Route<never, PluginRouteServices>
 // oxlint-disable-next-line typescript/no-explicit-any
 type AnyMiraPlugin = MiraPlugin<any>
 
@@ -296,12 +292,9 @@ export class MiraApp<R = never, Telemetry = never> {
     // not hide `TelemetryStore`, because the telemetry layer uses
     // `Layer.provideMerge` internally.
     const telemetryLayer = telemetry.pipe(Layer.provide(database.layer))
-    const foundation = Layer.mergeAll(
-      database.layer,
-      storage.layer,
-      thumbnailLayer,
-      telemetryLayer
-    ).pipe(Layer.provideMerge(platform.layer))
+    const foundation = Layer.mergeAll(database.layer, storage.layer, thumbnailLayer, telemetryLayer).pipe(
+      Layer.provideMerge(platform.layer)
+    )
 
     // Rate limiting: the store is the swap point. The default is SQL-backed.
     const appConfigLayer = AppConfigLive
@@ -421,8 +414,8 @@ export class MiraApp<R = never, Telemetry = never> {
     const allCollections = this.#getAllCollections()
     const adminCollections = this.#getAdminCollections().map((c) => c.name)
     const collectionRoutes = makeCollectionRouter(allCollections, adminCollections)
-    const pluginRoutes = this.#extras.flatMap((p) =>
-      typeof p.routes === "function" ? p.routes(allCollections) : p.routes ?? []
+    const pluginRoutes: ReadonlyArray<AnyRoute> = this.#extras.flatMap((p) =>
+      typeof p.routes === "function" ? p.routes(allCollections) : (p.routes ?? [])
     )
     const routes = [...collectionRoutes, ...pluginRoutes]
 
@@ -468,20 +461,21 @@ export class MiraApp<R = never, Telemetry = never> {
     const usingDefaultCors = this.#config.cors === defaultCorsConfig
 
     const appEffect = Effect.gen(function* () {
-        if (usingDefaultCors) {
-          yield* Effect.logWarning(
-            "CORS: using the permissive default — every Origin is reflected and credentials are allowed. " +
-              "Configure Mira.builder().cors({ allowedOrigins, credentials }) for production."
-          )
-        }
-        const hookService = yield* HookService.pipe(Effect.provide(hookServiceLayer))
-        const bootstrapLayer = Layer.effectDiscard(hookService.runBootstrap())
-        return yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))
+      if (usingDefaultCors) {
+        yield* Effect.logWarning(
+          "CORS: using the permissive default — every Origin is reflected and credentials are allowed. " +
+            "Configure Mira.builder().cors({ allowedOrigins, credentials }) for production."
+        )
+      }
+      const hookService = yield* HookService.pipe(Effect.provide(hookServiceLayer))
+      const bootstrapLayer = Layer.effectDiscard(hookService.runBootstrap())
+      return yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))
     })
 
-    // The app graph closes its requirements and errors before runMain; the
-    // assertion keeps the public serve effect closed.
-    // oxlint-disable-next-line typescript/consistent-type-assertions
+    // The app graph is closed at runtime. `Layer.launch` reports its remaining
+    // construction errors and requirements only in the type system, so narrow
+    // the effect at the `runMain` boundary.
+    // oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion, typescript/consistent-type-assertions -- runtime-closed app graph
     const closedEffect = appEffect as Effect.Effect<never, never, never>
 
     this.#config.platform.runMain(

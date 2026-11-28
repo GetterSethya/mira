@@ -165,9 +165,9 @@ const program = Effect.gen(function* () {
     SELECT name, schema FROM _collections ORDER BY name
   `
   for (const row of collections) {
-    const parsed = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
-    )(row.schema).pipe(Effect.orDie)
+    const parsed = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(
+      row.schema
+    ).pipe(Effect.orDie)
     const props = parsed["properties"]
     const fieldNames = Object.keys(typeof props === "object" && props !== null ? props : {})
     console.log(`${row.name}: [${fieldNames.join(", ")}]`)

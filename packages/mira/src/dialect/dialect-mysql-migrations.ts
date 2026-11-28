@@ -37,12 +37,7 @@ import {
   mysqlMaxIndexedTextLength,
   mysqlTextCollation
 } from "./dialect-mysql-text.js"
-import {
-  affectedViews,
-  normalizeIdentifier,
-  topologicalViewOrder,
-  viewDependencies
-} from "./view-dependencies.js"
+import { affectedViews, normalizeIdentifier, topologicalViewOrder, viewDependencies } from "./view-dependencies.js"
 
 /** The length #68 rendered for a keyed text column before #71. */
 const PROVISIONAL_TEXT_LENGTH = 255
@@ -56,23 +51,16 @@ const effectiveTextCollation = (col: ColumnDef) => col.collation ?? mysqlTextCol
 const RETRYABLE_CONFLICT_CODES = [1050, 1060, 1061, 1091, 1205, 1213] as const
 
 /** Catalog types that cannot back a full-column index without #71's strategy. */
-const UNBOUNDED_TEXT_TYPES: ReadonlySet<string> = new Set([
-  "tinytext",
-  "text",
-  "mediumtext",
-  "longtext"
-])
+const UNBOUNDED_TEXT_TYPES: ReadonlySet<string> = new Set(["tinytext", "text", "mediumtext", "longtext"])
 
 const quoteIdentifier = mysqlQuoteIdentifier
 const quoteLiteral = mysqlQuoteLiteral
 const indexNameOf = mysqlIndexName
 
-const codePointLength = (value: string) => [...value].length
+const codePointLength = (value: string) => Array.from(value).length
 
 const isKeyedColumn = (col: ColumnDef, indexes: ReadonlyArray<IndexShape>) =>
-  col.primaryKey === true ||
-  col.unique === true ||
-  indexes.some((index) => index.fields.includes(col.name))
+  col.primaryKey === true || col.unique === true || indexes.some((index) => index.fields.includes(col.name))
 
 /**
  * The catalog type the renderer expects for a column. Shared by the renderer
@@ -87,17 +75,11 @@ const expectedCatalogType = (col: ColumnDef, indexes: ReadonlyArray<IndexShape>)
     case "real":
       return "double"
     case "text":
-      return isKeyedColumn(col, indexes)
-        ? `varchar(${col.maxLength ?? PROVISIONAL_TEXT_LENGTH})`
-        : "longtext"
+      return isKeyedColumn(col, indexes) ? `varchar(${col.maxLength ?? PROVISIONAL_TEXT_LENGTH})` : "longtext"
   }
 }
 
-const nativeTypeOf = (
-  col: ColumnDef,
-  indexes: ReadonlyArray<IndexShape>,
-  step: MigrationStep["kind"]
-) => {
+const nativeTypeOf = (col: ColumnDef, indexes: ReadonlyArray<IndexShape>, step: MigrationStep["kind"]) => {
   switch (col.type) {
     case "boolean":
       return "BOOLEAN"
@@ -134,6 +116,12 @@ const normalizeCatalogType = (raw: string) => {
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const showDefaultValue = (value: unknown) => encodeJson(value) ?? String(value)
+
+const unknownToText = (value: unknown): string => {
+  if (value instanceof Error) return `${value.name}: ${value.message}`
+  if (typeof value === "object" && value !== null) return encodeJson(value)
+  return String(value)
+}
 
 const coerceNumber = (value: unknown): number | undefined => {
   if (typeof value === "number") return Number.isFinite(value) ? value : undefined
@@ -256,15 +244,15 @@ const normalizeDefault = (col: ColumnDef, raw: unknown): string => {
   switch (col.type) {
     case "boolean": {
       const boolean = coerceBoolean(raw)
-      return boolean === undefined ? `invalid:${String(raw)}` : `bool:${boolean}`
+      return boolean === undefined ? `invalid:${unknownToText(raw)}` : `bool:${boolean}`
     }
     case "integer":
     case "real": {
       const number = coerceNumber(raw)
-      return number === undefined ? `invalid:${String(raw)}` : `num:${String(number)}`
+      return number === undefined ? `invalid:${unknownToText(raw)}` : `num:${String(number)}`
     }
     case "text": {
-      if (typeof raw !== "string") return `invalid:${String(raw)}`
+      if (typeof raw !== "string") return `invalid:${unknownToText(raw)}`
       return `text:${normalizeTextDefault(raw)}`
     }
   }
@@ -298,34 +286,21 @@ const describeCatalogColumn = (col: CatalogColumn) => {
   return parts.join(" ")
 }
 
-const columnMatchesCatalog = (
-  desired: ColumnDef,
-  actual: CatalogColumn,
-  indexes: ReadonlyArray<IndexShape>
-) =>
+const columnMatchesCatalog = (desired: ColumnDef, actual: CatalogColumn, indexes: ReadonlyArray<IndexShape>) =>
   expectedCatalogType(desired, indexes) === actual.columnType &&
   desired.nullable === actual.nullable &&
   (desired.autoIncrement === true) === actual.autoIncrement &&
   (desired.type !== "text" ||
-    (actual.characterSetName === MYSQL_TEXT_CHARSET &&
-      actual.collationName === effectiveTextCollation(desired))) &&
+    (actual.characterSetName === MYSQL_TEXT_CHARSET && actual.collationName === effectiveTextCollation(desired))) &&
   defaultTagOf(desired) === normalizeDefault(desired, actual.defaultRaw)
 
-const columnMatchesDefinition = (
-  desired: ColumnDef,
-  actual: ColumnDef,
-  indexes: ReadonlyArray<IndexShape>
-) =>
+const columnMatchesDefinition = (desired: ColumnDef, actual: ColumnDef, indexes: ReadonlyArray<IndexShape>) =>
   expectedCatalogType(desired, indexes) === expectedCatalogType(actual, indexes) &&
   desired.nullable === actual.nullable &&
   (desired.autoIncrement === true) === (actual.autoIncrement === true) &&
   defaultTagOf(desired) === defaultTagOf(actual)
 
-const columnDefinition = (
-  col: ColumnDef,
-  indexes: ReadonlyArray<IndexShape>,
-  step: MigrationStep["kind"]
-) => {
+const columnDefinition = (col: ColumnDef, indexes: ReadonlyArray<IndexShape>, step: MigrationStep["kind"]) => {
   const rendered = renderDefault(col)
   if (!rendered.ok) {
     throw new UnsupportedMigrationStepError({
@@ -357,26 +332,17 @@ const createTableSql = (
   return `CREATE TABLE ${ifNotExists ? "IF NOT EXISTS " : ""}${quoteIdentifier(table)} (\n  ${definitions.join(",\n  ")}\n) ENGINE=InnoDB`
 }
 
-const createIndexSql = (
-  table: string,
-  fields: ReadonlyArray<string>,
-  unique: boolean
-) =>
+const createIndexSql = (table: string, fields: ReadonlyArray<string>, unique: boolean) =>
   `CREATE ${unique ? "UNIQUE " : ""}INDEX ${quoteIdentifier(indexNameOf(table, fields))} ON ${quoteIdentifier(table)} (${fields.map(quoteIdentifier).join(", ")})`
 
-const backfillLiteral = (col: ColumnDef) =>
-  col.type === "boolean" ? "FALSE" : col.type === "text" ? "('')" : "0"
+const backfillLiteral = (col: ColumnDef) => (col.type === "boolean" ? "FALSE" : col.type === "text" ? "('')" : "0")
 
 /**
  * A non-null column without a default cannot be added in one statement on a
  * table that may already hold rows: add it nullable, backfill, then make it
  * `NOT NULL`.
  */
-const addColumnStatements = (
-  table: string,
-  col: ColumnDef,
-  indexes: ReadonlyArray<IndexShape>
-) => {
+const addColumnStatements = (table: string, col: ColumnDef, indexes: ReadonlyArray<IndexShape>) => {
   const tableSql = quoteIdentifier(table)
   const columnSql = quoteIdentifier(col.name)
 
@@ -413,9 +379,7 @@ const alterColumnStatements = (
   if (step.from.nullable && !step.to.nullable) {
     const rendered = renderDefault(step.to)
     if (rendered.ok && rendered.value !== undefined && rendered.value !== "NULL") {
-      statements.push(
-        `UPDATE ${tableSql} SET ${columnSql} = ${rendered.value} WHERE ${columnSql} IS NULL`
-      )
+      statements.push(`UPDATE ${tableSql} SET ${columnSql} = ${rendered.value} WHERE ${columnSql} IS NULL`)
     }
   }
 
@@ -435,15 +399,11 @@ const translate = (step: MigrationStep): Array<string> => {
     case "dropTable":
       return [`DROP TABLE IF EXISTS ${quoteIdentifier(step.table)}`]
     case "renameTable":
-      return [
-        `RENAME TABLE ${quoteIdentifier(step.from)} TO ${quoteIdentifier(step.to)}`
-      ]
+      return [`RENAME TABLE ${quoteIdentifier(step.from)} TO ${quoteIdentifier(step.to)}`]
     case "addColumn":
       return addColumnStatements(step.table, step.column, [])
     case "dropColumn":
-      return [
-        `ALTER TABLE ${quoteIdentifier(step.table)} DROP COLUMN ${quoteIdentifier(step.column)}`
-      ]
+      return [`ALTER TABLE ${quoteIdentifier(step.table)} DROP COLUMN ${quoteIdentifier(step.column)}`]
     case "renameColumn":
       return [
         `ALTER TABLE ${quoteIdentifier(step.table)} RENAME COLUMN ${quoteIdentifier(step.from)} TO ${quoteIdentifier(step.to)}`
@@ -453,9 +413,7 @@ const translate = (step: MigrationStep): Array<string> => {
     case "createIndex":
       return [createIndexSql(step.table, step.fields, step.unique)]
     case "dropIndex":
-      return [
-        `DROP INDEX ${quoteIdentifier(indexNameOf(step.table, step.fields))} ON ${quoteIdentifier(step.table)}`
-      ]
+      return [`DROP INDEX ${quoteIdentifier(indexNameOf(step.table, step.fields))} ON ${quoteIdentifier(step.table)}`]
     case "createView":
       return [`CREATE OR REPLACE VIEW ${quoteIdentifier(step.view)} AS ${step.query}`]
     case "dropView":
@@ -480,10 +438,7 @@ const firstIdentifierIssue = (names: ReadonlyArray<string>): string | undefined 
   return undefined
 }
 
-const firstDefaultIssue = (
-  table: string,
-  columns: ReadonlyArray<ColumnDef>
-): string | undefined => {
+const firstDefaultIssue = (table: string, columns: ReadonlyArray<ColumnDef>): string | undefined => {
   for (const column of columns) {
     const rendered = renderDefault(column)
     if (!rendered.ok) {
@@ -513,8 +468,7 @@ const desiredColumnsFor = (
   ctx: TranslatePlanContext,
   stepColumns: ReadonlyMap<string, ReadonlyArray<ColumnDef>>,
   table: string
-): ReadonlyArray<ColumnDef> | undefined =>
-  ctx.tables.get(table)?.desired.columns ?? stepColumns.get(table)
+): ReadonlyArray<ColumnDef> | undefined => ctx.tables.get(table)?.desired.columns ?? stepColumns.get(table)
 
 /** Tables that survive the plan and have a desired shape. */
 const candidateTables = (
@@ -609,8 +563,7 @@ const textPreflightError = (
   const stepColumns = stepColumnsOf(steps)
   const checkedTables = new Set<string>()
 
-  const fail = (detail: string) =>
-    new UnsupportedMigrationStepError({ step: "alterColumn", detail })
+  const fail = (detail: string) => new UnsupportedMigrationStepError({ step: "alterColumn", detail })
 
   const renamedTables = new Set<string>()
   const renamedColumns = new Set<string>()
@@ -626,7 +579,10 @@ const textPreflightError = (
   }
   for (const step of steps) {
     if (step.kind !== "createIndex") continue
-    if (renamedTables.has(step.table) || step.fields.some((field) => renamedColumns.has(`${step.table}\u0000${field}`))) {
+    if (
+      renamedTables.has(step.table) ||
+      step.fields.some((field) => renamedColumns.has(`${step.table}\u0000${field}`))
+    ) {
       return fail(
         `cannot combine a rename of "${step.table}" with a same-plan index step; split the rename and the index into separate migrations`
       )
@@ -643,11 +599,7 @@ const textPreflightError = (
     checkedTables.add(table)
     const columns = desiredColumnsFor(ctx, stepColumns, table) ?? []
     const indexes = desiredIndexesFor(ctx, table)
-    const keyed = new Set(
-      columns
-        .filter((column) => isKeyedColumn(column, indexes))
-        .map((column) => column.name)
-    )
+    const keyed = new Set(columns.filter((column) => isKeyedColumn(column, indexes)).map((column) => column.name))
 
     for (const column of columns) {
       if (column.type !== "text") continue
@@ -657,7 +609,8 @@ const textPreflightError = (
       }
       const lengthDetail = keyed.has(column.name)
         ? textLengthDetail(table, column)
-        : column.maxLength !== undefined && typeof column.default === "string" &&
+        : column.maxLength !== undefined &&
+            typeof column.default === "string" &&
             codePointLength(column.default) > column.maxLength
           ? textLengthDetail(table, column)
           : undefined
@@ -690,7 +643,9 @@ const textPreflightError = (
       for (const field of step.fields) {
         const column = columns.find((candidate) => candidate.name === field)
         if (column === undefined) {
-          return fail(`index "${indexNameOf(step.table, step.fields)}" on "${step.table}" names unknown field "${field}"`)
+          return fail(
+            `index "${indexNameOf(step.table, step.fields)}" on "${step.table}" names unknown field "${field}"`
+          )
         }
         if (column.type === "text") {
           const detail = textLengthDetail(step.table, column)
@@ -709,14 +664,8 @@ const textPreflightError = (
   return undefined
 }
 
-const participatesInUniqueIndex = (
-  ctx: TranslatePlanContext,
-  table: string,
-  column: string
-) =>
-  desiredIndexesFor(ctx, table).some(
-    (index) => index.unique && index.fields.includes(column)
-  )
+const participatesInUniqueIndex = (ctx: TranslatePlanContext, table: string, column: string) =>
+  desiredIndexesFor(ctx, table).some((index) => index.unique && index.fields.includes(column))
 
 /**
  * Pure preflight. It runs before the catalog read and before any SQL is
@@ -727,16 +676,12 @@ const collectPreflightError = (
   ctx: TranslatePlanContext
 ): UnsupportedMigrationStepError | undefined => {
   for (const step of steps) {
-    const fail = (detail: string) =>
-      new UnsupportedMigrationStepError({ step: step.kind, detail })
+    const fail = (detail: string) => new UnsupportedMigrationStepError({ step: step.kind, detail })
 
     switch (step.kind) {
       case "createTable":
       case "createSystemTable": {
-        const names = firstIdentifierIssue([
-          step.table,
-          ...step.columns.map((column) => column.name)
-        ])
+        const names = firstIdentifierIssue([step.table, ...step.columns.map((column) => column.name)])
         if (names !== undefined) return fail(names)
         const defaults = firstDefaultIssue(step.table, step.columns)
         if (defaults !== undefined) return fail(defaults)
@@ -760,8 +705,7 @@ const collectPreflightError = (
         if (
           !step.column.nullable &&
           step.column.default === undefined &&
-          (step.column.unique === true ||
-            participatesInUniqueIndex(ctx, step.table, step.column.name))
+          (step.column.unique === true || participatesInUniqueIndex(ctx, step.table, step.column.name))
         ) {
           return fail(
             `adding NOT NULL column "${step.table}"."${step.column.name}" without a default would give every existing row the same value and collide in a unique index; provide a default, add the column as nullable, or backfill unique values out of band`
@@ -785,9 +729,7 @@ const collectPreflightError = (
         const defaults = firstDefaultIssue(step.table, [step.from, step.to])
         if (defaults !== undefined) return fail(defaults)
         if (step.from.autoIncrement === true || step.to.autoIncrement === true) {
-          return fail(
-            `changing identity column "${step.table}"."${step.to.name}" is not supported`
-          )
+          return fail(`changing identity column "${step.table}"."${step.to.name}" is not supported`)
         }
         break
       }
@@ -849,8 +791,7 @@ type CatalogView = {
   readonly definition: string | null
 }
 
-const stringValue = (value: unknown): string | null =>
-  typeof value === "string" ? value : null
+const stringValue = (value: unknown): string | null => (typeof value === "string" ? value : null)
 
 const numberValue = (value: unknown): number => {
   if (typeof value === "number") return value
@@ -911,11 +852,7 @@ type IndexBuilder = {
  * Batched catalog read for every table and view touched by the plan. Columns
  * and indexes are skipped when the plan only creates or drops views.
  */
-const readCatalog = (
-  ctx: TranslatePlanContext,
-  names: ReadonlySet<string>,
-  includeShapes: boolean
-) =>
+const readCatalog = (ctx: TranslatePlanContext, names: ReadonlySet<string>, includeShapes: boolean) =>
   Effect.gen(function* () {
     const tables = new Map<string, CatalogTable>()
     if (names.size === 0) return tables
@@ -1020,25 +957,15 @@ const readViewDefinitions = (ctx: TranslatePlanContext) =>
     return views
   })
 
-const indexColumnsMatch = (
-  index: CatalogIndex,
-  fields: ReadonlyArray<string>
-) =>
+const indexColumnsMatch = (index: CatalogIndex, fields: ReadonlyArray<string>) =>
   index.columns.length === fields.length &&
-  index.columns.every(
-    (part, position) => part.name === fields[position] && !part.hasSubPart
-  )
+  index.columns.every((part, position) => part.name === fields[position] && !part.hasSubPart)
 
-const indexShapeMatches = (
-  index: CatalogIndex,
-  fields: ReadonlyArray<string>,
-  unique: boolean
-) => index.unique === unique && indexColumnsMatch(index, fields)
+const indexShapeMatches = (index: CatalogIndex, fields: ReadonlyArray<string>, unique: boolean) =>
+  index.unique === unique && indexColumnsMatch(index, fields)
 
 const describeIndex = (index: CatalogIndex) =>
-  `${index.unique ? "UNIQUE " : ""}(${index.columns
-    .map((part) => part.name ?? "<expression>")
-    .join(", ")})`
+  `${index.unique ? "UNIQUE " : ""}(${index.columns.map((part) => part.name ?? "<expression>").join(", ")})`
 
 const findIndexByName = (table: CatalogTable, name: string) =>
   table.indexes.find((index) => index.name.toLowerCase() === name.toLowerCase())
@@ -1077,10 +1004,7 @@ const textDataPreflight = (
     const fail = (step: MigrationStep["kind"], detail: string) =>
       Effect.fail(new UnsupportedMigrationStepError({ step, detail }))
 
-    const narrowing = new Map<
-      string,
-      Array<{ readonly column: string; readonly maxLength: number }>
-    >()
+    const narrowing = new Map<string, Array<{ readonly column: string; readonly maxLength: number }>>()
 
     for (const table of candidateTables(steps, ctx, stepColumns)) {
       const catalogTable = catalog.get(table)
@@ -1141,13 +1065,9 @@ const textDataPreflight = (
 
     for (const [table, columns] of narrowing) {
       const select = columns
-        .map((entry, index) =>
-          `MAX(CHAR_LENGTH(${quoteIdentifier(entry.column)})) AS ${quoteIdentifier(`c${index}`)}`
-        )
+        .map((entry, index) => `MAX(CHAR_LENGTH(${quoteIdentifier(entry.column)})) AS ${quoteIdentifier(`c${index}`)}`)
         .join(", ")
-      const rows = yield* ctx.readonlyQuery(
-        `SELECT ${select} FROM ${quoteIdentifier(table)}`
-      )
+      const rows = yield* ctx.readonlyQuery(`SELECT ${select} FROM ${quoteIdentifier(table)}`)
       const row = rows[0]
       if (row === undefined) continue
       for (let index = 0; index < columns.length; index++) {
@@ -1200,16 +1120,12 @@ const textDataPreflight = (
       if (catalogTable === undefined || catalogTable.type !== "base") continue
       const participates =
         step.column.unique === true ||
-        desiredIndexesFor(ctx, step.table).some(
-          (index) => index.unique && index.fields.includes(step.column.name)
-        )
+        desiredIndexesFor(ctx, step.table).some((index) => index.unique && index.fields.includes(step.column.name))
       if (!participates) continue
       if (step.column.nullable && (step.column.default === undefined || step.column.default === null)) {
         continue
       }
-      const rows = yield* ctx.readonlyQuery(
-        `SELECT 1 AS hit FROM ${quoteIdentifier(step.table)} LIMIT 2`
-      )
+      const rows = yield* ctx.readonlyQuery(`SELECT 1 AS hit FROM ${quoteIdentifier(step.table)} LIMIT 2`)
       if (rows.length > 1) {
         return yield* fail(
           "addColumn",
@@ -1289,20 +1205,14 @@ const reconcileTextColumns = (
         for (const index of catalogTable.indexes) {
           if (index.name.toUpperCase() === "PRIMARY") continue
           if (!index.columns.some((part) => part.name === column.name)) continue
-          const desiredIndex = indexes.some((shape) =>
-            indexShapeMatches(index, shape.fields, shape.unique)
-          )
+          const desiredIndex = indexes.some((shape) => indexShapeMatches(index, shape.fields, shape.unique))
           if (desiredIndex) continue
           const planned = steps.some(
             (step) =>
-              step.kind === "dropIndex" &&
-              step.table === table &&
-              indexShapeMatches(index, step.fields, step.unique)
+              step.kind === "dropIndex" && step.table === table && indexShapeMatches(index, step.fields, step.unique)
           )
           if (planned) continue
-          staleDrops.push(
-            `DROP INDEX ${quoteIdentifier(index.name)} ON ${quoteIdentifier(table)}`
-          )
+          staleDrops.push(`DROP INDEX ${quoteIdentifier(index.name)} ON ${quoteIdentifier(table)}`)
         }
       }
 
@@ -1316,13 +1226,8 @@ const reconcileTextColumns = (
 
     if (staleDrops.length > 0) statements.push(...staleDrops)
     if (modifies.length > 0) {
-      statements.push(
-        `ALTER TABLE ${quoteIdentifier(table)} ${modifies.join(", ")}, ALGORITHM=COPY, LOCK=SHARED`
-      )
-      const size =
-        catalogTable.sizeBytes > 0
-          ? ` (${catalogTable.sizeBytes} bytes; budget similar free space)`
-          : ""
+      statements.push(`ALTER TABLE ${quoteIdentifier(table)} ${modifies.join(", ")}, ALGORITHM=COPY, LOCK=SHARED`)
+      const size = catalogTable.sizeBytes > 0 ? ` (${catalogTable.sizeBytes} bytes; budget similar free space)` : ""
       notes.push(`reconcile text shape on ${table}${size}`)
       tables.add(table)
     }
@@ -1368,12 +1273,8 @@ const compareTableShape = (
     }
   }
 
-  const primaryFields = columns
-    .filter((column) => column.primaryKey === true)
-    .map((column) => column.name)
-  const primary = catalog.indexes.find(
-    (index) => index.name.toUpperCase() === "PRIMARY"
-  )
+  const primaryFields = columns.filter((column) => column.primaryKey === true).map((column) => column.name)
+  const primary = catalog.indexes.find((index) => index.name.toUpperCase() === "PRIMARY")
   if (primaryFields.length > 0) {
     if (primary === undefined) {
       return `table "${table}" is missing its primary key (${primaryFields.join(", ")})`
@@ -1390,10 +1291,7 @@ const compareTableShape = (
     .map((column) => column.name)
   for (const field of uniqueFields) {
     const found = catalog.indexes.some(
-      (index) =>
-        index.unique &&
-        index.name.toUpperCase() !== "PRIMARY" &&
-        indexColumnsMatch(index, [field])
+      (index) => index.unique && index.name.toUpperCase() !== "PRIMARY" && indexColumnsMatch(index, [field])
     )
     if (!found) {
       return `table "${table}" is missing the unique key on "${field}"`
@@ -1438,16 +1336,10 @@ const needsViewScan = (steps: ReadonlyArray<MigrationStep>) =>
       (step.kind === "alterColumn" && step.from.type !== step.to.type)
   )
 
-const viewTriggerKind = (
-  steps: ReadonlyArray<MigrationStep>
-): MigrationStep["kind"] => {
+const viewTriggerKind = (steps: ReadonlyArray<MigrationStep>): MigrationStep["kind"] => {
   if (steps.some((step) => step.kind === "dropColumn")) return "dropColumn"
   if (steps.some((step) => step.kind === "dropTable")) return "dropTable"
-  if (
-    steps.some(
-      (step) => step.kind === "alterColumn" && step.from.type !== step.to.type
-    )
-  ) {
+  if (steps.some((step) => step.kind === "alterColumn" && step.from.type !== step.to.type)) {
     return "alterColumn"
   }
   return "dropView"
@@ -1597,10 +1489,7 @@ const isPlannedTable = (state: PlanState, name: string) =>
   state.plannedColumns.has(name) || state.renameSource.has(name)
 
 /** Resolves a table name through earlier `renameTable` steps in the same plan. */
-const resolveTable = (
-  state: PlanState,
-  name: string
-): CatalogTable | undefined => {
+const resolveTable = (state: PlanState, name: string): CatalogTable | undefined => {
   const direct = state.catalog.get(name)
   if (direct !== undefined) return direct
 
@@ -1615,11 +1504,7 @@ const resolveTable = (
   return undefined
 }
 
-const isIntermediateAdd = (
-  desired: ColumnDef,
-  actual: CatalogColumn,
-  indexes: ReadonlyArray<IndexShape>
-) =>
+const isIntermediateAdd = (desired: ColumnDef, actual: CatalogColumn, indexes: ReadonlyArray<IndexShape>) =>
   !desired.nullable &&
   desired.default === undefined &&
   actual.nullable &&
@@ -1654,8 +1539,7 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
   switch (step.kind) {
     case "createTable":
     case "createSystemTable": {
-      const indexes =
-        step.kind === "createTable" ? desiredIndexesFor(state.ctx, step.table) : []
+      const indexes = step.kind === "createTable" ? desiredIndexesFor(state.ctx, step.table) : []
       const existing = state.catalog.get(step.table)
       if (existing === undefined) {
         state.plannedColumns.set(step.table, step.columns)
@@ -1669,9 +1553,7 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
       const ignored = new Set(
         step.columns
           .filter(
-            (column) =>
-              column.type === "text" &&
-              state.reconciledColumns.has(`${step.table}\u0000${column.name}`)
+            (column) => column.type === "text" && state.reconciledColumns.has(`${step.table}\u0000${column.name}`)
           )
           .map((column) => column.name)
       )
@@ -1694,13 +1576,9 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
       if (target !== undefined && source === undefined) return done()
       if (source !== undefined && target === undefined) {
         state.renameSource.set(step.to, step.from)
-        return pending([
-          `RENAME TABLE ${quoteIdentifier(step.from)} TO ${quoteIdentifier(step.to)}`
-        ])
+        return pending([`RENAME TABLE ${quoteIdentifier(step.from)} TO ${quoteIdentifier(step.to)}`])
       }
-      return drift(
-        `cannot rename "${step.from}" to "${step.to}": both names already exist or neither exists`
-      )
+      return drift(`cannot rename "${step.from}" to "${step.to}": both names already exist or neither exists`)
     }
 
     case "addColumn": {
@@ -1708,16 +1586,12 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
       const planned = state.plannedColumns.get(step.table)
       if (planned !== undefined) {
         const listed = planned.some((column) => column.name === step.column.name)
-        return listed
-          ? done()
-          : pending(addColumnStatements(step.table, step.column, indexes))
+        return listed ? done() : pending(addColumnStatements(step.table, step.column, indexes))
       }
 
       const table = resolveTable(state, step.table)
       if (table === undefined) {
-        return drift(
-          `table "${step.table}" does not exist and the plan does not create it`
-        )
+        return drift(`table "${step.table}" does not exist and the plan does not create it`)
       }
       if (table.type !== "base") return drift(`"${step.table}" is not a base table`)
 
@@ -1744,18 +1618,14 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
       if (planned !== undefined) {
         const listed = planned.some((column) => column.name === step.column)
         return listed
-          ? pending([
-              `ALTER TABLE ${quoteIdentifier(step.table)} DROP COLUMN ${quoteIdentifier(step.column)}`
-            ])
+          ? pending([`ALTER TABLE ${quoteIdentifier(step.table)} DROP COLUMN ${quoteIdentifier(step.column)}`])
           : done()
       }
 
       const table = resolveTable(state, step.table)
       if (table === undefined) return done()
       if (!table.columns.has(step.column)) return done()
-      return pending([
-        `ALTER TABLE ${quoteIdentifier(step.table)} DROP COLUMN ${quoteIdentifier(step.column)}`
-      ])
+      return pending([`ALTER TABLE ${quoteIdentifier(step.table)} DROP COLUMN ${quoteIdentifier(step.column)}`])
     }
 
     case "renameColumn": {
@@ -1776,9 +1646,7 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
 
       const table = resolveTable(state, step.table)
       if (table === undefined) {
-        return drift(
-          `table "${step.table}" does not exist and the plan does not create it`
-        )
+        return drift(`table "${step.table}" does not exist and the plan does not create it`)
       }
       const hasSource = table.columns.has(step.from)
       const hasTarget = table.columns.has(step.to)
@@ -1799,9 +1667,7 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
       if (planned !== undefined) {
         const actual = planned.find((column) => column.name === step.to.name)
         if (actual === undefined) {
-          return drift(
-            `column "${step.table}"."${step.to.name}" is not part of the plan's createTable step`
-          )
+          return drift(`column "${step.table}"."${step.to.name}" is not part of the plan's createTable step`)
         }
         return columnMatchesDefinition(step.to, actual, indexes)
           ? done()
@@ -1810,9 +1676,7 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
 
       const table = resolveTable(state, step.table)
       if (table === undefined) {
-        return drift(
-          `table "${step.table}" does not exist and the plan does not create it`
-        )
+        return drift(`table "${step.table}" does not exist and the plan does not create it`)
       }
       if (table.type !== "base") return drift(`"${step.table}" is not a base table`)
 
@@ -1852,9 +1716,7 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
         if (isPlannedTable(state, step.table)) {
           return pending([createIndexSql(step.table, step.fields, step.unique)])
         }
-        return drift(
-          `table "${step.table}" does not exist and the plan does not create it`
-        )
+        return drift(`table "${step.table}" does not exist and the plan does not create it`)
       }
       if (table.type !== "base") return drift(`"${step.table}" is not a base table`)
 
@@ -1879,13 +1741,9 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
       if (table === undefined) return done()
       if (table.type !== "base") return done()
 
-      const found = table.indexes.find((index) =>
-        indexShapeMatches(index, step.fields, step.unique)
-      )
+      const found = table.indexes.find((index) => indexShapeMatches(index, step.fields, step.unique))
       if (found === undefined) return done()
-      return pending([
-        `DROP INDEX ${quoteIdentifier(found.name)} ON ${quoteIdentifier(step.table)}`
-      ])
+      return pending([`DROP INDEX ${quoteIdentifier(found.name)} ON ${quoteIdentifier(step.table)}`])
     }
 
     case "createView": {
@@ -1911,23 +1769,18 @@ const evaluateStep = (step: MigrationStep, state: PlanState): StepResult => {
   }
 }
 
-const translatePlan = (
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-) =>
+const translatePlan = (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) =>
   Effect.gen(function* () {
     if (steps.length === 0) {
       return { statements: [], cleanup: [], notes: [], skipped: [] }
     }
 
     const preflight = collectPreflightError(steps, ctx)
-    if (preflight !== undefined) return yield* Effect.fail(preflight)
+    if (preflight !== undefined) return yield* preflight
     const textPreflight = textPreflightError(steps, ctx)
-    if (textPreflight !== undefined) return yield* Effect.fail(textPreflight)
+    if (textPreflight !== undefined) return yield* textPreflight
 
-    const includeShapes = steps.some(
-      (step) => step.kind !== "createView" && step.kind !== "dropView"
-    )
+    const includeShapes = steps.some((step) => step.kind !== "createView" && step.kind !== "dropView")
     const catalog = yield* readCatalog(ctx, collectTableNames(steps), includeShapes)
     if (includeShapes) {
       yield* textDataPreflight(steps, ctx, catalog)
@@ -1940,7 +1793,7 @@ const translatePlan = (
     if (needsViewScan(steps) || reconciliation.tables.size > 0) {
       const catalogViews = yield* readViewDefinitions(ctx)
       const viewError = dependentViewError(steps, ctx, catalogViews, reconciliation.tables)
-      if (viewError !== undefined) return yield* Effect.fail(viewError)
+      if (viewError !== undefined) return yield* viewError
     }
 
     const state: PlanState = {
@@ -1963,12 +1816,7 @@ const translatePlan = (
       const step = steps[index]
       if (step === undefined) continue
 
-      if (
-        !reconciled &&
-        step.kind !== "dropView" &&
-        step.kind !== "dropIndex" &&
-        step.kind !== "createView"
-      ) {
+      if (!reconciled && step.kind !== "dropView" && step.kind !== "dropIndex" && step.kind !== "createView") {
         tableStatements.push(...reconciliation.statements)
         notes.push(...reconciliation.notes)
         reconciled = true
@@ -1976,9 +1824,7 @@ const translatePlan = (
 
       const result = evaluateStep(step, state)
       if (result.status === "drift") {
-        return yield* Effect.fail(
-          new UnsupportedMigrationStepError({ step: step.kind, detail: result.detail })
-        )
+        return yield* new UnsupportedMigrationStepError({ step: step.kind, detail: result.detail })
       }
       if (result.status === "done") {
         notes.push(`skip ${describeStep(step)} (already present)`)
@@ -2006,10 +1852,7 @@ const translatePlan = (
     for (const view of pendingDrops) {
       dropNames.set(normalizeIdentifier(view), view)
     }
-    const dropOrder = topologicalViewOrder(
-      new Set(dropNames.keys()),
-      viewDependencies(ctx.views, "stored")
-    ).reverse()
+    const dropOrder = topologicalViewOrder(new Set(dropNames.keys()), viewDependencies(ctx.views, "stored")).reverse()
     for (const normalized of dropOrder) {
       const raw = dropNames.get(normalized)
       if (raw === undefined) continue
@@ -2019,23 +1862,15 @@ const translatePlan = (
 
     statements.push(...tableStatements)
 
-    const createNames = new Map<
-      string,
-      { readonly view: string; readonly query: string }
-    >()
+    const createNames = new Map<string, { readonly view: string; readonly query: string }>()
     for (const create of pendingCreates) {
       createNames.set(normalizeIdentifier(create.view), create)
     }
-    const createOrder = topologicalViewOrder(
-      new Set(createNames.keys()),
-      viewDependencies(ctx.views, "desired")
-    )
+    const createOrder = topologicalViewOrder(new Set(createNames.keys()), viewDependencies(ctx.views, "desired"))
     for (const normalized of createOrder) {
       const create = createNames.get(normalized)
       if (create === undefined) continue
-      statements.push(
-        `CREATE OR REPLACE VIEW ${quoteIdentifier(create.view)} AS ${create.query}`
-      )
+      statements.push(`CREATE OR REPLACE VIEW ${quoteIdentifier(create.view)} AS ${create.query}`)
       notes.push(`create view ${create.view}`)
     }
 
@@ -2047,10 +1882,7 @@ type PlanShapes = {
   readonly indexes: ReadonlyMap<string, ReadonlyArray<IndexShape>>
 }
 
-const collectPlanShapes = (
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-): PlanShapes => {
+const collectPlanShapes = (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext): PlanShapes => {
   const stepColumns = stepColumnsOf(steps)
   const columns = new Map<string, ReadonlyArray<ColumnDef>>()
   const indexes = new Map<string, ReadonlyArray<IndexShape>>()
@@ -2194,10 +2026,7 @@ const verifyStep = (
       if (columns === undefined) {
         return `post-apply verification: cannot verify index field shape on "${step.table}"; no desired column shape`
       }
-      const indexes = [
-        ...(shapes.indexes.get(step.table) ?? []),
-        { fields: step.fields, unique: step.unique }
-      ]
+      const indexes = [...(shapes.indexes.get(step.table) ?? []), { fields: step.fields, unique: step.unique }]
       for (const field of step.fields) {
         const desired = columns.find((column) => column.name === field)
         if (desired === undefined) {
@@ -2217,9 +2046,7 @@ const verifyStep = (
     case "dropIndex": {
       const table = catalog.get(step.table)
       if (table === undefined) return undefined
-      const found = table.indexes.find((index) =>
-        indexShapeMatches(index, step.fields, step.unique)
-      )
+      const found = table.indexes.find((index) => indexShapeMatches(index, step.fields, step.unique))
       if (found === undefined) return undefined
       return `post-apply verification: index "${found.name}" on "${step.table}" still exists`
     }
@@ -2238,37 +2065,26 @@ const verifyStep = (
   }
 }
 
-const verifyPlan = (
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-) =>
+const verifyPlan = (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) =>
   Effect.gen(function* () {
     if (steps.length === 0) return
 
-    const includeShapes = steps.some(
-      (step) => step.kind !== "createView" && step.kind !== "dropView"
-    )
+    const includeShapes = steps.some((step) => step.kind !== "createView" && step.kind !== "dropView")
     const catalog = yield* readCatalog(ctx, collectTableNames(steps), includeShapes)
 
     const recreatedViews = new Set(
-      steps
-        .filter((step) => step.kind === "createView")
-        .map((step) => normalizeIdentifier(step.view))
+      steps.filter((step) => step.kind === "createView").map((step) => normalizeIdentifier(step.view))
     )
     const shapes = collectPlanShapes(steps, ctx)
     for (const step of steps) {
       const detail = verifyStep(step, ctx, catalog, recreatedViews, shapes)
       if (detail !== undefined) {
-        return yield* Effect.fail(
-          new UnsupportedMigrationStepError({ step: step.kind, detail })
-        )
+        return yield* new UnsupportedMigrationStepError({ step: step.kind, detail })
       }
     }
     const textDetail = verifyTextShape(steps, ctx, catalog, shapes)
     if (textDetail !== undefined) {
-      return yield* Effect.fail(
-        new UnsupportedMigrationStepError({ step: "alterColumn", detail: textDetail })
-      )
+      return yield* new UnsupportedMigrationStepError({ step: "alterColumn", detail: textDetail })
     }
   })
 
@@ -2289,12 +2105,8 @@ const renderUpsert = (
   }
 
   const columns = keys.map(quoteIdentifier).join(", ")
-  const values = keys
-    .map((key) => (bound ? "?" : quoteLiteral(record[key])))
-    .join(", ")
-  const assignments = updates
-    .map((key) => `${quoteIdentifier(key)} = VALUES(${quoteIdentifier(key)})`)
-    .join(", ")
+  const values = keys.map((key) => (bound ? "?" : quoteLiteral(record[key]))).join(", ")
+  const assignments = updates.map((key) => `${quoteIdentifier(key)} = VALUES(${quoteIdentifier(key)})`).join(", ")
 
   return {
     sql: `INSERT INTO ${quoteIdentifier(table)} (${columns}) VALUES (${values}) ON DUPLICATE KEY UPDATE ${assignments}`,
@@ -2302,15 +2114,12 @@ const renderUpsert = (
   }
 }
 
-const preflightPlan = (
-  steps: ReadonlyArray<MigrationStep>,
-  ctx: TranslatePlanContext
-) =>
+const preflightPlan = (steps: ReadonlyArray<MigrationStep>, ctx: TranslatePlanContext) =>
   Effect.gen(function* () {
     const preflight = collectPreflightError(steps, ctx)
-    if (preflight !== undefined) return yield* Effect.fail(preflight)
+    if (preflight !== undefined) return yield* preflight
     const textPreflight = textPreflightError(steps, ctx)
-    if (textPreflight !== undefined) return yield* Effect.fail(textPreflight)
+    if (textPreflight !== undefined) return yield* textPreflight
 
     const rows = yield* ctx.readonlyQuery(
       `SELECT ('a' COLLATE ${mysqlTextCollation}) = ('a ' COLLATE ${mysqlTextCollation}) AS bin_padded, ` +
@@ -2319,20 +2128,16 @@ const preflightPlan = (
     )
     const row = rows[0]
     if (numberValue(row?.["bin_padded"]) === 1 || numberValue(row?.["email_padded"]) === 1) {
-      return yield* Effect.fail(
-        new UnsupportedMigrationStepError({
-          step: "alterColumn",
-          detail: `this MySQL/MariaDB server aliases ${mysqlTextCollation} or ${mysqlEmailCollation} to PAD SPACE; the text strategy requires a NO PAD build`
-        })
-      )
+      return yield* new UnsupportedMigrationStepError({
+        step: "alterColumn",
+        detail: `this MySQL/MariaDB server aliases ${mysqlTextCollation} or ${mysqlEmailCollation} to PAD SPACE; the text strategy requires a NO PAD build`
+      })
     }
     if (numberValue(row?.["email_case_equal"]) !== 1) {
-      return yield* Effect.fail(
-        new UnsupportedMigrationStepError({
-          step: "alterColumn",
-          detail: `${mysqlEmailCollation} is not case-insensitive on this server; the auth email key requires a case-insensitive collation`
-        })
-      )
+      return yield* new UnsupportedMigrationStepError({
+        step: "alterColumn",
+        detail: `${mysqlEmailCollation} is not case-insensitive on this server; the auth email key requires a case-insensitive collation`
+      })
     }
   })
 
@@ -2369,11 +2174,8 @@ const auditTextShape = (ctx: TranslatePlanContext) =>
     return issues
   })
 
-const upsert = (
-  table: string,
-  record: Readonly<Record<string, unknown>>,
-  conflictKeys: ReadonlyArray<string>
-) => renderUpsert(table, record, conflictKeys, false).sql
+const upsert = (table: string, record: Readonly<Record<string, unknown>>, conflictKeys: ReadonlyArray<string>) =>
+  renderUpsert(table, record, conflictKeys, false).sql
 
 const upsertStatement = (
   table: string,
@@ -2385,8 +2187,7 @@ const migrationModel: Extract<MigrationModel, { kind: "statement" }> = {
   kind: "statement",
   systemTableExistsSql: (table) =>
     `SELECT 1 AS present FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ${quoteLiteral(table)} LIMIT 1`,
-  isRetryableConflict: (error) =>
-    errorHasCode(error, RETRYABLE_CONFLICT_CODES),
+  isRetryableConflict: (error) => errorHasCode(error, RETRYABLE_CONFLICT_CODES),
   transaction: {
     beginSql: "START TRANSACTION",
     commitSql: "COMMIT",

@@ -97,15 +97,12 @@ describe("dialect-neutral store setup", () => {
   it.effect("does not emit PRAGMA when the dialect has no telemetry hooks", () => {
     const statements: Array<string> = []
     const { telemetry: _telemetry, ...rest } = sqliteDialect
-    void _telemetry
     const fake: DialectType = rest
     const database = Layer.merge(
       recordingLayer(statements).pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" }))),
       Layer.succeed(Dialect, fake)
     )
-    const layer = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(
-      Layer.provideMerge(database)
-    )
+    const layer = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(Layer.provideMerge(database))
 
     return Effect.gen(function* () {
       const store = yield* TelemetryStore

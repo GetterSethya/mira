@@ -76,6 +76,7 @@ function blocks(sections: ReadonlyArray<SnippetSection>): ReadonlyArray<SnippetB
   return sections.flatMap((section) => section.blocks)
 }
 
+// oxlint-disable-next-line typescript/no-redundant-type-constituents -- oxlint's type program does not resolve the `@/*` alias from `tests/` (the dashboard tsconfig only includes `src`), so `SnippetBlock` shows up as an error type here; `tsc` and vitest resolve it
 function block(sections: ReadonlyArray<SnippetSection>, id: string): SnippetBlock | undefined {
   return blocks(sections).find((candidate) => candidate.id === id)
 }

@@ -37,7 +37,7 @@
  *     body: { "postId": "...", "authorId": "YOUR_ID", "body": "..." }
  */
 
-import { HttpServer } from "effect/http"
+import { HttpRouter } from "effect/http"
 import { NodeFileSystem, NodeHttpServer, NodePath, NodeRuntime } from "@effect/platform-node"
 import { SqlClient } from "effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
@@ -240,7 +240,7 @@ const serverLayer = Layer.unwrap(
 )
 
 // app: serve the router with all service dependencies provided
-const appLayer = HttpServer.serve(router).pipe(
+const appLayer = HttpRouter.serve(HttpRouter.addAll(router)).pipe(
   Layer.provideMerge(serverLayer),
   Layer.provideMerge(Layer.merge(collectionLayer, configLayer))
 )

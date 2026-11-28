@@ -11,7 +11,7 @@ export const CRON_STATE_CONFIG_KEY = "cron_state"
 const PersistedCronEntrySchema = Schema.Struct({
   lastRunAt: Schema.NullOr(Schema.String),
   lastStatus: Schema.NullOr(Schema.Literals(["success", "error"])),
-  lastDurationMs: Schema.NullOr(Schema.Number),
+  lastDurationMs: Schema.NullOr(Schema.Finite),
   lastError: Schema.NullOr(Schema.String)
 })
 
@@ -21,34 +21,35 @@ export type PersistedCronState = typeof PersistedCronStateSchema.Type
 
 const ConfigRowSchema = Schema.Struct({ value: Schema.String })
 
-export function loadPersistedCronState(sql: SqlClient.SqlClient, _dialect: DialectType) {
-  return Effect.gen(function* () {
-    const emptyState: PersistedCronState = {}
+const stringifyUnknown = (value: unknown): string => {
+  if (value instanceof Error) return `${value.name}: ${value.message}`
+  if (typeof value === "object" && value !== null) return Object.prototype.toString.call(value)
+  return String(value)
+}
 
-    const rows = yield* SqlSchema.findAll({
-      Request: Schema.String,
-      Result: ConfigRowSchema,
-      execute: (key) =>
-        sql`SELECT ${sql("value")} FROM ${sql("_config")} WHERE ${sql("key")} = ${key}`
-    })(CRON_STATE_CONFIG_KEY)
+export const loadPersistedCronState = Effect.fn("cron.persistence.load", {
+  kind: "client",
+  attributes: { table: "_config", "cron.config_key": CRON_STATE_CONFIG_KEY }
+})(function* (sql: SqlClient.SqlClient, _dialect: DialectType) {
+  const emptyState: PersistedCronState = {}
 
-    const row = rows[0]
-    if (row === undefined) return emptyState
+  const rows = yield* SqlSchema.findAll({
+    Request: Schema.String,
+    Result: ConfigRowSchema,
+    execute: (key) => sql`SELECT ${sql("value")} FROM ${sql("_config")} WHERE ${sql("key")} = ${key}`
+  })(CRON_STATE_CONFIG_KEY)
 
-    return yield* Schema.decodeEffect(Schema.fromJsonString(PersistedCronStateSchema))(row.value).pipe(
-      Effect.catch((e) =>
-        Effect.logWarning(`[cron] failed to decode persisted cron_state, starting fresh: ${String(e)}`).pipe(
-          Effect.as(emptyState)
-        )
+  const row = rows[0]
+  if (row === undefined) return emptyState
+
+  return yield* Schema.decodeEffect(Schema.fromJsonString(PersistedCronStateSchema))(row.value).pipe(
+    Effect.catch((e) =>
+      Effect.logWarning(`[cron] failed to decode persisted cron_state, starting fresh: ${String(e)}`).pipe(
+        Effect.as(emptyState)
       )
     )
-  }).pipe(
-    Effect.withSpan("cron.persistence.load", {
-      kind: "client",
-      attributes: { table: "_config", "cron.config_key": CRON_STATE_CONFIG_KEY }
-    })
   )
-}
+})
 
 export function savePersistedCronState(
   sql: SqlClient.SqlClient,
@@ -62,15 +63,13 @@ export function savePersistedCronState(
         lastRunAt: state.lastRunAt ? state.lastRunAt.toISOString() : null,
         lastStatus: state.lastStatus ?? null,
         lastDurationMs: state.lastDurationMs ?? null,
-        lastError: state.lastError !== undefined ? String(state.lastError) : null
+        lastError: state.lastError !== undefined ? stringifyUnknown(state.lastError) : null
       }
     }
     const json = yield* Schema.encodeEffect(Schema.fromJsonString(PersistedCronStateSchema))(blob)
     yield* sql`
       INSERT INTO ${sql("_config")} ${sql.insert({ key: CRON_STATE_CONFIG_KEY, value: json })}
-      ${sql.literal(
-        dialect.store.upsertClause(["key"], [{ column: "value", kind: "excluded" }])
-      )}
+      ${sql.literal(dialect.store.upsertClause(["key"], [{ column: "value", kind: "excluded" }]))}
     `
   }).pipe(
     Effect.withSpan("cron.persistence.save", {

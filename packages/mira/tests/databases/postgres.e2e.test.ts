@@ -19,13 +19,7 @@ import { join } from "node:path"
 import { NodeHttpServer } from "@effect/platform-node"
 import { PgClient } from "@effect/sql-pg"
 import { describe, it } from "@effect/vitest"
-import {
-  AuthCollection,
-  BaseCollection,
-  Field,
-  Rule,
-  ViewCollection
-} from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection, Field, Rule, ViewCollection } from "@gettersethya/mira-client"
 import { Effect, Layer, Redacted, Schema, Schedule } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
@@ -44,6 +38,13 @@ import { NodePlatform } from "@/platforms/node.js"
 import { RateLimitStore } from "@/rate-limit/index.js"
 import { LocalFileStorage } from "@/storage/local-preset.js"
 import { makeTelemetryLayer } from "@/telemetry/layer.js"
+
+function closeEffect<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> {
+  // The app layer is closed at runtime; the test graph widens R through
+  // plugin/cron config, so this helper restores the closed run type.
+  // oxlint-disable-next-line effecttsgo/unsafe-effect-type-assertion, typescript/consistent-type-assertions
+  return effect as Effect.Effect<A, E, never>
+}
 import { TelemetryStore } from "@/telemetry/store.js"
 
 const postgresUrl = process.env["MIRA_TEST_POSTGRES_URL"]
@@ -186,8 +187,8 @@ const PostItem = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   published: Schema.Boolean,
-  views: Schema.Number,
-  age: Schema.NullOr(Schema.Number),
+  views: Schema.Finite,
+  age: Schema.NullOr(Schema.Finite),
   secret: Schema.optional(Schema.String)
 })
 const PostList = Schema.Struct({
@@ -216,8 +217,8 @@ const ExpandedPost = Schema.Struct({
 const ViewRow = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
-  total: Schema.Number,
-  total_views: Schema.Number,
+  total: Schema.Finite,
+  total_views: Schema.Finite,
   meta: Schema.String
 })
 const ViewList = Schema.Struct({
@@ -235,23 +236,13 @@ const encodeFilter = Schema.encodeSync(
   )
 )
 
-const filterQuery = (
-  op: string,
-  field: string,
-  value: unknown,
-  extra = ""
-) =>
-  `/api/collections/e2e_pg_posts?filter=${encodeURIComponent(
-    encodeFilter({ op, field, value })
-  )}${extra}`
+const filterQuery = (op: string, field: string, value: unknown, extra = "") =>
+  `/api/collections/e2e_pg_posts?filter=${encodeURIComponent(encodeFilter({ op, field, value }))}${extra}`
 
-const json = <A>(
-  res: { json: Effect.Effect<unknown, unknown> },
-  schema: Schema.Schema<A>
-) => res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
+const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
+  res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
 
-const realDelay = (millis: number) =>
-  Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, millis)))
+const realDelay = (millis: number) => Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, millis)))
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
 const adminCtx: RequestCtx = { headers: {}, query: {}, admin: true }
@@ -269,17 +260,13 @@ const tableNames = (names: ReadonlyArray<string>) =>
       FROM information_schema.tables
       WHERE table_schema = current_schema()
     `
-    return rows
-      .map((row) => row.table_name)
-      .filter((name) => names.includes(name))
+    return rows.map((row) => row.table_name).filter((name) => names.includes(name))
   })
 
 const CronEntry = Schema.Struct({
   lastStatus: Schema.NullOr(Schema.Literals(["success", "error"]))
 })
-const CronState = Schema.fromJsonString(
-  Schema.Record(Schema.String, CronEntry)
-)
+const CronState = Schema.fromJsonString(Schema.Record(Schema.String, CronEntry))
 
 const createApp = () =>
   Mira.builder()
@@ -340,15 +327,11 @@ describeE2E("PostgreSQL HTTP behavior", () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const cleanupCtx = yield* Layer.build(
-            PgClient.layer({ url: Redacted.make(url), maxConnections: 1 })
-          )
+          const cleanupCtx = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 1 }))
           yield* cleanupHttpDatabase.pipe(Effect.provide(cleanupCtx))
 
           const app = createApp()
-          const appCtx = yield* Layer.build(
-            Layer.mergeAll(app.buildServiceLayer(), NodeHttpServer.layerTest)
-          )
+          const appCtx = yield* Layer.build(app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest)))
 
           yield* Effect.gen(function* () {
             yield* serveRouter
@@ -367,9 +350,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             expect(user.password).toBeUndefined()
 
             const login = yield* HttpClient.execute(
-              HttpClientRequest.post(
-                "/api/collections/e2e_pg_users/auth-with-password"
-              ).pipe(
+              HttpClientRequest.post("/api/collections/e2e_pg_users/auth-with-password").pipe(
                 HttpClientRequest.bodyJsonUnsafe({
                   email: "e2e-pg@example.com",
                   password: "correct-password"
@@ -381,10 +362,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
 
             const me = yield* HttpClient.execute(
               HttpClientRequest.get("/api/auth/me").pipe(
-                HttpClientRequest.setHeader(
-                  "Authorization",
-                  `Bearer ${loginBody.token}`
-                )
+                HttpClientRequest.setHeader("Authorization", `Bearer ${loginBody.token}`)
               )
             )
             expect(me.status).toBe(200)
@@ -395,9 +373,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
 
             const createPost = (payload: Record<string, unknown>) =>
               HttpClient.execute(
-                HttpClientRequest.post("/api/collections/e2e_pg_posts").pipe(
-                  HttpClientRequest.bodyJsonUnsafe(payload)
-                )
+                HttpClientRequest.post("/api/collections/e2e_pg_posts").pipe(HttpClientRequest.bodyJsonUnsafe(payload))
               )
 
             const one = yield* createPost({
@@ -437,52 +413,34 @@ describeE2E("PostgreSQL HTTP behavior", () => {
               expect(Object.hasOwn(item, "secret")).toBe(false)
             }
 
-            const numberOnText = yield* HttpClient.get(
-              filterQuery("eq", "title", 5)
-            )
+            const numberOnText = yield* HttpClient.get(filterQuery("eq", "title", 5))
             expect(numberOnText.status).toBe(200)
             const numberBody = yield* json(numberOnText, PostList)
             expect(numberBody.items.map((item) => item.title)).toEqual(["5"])
 
-            const likeNumber = yield* HttpClient.get(
-              filterQuery("like", "title", 5)
-            )
+            const likeNumber = yield* HttpClient.get(filterQuery("like", "title", 5))
             expect(likeNumber.status).toBe(422)
 
-            const likeNonText = yield* HttpClient.get(
-              filterQuery("like", "age", "1%")
-            )
+            const likeNonText = yield* HttpClient.get(filterQuery("like", "age", "1%"))
             expect(likeNonText.status).toBe(200)
             const likeBody = yield* json(likeNonText, PostList)
             expect(likeBody.items).toHaveLength(2)
             expect(likeBody.items.every((item) => item.age === 18)).toBe(true)
 
-            const badInteger = yield* HttpClient.get(
-              filterQuery("eq", "views", "not-a-number")
-            )
+            const badInteger = yield* HttpClient.get(filterQuery("eq", "views", "not-a-number"))
             expect(badInteger.status).toBe(422)
 
-            const booleanFilter = yield* HttpClient.get(
-              filterQuery("eq", "published", true)
-            )
+            const booleanFilter = yield* HttpClient.get(filterQuery("eq", "published", true))
             expect(booleanFilter.status).toBe(200)
             const booleanBody = yield* json(booleanFilter, PostList)
             expect(booleanBody.items.map((item) => item.title)).toEqual(["one"])
 
-            const sorted = yield* HttpClient.get(
-              "/api/collections/e2e_pg_posts?sort=title&order=asc"
-            )
+            const sorted = yield* HttpClient.get("/api/collections/e2e_pg_posts?sort=title&order=asc")
             expect(sorted.status).toBe(200)
             const sortedBody = yield* json(sorted, PostList)
-            expect(sortedBody.items.map((item) => item.title)).toEqual([
-              "5",
-              "one",
-              "two"
-            ])
+            expect(sortedBody.items.map((item) => item.title)).toEqual(["5", "one", "two"])
 
-            const page = yield* HttpClient.get(
-              "/api/collections/e2e_pg_posts?limit=1"
-            )
+            const page = yield* HttpClient.get("/api/collections/e2e_pg_posts?limit=1")
             expect(page.status).toBe(200)
             const pageBody = yield* json(page, PostList)
             expect(pageBody.items).toHaveLength(1)
@@ -498,9 +456,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             expect(nextBody.items[0]?.id).not.toBe(pageBody.items[0]?.id)
 
             const updated = yield* HttpClient.execute(
-              HttpClientRequest.patch(
-                `/api/collections/e2e_pg_posts/${first.id}`
-              ).pipe(
+              HttpClientRequest.patch(`/api/collections/e2e_pg_posts/${first.id}`).pipe(
                 HttpClientRequest.bodyJsonUnsafe({ title: "one-updated" })
               )
             )
@@ -526,9 +482,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             )
             expect(denied.status).toBe(403)
 
-            const expanded = yield* HttpClient.get(
-              `/api/collections/e2e_pg_posts/${first.id}?expand=author`
-            )
+            const expanded = yield* HttpClient.get(`/api/collections/e2e_pg_posts/${first.id}?expand=author`)
             expect(expanded.status).toBe(200)
             const expandedBody = yield* json(expanded, ExpandedPost)
             expect(expandedBody.expand.author.id).toBe(user.id)
@@ -538,9 +492,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             const view = yield* HttpClient.get("/api/collections/e2e_pg_view")
             expect(view.status).toBe(200)
             const viewBody = yield* json(view, ViewList)
-            const updatedRow = viewBody.items.find(
-              (row) => row.id === first.id
-            )
+            const updatedRow = viewBody.items.find((row) => row.id === first.id)
             expect(updatedRow).toBeDefined()
             if (updatedRow === undefined) {
               return yield* Effect.die("expected the view row")
@@ -553,26 +505,12 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             expect(updatedRow.meta).toContain('"a"')
 
             const svc = yield* CollectionService
-            const ageRestricted = yield* svc.list(
-              AgePosts,
-              null,
-              20,
-              noCtx
-            )
-            expect(
-              ageRestricted.items.some((row) => row["title"] === "two")
-            ).toBe(false)
-            expect(
-              ageRestricted.items.every(
-                (row) =>
-                  typeof row["age"] === "number" && row["age"] >= 18
-              )
-            ).toBe(true)
+            const ageRestricted = yield* svc.list(AgePosts, null, 20, noCtx)
+            expect(ageRestricted.items.some((row) => row["title"] === "two")).toBe(false)
+            expect(ageRestricted.items.every((row) => typeof row["age"] === "number" && row["age"] >= 18)).toBe(true)
 
             const sql = yield* SqlClient.SqlClient
-            yield* sql.unsafe(
-              `ALTER TABLE "e2e_pg_posts" ALTER COLUMN "seqId" RESTART WITH 2147483649`
-            )
+            yield* sql.unsafe(`ALTER TABLE "e2e_pg_posts" ALTER COLUMN "seqId" RESTART WITH 2147483649`)
             const big = yield* createPost({
               title: "big",
               published: false,
@@ -582,27 +520,20 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             expect(big.status).toBe(201)
             const bigBody = yield* json(big, IdResponse)
 
-            const seqRestricted = yield* svc.list(
-              SeqIdPosts,
-              null,
-              20,
-              noCtx
-            )
+            const seqRestricted = yield* svc.list(SeqIdPosts, null, 20, noCtx)
             expect(seqRestricted.items).toHaveLength(1)
             expect(seqRestricted.items[0]?.["title"]).toBe("big")
 
             const adminRow = yield* svc.view(Posts, bigBody.id, adminCtx)
             expect(typeof adminRow["seqId"]).toBe("string")
-            const serialized = Schema.encodeSync(
-              Schema.fromJsonString(Schema.Unknown)
-            )(adminRow)
+            const serialized = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(adminRow)
             expect(typeof serialized).toBe("string")
             if (typeof serialized === "string") {
               expect(serialized).toContain('"seqId"')
             }
           }).pipe(Effect.provide(appCtx))
         })
-      ),
+      ).pipe(closeEffect),
     120_000
   )
 
@@ -611,9 +542,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const cleanupCtx = yield* Layer.build(
-            PgClient.layer({ url: Redacted.make(url), maxConnections: 1 })
-          )
+          const cleanupCtx = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 1 }))
           yield* cleanupHttpDatabase.pipe(Effect.provide(cleanupCtx))
 
           const app = createStoreApp()
@@ -651,13 +580,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
               createdAt: now,
               newEmail: null
             })
-            expect(
-              yield* challenges.findByTokenHash(
-                "e2e_pg_users",
-                "login_otp",
-                `e2e-pg-hash-${now}`
-              )
-            ).toBeDefined()
+            expect(yield* challenges.findByTokenHash("e2e_pg_users", "login_otp", `e2e-pg-hash-${now}`)).toBeDefined()
 
             const limits = yield* RateLimitStore
             const result = yield* limits.increment([
@@ -682,13 +605,11 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             if (value === undefined) {
               return yield* Effect.die("expected persisted cron state")
             }
-            const state = yield* Schema.decodeUnknownEffect(CronState)(value).pipe(
-              Effect.orDie
-            )
+            const state = yield* Schema.decodeEffect(CronState)(value).pipe(Effect.orDie)
             expect(state["e2e-pg-cron"]?.lastStatus).toBe("success")
           }).pipe(Effect.provide(appCtx))
         })
-      ),
+      ).pipe(closeEffect),
     120_000
   )
 
@@ -697,9 +618,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const cleanupCtx = yield* Layer.build(
-            PgClient.layer({ url: Redacted.make(url), maxConnections: 1 })
-          )
+          const cleanupCtx = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 1 }))
           yield* cleanupHttpDatabase.pipe(Effect.provide(cleanupCtx))
 
           const app = createTelemetryApp()
@@ -730,19 +649,11 @@ describeE2E("PostgreSQL HTTP behavior", () => {
               filter: null,
               traceId: null
             })
-            expect(
-              logs.items.some((row) => row.message === "e2e-pg-telemetry-log")
-            ).toBe(true)
-            expect(
-              spans.items.some((row) => row.name === "e2e-pg-telemetry-span")
-            ).toBe(true)
+            expect(logs.items.some((row) => row.message === "e2e-pg-telemetry-log")).toBe(true)
+            expect(spans.items.some((row) => row.name === "e2e-pg-telemetry-span")).toBe(true)
 
-            const old = new Date(
-              Date.now() - 8 * 24 * 60 * 60 * 1000
-            ).toISOString()
-            const recent = new Date(
-              Date.now() - 1 * 24 * 60 * 60 * 1000
-            ).toISOString()
+            const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+            const recent = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
             yield* store.appendLogs([
               {
                 id: "e2e-pg-old-log",
@@ -767,7 +678,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             expect(deleted.logs).toBeGreaterThanOrEqual(1)
           }).pipe(Effect.provide(appCtx))
         })
-      ),
+      ).pipe(closeEffect),
     120_000
   )
 
@@ -776,22 +687,15 @@ describeE2E("PostgreSQL HTTP behavior", () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const cleanupCtx = yield* Layer.build(
-            PgClient.layer({ url: Redacted.make(url), maxConnections: 1 })
-          )
+          const cleanupCtx = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 1 }))
           yield* cleanupHttpDatabase.pipe(Effect.provide(cleanupCtx))
 
           const app = Mira.builder()
             .platform(NodePlatform)
-            .database(
-              PostgresDatabase({ url: Redacted.make(url), migrateAtStartup: false })
-            )
+            .database(PostgresDatabase({ url: Redacted.make(url), migrateAtStartup: false }))
             .storage(
               LocalFileStorage({
-                directory: join(
-                  mkdtempSync(join(tmpdir(), "mira-pg-boot-")),
-                  "uploads"
-                )
+                directory: join(mkdtempSync(join(tmpdir(), "mira-pg-boot-")), "uploads")
               })
             )
             .collections(collections)
@@ -801,12 +705,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
           const appCtx = yield* Layer.build(app.buildServiceLayer())
 
           yield* Effect.gen(function* () {
-            const collectionTables = yield* tableNames([
-              "e2e_pg_posts",
-              "e2e_pg_locked",
-              "e2e_pg_users",
-              "e2e_pg_view"
-            ])
+            const collectionTables = yield* tableNames(["e2e_pg_posts", "e2e_pg_locked", "e2e_pg_users", "e2e_pg_view"])
             expect(collectionTables).toEqual([])
 
             const internalTables = yield* tableNames([
@@ -819,7 +718,7 @@ describeE2E("PostgreSQL HTTP behavior", () => {
             expect(internalTables).toHaveLength(5)
           }).pipe(Effect.provide(appCtx))
         })
-      ),
+      ).pipe(closeEffect),
     120_000
   )
 })

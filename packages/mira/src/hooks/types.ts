@@ -109,5 +109,5 @@ export interface CronFinishedContext {
   readonly scheduledAt: Date
   readonly durationMs: number
   readonly status: "success" | "error"
-  readonly error: unknown | undefined
+  readonly error: unknown
 }

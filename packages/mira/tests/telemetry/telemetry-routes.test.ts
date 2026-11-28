@@ -15,14 +15,14 @@ const JsonRecord = Schema.Record(Schema.String, Schema.Unknown)
 
 const LogsBody = Schema.Struct({
   logs: Schema.Array(JsonRecord),
-  total: Schema.Number,
-  nextCursor: Schema.NullOr(Schema.Number)
+  total: Schema.Finite,
+  nextCursor: Schema.NullOr(Schema.Finite)
 })
 
 const SpansBody = Schema.Struct({
   spans: Schema.Array(JsonRecord),
-  total: Schema.Number,
-  nextCursor: Schema.NullOr(Schema.Number)
+  total: Schema.Finite,
+  nextCursor: Schema.NullOr(Schema.Finite)
 })
 
 const encodeFilter = Schema.encodeSync(Schema.fromJsonString(FilterNodeSchema))
@@ -33,9 +33,7 @@ const encodeFilter = Schema.encodeSync(Schema.fromJsonString(FilterNodeSchema))
 
 function makeRouteLayer() {
   const database = SqliteDatabase({ filename: ":memory:" })
-  const store = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(
-    Layer.provide(database.layer)
-  )
+  const store = makeSqlTelemetryStoreLayer({ dedicated: true }).pipe(Layer.provide(database.layer))
 
   return makeTelemetryLayerForClient().pipe(
     Layer.provideMerge(store),
@@ -54,28 +52,23 @@ async function drainMicrotasks() {
 
 function runLogsRoute(url: string) {
   const req = HttpServerRequest.fromWeb(new Request(url))
-  return telemetryLogsRoute.pipe(
-    Effect.provide(Layer.succeed(HttpServerRequest.HttpServerRequest, req))
-  )
+  return telemetryLogsRoute.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, req))
 }
 
 function runSpansRoute(url: string) {
   const req = HttpServerRequest.fromWeb(new Request(url))
-  return telemetrySpansRoute.pipe(
-    Effect.provide(Layer.succeed(HttpServerRequest.HttpServerRequest, req))
-  )
+  return telemetrySpansRoute.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, req))
 }
 
 function getBody<A>(
   res: HttpServerResponse.HttpServerResponse,
-  schema: Schema.Schema<A>
+  schema: Schema.ConstraintDecoder<A>
 ): Effect.Effect<A, Schema.SchemaError, never> {
   // The route test intentionally decodes arbitrary response JSON; the runtime
-  // graph is closed, but Schema's generic widens the environment.
-  // oxlint-disable-next-line typescript/consistent-type-assertions
+  // graph is closed but the input is genuinely unknown.
   return Effect.promise(() => HttpServerResponse.toWeb(res).json()).pipe(
     Effect.flatMap((body: unknown) => Schema.decodeUnknownEffect(schema)(body))
-  ) as Effect.Effect<A, Schema.SchemaError, never>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -179,10 +172,7 @@ describe("telemetrySpansRoute", () => {
   it.effect("?traceId= fast path returns all spans for the trace", () =>
     Effect.gen(function* () {
       let capturedTraceId = ""
-      yield* Effect.void.pipe(
-        Effect.withSpan("child-span"),
-        Effect.withSpan("parent-span")
-      )
+      yield* Effect.void.pipe(Effect.withSpan("child-span"), Effect.withSpan("parent-span"))
       yield* Effect.promise(drainMicrotasks)
 
       const sql = yield* SqlClient.SqlClient
@@ -190,7 +180,9 @@ describe("telemetrySpansRoute", () => {
       expect(rows.length).toBeGreaterThan(0)
       if (rows[0] !== undefined) capturedTraceId = rows[0].traceId
 
-      const res = yield* runSpansRoute(`http://localhost/_telemetry/spans?traceId=${encodeURIComponent(capturedTraceId)}`)
+      const res = yield* runSpansRoute(
+        `http://localhost/_telemetry/spans?traceId=${encodeURIComponent(capturedTraceId)}`
+      )
       const body = yield* getBody(res, SpansBody)
 
       const { spans } = body

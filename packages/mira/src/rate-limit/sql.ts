@@ -6,11 +6,7 @@ import { Dialect } from "@/dialect/dialect.js"
 import { ensureStoreIndex, withStoreBootstrap } from "@/dialect/store-sql.js"
 import { RateLimitStoreError } from "./errors.js"
 import { makeRateLimiter, PRUNE_INTERVAL_MS, PRUNE_RETENTION_MS } from "./limiter.js"
-import {
-  RateLimiter,
-  RateLimitKeySecret,
-  RateLimitStore
-} from "./types.js"
+import { RateLimiter, RateLimitKeySecret, RateLimitStore } from "./types.js"
 import type { RateLimitIncrementResult, RateLimitStoreShape } from "./types.js"
 
 class RateLimitBlocked extends Data.TaggedError("RateLimitBlocked")<{
@@ -37,12 +33,7 @@ export const SqlRateLimitStoreLive = Layer.effect(
         yield* ensureStoreIndex(
           tx,
           store,
-          store.createIndexIfNotExists(
-            "_rate_limits_expires",
-            "_rate_limits",
-            ["expires_at"],
-            false
-          )
+          store.createIndexIfNotExists("_rate_limits_expires", "_rate_limits", ["expires_at"], false)
         )
       })
     )
@@ -62,9 +53,7 @@ export const SqlRateLimitStoreLive = Layer.effect(
         )
       `.pipe(
         Effect.asVoid,
-        Effect.catch((error) =>
-          Effect.logWarning("rate_limit.prune_failed", { message: error.message })
-        )
+        Effect.catch((error) => Effect.logWarning("rate_limit.prune_failed", { message: error.message }))
       )
 
     const increment: RateLimitStoreShape["increment"] = (entries) =>
@@ -74,20 +63,18 @@ export const SqlRateLimitStoreLive = Layer.effect(
         }
 
         for (const entry of entries) {
-          if ([...entry.bucket].length > store.bucketMaxLength) {
-            return yield* Effect.fail(
-              new RateLimitStoreError({
-                message: `Rate-limit bucket exceeds ${store.bucketMaxLength} characters`,
-                retryable: false
-              })
-            )
+          if (Array.from(entry.bucket).length > store.bucketMaxLength) {
+            return yield* new RateLimitStoreError({
+              message: `Rate-limit bucket exceeds ${store.bucketMaxLength} characters`,
+              retryable: false
+            })
           }
         }
 
         const now = Date.now()
         if (now - lastPrune > PRUNE_INTERVAL_MS) {
           lastPrune = now
-          yield* prune(now - PRUNE_RETENTION_MS).pipe(Effect.catch(() => Effect.void))
+          yield* prune(now - PRUNE_RETENTION_MS).pipe(Effect.ignore)
         }
 
         const buckets = entries.map((entry) => entry.bucket)
@@ -119,17 +106,18 @@ export const SqlRateLimitStoreLive = Layer.effect(
             return blocked
           }
 
-          const transaction = sql.withTransaction(
-            Effect.gen(function* () {
-              if (store.transactionLockTimeoutSql !== undefined) {
-                yield* sql.unsafe(store.transactionLockTimeoutSql)
-              }
+          const transaction = sql
+            .withTransaction(
+              Effect.gen(function* () {
+                if (store.transactionLockTimeoutSql !== undefined) {
+                  yield* sql.unsafe(store.transactionLockTimeoutSql)
+                }
 
-              const updated = new Map<number, number>()
-              const blockedIndices: Array<number> = []
+                const updated = new Map<number, number>()
+                const blockedIndices: Array<number> = []
 
-              for (const { entry, index } of sorted) {
-                const result = yield* sql<{ used: number }>`
+                for (const { entry, index } of sorted) {
+                  const result = yield* sql<{ used: number }>`
                   INSERT INTO ${sql("_rate_limits")} (bucket, used, expires_at)
                   SELECT ${entry.bucket}, ${entry.cost}, ${entry.expiresAt}
                   WHERE CAST(${entry.cost} AS INTEGER) <= CAST(${entry.limit} AS INTEGER)
@@ -139,140 +127,130 @@ export const SqlRateLimitStoreLive = Layer.effect(
                   RETURNING used
                 `
 
-                const row = result[0]
-                if (row === undefined) {
-                  blockedIndices.push(index)
-                } else {
-                  updated.set(index, Number(row.used))
+                  const row = result[0]
+                  if (row === undefined) {
+                    blockedIndices.push(index)
+                  } else {
+                    updated.set(index, Number(row.used))
+                  }
                 }
-              }
 
-              if (blockedIndices.length > 0) {
-                return yield* Effect.fail(
-                  new RateLimitBlocked({
+                if (blockedIndices.length > 0) {
+                  return yield* new RateLimitBlocked({
                     result: {
                       ok: false,
                       blockedIndices: blockedIndices.sort((left, right) => left - right),
                       counts: current
                     }
                   })
-                )
-              }
+                }
 
-              const counts = entries.map((_, index) => updated.get(index) ?? current[index] ?? 0)
-              const incremented: RateLimitIncrementResult = { ok: true, counts }
-              return incremented
-            })
-          ).pipe(
-            Effect.retry({
-              while: store.isRetryable,
-              schedule: Schedule.spaced("10 millis"),
-              times: 1
-            })
-          )
+                const counts = entries.map((_, index) => updated.get(index) ?? current[index] ?? 0)
+                const incremented: RateLimitIncrementResult = { ok: true, counts }
+                return incremented
+              })
+            )
+            .pipe(
+              Effect.retry({
+                while: store.isRetryable,
+                schedule: Schedule.spaced("10 millis"),
+                times: 1
+              })
+            )
 
-          return yield* transaction.pipe(
-            Effect.catchTag("RateLimitBlocked", (error) => Effect.succeed(error.result))
-          )
+          return yield* transaction.pipe(Effect.catchTag("RateLimitBlocked", (error) => Effect.succeed(error.result)))
         }
 
         // MySQL and MariaDB: no guarded upsert with RETURNING. Lock the batch,
         // evaluate the guard in memory, write, and fail the transaction when
         // any entry blocks so every earlier write rolls back.
-        const transaction = sql.withTransaction(
-          Effect.gen(function* () {
-            const existing = yield* sql<{ bucket: string; used: number }>`
+        const transaction = sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const existing = yield* sql<{ bucket: string; used: number }>`
               SELECT bucket, used FROM ${sql("_rate_limits")}
               WHERE bucket IN ${sql.in(buckets)}
             `
-            const reported = new Map(
-              existing.map((row) => [row.bucket, Number(row.used)])
-            )
-            const usedByBucket = new Map(reported)
-            const seen = new Set<string>()
-            const updated = new Map<number, number>()
-            const blockedIndices: Array<number> = []
+              const reported = new Map(existing.map((row) => [row.bucket, Number(row.used)]))
+              const usedByBucket = new Map(reported)
+              const seen = new Set<string>()
+              const updated = new Map<number, number>()
+              const blockedIndices: Array<number> = []
 
-            for (const { entry, index } of sorted) {
-              let current = usedByBucket.get(entry.bucket)
-              if (current !== undefined) {
-                const locked = yield* sql<{ used: number }>`
+              for (const { entry, index } of sorted) {
+                let current = usedByBucket.get(entry.bucket)
+                if (current !== undefined) {
+                  const locked = yield* sql<{ used: number }>`
                   SELECT used FROM ${sql("_rate_limits")}
                   WHERE bucket = ${entry.bucket}
                   FOR UPDATE
                 `
-                const lockedRow = locked[0]
-                if (lockedRow === undefined) {
-                  current = undefined
-                } else {
-                  current = Number(lockedRow.used)
-                  usedByBucket.set(entry.bucket, current)
+                  const lockedRow = locked[0]
+                  if (lockedRow === undefined) {
+                    current = undefined
+                  } else {
+                    current = Number(lockedRow.used)
+                    usedByBucket.set(entry.bucket, current)
+                  }
                 }
-              }
 
-              // Report the pre-batch value once per bucket, from the first
-              // locked read, so duplicate buckets cannot overwrite it with the
-              // post-increment count.
-              if (!seen.has(entry.bucket)) {
-                seen.add(entry.bucket)
-                if (current === undefined) reported.delete(entry.bucket)
-                else reported.set(entry.bucket, current)
-              }
+                // Report the pre-batch value once per bucket, from the first
+                // locked read, so duplicate buckets cannot overwrite it with the
+                // post-increment count.
+                if (!seen.has(entry.bucket)) {
+                  seen.add(entry.bucket)
+                  if (current === undefined) reported.delete(entry.bucket)
+                  else reported.set(entry.bucket, current)
+                }
 
-              const used = current ?? 0
-              if (used + entry.cost > entry.limit) {
-                blockedIndices.push(index)
-                continue
-              }
+                const used = current ?? 0
+                if (used + entry.cost > entry.limit) {
+                  blockedIndices.push(index)
+                  continue
+                }
 
-              if (current !== undefined) {
-                yield* sql`
+                if (current !== undefined) {
+                  yield* sql`
                   UPDATE ${sql("_rate_limits")}
                   SET used = used + ${entry.cost}
                   WHERE bucket = ${entry.bucket}
                 `
-              } else {
-                yield* sql`
+                } else {
+                  yield* sql`
                   INSERT INTO ${sql("_rate_limits")} (bucket, used, expires_at)
                   VALUES (${entry.bucket}, ${entry.cost}, ${entry.expiresAt})
                 `
+                }
+
+                usedByBucket.set(entry.bucket, used + entry.cost)
+                updated.set(index, used + entry.cost)
               }
 
-              usedByBucket.set(entry.bucket, used + entry.cost)
-              updated.set(index, used + entry.cost)
-            }
-
-            if (blockedIndices.length > 0) {
-              return yield* Effect.fail(
-                new RateLimitBlocked({
+              if (blockedIndices.length > 0) {
+                return yield* new RateLimitBlocked({
                   result: {
                     ok: false,
                     blockedIndices: blockedIndices.sort((left, right) => left - right),
-                    counts: entries.map(
-                      (entry) => reported.get(entry.bucket) ?? 0
-                    )
+                    counts: entries.map((entry) => reported.get(entry.bucket) ?? 0)
                   }
                 })
-              )
-            }
+              }
 
-            return {
-              ok: true as const,
-              counts: entries.map((_, index) => updated.get(index) ?? 0)
-            }
-          })
-        ).pipe(
-          Effect.retry({
-            while: (error) =>
-              store.isRetryable(error) || store.isDuplicateKey(error),
-            schedule: Schedule.exponential("5 millis").pipe(Schedule.jittered),
-            times: 1
-          })
-        )
+              return {
+                ok: true as const,
+                counts: entries.map((_, index) => updated.get(index) ?? 0)
+              }
+            })
+          )
+          .pipe(
+            Effect.retry({
+              while: (error) => store.isRetryable(error) || store.isDuplicateKey(error),
+              schedule: Schedule.exponential("5 millis").pipe(Schedule.jittered),
+              times: 1
+            })
+          )
 
-        return yield* transaction.pipe(
-          Effect.catchTag("RateLimitBlocked", (error) => Effect.succeed(error.result))
-        )
+        return yield* transaction.pipe(Effect.catchTag("RateLimitBlocked", (error) => Effect.succeed(error.result)))
       }).pipe(
         Effect.tapError((error) =>
           Effect.logWarning("rate_limit.increment_failed", {

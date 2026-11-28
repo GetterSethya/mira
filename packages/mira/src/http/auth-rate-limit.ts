@@ -20,20 +20,13 @@ import type { RateLimitRequest } from "@/rate-limit/index.js"
 export const consumeLoginRequestLimits = (
   email: string,
   ip: string | null
-): Effect.Effect<
-  void,
-  RateLimitedError | RateLimitUnavailableError,
-  RateLimiter | RateLimitKeySecret
-> =>
+): Effect.Effect<void, RateLimitedError | RateLimitUnavailableError, RateLimiter | RateLimitKeySecret> =>
   Effect.gen(function* () {
     const secret = Redacted.value(yield* RateLimitKeySecret)
     const policies = yield* AuthRateLimitConfig
     const requests: Array<RateLimitRequest> = []
 
-    const recipientKey = yield* rateLimitKey(
-      secret,
-      `login:recipient:${email.trim().toLowerCase()}`
-    )
+    const recipientKey = yield* rateLimitKey(secret, `login:recipient:${email.trim().toLowerCase()}`)
     requests.push({ policy: policies.loginRecipient, key: recipientKey })
 
     const normalizedIp = normalizeIpForRateLimit(ip)
@@ -47,12 +40,10 @@ export const consumeLoginRequestLimits = (
     const limiter = yield* RateLimiter
     const result = yield* limiter.consumeMany(requests)
     if (result.blocked !== null) {
-      return yield* Effect.fail(
-        new RateLimitedError({
-          retryAfterSeconds: result.blocked.retryAfterSeconds,
-          policy: result.blocked.policy,
-          scope: "request"
-        })
-      )
+      return yield* new RateLimitedError({
+        retryAfterSeconds: result.blocked.retryAfterSeconds,
+        policy: result.blocked.policy,
+        scope: "request"
+      })
     }
   })

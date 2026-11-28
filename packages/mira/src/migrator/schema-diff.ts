@@ -29,7 +29,7 @@ function textMaxLength(prop: JsonSchemaProperty): number | undefined {
   if (prop["x-kind"] === "literalText") {
     const values = prop["x-literal"] ?? []
     if (values.length === 0) return undefined
-    return Math.max(1, ...values.map((value) => [...value].length))
+    return Math.max(1, ...values.map((value) => Array.from(value).length))
   }
   if (prop.format === "email") return 320
   switch (prop["x-kind"]) {
@@ -49,10 +49,7 @@ function textMaxLength(prop: JsonSchemaProperty): number | undefined {
 }
 
 /** The field names used as keys: column flags plus every index field. */
-export function keyedFieldNames(
-  columns: ReadonlyArray<ColumnDef>,
-  indexes: ReadonlyArray<IndexShape>
-): Set<string> {
+export function keyedFieldNames(columns: ReadonlyArray<ColumnDef>, indexes: ReadonlyArray<IndexShape>): Set<string> {
   const names = new Set(indexes.flatMap((index) => index.fields))
   for (const column of columns) {
     if (column.primaryKey === true || column.unique === true) names.add(column.name)
@@ -130,7 +127,7 @@ function diffViewSchemas(
 
   if (stored["x-view-query"] !== query) {
     return [
-      { kind: "dropView",   view: name },
+      { kind: "dropView", view: name },
       { kind: "createView", view: name, query }
     ]
   }
@@ -193,10 +190,8 @@ export function diffSchemas(
       const physicalTextChange =
         options?.compareTextLength === true &&
         dc.type === "text" &&
-        (
-          storedKeyed.has(dc.name) !== desiredKeyed.has(dc.name) ||
-          ((storedKeyed.has(dc.name) || desiredKeyed.has(dc.name)) && sc.maxLength !== dc.maxLength)
-        )
+        (storedKeyed.has(dc.name) !== desiredKeyed.has(dc.name) ||
+          ((storedKeyed.has(dc.name) || desiredKeyed.has(dc.name)) && sc.maxLength !== dc.maxLength))
       if (
         sc.type !== dc.type ||
         sc.nullable !== dc.nullable ||

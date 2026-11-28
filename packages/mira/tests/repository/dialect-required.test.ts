@@ -19,7 +19,7 @@ describe("repository dialect requirement", () => {
   it("requires Dialect at the type level", () => {
     // @ts-expect-error RepositoryLive requires the Dialect service.
     const missing: Layer.Layer<Repository, never, never> = RepositoryLive // oxlint-disable-line effecttsgo/missing-layer-context -- negative type test: the missing Dialect requirement is intentional.
-    void missing
+    expect(missing).toBeDefined()
     expect(true).toBe(true)
   })
 
