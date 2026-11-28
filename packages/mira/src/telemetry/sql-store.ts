@@ -5,6 +5,7 @@ import { SqlClient } from "effect/sql"
 
 import { Dialect, rewritePlaceholders, type DialectType } from "@/dialect/dialect.js"
 import { Migrator, MigratorLive } from "@/migrator/migrator.js"
+import { registerSchemaJitRoot } from "@/schema-compiler/index.js"
 
 import { LogsCollection, SpansCollection } from "./collections.js"
 import {
@@ -25,6 +26,7 @@ const RETENTION_BATCH_SIZE = 1_000
 const MAX_RETENTION_BATCHES = 1_000
 const SPAN_ATTRIBUTE_VALUE = Schema.Union([Schema.String, Schema.Finite, Schema.Boolean])
 const SpanAttributesSchema = Schema.fromJsonString(Schema.Record(Schema.String, SPAN_ATTRIBUTE_VALUE))
+registerSchemaJitRoot(SpanAttributesSchema)
 const parseAttributes = Schema.decodeUnknownEffect(SpanAttributesSchema)
 const encodeAttributes = Schema.encodeSync(SpanAttributesSchema)
 

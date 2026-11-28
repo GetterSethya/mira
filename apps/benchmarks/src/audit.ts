@@ -605,7 +605,8 @@ writeFileSync(
     method: {
       titleIndex: titleIndexEnabled,
       cache: cacheEnabled ? "enabled" : "disabled",
-      synchronous
+      synchronous,
+      schemaCompiler: process.env.BENCH_SCHEMA_JIT === "on" ? "jit" : "off"
     },
     results
   })}\n`

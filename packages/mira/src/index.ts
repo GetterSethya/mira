@@ -3,6 +3,11 @@ export * from "@gettersethya/mira-client"
 
 // App builder
 export * from "./app/index.js"
+
+// Schema compiler (Effect JIT)
+export type { MiraSchemaCompilerConfig } from "./schema-compiler/index.js"
+export { enableSchemaJit, isSchemaJitEnabled } from "./schema-compiler/index.js"
+
 export * from "./databases/index.js"
 export * from "./platforms/node.js"
 export * from "./storage/index.js"

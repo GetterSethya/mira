@@ -9,6 +9,7 @@ import type { CorsConfig } from "@/http/cors.js"
 import { assertValidCorsConfig, defaultCorsConfig } from "@/http/cors.js"
 import { NoopEmail } from "@/email/noop.js"
 import type { MigrateOptions } from "@/migrator/types.js"
+import type { MiraSchemaCompilerConfig } from "@/schema-compiler/index.js"
 import { ConsoleTelemetryLayer } from "@/telemetry/index-core.js"
 
 import { MiraApp } from "./app.js"
@@ -47,6 +48,7 @@ export interface MiraAppConfig<Telemetry = never> {
   cache?: MiraCacheConfig
   batchMutation?: MiraBatchMutationConfig
   emailTemplates?: EmailTemplatesConfig
+  schemaCompiler?: MiraSchemaCompilerConfig
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any
@@ -82,6 +84,9 @@ function isMiraAppConfig(config: Partial<MiraAppConfig<any>>): config is MiraApp
  *
  * Optional step: `.cache(c)` — in-memory collection cache tuning, or
  * `{ enabled: false }` to read straight from the database
+ *
+ * Optional step: `.schemaCompiler(c)` — enable Effect's JIT schema compiler
+ * for Mira's request-path schemas (`{ mode: "jit" }`)
  *
  * Optional step: `.emailTemplates(t)` — per-collection and app-wide auth email
  * overrides
@@ -236,6 +241,33 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
    */
   cache(c: MiraCacheConfig): MiraBuilder<Has, R, Telemetry> {
     return new MiraBuilder({ ...this.#config, cache: c })
+  }
+
+  /**
+   * Configure the Effect schema compiler (optional, **off by default**).
+   *
+   * `{ mode: "jit" }` enables Effect's just-in-time schema compiler for the
+   * schemas Mira uses on the request path: collection create/update input
+   * schemas, request-body and filter schemas, and span attributes. Mira
+   * registers those roots and enables them at build time, before the first
+   * parser is created, so request decoding can use a generated fast path
+   * instead of interpreting the AST.
+   *
+   * The compiler is experimental and process-wide: unsupported nodes stay
+   * interpreted, a runtime that blocks `new Function` (CSP) falls back to the
+   * interpreter, and enabling it cannot be undone for the life of the process.
+   * Decoded values and validation issues are unchanged.
+   *
+   * @param c - A `MiraSchemaCompilerConfig` (`{ mode: "off" | "jit" }`)
+   * @returns A new builder (same phantom type — the compiler is optional)
+   *
+   * @example
+   * Mira.builder()
+   *   // ... required steps
+   *   .schemaCompiler({ mode: "jit" })
+   */
+  schemaCompiler(c: MiraSchemaCompilerConfig): MiraBuilder<Has, R, Telemetry> {
+    return new MiraBuilder({ ...this.#config, schemaCompiler: c })
   }
 
   /**
@@ -394,7 +426,8 @@ export class MiraBuilder<Has extends string = never, R = never, Telemetry = neve
       rateLimits: config.rateLimits ?? {},
       cache: config.cache ?? { enabled: true },
       batchMutation: config.batchMutation ?? {},
-      emailTemplates: config.emailTemplates ?? {}
+      emailTemplates: config.emailTemplates ?? {},
+      schemaCompiler: config.schemaCompiler ?? { mode: "off" }
     })
   }
 }

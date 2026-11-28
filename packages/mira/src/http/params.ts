@@ -8,8 +8,10 @@ import type { RequestCtx } from "@/collection-service/context.js"
 import { parseCursor } from "@/collection-service/cursor.js"
 import { ValidationError } from "@/collection-service/errors.js"
 import type { SortOrder } from "@/repository/types.js"
+import { registerSchemaJitRoot } from "@/schema-compiler/index.js"
 
 const FilterJsonSchema = Schema.fromJsonString(Schema.Unknown)
+registerSchemaJitRoot(FilterNodeSchema)
 
 export function parseFilterParam(
   query: RequestCtx["query"],

@@ -178,9 +178,34 @@ Mira.builder()
 | `.crons(c)` | no | Array of `CronDef` — scheduled tasks using Effect `Schedule`. |
 | `.telemetry(l)` | no | Telemetry layer. Defaults to `ConsoleTelemetryLayer` (stdout JSON). `makeTelemetryLayer({ storage })` persists logs and spans through `TelemetryStore`. Use dedicated storage with a database preset, or shared storage to reuse the application database. |
 | `.cors(c)` | no | CORS config. Defaults to permissive (`*`), so a separately-hosted frontend works with zero config. |
+| `.schemaCompiler(c)` | no | Enables Effect's JIT schema compiler for Mira's request-path schemas with `{ mode: "jit" }`. Off by default. |
 | `.build()` | — | Produces `MiraApp`. Fails at compile time if any required step is missing. |
 | `.extend(plugin)` | — | Called on `MiraApp` after `.build()`. Registers a `MiraPlugin`. |
 | `.serve(opts?)` | — | Starts the HTTP server. Optional `{ port, maxPortAttempts }` overrides `AppConfig`. If the port is already in use, the server automatically retries on the next available port (up to `maxPortAttempts`, default 10). |
+
+### Schema compiler
+
+Mira interprets collection create/update input schemas, request-body schemas,
+filter schemas, and span attributes on the request path. Setting
+`.schemaCompiler({ mode: "jit" })` registers those decode roots with Effect's
+experimental schema compiler before the first parser is created. Supported
+nodes then use generated JavaScript; unsupported nodes stay interpreted.
+
+```typescript
+Mira.builder()
+  .platform(NodePlatform)
+  .database(SqliteDatabase({ filename: "mira.db" }))
+  .storage(LocalFileStorage({ directory: "./uploads" }))
+  .collections([Posts])
+  .schemaCompiler({ mode: "jit" })
+  .build()
+```
+
+The compiler is process-wide and cannot be disabled once enabled, so it is a
+startup decision. Decoded values and validation issues are unchanged. A runtime
+that blocks `new Function` (for example a strict CSP) falls back to the
+interpreter. The option is opt-in because Effect marks the compiler as
+experimental and the benefit depends on the schema and workload.
 
 ### Databases
 

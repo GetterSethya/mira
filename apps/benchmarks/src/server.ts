@@ -253,6 +253,7 @@ const createBatchWindowMs = Number(process.env.BENCH_CREATE_BATCH_WINDOW_MS ?? "
 const createBatchMax = Number(process.env.BENCH_CREATE_BATCH_MAX ?? "100")
 const updateBatchEnabled = process.env.BENCH_UPDATE_BATCH === "on"
 const deleteBatchEnabled = process.env.BENCH_DELETE_BATCH === "on"
+const schemaJitEnabled = process.env.BENCH_SCHEMA_JIT === "on"
 
 Mira.builder()
   .platform(platform.preset)
@@ -261,6 +262,7 @@ Mira.builder()
   .collections([Posts])
   .rules([postsRules])
   .cache({ enabled: cacheEnabled })
+  .schemaCompiler({ mode: schemaJitEnabled ? "jit" : "off" })
   .batchMutation({
     create: {
       enabled: createBatchEnabled,

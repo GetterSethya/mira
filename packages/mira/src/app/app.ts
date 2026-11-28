@@ -38,6 +38,7 @@ import {
 } from "@/rate-limit/index.js"
 import { RateLimiterLive, RateLimitKeySecretLive, SqlRateLimitStoreLive } from "@/rate-limit/sql.js"
 import { RepositoryLive } from "@/repository/repository.js"
+import { enableSchemaJit } from "@/schema-compiler/index.js"
 import { ThumbnailServicePhotonLive } from "@/thumbnail/lazy.js"
 import { ThumbnailServiceNoopLive } from "@/thumbnail/types.js"
 
@@ -176,6 +177,7 @@ export class MiraApp<R = never, Telemetry = never> {
   constructor(config: MiraAppConfig<Telemetry>) {
     this.#config = config
     this.#extras = []
+    if (config.schemaCompiler?.mode === "jit") enableSchemaJit()
   }
 
   /** @internal for tests only */

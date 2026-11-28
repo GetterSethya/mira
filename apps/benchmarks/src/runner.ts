@@ -370,6 +370,7 @@ const data = {
       maxLists: 5_000
     },
     telemetry: "off",
+    schemaCompiler: process.env.BENCH_SCHEMA_JIT === "on" ? "jit" : "off",
     validation: {
       filteredItems: 30,
       positiveItems: 1,

@@ -105,6 +105,13 @@ idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
   (`bun run packages/mira/tests/databases/postgres-bun.e2e.ts`) runs the Bun
   preset, migrates a collection, inserts, and asserts a native boolean and a
   restarted `BIGINT` sequence.
+- **Opt-in Effect schema compiler.** `Mira.builder().schemaCompiler({ mode:
+  "jit" })` registers collection create/update input schemas, request-body and
+  filter schemas, and span attributes with Effect's JIT compiler before the
+  first parser is created. Supported nodes use generated JavaScript; unsupported
+  nodes and runtimes that block `new Function` stay interpreted. Decoded values
+  and validation issues are unchanged. Off by default, process-wide once
+  enabled. `BENCH_SCHEMA_JIT=on` exposes the switch in the benchmark harness.
 
 ### Fixed
 

@@ -14,6 +14,7 @@ import { renderRuleCheck } from "@/repository/sql.js"
 import type { AccessPredicate, ExpandDef, RepoRecord, SortOrder, WhereClause } from "@/repository/types.js"
 import { enforcerForAction, payloadEnforcerForAction } from "@/rule/enforcer.js"
 import type { FieldRefMode } from "@/rule/compiler.js"
+import { registerSchemaJitRoot } from "@/schema-compiler/index.js"
 import { FileStorage } from "@/storage/storage.js"
 import { withSpanWhenEnabled } from "@/telemetry/span.js"
 
@@ -521,8 +522,14 @@ function makeCollectionServiceLayerWith(
       const encoderMap = new Map<string, RowEncoder>(
         allCollections.map((c) => [c.name, makeRowEncoder(c.schema, dialect.storesBooleanAsInteger)])
       )
-      const inputSchemaMap = new Map(allCollections.map((c) => [c.name, buildInputSchemas(c)]))
-      const getInputSchemas = (col: AnyCollectionDef) => inputSchemaMap.get(col.name) ?? buildInputSchemas(col)
+      const buildSchemas = (col: AnyCollectionDef) => {
+        const schemas = buildInputSchemas(col)
+        registerSchemaJitRoot(schemas.create)
+        registerSchemaJitRoot(schemas.update)
+        return schemas
+      }
+      const inputSchemaMap = new Map(allCollections.map((c) => [c.name, buildSchemas(c)]))
+      const getInputSchemas = (col: AnyCollectionDef) => inputSchemaMap.get(col.name) ?? buildSchemas(col)
       const decodeRow = (collection: AnyCollectionDef, record: RepoRecord): Effect.Effect<RepoRecord> =>
         (decoderMap.get(collection.name) ?? Effect.succeed)(record)
       const getListRowMapper = (collection: AnyCollectionDef): RowDecoderSync =>

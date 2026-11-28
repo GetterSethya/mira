@@ -15,6 +15,7 @@ import { EmailService } from "@/email/types.js"
 import type { RateLimitKeySecret, RateLimiter } from "@/rate-limit/index.js"
 import { Repository } from "@/repository/repository.js"
 import type { RepoRecord } from "@/repository/types.js"
+import { registerSchemaJitRoot } from "@/schema-compiler/index.js"
 import type { FileStorage } from "@/storage/storage.js"
 import type { ThumbnailService } from "@/thumbnail/types.js"
 
@@ -115,6 +116,20 @@ const BulkUpdateBodySchema = Schema.Struct({
 const BulkDeleteBodySchema = Schema.Struct({
   ids: Schema.Array(Schema.String)
 })
+
+for (const schema of [
+  AuthBodySchema,
+  AuthEmailBodySchema,
+  CodeBodySchema,
+  ResetBodySchema,
+  EmailChangeRequestSchema,
+  ConfirmEmailChangeSchema,
+  BulkCreateBodySchema,
+  BulkUpdateBodySchema,
+  BulkDeleteBodySchema
+]) {
+  registerSchemaJitRoot(schema)
+}
 
 /** First id that occurs more than once, or `null` when every id is unique. */
 function firstDuplicateId(ids: ReadonlyArray<string>): string | null {

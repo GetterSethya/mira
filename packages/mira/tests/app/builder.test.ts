@@ -87,6 +87,18 @@ describe("MiraBuilder", () => {
   })
 })
 
+describe("MiraBuilder.schemaCompiler()", () => {
+  it("defaults to off through build()", () => {
+    const app = fullBuilder().build()
+    expect(app._getConfig().schemaCompiler).toEqual({ mode: "off" })
+  })
+
+  it("stores an explicit jit mode on the builder", () => {
+    const b = fullBuilder().schemaCompiler({ mode: "jit" })
+    expect(b._getPartialConfig().schemaCompiler).toEqual({ mode: "jit" })
+  })
+})
+
 describe("MiraApp.extend()", () => {
   it("returns this (chainable)", () => {
     const app = fullBuilder().build()
