@@ -5,8 +5,10 @@ import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
 import { Dialect } from "@/dialect/dialect.js"
+import { mysqlDialect } from "@/dialect/dialect-mysql.js"
 import { sqliteDialect } from "@/dialect/dialect-sqlite.js"
 import {
+  dmlRetry,
   makeInsertStatement,
   makeRetentionDeleteStatement,
   makeSqlTelemetryStoreLayer
@@ -103,6 +105,39 @@ const affectedRowsDialect = (
 ) => ({
   ...sqliteDialect,
   deleteResult: { _tag: "affectedRows" as const, read }
+})
+
+describe("dmlRetry", () => {
+  it.live("retries one 1205 and leaves a 1213 to the caller", () =>
+    Effect.gen(function* () {
+      let attempts1205 = 0
+      const retried = yield* Effect.suspend(() => {
+        attempts1205 += 1
+        return attempts1205 === 1
+          ? Effect.fail({ errno: 1205 })
+          : Effect.succeed("ok")
+      }).pipe(dmlRetry(mysqlDialect))
+      expect(retried).toBe("ok")
+      expect(attempts1205).toBe(2)
+
+      let attempts1213 = 0
+      const exit = yield* Effect.exit(
+        Effect.suspend(() => {
+          attempts1213 += 1
+          return Effect.fail({ errno: 1213 })
+        }).pipe(dmlRetry(mysqlDialect))
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(attempts1213).toBe(1)
+
+      let attemptsOk = 0
+      yield* Effect.suspend(() => {
+        attemptsOk += 1
+        return Effect.succeed("ok")
+      }).pipe(dmlRetry(mysqlDialect))
+      expect(attemptsOk).toBe(1)
+    })
+  )
 })
 
 describe("SqlTelemetryStore", () => {

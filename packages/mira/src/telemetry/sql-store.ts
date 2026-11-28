@@ -71,7 +71,7 @@ const run = <A extends object>(
 const retryPredicate = (dialect: DialectType) =>
   dialect.telemetry?.isRetryable ?? (() => false)
 
-const dmlRetry = (dialect: DialectType) =>
+export const dmlRetry = (dialect: DialectType) =>
   Effect.retry({
     while: (error: unknown) =>
       dialect.telemetry?.retryDml === true &&
