@@ -6,7 +6,7 @@ import { NodeHttpServer } from "@effect/platform-node"
 import { describe, it } from "@effect/vitest"
 import { AuthCollection, BaseCollection, Field, ViewCollection } from "@gettersethya/mira-client"
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpIncomingMessage, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import mysql from "mysql2/promise"
 import { expect } from "vitest"
@@ -192,8 +192,10 @@ const CursorListBody = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.Union([Schema.String, Schema.Finite]))
 })
 
-const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
-  res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
+const json = <S extends Schema.ConstraintCodec<unknown>, E>(
+  res: HttpIncomingMessage.HttpIncomingMessage<E>,
+  schema: S
+) => HttpIncomingMessage.schemaBodyJson(schema)(res)
 
 const encodeFilter = Schema.encodeSync(
   Schema.fromJsonString(Schema.Struct({ op: Schema.String, field: Schema.String, value: Schema.Unknown }))

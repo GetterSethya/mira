@@ -20,7 +20,7 @@ import { PgClient } from "@effect/sql-pg"
 import { describe, it } from "@effect/vitest"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { Effect, Layer, Redacted, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpIncomingMessage, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -99,8 +99,10 @@ const Page = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String)
 })
 
-const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
-  res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
+const json = <S extends Schema.ConstraintCodec<unknown>, E>(
+  res: HttpIncomingMessage.HttpIncomingMessage<E>,
+  schema: S
+) => HttpIncomingMessage.schemaBodyJson(schema)(res)
 
 const adminCtx: RequestCtx = { headers: {}, query: {}, admin: true }
 

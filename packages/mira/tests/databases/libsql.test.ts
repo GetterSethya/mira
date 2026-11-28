@@ -6,7 +6,7 @@ import { NodeHttpServer } from "@effect/platform-node"
 import { describe, it } from "@effect/vitest"
 import { AuthCollection, BaseCollection, type CollectionSchema, Field } from "@gettersethya/mira-client"
 import { Effect, Exit, Layer, Redacted, Result, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpIncomingMessage, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { afterAll, expect } from "vitest"
 
@@ -90,8 +90,10 @@ const TitleItemSchema = Schema.Struct({ title: Schema.String })
 const IdItemsSchema = Schema.Struct({ items: Schema.Array(IdItemSchema) })
 const TitleItemsSchema = Schema.Struct({ items: Schema.Array(TitleItemSchema) })
 
-const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
-  res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
+const json = <S extends Schema.ConstraintCodec<unknown>, E>(
+  res: HttpIncomingMessage.HttpIncomingMessage<E>,
+  schema: S
+) => HttpIncomingMessage.schemaBodyJson(schema)(res)
 
 const encodeFilter = Schema.encodeSync(
   Schema.fromJsonString(Schema.Struct({ op: Schema.String, field: Schema.String, value: Schema.Unknown }))
@@ -339,113 +341,115 @@ describe("libSQL app and HTTP behavior", () => {
       const router = makeCollectionRouter([Posts, Locked, Users])
       const serveRouter = Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(router)), HttpServer.serveEffect())
 
-      return closeEffect(Effect.gen(function* () {
-        yield* serveRouter
+      return closeEffect(
+        Effect.gen(function* () {
+          yield* serveRouter
 
-        const empty = yield* HttpClient.get("/api/collections/posts")
-        expect(empty.status).toBe(200)
-        expect((yield* json(empty, Schema.Struct({ items: Schema.Array(Schema.Unknown) }))).items).toEqual([])
+          const empty = yield* HttpClient.get("/api/collections/posts")
+          expect(empty.status).toBe(200)
+          expect((yield* json(empty, Schema.Struct({ items: Schema.Array(Schema.Unknown) }))).items).toEqual([])
 
-        const created = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/posts").pipe(
-            HttpClientRequest.bodyJsonUnsafe({ title: "one", published: true })
+          const created = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/posts").pipe(
+              HttpClientRequest.bodyJsonUnsafe({ title: "one", published: true })
+            )
           )
-        )
-        expect(created.status).toBe(201)
-        const first = yield* json(created, Schema.Struct({ id: Schema.String, title: Schema.String }))
-        expect(first.title).toBe("one")
+          expect(created.status).toBe(201)
+          const first = yield* json(created, Schema.Struct({ id: Schema.String, title: Schema.String }))
+          expect(first.title).toBe("one")
 
-        const second = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/posts").pipe(HttpClientRequest.bodyJsonUnsafe({ title: "two" }))
-        )
-        expect(second.status).toBe(201)
-
-        const filtered = yield* HttpClient.get(
-          `/api/collections/posts?filter=${encodeURIComponent(
-            encodeFilter({ op: "eq", field: "title", value: "two" })
-          )}`
-        )
-        expect(filtered.status).toBe(200)
-        const filteredBody = yield* json(filtered, TitleItemsSchema)
-        expect(filteredBody.items).toHaveLength(1)
-        expect(filteredBody.items[0]?.title).toBe("two")
-
-        const sorted = yield* HttpClient.get("/api/collections/posts?sort=title&order=asc")
-        expect(sorted.status).toBe(200)
-        const sortedBody = yield* json(sorted, TitleItemsSchema)
-        expect(sortedBody.items.map((row) => row.title)).toEqual(["one", "two"])
-
-        const page = yield* HttpClient.get("/api/collections/posts?limit=1&sort=title&order=asc")
-        const pageBody = yield* json(
-          page,
-          Schema.Struct({ items: Schema.Array(IdItemSchema), nextCursor: Schema.NullOr(Schema.Finite) })
-        )
-        expect(pageBody.items).toHaveLength(1)
-        expect(pageBody.nextCursor).not.toBeNull()
-        const next = yield* HttpClient.get(
-          `/api/collections/posts?limit=1&sort=title&order=asc&after=${pageBody.nextCursor}`
-        )
-        const nextBody = yield* json(next, IdItemsSchema)
-        expect(nextBody.items[0]?.id).not.toBe(pageBody.items[0]?.id)
-
-        const updated = yield* HttpClient.execute(
-          HttpClientRequest.patch(`/api/collections/posts/${first.id}`).pipe(
-            HttpClientRequest.bodyJsonUnsafe({ title: "one-updated" })
+          const second = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/posts").pipe(HttpClientRequest.bodyJsonUnsafe({ title: "two" }))
           )
-        )
-        expect(updated.status).toBe(200)
-        expect((yield* json(updated, TitleItemSchema)).title).toBe("one-updated")
+          expect(second.status).toBe(201)
 
-        const deleted = yield* HttpClient.execute(HttpClientRequest.delete(`/api/collections/posts/${first.id}`))
-        expect(deleted.status).toBe(204)
+          const filtered = yield* HttpClient.get(
+            `/api/collections/posts?filter=${encodeURIComponent(
+              encodeFilter({ op: "eq", field: "title", value: "two" })
+            )}`
+          )
+          expect(filtered.status).toBe(200)
+          const filteredBody = yield* json(filtered, TitleItemsSchema)
+          expect(filteredBody.items).toHaveLength(1)
+          expect(filteredBody.items[0]?.title).toBe("two")
 
-        const bulk = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/posts/bulk").pipe(
-            HttpClientRequest.bodyJsonUnsafe({
-              records: [{ title: "bulk-1" }, { title: "bulk-2" }]
+          const sorted = yield* HttpClient.get("/api/collections/posts?sort=title&order=asc")
+          expect(sorted.status).toBe(200)
+          const sortedBody = yield* json(sorted, TitleItemsSchema)
+          expect(sortedBody.items.map((row) => row.title)).toEqual(["one", "two"])
+
+          const page = yield* HttpClient.get("/api/collections/posts?limit=1&sort=title&order=asc")
+          const pageBody = yield* json(
+            page,
+            Schema.Struct({ items: Schema.Array(IdItemSchema), nextCursor: Schema.NullOr(Schema.Finite) })
+          )
+          expect(pageBody.items).toHaveLength(1)
+          expect(pageBody.nextCursor).not.toBeNull()
+          const next = yield* HttpClient.get(
+            `/api/collections/posts?limit=1&sort=title&order=asc&after=${pageBody.nextCursor}`
+          )
+          const nextBody = yield* json(next, IdItemsSchema)
+          expect(nextBody.items[0]?.id).not.toBe(pageBody.items[0]?.id)
+
+          const updated = yield* HttpClient.execute(
+            HttpClientRequest.patch(`/api/collections/posts/${first.id}`).pipe(
+              HttpClientRequest.bodyJsonUnsafe({ title: "one-updated" })
+            )
+          )
+          expect(updated.status).toBe(200)
+          expect((yield* json(updated, TitleItemSchema)).title).toBe("one-updated")
+
+          const deleted = yield* HttpClient.execute(HttpClientRequest.delete(`/api/collections/posts/${first.id}`))
+          expect(deleted.status).toBe(204)
+
+          const bulk = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/posts/bulk").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                records: [{ title: "bulk-1" }, { title: "bulk-2" }]
+              })
+            )
+          )
+          expect(bulk.status).toBe(201)
+          expect((yield* json(bulk, Schema.Struct({ records: Schema.Array(Schema.Unknown) }))).records).toHaveLength(2)
+
+          const denied = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/locked").pipe(HttpClientRequest.bodyJsonUnsafe({ title: "nope" }))
+          )
+          expect(denied.status).toBe(403)
+
+          const user = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/users").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                email: "libsql@example.com",
+                password: "correct-password",
+                passwordConfirm: "correct-password"
+              })
+            )
+          )
+          expect(user.status).toBe(201)
+          const userBody = yield* json(user, Schema.Struct({ password: Schema.optional(Schema.Unknown) }))
+          expect(userBody.password).toBeUndefined()
+
+          const login = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                email: "libsql@example.com",
+                password: "correct-password"
+              })
+            )
+          )
+          expect(login.status).toBe(200)
+          const loginBody = yield* json(
+            login,
+            Schema.Struct({
+              token: Schema.optional(Schema.String),
+              record: Schema.optional(Schema.Struct({ email: Schema.String }))
             })
           )
-        )
-        expect(bulk.status).toBe(201)
-        expect((yield* json(bulk, Schema.Struct({ records: Schema.Array(Schema.Unknown) }))).records).toHaveLength(2)
-
-        const denied = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/locked").pipe(HttpClientRequest.bodyJsonUnsafe({ title: "nope" }))
-        )
-        expect(denied.status).toBe(403)
-
-        const user = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/users").pipe(
-            HttpClientRequest.bodyJsonUnsafe({
-              email: "libsql@example.com",
-              password: "correct-password",
-              passwordConfirm: "correct-password"
-            })
-          )
-        )
-        expect(user.status).toBe(201)
-        const userBody = yield* json(user, Schema.Struct({ password: Schema.optional(Schema.Unknown) }))
-        expect(userBody.password).toBeUndefined()
-
-        const login = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/users/auth-with-password").pipe(
-            HttpClientRequest.bodyJsonUnsafe({
-              email: "libsql@example.com",
-              password: "correct-password"
-            })
-          )
-        )
-        expect(login.status).toBe(200)
-        const loginBody = yield* json(
-          login,
-          Schema.Struct({
-            token: Schema.optional(Schema.String),
-            record: Schema.optional(Schema.Struct({ email: Schema.String }))
-          })
-        )
-        expect(typeof loginBody.token).toBe("string")
-        expect(loginBody.record?.email).toBe("libsql@example.com")
-      }).pipe(Effect.provide(app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest)))))
+          expect(typeof loginBody.token).toBe("string")
+          expect(loginBody.record?.email).toBe("libsql@example.com")
+        }).pipe(Effect.provide(app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest))))
+      )
     },
     30_000
   )

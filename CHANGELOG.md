@@ -87,7 +87,7 @@ published by CI.
   `LockExecutor`, `LockConnection`, `MigrationLockError`,
   `MigrationLockReleaseError`, and `MigrationError`.
 - **PostgreSQL database support.** `PostgresDatabase({ url, maxConnections?,
-  idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
+idleTimeout?, prepare?, ssl?, migrateAtStartup? })` runs PostgreSQL 15+ on
   Node and Bun through `@effect/sql-pg`. The preset validates `maxConnections`,
   exposes pool and TLS options, defaults `prepare` to true with `prepare: false`
   for statement-mode poolers such as PgBouncer, and runs a `SELECT 1` readiness
@@ -158,9 +158,10 @@ published by CI.
   scheduler and logging APIs). `effecttsgo/unstable-api-usage` is off because
   Mira intentionally builds on Effect's unstable SQL APIs;
   `effecttsgo/lazy-effect` is off because converting the exported zero-argument
-  helpers and service members would break their public call shape; and
-  `effecttsgo/any-unknown-in-error-context` is off for test files, which
-  intentionally exercise heterogeneous app layers. `tsconfig` path mappings no
+  helpers and service members would break their public call shape. The test
+  suites are held to the same rule set: their HTTP helpers now decode bodies
+  with `HttpIncomingMessage.schemaBodyJson`, and the retry/cron helpers preserve
+  concrete error channels instead of widening them. `tsconfig` path mappings no
   longer use `baseUrl`, which the type-aware checker rejects.
 - **`StoreSqlCapabilities` gained required members.** Custom dialects must now
   supply `keyColumnType`, `textColumnType`, `bucketColumnType`,
@@ -421,7 +422,7 @@ published by CI.
   `409 { error: "batch_conflict", operation }` / `BatchMutationConflictError`
   and does not count as a batcher defect; driver defects close the batcher after
   three consecutive failures. Queue-full, timeout and closed map to `503
-  { error: "batch_unavailable", operation, retryable }`; create is never
+{ error: "batch_unavailable", operation, retryable }`; create is never
   retryable, update/delete are retryable for queue-full/timeout (a retried
   delete may return 404). Admin is captured per entry and hidden fields are
   stripped per entry. File and auth-challenge cleanup runs after commit through
@@ -605,7 +606,7 @@ published by CI.
   are limited per IP and recipient; sends are limited per recovery, login, or notification
   class, collection, and recipient. Daily caps bound cost. `429` responses
   carry `retryAfterSeconds` and `Retry-After`. The builder accepts `.rateLimits({ store,
-  emailPolicies })`.
+emailPolicies })`.
 - **Bun runtime.** `BunPlatform` and `BunSqliteDatabase` backed by
   `@effect/platform-bun` and `@effect/sql-sqlite-bun`, plus the
   `@gettersethya/mira/bun` package entry and a root `bun` export condition. Bun uses native

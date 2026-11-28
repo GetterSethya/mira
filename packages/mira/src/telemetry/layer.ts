@@ -12,6 +12,7 @@ import type { TelemetryCoreConfig } from "./core.js"
 import { makeTelemetryLayerForClient } from "./core.js"
 import { makeSqlTelemetryStoreLayer } from "./sql-store.js"
 import { TelemetryStore } from "./store.js"
+import type { TelemetryStoreError } from "./store.js"
 
 /** A database preset that supplies both the SQL client and its dialect. */
 export interface TelemetryDatabase {
@@ -81,7 +82,7 @@ export function makeTelemetryLayer(
  * the store owns both. A failed purge is logged with its cause and the run is
  * marked failed; the scheduler still schedules the next run.
  */
-export const logCleanupCronDef: CronDef<TelemetryStore | AppConfig> = {
+export const logCleanupCronDef: CronDef<TelemetryStore | AppConfig, TelemetryStoreError> = {
   name: "mira:log-cleanup",
   description: "Delete logs and spans older than logRetentionDays days",
   schedule: Schedule.cron("0 0 * * *"),

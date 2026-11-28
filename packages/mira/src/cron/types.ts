@@ -6,11 +6,11 @@ import type { CollectionService } from "@/collection-service/collection-service.
 import type { AppConfig } from "@/config/index.js"
 import type { Repository } from "@/repository/index.js"
 
-export interface CronDef<R = PlatformServices | AppConfig | Repository | CollectionService> {
+export interface CronDef<R = PlatformServices | AppConfig | Repository | CollectionService, E = unknown> {
   readonly name: string
   readonly description?: string
   readonly schedule: Schedule.Schedule<unknown, unknown, Cron.CronParseError>
-  readonly handler: () => Effect.Effect<void, unknown, R>
+  readonly handler: () => Effect.Effect<void, E, R>
 }
 
 export interface CronContext {

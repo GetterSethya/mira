@@ -18,7 +18,7 @@ import { NodeHttpServer } from "@effect/platform-node"
 import { describe, it } from "@effect/vitest"
 import { AuthCollection, BaseCollection, type CollectionSchema, Field } from "@gettersethya/mira-client"
 import { Effect, Exit, Layer, Schedule, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpIncomingMessage, HttpRouter, HttpServer } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { expect } from "vitest"
 
@@ -55,8 +55,10 @@ const TitleItemSchema = Schema.Struct({ title: Schema.String })
 const IdItemsSchema = Schema.Struct({ items: Schema.Array(IdItemSchema) })
 const TitleItemsSchema = Schema.Struct({ items: Schema.Array(TitleItemSchema) })
 
-const json = <A>(res: { json: Effect.Effect<unknown, unknown> }, schema: Schema.Schema<A>) =>
-  res.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
+const json = <S extends Schema.ConstraintCodec<unknown>, E>(
+  res: HttpIncomingMessage.HttpIncomingMessage<E>,
+  schema: S
+) => HttpIncomingMessage.schemaBodyJson(schema)(res)
 
 const encodeFilter = Schema.encodeSync(
   Schema.fromJsonString(Schema.Struct({ op: Schema.String, field: Schema.String, value: Schema.Unknown }))
@@ -182,102 +184,106 @@ describeE2E("libSQL remote sqld", () => {
       const router = makeCollectionRouter([Posts, Locked, Users])
       const serveRouter = Effect.flatMap(HttpRouter.toHttpEffect(HttpRouter.addAll(router)), HttpServer.serveEffect())
 
-      return closeEffect(Effect.gen(function* () {
-        yield* waitForServer
-        const sql = yield* SqlClient.SqlClient
-        for (const table of ["e2e_posts", "e2e_locked", "e2e_users"]) {
-          yield* sql.unsafe(`DELETE FROM "${table}"`).pipe(Effect.ignore)
-        }
-        yield* serveRouter
+      return closeEffect(
+        Effect.gen(function* () {
+          yield* waitForServer
+          const sql = yield* SqlClient.SqlClient
+          for (const table of ["e2e_posts", "e2e_locked", "e2e_users"]) {
+            yield* sql.unsafe(`DELETE FROM "${table}"`).pipe(Effect.ignore)
+          }
+          yield* serveRouter
 
-        const created = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/e2e_posts").pipe(
-            HttpClientRequest.bodyJsonUnsafe({ title: "one", published: true })
+          const created = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/e2e_posts").pipe(
+              HttpClientRequest.bodyJsonUnsafe({ title: "one", published: true })
+            )
           )
-        )
-        expect(created.status).toBe(201)
-        const first = yield* json(created, IdItemSchema)
+          expect(created.status).toBe(201)
+          const first = yield* json(created, IdItemSchema)
 
-        const second = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/e2e_posts").pipe(HttpClientRequest.bodyJsonUnsafe({ title: "two" }))
-        )
-        expect(second.status).toBe(201)
-
-        const filtered = yield* HttpClient.get(
-          `/api/collections/e2e_posts?filter=${encodeURIComponent(
-            encodeFilter({ op: "eq", field: "title", value: "two" })
-          )}`
-        )
-        expect(filtered.status).toBe(200)
-        const filteredBody = yield* json(filtered, TitleItemsSchema)
-        expect(filteredBody.items.map((row) => row.title)).toEqual(["two"])
-
-        const sorted = yield* HttpClient.get("/api/collections/e2e_posts?sort=title&order=asc")
-        expect(sorted.status).toBe(200)
-        const sortedBody = yield* json(sorted, TitleItemsSchema)
-        expect(sortedBody.items.map((row) => row.title)).toEqual(["one", "two"])
-
-        const page = yield* HttpClient.get("/api/collections/e2e_posts?limit=1&sort=title&order=asc")
-        const pageBody = yield* json(
-          page,
-          Schema.Struct({ items: Schema.Array(IdItemSchema), nextCursor: Schema.NullOr(Schema.Finite) })
-        )
-        expect(pageBody.items).toHaveLength(1)
-        expect(pageBody.nextCursor).not.toBeNull()
-        const next = yield* HttpClient.get(
-          `/api/collections/e2e_posts?limit=1&sort=title&order=asc&after=${pageBody.nextCursor}`
-        )
-        const nextBody = yield* json(next, IdItemsSchema)
-        expect(nextBody.items[0]?.id).not.toBe(pageBody.items[0]?.id)
-
-        const updated = yield* HttpClient.execute(
-          HttpClientRequest.patch(`/api/collections/e2e_posts/${first.id}`).pipe(
-            HttpClientRequest.bodyJsonUnsafe({ title: "one-updated" })
+          const second = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/e2e_posts").pipe(
+              HttpClientRequest.bodyJsonUnsafe({ title: "two" })
+            )
           )
-        )
-        expect(updated.status).toBe(200)
+          expect(second.status).toBe(201)
 
-        const bulk = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/e2e_posts/bulk").pipe(
-            HttpClientRequest.bodyJsonUnsafe({
-              records: [{ title: "bulk-1" }, { title: "bulk-2" }]
-            })
+          const filtered = yield* HttpClient.get(
+            `/api/collections/e2e_posts?filter=${encodeURIComponent(
+              encodeFilter({ op: "eq", field: "title", value: "two" })
+            )}`
           )
-        )
-        expect(bulk.status).toBe(201)
-        expect((yield* json(bulk, Schema.Struct({ records: Schema.Array(Schema.Unknown) }))).records).toHaveLength(2)
+          expect(filtered.status).toBe(200)
+          const filteredBody = yield* json(filtered, TitleItemsSchema)
+          expect(filteredBody.items.map((row) => row.title)).toEqual(["two"])
 
-        const denied = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/e2e_locked").pipe(
-            HttpClientRequest.bodyJsonUnsafe({ title: "nope" })
-          )
-        )
-        expect(denied.status).toBe(403)
+          const sorted = yield* HttpClient.get("/api/collections/e2e_posts?sort=title&order=asc")
+          expect(sorted.status).toBe(200)
+          const sortedBody = yield* json(sorted, TitleItemsSchema)
+          expect(sortedBody.items.map((row) => row.title)).toEqual(["one", "two"])
 
-        const user = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/e2e_users").pipe(
-            HttpClientRequest.bodyJsonUnsafe({
-              email: "e2e@example.com",
-              password: "correct-password",
-              passwordConfirm: "correct-password"
-            })
+          const page = yield* HttpClient.get("/api/collections/e2e_posts?limit=1&sort=title&order=asc")
+          const pageBody = yield* json(
+            page,
+            Schema.Struct({ items: Schema.Array(IdItemSchema), nextCursor: Schema.NullOr(Schema.Finite) })
           )
-        )
-        expect(user.status).toBe(201)
+          expect(pageBody.items).toHaveLength(1)
+          expect(pageBody.nextCursor).not.toBeNull()
+          const next = yield* HttpClient.get(
+            `/api/collections/e2e_posts?limit=1&sort=title&order=asc&after=${pageBody.nextCursor}`
+          )
+          const nextBody = yield* json(next, IdItemsSchema)
+          expect(nextBody.items[0]?.id).not.toBe(pageBody.items[0]?.id)
 
-        const login = yield* HttpClient.execute(
-          HttpClientRequest.post("/api/collections/e2e_users/auth-with-password").pipe(
-            HttpClientRequest.bodyJsonUnsafe({
-              email: "e2e@example.com",
-              password: "correct-password"
-            })
+          const updated = yield* HttpClient.execute(
+            HttpClientRequest.patch(`/api/collections/e2e_posts/${first.id}`).pipe(
+              HttpClientRequest.bodyJsonUnsafe({ title: "one-updated" })
+            )
           )
-        )
-        expect(login.status).toBe(200)
-        expect(typeof (yield* json(login, Schema.Struct({ token: Schema.optional(Schema.String) }))).token).toBe(
-          "string"
-        )
-      }).pipe(Effect.provide(app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest)))))
+          expect(updated.status).toBe(200)
+
+          const bulk = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/e2e_posts/bulk").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                records: [{ title: "bulk-1" }, { title: "bulk-2" }]
+              })
+            )
+          )
+          expect(bulk.status).toBe(201)
+          expect((yield* json(bulk, Schema.Struct({ records: Schema.Array(Schema.Unknown) }))).records).toHaveLength(2)
+
+          const denied = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/e2e_locked").pipe(
+              HttpClientRequest.bodyJsonUnsafe({ title: "nope" })
+            )
+          )
+          expect(denied.status).toBe(403)
+
+          const user = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/e2e_users").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                email: "e2e@example.com",
+                password: "correct-password",
+                passwordConfirm: "correct-password"
+              })
+            )
+          )
+          expect(user.status).toBe(201)
+
+          const login = yield* HttpClient.execute(
+            HttpClientRequest.post("/api/collections/e2e_users/auth-with-password").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                email: "e2e@example.com",
+                password: "correct-password"
+              })
+            )
+          )
+          expect(login.status).toBe(200)
+          expect(typeof (yield* json(login, Schema.Struct({ token: Schema.optional(Schema.String) }))).token).toBe(
+            "string"
+          )
+        }).pipe(Effect.provide(app.buildServiceLayer().pipe(Layer.provideMerge(NodeHttpServer.layerTest))))
+      )
     },
     60_000
   )

@@ -63,13 +63,17 @@ const run = <A extends object>(
 
 const retryPredicate = (dialect: DialectType) => dialect.telemetry?.isRetryable ?? (() => false)
 
-export const dmlRetry = (dialect: DialectType) =>
-  Effect.retry({
-    while: (error: unknown) =>
-      dialect.telemetry?.retryDml === true && dialect.telemetry.isDmlRetryable?.(error) === true,
-    schedule: migrationRetrySchedule,
-    times: 1
-  })
+export const dmlRetry = (dialect: DialectType) => {
+  const retryable = (error: unknown) =>
+    dialect.telemetry?.retryDml === true && dialect.telemetry.isDmlRetryable?.(error) === true
+
+  return <A, E, R>(self: Effect.Effect<A, E, R>) =>
+    Effect.catchIf(
+      self,
+      (error: E) => retryable(error),
+      () => self.pipe(Effect.delay("100 millis"))
+    )
+}
 
 const resolveConflictClause = (dialect: DialectType) => {
   const quotedId = dialect.quoteIdentifier("id")

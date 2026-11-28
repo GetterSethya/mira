@@ -2,7 +2,7 @@
 // `CollectionService`, real on-disk `FileStorage`).
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, FileSystem, Result, Schema } from "effect"
-import { HttpClient, HttpClientRequest } from "effect/http"
+import { HttpClient, HttpClientRequest, HttpIncomingMessage } from "effect/http"
 
 import { FileStorage } from "@/storage/storage.js"
 
@@ -48,11 +48,8 @@ const delAnon = (path: string) => HttpClient.execute(HttpClientRequest.delete(pa
 
 const ReadPost = Schema.Struct({ id: Schema.String, attachment: Schema.String })
 
-const readPost = (res: { json: Effect.Effect<unknown, unknown, never> }) =>
-  Effect.gen(function* () {
-    const raw = yield* res.json
-    return yield* Schema.decodeUnknownEffect(ReadPost)(raw)
-  })
+const readPost = <E>(res: HttpIncomingMessage.HttpIncomingMessage<E>) =>
+  HttpIncomingMessage.schemaBodyJson(ReadPost)(res)
 
 /** A served file is safe only if it is not inline-executable. */
 const servedInlineIsSafe = (headers: Readonly<Record<string, string | undefined>>) => {
