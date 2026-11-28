@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
 
+// The UI sources live outside src/ and are not exported by the package, so no
+// alias can reach them from the test suite.
+// oxlint-disable-next-line import/no-relative-parent-imports
 import type { CollectionSchema } from "../ui/src/lib/dashboard-api.js"
 import {
   indexFindings,
@@ -8,6 +11,7 @@ import {
   schemaIndexes,
   templateSourceLabel,
   type RuleInspection
+  // oxlint-disable-next-line import/no-relative-parent-imports
 } from "../ui/src/lib/schema-inspection.js"
 
 function baseSchema(overrides: Partial<CollectionSchema> = {}): CollectionSchema {

@@ -1,6 +1,6 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { FileSystem, Path } from "effect"
-import { SqlClient } from "effect/sql"
+import type { SqlClient } from "effect/sql"
 import type {
   AppConfig,
   CollectionService,
@@ -11,7 +11,7 @@ import type {
   RateLimitKeySecret,
   Repository
 } from "@gettersethya/mira"
-import { Cause, Effect, Option, Tracer } from "effect"
+import { Cause, Effect, Option, type Tracer } from "effect"
 import type { AnyCollectionDef } from "@gettersethya/mira-client"
 import { bootstrapStatusRoute } from "./api/bootstrap-status.js"
 import { registerRoute } from "./api/register.js"
@@ -85,7 +85,8 @@ function wrapAuthRoute<E, R>(operation: string, effect: Effect.Effect<HttpServer
 }
 
 function makeDashboardSpaRoute() {
-  const spaHandler = wrapRoute("dashboard_spa",
+  const spaHandler = wrapRoute(
+    "dashboard_spa",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -117,9 +118,7 @@ function makeDashboardSpaRoute() {
     })
   )
 
-  return [
-    HttpRouter.route("GET", "/_dashboard/*", spaHandler)
-  ]
+  return [HttpRouter.route("GET", "/_dashboard/*", spaHandler)]
 }
 
 type DashboardRouteServices =
@@ -142,9 +141,17 @@ export function makeDashboardRouter(
     ...makeDashboardSpaRoute(),
     HttpRouter.route("GET", "/_dashboard/api/bootstrap-status", wrapRoute("bootstrap_status", bootstrapStatusRoute)),
     HttpRouter.route("POST", "/_dashboard/api/register", wrapRoute("register", registerRoute)),
-    HttpRouter.route("POST", "/_dashboard/api/superadmin/create", wrapAuthRoute("superadmin_create", createSuperadminRoute)),
+    HttpRouter.route(
+      "POST",
+      "/_dashboard/api/superadmin/create",
+      wrapAuthRoute("superadmin_create", createSuperadminRoute)
+    ),
     HttpRouter.route("GET", "/_dashboard/api/superadmin", wrapAuthRoute("superadmin_list", listSuperadminsRoute)),
-    HttpRouter.route("DELETE", "/_dashboard/api/superadmin/:id", wrapAuthRoute("superadmin_delete", deleteSuperadminRoute)),
+    HttpRouter.route(
+      "DELETE",
+      "/_dashboard/api/superadmin/:id",
+      wrapAuthRoute("superadmin_delete", deleteSuperadminRoute)
+    ),
     HttpRouter.route("GET", "/_dashboard/api/config", wrapAuthRoute("config", configRoute)),
     HttpRouter.route("PUT", "/_dashboard/api/config", wrapAuthRoute("config_update", configUpdateRoute)),
     HttpRouter.route("GET", "/_dashboard/api/crons", wrapAuthRoute("crons_list", cronsRoute)),

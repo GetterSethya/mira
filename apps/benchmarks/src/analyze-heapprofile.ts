@@ -9,6 +9,8 @@
  */
 import { readFileSync } from "node:fs"
 
+import { Schema } from "effect"
+
 export interface HeapCallFrame {
   readonly functionName?: string
   readonly url?: string
@@ -35,40 +37,26 @@ export interface HeapSummary {
   readonly byFunction: ReadonlyArray<HeapFunctionSummary>
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
+const HeapCallFrameSchema = Schema.Struct({
+  functionName: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+  lineNumber: Schema.optional(Schema.Finite)
+})
 
-function isCallFrame(value: unknown): value is HeapCallFrame {
-  if (!isRecord(value)) return false
-  if ("functionName" in value && typeof value.functionName !== "string") return false
-  if ("url" in value && typeof value.url !== "string") return false
-  if ("lineNumber" in value && typeof value.lineNumber !== "number") return false
-  return true
-}
+const HeapProfileNodeSchema: Schema.Codec<HeapProfileNode> = Schema.Struct({
+  callFrame: Schema.optional(HeapCallFrameSchema),
+  selfSize: Schema.optional(Schema.Finite),
+  children: Schema.optional(Schema.Array(Schema.suspend((): Schema.Codec<HeapProfileNode> => HeapProfileNodeSchema)))
+})
 
-function isNode(value: unknown): value is HeapProfileNode {
-  if (!isRecord(value)) return false
-  if ("callFrame" in value && !isCallFrame(value.callFrame)) return false
-  if ("selfSize" in value && typeof value.selfSize !== "number") return false
-  if ("children" in value) {
-    if (!Array.isArray(value.children)) return false
-    if (!value.children.every(isNode)) return false
-  }
-  return true
-}
+const HeapProfileSchema: Schema.Codec<HeapProfile> = Schema.Struct({
+  head: Schema.optional(HeapProfileNodeSchema)
+})
 
-function isHeapProfile(value: unknown): value is HeapProfile {
-  if (!isRecord(value)) return false
-  if ("head" in value && !isNode(value.head)) return false
-  return true
-}
+const decodeHeapProfile = Schema.decodeSync(Schema.fromJsonString(HeapProfileSchema))
 
 const keyOf = (frame: HeapCallFrame | undefined): string => {
-  const name =
-    frame?.functionName !== undefined && frame.functionName.length > 0
-      ? frame.functionName
-      : "(anonymous)"
+  const name = frame?.functionName !== undefined && frame.functionName.length > 0 ? frame.functionName : "(anonymous)"
   const url = frame?.url !== undefined && frame.url.length > 0 ? frame.url : "(unknown)"
   const line = frame?.lineNumber ?? 0
   return `${name} @ ${url}:${line}`
@@ -100,8 +88,10 @@ export function summarizeHeapProfile(profile: HeapProfile): HeapSummary {
 const path = process.argv[2]
 if (path !== undefined) {
   const requests = Number(process.argv[3] ?? process.env.PROFILE_REQUESTS ?? "0")
-  const profile: unknown = JSON.parse(readFileSync(path, "utf8"))
-  if (!isHeapProfile(profile)) {
+  let profile: HeapProfile
+  try {
+    profile = decodeHeapProfile(readFileSync(path, "utf8"))
+  } catch {
     throw new Error("heap profile has an unexpected shape")
   }
   const summary = summarizeHeapProfile(profile)

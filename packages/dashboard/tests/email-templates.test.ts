@@ -1,7 +1,7 @@
 import { AuthCollection, BaseCollection, Field } from "@gettersethya/mira-client"
 import { describe, expect, it } from "vitest"
 
-import { authCollectionNames } from "../src/api/email-templates.js"
+import { authCollectionNames } from "@/api/email-templates.js"
 
 describe("authCollectionNames", () => {
   it("keeps auth collections only", () => {

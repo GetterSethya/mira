@@ -2,17 +2,17 @@ import type { InferRecord } from "@gettersethya/mira-client"
 import { BaseCollection, createMiraClient, Field } from "@gettersethya/mira-client"
 import { describe, expect, expectTypeOf, it } from "vitest"
 
-import { ActionKeys, collectionAdapter } from "../src/index.js"
+import { ActionKeys, collectionAdapter } from "@gettersethya/mira-tanstack-adapter"
 
 const Authors = BaseCollection.define("authors", {
-  name: Field.text(),
+  name: Field.text()
 })
 
 const Posts = BaseCollection.define("posts", {
   title: Field.text(),
   body: Field.text(),
   secret: Field.text({ hidden: true }),
-  author: Field.relation(Authors),
+  author: Field.relation(Authors)
 })
 
 type PostFields = typeof Posts.fields
@@ -26,9 +26,7 @@ describe("adapted select narrowing", () => {
   it("getOne with select narrows the data and keeps query metadata", () => {
     const handler = Mira.posts.getOne("abc", { select: ["title"] })
     type Data = Awaited<ReturnType<typeof handler.raw>>
-    expectTypeOf<Data>().toEqualTypeOf<
-      Pick<InferRecord<PostFields>, "id" | "created" | "updated" | "title">
-    >()
+    expectTypeOf<Data>().toEqualTypeOf<Pick<InferRecord<PostFields>, "id" | "created" | "updated" | "title">>()
     expectTypeOf<Data["title"]>().toEqualTypeOf<string>()
     // @ts-expect-error body was not selected
     expectTypeOf<Data["body"]>().toEqualTypeOf<never>()
@@ -54,9 +52,7 @@ describe("adapted select narrowing", () => {
     expectTypeOf<First>().not.toBeNever()
     const full = Mira.posts.getFullList({ select: ["title"] })
     type Full = Awaited<ReturnType<typeof full.raw>>
-    expectTypeOf<Full[number]>().toEqualTypeOf<
-      Pick<InferRecord<PostFields>, "id" | "created" | "updated" | "title">
-    >()
+    expectTypeOf<Full[number]>().toEqualTypeOf<Pick<InferRecord<PostFields>, "id" | "created" | "updated" | "title">>()
   })
 
   it("hidden field in select is a type error through the adapter", () => {

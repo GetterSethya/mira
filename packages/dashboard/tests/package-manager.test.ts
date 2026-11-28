@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import {
-  installCommand,
-  isPackageManager,
-  PACKAGE_MANAGERS,
-  type PackageManager
-} from "../src/package-manager.js"
+import { installCommand, isPackageManager, PACKAGE_MANAGERS, type PackageManager } from "@/package-manager.js"
 
 const cases: ReadonlyArray<readonly [PackageManager, string]> = [
   ["pnpm", "pnpm add @gettersethya/mira-client"],
@@ -38,11 +33,8 @@ describe("installCommand", () => {
   })
 
   it("joins multiple packages in order", () => {
-    expect(
-      installCommand("npm", [
-        "@gettersethya/mira-tanstack-adapter",
-        "@tanstack/svelte-query"
-      ])
-    ).toBe("npm install @gettersethya/mira-tanstack-adapter @tanstack/svelte-query")
+    expect(installCommand("npm", ["@gettersethya/mira-tanstack-adapter", "@tanstack/svelte-query"])).toBe(
+      "npm install @gettersethya/mira-tanstack-adapter @tanstack/svelte-query"
+    )
   })
 })

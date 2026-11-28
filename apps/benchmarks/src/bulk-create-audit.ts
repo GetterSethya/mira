@@ -23,6 +23,34 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { performance } from "node:perf_hooks"
 
+import { Schema } from "effect"
+
+const BenchRecordSchema = Schema.Struct({
+  title: Schema.String,
+  body: Schema.String,
+  published: Schema.Boolean
+})
+
+const BulkCreateRequestSchema = Schema.Struct({ records: Schema.Array(BenchRecordSchema) })
+
+const RequestBodySchema = Schema.Union([BenchRecordSchema, BulkCreateRequestSchema])
+type RequestBody = typeof RequestBodySchema.Type
+
+const StatsSchema = Schema.Struct({
+  batch: Schema.Finite,
+  runs: Schema.Finite,
+  synchronous: Schema.Literal("FULL"),
+  recordsPerRun: Schema.Array(Schema.Struct({ individual: Schema.Finite, bulk: Schema.Finite })),
+  individualMs: Schema.Array(Schema.Finite),
+  bulkMs: Schema.Array(Schema.Finite),
+  individualMeanMs: Schema.Finite,
+  bulkMeanMs: Schema.Finite,
+  speedup: Schema.Finite
+})
+
+const encodeRequestBody = Schema.encodeSync(Schema.fromJsonString(RequestBodySchema))
+const encodeStats = Schema.encodeSync(Schema.fromJsonString(StatsSchema, { space: 2 }))
+
 const BATCH = 500
 const RUNS = 3
 
@@ -82,20 +110,19 @@ const makeRecords = (prefix: string) =>
     published: false
   }))
 
-const postJson = async (url: string, body: unknown) => {
+const postJson = async (url: string, body: RequestBody) => {
   const started = performance.now()
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
+    body: encodeRequestBody(body)
   })
   await response.arrayBuffer()
   if (!response.ok) throw new Error(`POST ${url} failed with ${response.status}`)
   return performance.now() - started
 }
 
-const mean = (values: ReadonlyArray<number>) =>
-  values.reduce((sum, value) => sum + value, 0) / values.length
+const mean = (values: ReadonlyArray<number>) => values.reduce((sum, value) => sum + value, 0) / values.length
 
 const main = async () => {
   const dir = mkdtempSync(join(tmpdir(), "mira-bulk-create-"))
@@ -155,21 +182,17 @@ const main = async () => {
     const bulkMean = mean(bulk)
 
     console.log(
-      JSON.stringify(
-        {
-          batch: BATCH,
-          runs: RUNS,
-          synchronous: "FULL",
-          recordsPerRun,
-          individualMs: individual,
-          bulkMs: bulk,
-          individualMeanMs: Number(individualMean.toFixed(1)),
-          bulkMeanMs: Number(bulkMean.toFixed(1)),
-          speedup: Number((individualMean / bulkMean).toFixed(1))
-        },
-        null,
-        2
-      )
+      encodeStats({
+        batch: BATCH,
+        runs: RUNS,
+        synchronous: "FULL",
+        recordsPerRun,
+        individualMs: individual,
+        bulkMs: bulk,
+        individualMeanMs: Number(individualMean.toFixed(1)),
+        bulkMeanMs: Number(bulkMean.toFixed(1)),
+        speedup: Number((individualMean / bulkMean).toFixed(1))
+      })
     )
   } finally {
     await stopServer(baseUrl, child)

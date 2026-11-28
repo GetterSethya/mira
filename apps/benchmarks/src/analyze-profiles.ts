@@ -46,10 +46,8 @@ const ProfileSchema = Schema.Struct({
 const profileDir = process.argv[2] ?? ".egm/perf-audit-2026-11-15"
 const outputPath = process.argv[3] ?? join(profileDir, "hotspots.md")
 
-const readProfile = (path: string): Profile => {
-  const text = readFileSync(path, "utf8")
-  return Schema.decodeUnknownSync(ProfileSchema)(JSON.parse(text))
-}
+const readProfile = (path: string): Profile =>
+  Schema.decodeSync(Schema.fromJsonString(ProfileSchema))(readFileSync(path, "utf8"))
 
 const shortUrl = (url: string) => {
   if (url.startsWith("file:///C:/ProjectCode/mira/")) {
@@ -75,8 +73,7 @@ const categoryOf = (url: string) => {
   return "other"
 }
 
-const fmt = (value: number, digits = 1) =>
-  value.toLocaleString("en-US", { maximumFractionDigits: digits })
+const fmt = (value: number, digits = 1) => value.toLocaleString("en-US", { maximumFractionDigits: digits })
 
 const nodeKey = (node: ProfileNode) =>
   `${node.callFrame.functionName}|${node.callFrame.url}|${node.callFrame.lineNumber}`
@@ -120,19 +117,18 @@ const analyze = (path: string, baseline?: Profile) => {
       const node = nodes.get(id)
       if (node === undefined) return []
       const baselineMicroseconds = baselineByKey?.get(nodeKey(node)) ?? 0
-      return [{
-        node,
-        microseconds,
-        attributed: Math.max(0, microseconds - baselineMicroseconds)
-      }]
+      return [
+        {
+          node,
+          microseconds,
+          attributed: Math.max(0, microseconds - baselineMicroseconds)
+        }
+      ]
     })
     .sort((a, b) => b.attributed - a.attributed)
 
   const isNoise = (name: string) =>
-    name === "(idle)" ||
-    name === "(program)" ||
-    name === "(garbage collector)" ||
-    name === "(root)"
+    name === "(idle)" || name === "(program)" || name === "(garbage collector)" || name === "(root)"
 
   const total = rows.reduce((sum, row) => sum + row.attributed, 0)
   const idle = rows
@@ -145,9 +141,7 @@ const analyze = (path: string, baseline?: Profile) => {
     byCategory.set(category, (byCategory.get(category) ?? 0) + row.attributed)
   }
 
-  const top = rows
-    .filter((row) => !isNoise(row.node.callFrame.functionName) && row.attributed > 0)
-    .slice(0, 30)
+  const top = rows.filter((row) => !isNoise(row.node.callFrame.functionName) && row.attributed > 0).slice(0, 30)
 
   const callPath = (id: number) => {
     const frames: Array<string> = []

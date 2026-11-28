@@ -32,7 +32,23 @@ import { cpus, tmpdir } from "node:os"
 import { join } from "node:path"
 import { performance } from "node:perf_hooks"
 
-type PlatformName = "node" | "bun"
+import { Schema } from "effect"
+
+const PlatformSchema = Schema.Literals(["node", "bun"])
+type PlatformName = typeof PlatformSchema.Type
+
+const CreatePostSchema = Schema.Struct({
+  title: Schema.String,
+  body: Schema.String,
+  published: Schema.Boolean
+})
+
+const PreSpikeControlSchema = Schema.Record(Schema.String, Schema.Unknown)
+
+const encodeCreatePost = Schema.encodeSync(Schema.fromJsonString(CreatePostSchema))
+const encodeRawAudit = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }))
+const decodePreSpikeControl = Schema.decodeUnknownSync(Schema.fromJsonString(PreSpikeControlSchema))
+
 type Durability = "FULL" | "NORMAL"
 type BatchMode = "off" | "on"
 
@@ -131,7 +147,7 @@ interface SweepPoint {
 
 const packageRoot = process.cwd()
 const repoRoot = join(packageRoot, "../..")
-const platform = (process.env.AUDIT_PLATFORM ?? "node") as PlatformName
+const platform = Schema.decodeUnknownSync(PlatformSchema)(process.env.AUDIT_PLATFORM ?? "node")
 const fast = process.env.AUDIT_FAST === "1"
 const skipSweeps = process.env.AUDIT_SKIP_SWEEPS === "1"
 const MATRIX_WINDOW_MS = 0
@@ -140,17 +156,14 @@ if (!Number.isInteger(repeatsEnv) || repeatsEnv < 1) {
   throw new Error(`AUDIT_REPEATS must be an integer >= 1 (received ${String(process.env.AUDIT_REPEATS)})`)
 }
 const repeats = repeatsEnv
-const outDir =
-  process.env.AUDIT_OUT ?? join(repoRoot, ".egm", "create-batch-spike-2026-11-15", "audit")
+const outDir = process.env.AUDIT_OUT ?? join(repoRoot, ".egm", "create-batch-spike-2026-11-15", "audit")
 const preSpikePath =
-  process.env.AUDIT_PRE_SPIKE ??
-  join(repoRoot, ".egm", "create-batch-spike-2026-11-15", "pre-spike", "audit-load.json")
+  process.env.AUDIT_PRE_SPIKE ?? join(repoRoot, ".egm", "create-batch-spike-2026-11-15", "pre-spike", "audit-load.json")
 
 const BODY = "x".repeat(180)
 const WARMUPS = fast ? 10 : 50
 const READ_TARGET = fast ? 200 : 500
 const READ_WARMUPS = fast ? 20 : 100
-const WRITE_BATCH = 10
 const OPEN_LOOP_IN_FLIGHT_CAP = 1_000
 
 const matrixConcurrencies = fast ? [1, 50] : [1, 10, 50, 100]
@@ -188,7 +201,7 @@ const median = (values: ReadonlyArray<number>) => {
   if (values.length === 0) return 0
   const sorted = [...values].sort((left, right) => left - right)
   const middle = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2 : sorted[middle] ?? 0
+  return sorted.length % 2 === 0 ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2 : (sorted[middle] ?? 0)
 }
 
 const round = (value: number, digits = 2) => Number(value.toFixed(digits))
@@ -199,12 +212,7 @@ interface RunningServer {
   readonly logs: () => string
 }
 
-const startServer = (
-  spec: CellSpec,
-  directory: string,
-  port: number,
-  databaseName: string
-): RunningServer => {
+const startServer = (spec: CellSpec, directory: string, port: number, databaseName: string): RunningServer => {
   const args = platform === "node" ? ["src/server.ts"] : ["run", "src/server.ts"]
   const child = spawn(platform === "node" ? process.execPath : "bun", args, {
     cwd: packageRoot,
@@ -344,7 +352,7 @@ const runCreates = async (
         const response = await fetch(`${baseUrl}/api/collections/posts`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ title, body: BODY, published: false })
+          body: encodeCreatePost({ title, body: BODY, published: false })
         })
         const payload: unknown = await response.json()
         latencies.push(performance.now() - startedAt)
@@ -382,7 +390,7 @@ const runCreates = async (
   }
 }
 
-const readList = async (baseUrl: string, index: number) => {
+const readList = async (baseUrl: string, _index: number) => {
   const response = await fetch(`${baseUrl}/api/collections/posts?limit=20`, {
     signal: AbortSignal.timeout(10_000)
   })
@@ -502,7 +510,7 @@ const runOpenLoop = async (
       fetch(`${baseUrl}/api/collections/posts`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, body: BODY, published: false })
+        body: encodeCreatePost({ title, body: BODY, published: false })
       })
         .then(async (response) => {
           // Read the body so a 503 can be attributed to `batch_unavailable`
@@ -721,8 +729,8 @@ const cacheOnSpecs = (): ReadonlyArray<CellSpec> =>
 const readPreSpikeControl = (): Record<string, unknown> | null => {
   if (!existsSync(preSpikePath)) return null
   try {
-    const parsed: unknown = JSON.parse(readFileSync(preSpikePath, "utf8"))
-    return isRecord(parsed) ? parsed : null
+    const parsed = decodePreSpikeControl(readFileSync(preSpikePath, "utf8"))
+    return parsed
   } catch {
     return null
   }
@@ -786,8 +794,7 @@ const findAggregate = (
   concurrency: number
 ): Aggregate | undefined =>
   aggregates.find(
-    (entry) =>
-      entry.synchronous === synchronous && entry.batch === batch && entry.concurrency === concurrency
+    (entry) => entry.synchronous === synchronous && entry.batch === batch && entry.concurrency === concurrency
   )
 
 interface Check {
@@ -818,7 +825,9 @@ const evaluate = (
     (cell) => cell.family === "matrix" && cell.synchronous === "FULL" && cell.batch === "on" && cell.concurrency === 50
   )
   const statsOk = fullOnC50.length > 0 && fullOnC50.every((cell) => cell.stats !== null)
-  const batchesOk = fullOnC50.every((cell) => (cell.stats?.batches ?? 0) > 0 && (cell.stats?.batches ?? 0) < cell.requests)
+  const batchesOk = fullOnC50.every(
+    (cell) => (cell.stats?.batches ?? 0) > 0 && (cell.stats?.batches ?? 0) < cell.requests
+  )
   const flushOk = fullOnC50.every((cell) => cell.medianFlushSizeLast50 >= 4)
   const commitRatio = fullOnC50.map((cell) => (cell.stats?.commits ?? 0) / cell.requests)
   const commitOk = commitRatio.length > 0 && commitRatio.every((ratio) => ratio <= 0.25)
@@ -846,12 +855,7 @@ const evaluate = (
       : null
   checks.push({
     name: "4. sanity: post-change baseline vs pre-spike control (different shape, not a gate)",
-    status:
-      controlDelta === null
-        ? "insufficient-data"
-        : Math.abs(controlDelta) <= 10
-          ? "pass"
-          : "fail",
+    status: controlDelta === null ? "insufficient-data" : Math.abs(controlDelta) <= 10 ? "pass" : "fail",
     blocking: false,
     detail:
       controlDelta === null || fullOffC50 === undefined
@@ -862,11 +866,11 @@ const evaluate = (
   const fullOn = findAggregate(aggregates, "FULL", "on", 50)
   if (fullOffC50 !== undefined && fullOn !== undefined) {
     const batchedCells = matrix.filter(
-      (cell) => cell.family === "matrix" && cell.synchronous === "FULL" && cell.batch === "on" && cell.concurrency === 50
+      (cell) =>
+        cell.family === "matrix" && cell.synchronous === "FULL" && cell.batch === "on" && cell.concurrency === 50
     )
     const medianRatio = fullOn.throughputMedian / fullOffC50.throughputMedian
-    const worstRatio =
-      Math.min(...batchedCells.map((cell) => cell.throughput)) / fullOffC50.throughputMedian
+    const worstRatio = Math.min(...batchedCells.map((cell) => cell.throughput)) / fullOffC50.throughputMedian
     checks.push({
       name: "5. FULL c50: median batched >= 2x baseline, all runs >= 1.8x",
       status: medianRatio >= 2 && worstRatio >= 1.8 ? "pass" : "fail",
@@ -884,7 +888,8 @@ const evaluate = (
   const normalOn = findAggregate(aggregates, "NORMAL", "on", 50)
   if (normalOff !== undefined && normalOn !== undefined) {
     const normalCells = matrix.filter(
-      (cell) => cell.family === "matrix" && cell.synchronous === "NORMAL" && cell.batch === "on" && cell.concurrency === 50
+      (cell) =>
+        cell.family === "matrix" && cell.synchronous === "NORMAL" && cell.batch === "on" && cell.concurrency === 50
     )
     const ratio = normalOn.throughputMedian / normalOff.throughputMedian
     const worst = Math.min(...normalCells.map((cell) => cell.throughput)) / normalOff.throughputMedian
@@ -922,7 +927,8 @@ const evaluate = (
   if (fullOffC50 !== undefined && fullOn !== undefined) {
     const p99Ok = fullOn.p99Median <= fullOffC50.p99Median * 2
     const readOfOn = matrix.filter(
-      (cell) => cell.family === "matrix" && cell.synchronous === "FULL" && cell.batch === "on" && cell.concurrency === 50
+      (cell) =>
+        cell.family === "matrix" && cell.synchronous === "FULL" && cell.batch === "on" && cell.concurrency === 50
     )
     const readsUsable = readOfOn.every(
       (cell) => cell.reads !== null && cell.reads.targetMet && cell.reads.failures === 0 && cell.readAtRest !== null
@@ -930,9 +936,7 @@ const evaluate = (
     const burstRead = median(readOfOn.flatMap((cell) => (cell.reads === null ? [] : [cell.reads.p99])))
     const restRead = median(readOfOn.flatMap((cell) => (cell.readAtRest === null ? [] : [cell.readAtRest.p99])))
     const readOk = readsUsable && burstRead <= restRead * 2
-    const readSamples = readOfOn
-      .map((cell) => `${cell.reads?.samples ?? 0}/${cell.reads?.failures ?? 0}`)
-      .join(",")
+    const readSamples = readOfOn.map((cell) => `${cell.reads?.samples ?? 0}/${cell.reads?.failures ?? 0}`).join(",")
     checks.push({
       name: "8. c50 tail: p99 <= 2x baseline, read p99 during burst <= 2x at rest",
       status: !readsUsable ? "insufficient-data" : p99Ok && readOk ? "pass" : "fail",
@@ -1009,10 +1013,7 @@ const evaluate = (
   return checks
 }
 
-const sweepSummary = (
-  results: ReadonlyArray<CellResult>,
-  family: CellSpec["family"]
-): ReadonlyArray<SweepPoint> => {
+const sweepSummary = (results: ReadonlyArray<CellResult>, family: CellSpec["family"]): ReadonlyArray<SweepPoint> => {
   const cells = results.filter((cell) => cell.family === family)
   const groups = new Map<string, Array<CellResult>>()
   for (const cell of cells) {
@@ -1052,7 +1053,11 @@ const formatMatrixTable = (aggregates: ReadonlyArray<Aggregate>) => {
       (entry) =>
         `| ${entry.synchronous} | ${entry.batch} | ${entry.concurrency} | ${entry.throughputMedian} | ${entry.p50Median} | ${entry.p99Median} | ${entry.successRateMedian}% | ${entry.runs} |`
     )
-  return ["| Sync | Batch | c | rps (2xx/median) | p50 ms | p99 ms | success | runs |", "|---|---|---:|---:|---:|---:|---:|---:|", ...rows].join("\n")
+  return [
+    "| Sync | Batch | c | rps (2xx/median) | p50 ms | p99 ms | success | runs |",
+    "|---|---|---:|---:|---:|---:|---:|---:|",
+    ...rows
+  ].join("\n")
 }
 
 const renderSummary = (
@@ -1068,7 +1073,7 @@ const renderSummary = (
   const cacheOn = aggregate(results, "cache-on")
   const matrixOff50 = findAggregate(aggregates, "FULL", "off", 50)
 
-  const lines: string[] = []
+  const lines: Array<string> = []
   lines.push("# Create-batch audit summary")
   lines.push("")
   lines.push(`- Platform: ${platform}`)
@@ -1097,9 +1102,7 @@ const renderSummary = (
     lines.push(formatMatrixTable(cacheOn))
     const cacheRow = cacheOn[0]
     if (matrixOff50 !== undefined) {
-      lines.push(
-        ""
-      )
+      lines.push("")
       lines.push(
         `Cache-on batched throughput is ${round((cacheRow.throughputMedian / matrixOff50.throughputMedian) * 100, 1)}% of the no-cache baseline median.`
       )
@@ -1133,7 +1136,9 @@ const renderSummary = (
   if (openLoop.length > 0) {
     lines.push("## Open loop (timer-driven, in-flight cap 1,000)")
     lines.push("")
-    lines.push("| Sync | Batch | rate | scheduled | success | p50 ms | p99 ms | capped | batch_unavailable | rejected | timedOut |")
+    lines.push(
+      "| Sync | Batch | rate | scheduled | success | p50 ms | p99 ms | capped | batch_unavailable | rejected | timedOut |"
+    )
     lines.push("|---|---|---:|---:|---:|---:|---:|---:|")
     for (const cell of openLoop) {
       lines.push(
@@ -1162,13 +1167,27 @@ const renderSummary = (
   }
   lines.push("## Notes")
   lines.push("")
-  lines.push("- `rps` is successful throughput (2xx only); failed attempts are excluded. Each cell reports its success rate next to it.")
-  lines.push("- `commits` comes from `BatchMutationStats`, recorded after `COMMIT` returns; `batches` is the flush count; `median flush` is over the last 50 flushes, not the whole run.")
-  lines.push("- A create that times out may still have committed. There is no idempotency key: do not blindly retry creates.")
-  lines.push("- The batch holds the single SQLite connection for its duration, so reads in other fibers wait for the commit.")
-  lines.push(`- The read arm targets ${READ_TARGET} completed reads per cell; check 8 is \`insufficient-data\` when a cell misses that target or has no read-at-rest sample.`)
-  lines.push("- The pre-spike control is a different shape (500 requests, no warm-up, cache disabled). Check 4 is a non-blocking sanity comparison, not an acceptance gate.")
-  lines.push("- Open-loop row counts can exceed acknowledged successes when a client timeout hides a commit; such runs report `batch_unavailable` separately and capped runs are excluded from check 9.")
+  lines.push(
+    "- `rps` is successful throughput (2xx only); failed attempts are excluded. Each cell reports its success rate next to it."
+  )
+  lines.push(
+    "- `commits` comes from `BatchMutationStats`, recorded after `COMMIT` returns; `batches` is the flush count; `median flush` is over the last 50 flushes, not the whole run."
+  )
+  lines.push(
+    "- A create that times out may still have committed. There is no idempotency key: do not blindly retry creates."
+  )
+  lines.push(
+    "- The batch holds the single SQLite connection for its duration, so reads in other fibers wait for the commit."
+  )
+  lines.push(
+    `- The read arm targets ${READ_TARGET} completed reads per cell; check 8 is \`insufficient-data\` when a cell misses that target or has no read-at-rest sample.`
+  )
+  lines.push(
+    "- The pre-spike control is a different shape (500 requests, no warm-up, cache disabled). Check 4 is a non-blocking sanity comparison, not an acceptance gate."
+  )
+  lines.push(
+    "- Open-loop row counts can exceed acknowledged successes when a client timeout hides a commit; such runs report `batch_unavailable` separately and capped runs are excluded from check 9."
+  )
   lines.push("")
   return lines.join("\n")
 }
@@ -1250,14 +1269,9 @@ const main = async () => {
                 await waitForReady(server)
                 await runCreates(server.baseUrl, 10, WARMUPS, "warm")
                 await fetch(`${server.baseUrl}/__bench/batch-stats/reset`, { method: "POST" })
-                process.stdout.write(
-                  `[${platform}] open-loop ${synchronous} ${batch} ${rate} req/s r${repeat}\n`
-                )
+                process.stdout.write(`[${platform}] open-loop ${synchronous} ${batch} ${rate} req/s r${repeat}\n`)
                 const outcome = await runOpenLoop(spec, server.baseUrl, rate, durationMs)
-                const [rows, stats] = await Promise.all([
-                  readRowCount(server),
-                  readBatchStats(server)
-                ])
+                const [rows, stats] = await Promise.all([readRowCount(server), readBatchStats(server)])
                 const expectedRows = outcome.successes + WARMUPS
                 openLoop.push({ ...outcome, rows, expectedRows, stats })
                 process.stdout.write(
@@ -1323,7 +1337,7 @@ const main = async () => {
   const summary = `${renderSummary(results, openLoop, checks, preSpikeC50, machine)}${
     runError === null ? "" : `\n> **ABORTED**: ${runError}\n`
   }`
-  writeFileSync(rawPath, `${JSON.stringify(payload, null, 2)}\n`)
+  writeFileSync(rawPath, `${encodeRawAudit(payload)}\n`)
   writeFileSync(summaryPath, `${summary}\n`)
 
   process.stdout.write(`\n${summary}\n`)

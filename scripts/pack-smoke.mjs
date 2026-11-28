@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process"
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
@@ -17,6 +27,43 @@ const run = (command, args, cwd = repo, shell = process.platform === "win32") =>
     shell
   })
 }
+
+const jsonIndent = "  "
+
+const quoteJson = (value) =>
+  `"${value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r")
+    .replaceAll("\t", "\\t")}"`
+
+const formatJsonValue = (value, depth) => {
+  if (value === null) return "null"
+  if (typeof value === "string") return quoteJson(value)
+  if (typeof value === "boolean") return String(value)
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null"
+
+  const pad = jsonIndent.repeat(depth + 1)
+  const close = jsonIndent.repeat(depth)
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]"
+    const items = value.map((item) => `${pad}${formatJsonValue(item, depth + 1)}`)
+    return `[\n${items.join(",\n")}\n${close}]`
+  }
+
+  if (typeof value === "object") {
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined)
+    if (entries.length === 0) return "{}"
+    const body = entries.map(([key, item]) => `${pad}${quoteJson(key)}: ${formatJsonValue(item, depth + 1)}`)
+    return `{\n${body.join(",\n")}\n${close}}`
+  }
+
+  return "null"
+}
+
+const formatJson = (value) => `${formatJsonValue(value, 0)}\n`
 
 try {
   for (const dir of ["packages/collection", "packages/client", "packages/mira"]) {
@@ -49,16 +96,12 @@ try {
 
   writeFileSync(
     join(temp, "package.json"),
-    JSON.stringify(
-      {
-        name: "mira-pack-smoke",
-        private: true,
-        type: "module",
-        pnpm: { overrides }
-      },
-      null,
-      2
-    )
+    formatJson({
+      name: "mira-pack-smoke",
+      private: true,
+      type: "module",
+      pnpm: { overrides }
+    })
   )
   run("pnpm", ["add", ...tarballs, "effect@4.0.0"], temp)
 
@@ -77,7 +120,7 @@ try {
     [
       "--input-type=module",
       "-e",
-      `import('@gettersethya/mira').then((m) => { if (!m.NodePlatform) throw new Error('Node entry missing NodePlatform'); if (typeof m.LibsqlDatabase !== 'function') throw new Error('Node entry missing LibsqlDatabase'); if (m.TursoDatabase !== m.LibsqlDatabase) throw new Error('TursoDatabase is not the libSQL alias'); const leaked = ${JSON.stringify(bunOnlyExports)}.filter((name) => name in m); if (leaked.length > 0) throw new Error('Node entry leaked Bun exports: ' + leaked.join(', ')) })`
+      `import('@gettersethya/mira').then((m) => { if (!m.NodePlatform) throw new Error('Node entry missing NodePlatform'); if (typeof m.LibsqlDatabase !== 'function') throw new Error('Node entry missing LibsqlDatabase'); if (m.TursoDatabase !== m.LibsqlDatabase) throw new Error('TursoDatabase is not the libSQL alias'); const leaked = [${bunOnlyExports.map((name) => quoteJson(name)).join(", ")}].filter((name) => name in m); if (leaked.length > 0) throw new Error('Node entry leaked Bun exports: ' + leaked.join(', ')) })`
     ],
     temp,
     false
@@ -86,21 +129,13 @@ try {
   // The root entry must not load the libSQL driver. Rename the adapter, its
   // client, and the native package, then import the root. An eager import
   // fails here; the lazy preset still resolves after they are restored.
-  const miraPackageJson = realpathSync(
-    join(temp, "node_modules", "@gettersethya", "mira", "package.json")
-  )
+  const miraPackageJson = realpathSync(join(temp, "node_modules", "@gettersethya", "mira", "package.json"))
   const resolveFromMira = createRequire(miraPackageJson)
   const libsqlAdapter = dirname(resolveFromMira.resolve("@effect/sql-libsql/package.json"))
   const libsqlClient = dirname(
-    dirname(
-      createRequire(realpathSync(join(libsqlAdapter, "package.json"))).resolve(
-        "@libsql/client"
-      )
-    )
+    dirname(createRequire(realpathSync(join(libsqlAdapter, "package.json"))).resolve("@libsql/client"))
   )
-  const libsqlNative = dirname(
-    createRequire(realpathSync(join(libsqlClient, "package.json"))).resolve("libsql")
-  )
+  const libsqlNative = dirname(createRequire(realpathSync(join(libsqlClient, "package.json"))).resolve("libsql"))
   const moved = [libsqlAdapter, libsqlClient, libsqlNative]
   for (const dir of moved) renameSync(dir, `${dir}.bak`)
   try {
@@ -118,42 +153,27 @@ try {
     for (const dir of moved) renameSync(`${dir}.bak`, dir)
   }
 
-  copyFileSync(
-    join(repo, "scripts", "pack-smoke-libsql.mjs"),
-    join(temp, "pack-smoke-libsql.mjs")
-  )
+  copyFileSync(join(repo, "scripts", "pack-smoke-libsql.mjs"), join(temp, "pack-smoke-libsql.mjs"))
   run(process.execPath, ["pack-smoke-libsql.mjs"], temp, false)
 
   const bunTemp = join(temp, "bun-install")
   mkdirSync(bunTemp, { recursive: true })
   writeFileSync(
     join(bunTemp, "package.json"),
-    JSON.stringify(
-      {
-        name: "mira-pack-smoke-bun",
-        private: true,
-        type: "module",
-        overrides: {
-          "@gettersethya/mira-client": fileSpec(bunTemp, findTarball("gettersethya-mira-client-")),
-          "@gettersethya/mira-collection": fileSpec(
-            bunTemp,
-            findTarball("gettersethya-mira-collection-")
-          )
-        }
-      },
-      null,
-      2
-    )
+    formatJson({
+      name: "mira-pack-smoke-bun",
+      private: true,
+      type: "module",
+      overrides: {
+        "@gettersethya/mira-client": fileSpec(bunTemp, findTarball("gettersethya-mira-client-")),
+        "@gettersethya/mira-collection": fileSpec(bunTemp, findTarball("gettersethya-mira-collection-"))
+      }
+    })
   )
   run("bun", ["add", ...tarballs, "effect@4.0.0", "@effect/sql-sqlite-bun@4.0.0"], bunTemp, false)
   const bunExportCheck =
     "if (!m.BunPlatform) throw new Error('Bun entry missing BunPlatform'); if (!m.BunPortablePlatform) throw new Error('Bun entry missing BunPortablePlatform'); if (!m.BunCryptoLayer) throw new Error('Bun entry missing BunCryptoLayer'); if (!m.BunAuthServiceLayer) throw new Error('Bun entry missing BunAuthServiceLayer'); if (!m.ThumbnailServiceBunLive) throw new Error('Bun entry missing ThumbnailServiceBunLive'); if (typeof m.makeTelemetryLayer !== 'function') throw new Error('Bun entry missing makeTelemetryLayer'); if (!m.TelemetryStore) throw new Error('Bun entry missing TelemetryStore'); if (!m.TelemetryStoreError) throw new Error('Bun entry missing TelemetryStoreError'); if (!m.TelemetryDuplicateEntryError) throw new Error('Bun entry missing TelemetryDuplicateEntryError'); if (typeof m.makeSqlTelemetryStoreLayer !== 'function') throw new Error('Bun entry missing makeSqlTelemetryStoreLayer'); if (!m.logCleanupCronDef) throw new Error('Bun entry missing logCleanupCronDef'); if (typeof m.LibsqlDatabase !== 'function') throw new Error('Bun entry missing LibsqlDatabase'); if (m.TursoDatabase !== m.LibsqlDatabase) throw new Error('Bun entry TursoDatabase alias is wrong')"
-  run(
-    bunExecutable(),
-    ["-e", `import('@gettersethya/mira').then((m) => { ${bunExportCheck} })`],
-    bunTemp,
-    false
-  )
+  run(bunExecutable(), ["-e", `import('@gettersethya/mira').then((m) => { ${bunExportCheck} })`], bunTemp, false)
   run(
     bunExecutable(),
     [
@@ -165,16 +185,10 @@ try {
   )
 
   // Run the packed Bun telemetry write/read script from inside the temp install.
-  copyFileSync(
-    join(repo, "scripts", "pack-smoke-bun-telemetry.ts"),
-    join(bunTemp, "pack-smoke-bun-telemetry.ts")
-  )
+  copyFileSync(join(repo, "scripts", "pack-smoke-bun-telemetry.ts"), join(bunTemp, "pack-smoke-bun-telemetry.ts"))
   run(bunExecutable(), ["run", "pack-smoke-bun-telemetry.ts"], bunTemp, false)
 
-  copyFileSync(
-    join(repo, "scripts", "pack-smoke-bun-libsql.ts"),
-    join(bunTemp, "pack-smoke-bun-libsql.ts")
-  )
+  copyFileSync(join(repo, "scripts", "pack-smoke-bun-libsql.ts"), join(bunTemp, "pack-smoke-bun-libsql.ts"))
   run(bunExecutable(), ["run", "pack-smoke-bun-libsql.ts"], bunTemp, false)
 
   // Bundle only the telemetry surface and assert the Node SQLite driver stays out.

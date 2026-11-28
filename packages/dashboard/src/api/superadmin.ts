@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { CollectionService } from "@gettersethya/mira"
 import { Filter } from "@gettersethya/mira-client"
-import { SuperAdminCollection } from "../superadmin.js"
+import { SuperAdminCollection } from "@/superadmin.js"
 
 const CreateSuperadminSchema = Schema.Struct({
   email: Schema.String,
@@ -18,7 +18,7 @@ export const createSuperadminRoute = Effect.gen(function* () {
 
   const existing = yield* svc
     .list(SuperAdminCollection, null, 1, adminCtx, Filter.field("email").eq(body.email))
-    .pipe(Effect.orElseSucceed(() => ({ items: [] as ReadonlyArray<Record<string, unknown>> })))
+    .pipe(Effect.orElseSucceed(() => ({ items: [], nextCursor: null })))
 
   if (existing.items.length > 0) {
     return HttpServerResponse.jsonUnsafe({ error: "email_taken" }, { status: 409 })

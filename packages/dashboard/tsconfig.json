@@ -6,9 +6,8 @@
     "lib": ["ES2022"],
     "rootDir": ".",
     "outDir": "dist",
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
+      "@/*": ["./src/*"],
       "@gettersethya/mira": ["../mira/dist/index.d.ts"],
       "@gettersethya/mira-client": ["../client/dist/index.d.ts"]
     },

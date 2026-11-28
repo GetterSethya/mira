@@ -18,7 +18,7 @@
 
 import { SqlClient } from "effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, Layer, Logger, LogLevel } from "effect"
+import { Effect, Layer, References, Schema } from "effect"
 import { BaseCollection, Field } from "@gettersethya/mira-client"
 import { defineRule, applyRulesToCollections } from "@/app/index.js"
 import { Dialect } from "@/dialect/dialect.js"
@@ -53,6 +53,8 @@ const [Posts] = applyRulesToCollections([postsDef], [postsRules])
 
 const noCtx: RequestCtx = { headers: {}, query: {} }
 
+const RecordId = Schema.Struct({ id: Schema.String })
+
 // ---------------------------------------------------------------------------
 // Stub FileStorage (no uploads in this demo)
 // ---------------------------------------------------------------------------
@@ -75,9 +77,7 @@ const FileStorageStub = Layer.succeed(
 
 const sqliteLayer = SqliteClient.layer({ filename: ":memory:" })
 const dialectLayer = Layer.succeed(Dialect, sqliteDialect)
-const repoLayer = RepositoryLive.pipe(
-  Layer.provide(Layer.merge(sqliteLayer, NodeCryptoLayer, dialectLayer))
-)
+const repoLayer = RepositoryLive.pipe(Layer.provide(Layer.merge(sqliteLayer, NodeCryptoLayer, dialectLayer)))
 
 const serviceLayer = makeCachedCollectionServiceLayer([Posts], {
   recordTtlMs: 60_000,
@@ -120,7 +120,9 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo("=== CREATE: two posts ===")
   const p1 = yield* svc.create(Posts, { title: "Hello Effect" }, noCtx)
   const p2 = yield* svc.create(Posts, { title: "Telemetry rocks" }, noCtx)
-  yield* Effect.logInfo(`Created: ${p1["id"] as string}, ${p2["id"] as string}`)
+  const { id: p1Id } = yield* Schema.decodeUnknownEffect(RecordId)(p1).pipe(Effect.orDie)
+  const { id: p2Id } = yield* Schema.decodeUnknownEffect(RecordId)(p2).pipe(Effect.orDie)
+  yield* Effect.logInfo(`Created: ${p1Id}, ${p2Id}`)
 
   // --- List (cache miss) ----------------------------------------------------
   yield* Effect.logInfo("=== LIST (cache miss — full span chain) ===")
@@ -133,32 +135,28 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo(`Listed ${page2.items.length} posts (from cache)`)
 
   // --- View (cache miss) ----------------------------------------------------
-  const id1 = p1["id"] as string
   yield* Effect.logInfo("=== VIEW (cache miss) ===")
-  yield* svc.view(Posts, id1, noCtx)
-  yield* Effect.logInfo(`Viewed post ${id1}`)
+  yield* svc.view(Posts, p1Id, noCtx)
+  yield* Effect.logInfo(`Viewed post ${p1Id}`)
 
   // --- View (cache hit) -----------------------------------------------------
   yield* Effect.logInfo("=== VIEW (cache hit — only cache.view span) ===")
-  yield* svc.view(Posts, id1, noCtx)
-  yield* Effect.logInfo(`Viewed post ${id1} again (from cache)`)
+  yield* svc.view(Posts, p1Id, noCtx)
+  yield* Effect.logInfo(`Viewed post ${p1Id} again (from cache)`)
 
   // --- Update ---------------------------------------------------------------
   yield* Effect.logInfo("=== UPDATE (invalidates cache) ===")
-  yield* svc.update(Posts, id1, { title: "Hello Effect (edited)" }, noCtx)
+  yield* svc.update(Posts, p1Id, { title: "Hello Effect (edited)" }, noCtx)
 
   // --- Delete ---------------------------------------------------------------
   yield* Effect.logInfo("=== DELETE ===")
-  yield* svc.delete(Posts, id1, noCtx)
+  yield* svc.delete(Posts, p1Id, noCtx)
 
   yield* Effect.logInfo("=== Done — check lines above for [trace] span output ===")
-}).pipe(
-  // Show all log levels including Debug so you see everything
-  Logger.withMinimumLogLevel(LogLevel.Info)
-)
+}).pipe(Effect.provideService(References.MinimumLogLevel, "Info"))
 
 // ---------------------------------------------------------------------------
-// Run
+// Launch the demo against the in-memory SQLite layer
 // ---------------------------------------------------------------------------
 
 Effect.runPromise(program.pipe(Effect.provide(appLayer))).catch((err) => {

@@ -58,7 +58,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - Effective port is `options.port ?? AppConfig.port`, and the bound port is reported back through `cfg.updateBoundPort`: `[app.ts:MiraApp.buildLayer]`
 - `cors()` rejects `credentials: true` combined with a wildcard/omitted origin list: `[builder.ts:MiraBuilder.cors]`
 - `serve()` emits a warning when the permissive default CORS config is in use: `[app.ts:MiraApp.serve]`
-- `serve()` runs `HookService.runBootstrap` during layer launch and `runServe` afterwards; `onTerminate` is declared on the plugin but is not invoked by `serve`: `[app.ts:MiraApp.serve]`
+- `serve()` runs `HookService.runBootstrap` during layer launch; `Layer.launch` never succeeds, so `runServe` and `onTerminate` are declared on the plugin but not invoked by `serve`: `[app.ts:MiraApp.serve]`
 
 ## Side Effects
 
@@ -71,7 +71,7 @@ Turns collection definitions plus platform/database/storage presets into a runna
 - Timers/background fibers: cron service starts every configured cron as a scoped fiber: `[app.ts:MiraApp.buildServiceLayer]`
 - Configuration/environment: port and bound-port callback come from `AppConfig`: `[app.ts:MiraApp.buildLayer]`
 - Logging: warning when the permissive default CORS config is active: `[app.ts:MiraApp.serve]`
-- Lifecycle callbacks: plugin `onBootstrap`/`onServe` effects execute on start: `[app.ts:MiraApp.serve]`
+- Lifecycle callbacks: plugin `onBootstrap` effects execute on start; `onServe`/`onTerminate` are declared but not invoked: `[app.ts:MiraApp.serve]`
 - Plugin side effects: plugin `layer` and `routes` are merged into the app graph/router: `[plugin.ts:MiraPlugin]`
 
 ## Mutation batching

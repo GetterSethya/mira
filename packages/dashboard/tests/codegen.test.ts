@@ -3,11 +3,7 @@ import { describe, expect, it } from "vitest"
 
 import type { ApiCollectionSchema } from "@gettersethya/mira-client"
 
-import {
-  generateCollectionFile,
-  pascalCase,
-  resolveSubset
-} from "../src/codegen.js"
+import { generateCollectionFile, pascalCase, resolveSubset } from "@/codegen.js"
 
 const users: ApiCollectionSchema = {
   name: "users",
@@ -47,7 +43,8 @@ const posts: ApiCollectionSchema = {
 const publishedPosts: ApiCollectionSchema = {
   name: "published_posts",
   kind: "view",
-  viewQuery: "SELECT p.id, CAST(ROW_NUMBER() OVER (ORDER BY p.seqId) AS INTEGER) AS seqId, p.title FROM posts p WHERE p.published = 1",
+  viewQuery:
+    "SELECT p.id, CAST(ROW_NUMBER() OVER (ORDER BY p.seqId) AS INTEGER) AS seqId, p.title FROM posts p WHERE p.published = 1",
   fields: {
     id: { type: "string", "x-view-only": true },
     seqId: { type: "integer", "x-kind": "seqId", "x-view-only": true },
@@ -73,10 +70,7 @@ const accounts: ApiCollectionSchema = {
 
 const all = [users, posts, publishedPosts]
 
-function generate(
-  schemas: ReadonlyArray<ApiCollectionSchema>,
-  include?: ReadonlyArray<string>
-): string {
+function generate(schemas: ReadonlyArray<ApiCollectionSchema>, include?: ReadonlyArray<string>) {
   return generateCollectionFile(
     schemas,
     include === undefined
@@ -159,17 +153,13 @@ describe("generateCollectionFile", () => {
     expect(output).toContain("body: Field.text({ required: false }),")
     expect(output).toContain("published: Field.boolean({ default: false, required: false }),")
     expect(output).toContain("authorId: Field.relation(Users),")
-    expect(output).toContain(
-      'cover: Field.file({ maxSize: 5242880, mimeTypes: ["image/*"], required: false }),'
-    )
+    expect(output).toContain('cover: Field.file({ maxSize: 5242880, mimeTypes: ["image/*"], required: false }),')
     expect(output).toContain(
       'role: Field.literalText({ literal: ["admin", "member"] as const, default: "member", required: false }),'
     )
     expect(output).toContain("nickname: Field.text({ hidden: true, required: false }),")
     expect(output).toContain('ownerId: Field.relation(Users, { field: "email" }),')
-    expect(output).toContain(
-      "quota: Field.integer({ minimum: 0, maximum: 100, default: 10, required: false }),"
-    )
+    expect(output).toContain("quota: Field.integer({ minimum: 0, maximum: 100, default: 10, required: false }),")
     expect(output).toContain('export type PostsCreate = CreateInput<typeof Posts.fields, "base">')
     expect(output).toContain('export type PostsUpdate = UpdateInput<typeof Posts.fields, "base">')
   })
@@ -262,9 +252,7 @@ describe("generateCollectionFile", () => {
     const map = output.slice(output.indexOf("export const collections"))
 
     // Input order was view-first, but posts pulls users ahead of it.
-    expect(map.indexOf('"published_posts": PublishedPosts,')).toBeLessThan(
-      map.indexOf('"users": Users,')
-    )
+    expect(map.indexOf('"published_posts": PublishedPosts,')).toBeLessThan(map.indexOf('"users": Users,'))
     expect(map.indexOf('"users": Users,')).toBeLessThan(map.indexOf('"posts": Posts,'))
   })
 

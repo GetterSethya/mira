@@ -1,7 +1,11 @@
 {
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
   "plugins": ["import", "typescript", "unicorn", "oxc"],
   "jsPlugins": ["./tooling/oxlint-plugin-mira.ts"],
+  "options": {
+    "typeAware": true
+  },
   "categories": {
     "correctness": "error"
   },
@@ -62,7 +66,16 @@
     "typescript/no-empty-object-type": "off",
     "typescript/no-namespace": "off",
     "typescript/no-unsafe-function-type": "off",
-    "typescript/no-wrapper-object-types": "off"
+    "typescript/no-wrapper-object-types": "off",
+    "typescript/no-base-to-string": "warn",
+    "typescript/unbound-method": "warn",
+    "typescript/no-redundant-type-constituents": "warn",
+    "typescript/no-misused-spread": "warn",
+    "typescript/no-meaningless-void-operator": "warn",
+    "typescript/no-duplicate-type-constituents": "warn",
+    "effecttsgo/any-unknown-in-error-context": "warn",
+    "effecttsgo/unsafe-effect-type-assertion": "warn",
+    "effecttsgo/unstable-api-usage": "off"
   },
   "env": {
     "builtin": true
@@ -72,6 +85,7 @@
     "**/node_modules/**",
     "**/coverage/**",
     "**/*.tsbuildinfo",
+    "**/.svelte-kit/**",
     "packages/dashboard/ui/**"
   ]
 }

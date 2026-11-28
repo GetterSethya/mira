@@ -48,6 +48,16 @@ const BATCH_MUTATION_ENABLED = process.env.BENCH_CREATE_BATCH !== "off"
 const BATCH_MUTATION_WINDOW_MS = Number(process.env.BENCH_CREATE_BATCH_WINDOW_MS ?? "0")
 const BATCH_MUTATION_MAX = Number(process.env.BENCH_CREATE_BATCH_MAX ?? "100")
 const ListBodySchema = Schema.Struct({ items: Schema.Array(Schema.Unknown) })
+const PostWriteSchema = Schema.Struct({ title: Schema.String, body: Schema.String })
+const ListFilterSchema = Schema.Struct({
+  op: Schema.Literals(["neq", "eq"]),
+  field: Schema.String,
+  value: Schema.String
+})
+
+const encodePostWrite = Schema.encodeSync(Schema.fromJsonString(PostWriteSchema))
+const encodeListFilter = Schema.encodeSync(Schema.fromJsonString(ListFilterSchema))
+const encodeBenchmarkOutput = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }))
 
 if (!Number.isInteger(RUNS) || RUNS < 1) {
   throw new Error("BENCH_RUNS must be a positive integer")
@@ -161,10 +171,7 @@ const startServer = (platform: PlatformName, port: number, dbPath: string, uploa
     platform === "node"
       ? {
           executable: process.execPath,
-          args:
-            NODE_LOADER === "native"
-              ? ["src/server.ts"]
-              : ["--import", "tsx", "src/server.ts"]
+          args: NODE_LOADER === "native" ? ["src/server.ts"] : ["--import", "tsx", "src/server.ts"]
         }
       : { executable: "bun", args: ["run", "src/server.ts"] }
 
@@ -207,7 +214,7 @@ const runOnce = async (platform: PlatformName): Promise<PlatformRun> => {
       fetch(`${baseUrl}/api/collections/posts`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: `Seed ${index}`, body: BODY })
+        body: encodePostWrite({ title: `Seed ${index}`, body: BODY })
       })
     )
 
@@ -215,14 +222,12 @@ const runOnce = async (platform: PlatformName): Promise<PlatformRun> => {
       fetch(`${baseUrl}/api/collections/posts`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: `Post ${index}`, body: BODY })
+        body: encodePostWrite({ title: `Post ${index}`, body: BODY })
       })
     )
 
     const listUrl = (prefix: string, index: number) => {
-      const filter = encodeURIComponent(
-        JSON.stringify({ op: "neq", field: "title", value: `${prefix}-${index}` })
-      )
+      const filter = encodeURIComponent(encodeListFilter({ op: "neq", field: "title", value: `${prefix}-${index}` }))
       return `${baseUrl}/api/collections/posts?limit=30&filter=${filter}`
     }
 
@@ -234,7 +239,7 @@ const runOnce = async (platform: PlatformName): Promise<PlatformRun> => {
 
     const positive = await fetch(
       `${baseUrl}/api/collections/posts?limit=30&filter=${encodeURIComponent(
-        JSON.stringify({ op: "eq", field: "title", value: "Post 0" })
+        encodeListFilter({ op: "eq", field: "title", value: "Post 0" })
       )}`
     )
     const positiveBody = Schema.decodeUnknownSync(ListBodySchema)(await positive.json())
@@ -244,7 +249,7 @@ const runOnce = async (platform: PlatformName): Promise<PlatformRun> => {
 
     const negative = await fetch(
       `${baseUrl}/api/collections/posts?limit=30&filter=${encodeURIComponent(
-        JSON.stringify({ op: "eq", field: "title", value: "__absent__" })
+        encodeListFilter({ op: "eq", field: "title", value: "__absent__" })
       )}`
     )
     const negativeBody = Schema.decodeUnknownSync(ListBodySchema)(await negative.json())
@@ -254,9 +259,7 @@ const runOnce = async (platform: PlatformName): Promise<PlatformRun> => {
 
     await runLoad(100, 10, (index) => fetch(listUrl("warm", index)))
 
-    const list = await runLoad(LIST_REQUESTS, CONCURRENCY, (index) =>
-      fetch(listUrl("cache-miss", index))
-    )
+    const list = await runLoad(LIST_REQUESTS, CONCURRENCY, (index) => fetch(listUrl("cache-miss", index)))
 
     // Cache-hit path: one stable URL, warmed after the write phase so the
     // create invalidation cannot hide the cache metric.
@@ -379,10 +382,9 @@ const data = {
   }
 }
 
-const outputPath =
-  process.env.BENCH_OUTPUT ?? join(repoRoot, "apps/landing/src/lib/benchmarks.json")
+const outputPath = process.env.BENCH_OUTPUT ?? join(repoRoot, "apps/landing/src/lib/benchmarks.json")
 const tempPath = `${outputPath}.tmp`
-writeFileSync(tempPath, `${JSON.stringify(data, null, 2)}\n`)
+writeFileSync(tempPath, `${encodeBenchmarkOutput(data)}\n`)
 renameSync(tempPath, outputPath)
 
 console.log(`Wrote ${outputPath}`)

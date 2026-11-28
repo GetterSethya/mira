@@ -1857,6 +1857,10 @@ pnpm -r typecheck
 # Run all tests across all packages
 pnpm -r test
 
+# Lint the whole workspace with Oxlint in type-aware mode
+# (@effect/tsgo adds the Effect diagnostics and rules)
+pnpm lint
+
 # Rebuild the dashboard SPA bundle (not part of `pnpm build`)
 pnpm build:ui
 
@@ -1870,7 +1874,7 @@ pnpm --filter @gettersethya/mira build
 pnpm --filter @gettersethya/mira-tanstack-adapter build
 ```
 
-> Build order matters: `@gettersethya/mira-collection` and `@gettersethya/mira-client` must be built before running typecheck or tests in `@gettersethya/mira` or `@gettersethya/mira-tanstack-adapter`.
+> Build order matters: `@gettersethya/mira-collection` and `@gettersethya/mira-client` must be built before running `pnpm lint`, typecheck, or tests in `@gettersethya/mira` or `@gettersethya/mira-tanstack-adapter`.
 
 ---
 

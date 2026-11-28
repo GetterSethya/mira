@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/http"
-import { CronService, CronNotFoundError } from "@gettersethya/mira"
+import { CronService, type CronNotFoundError } from "@gettersethya/mira"
 
 export const cronsRoute = Effect.gen(function* () {
   const cronService = yield* CronService

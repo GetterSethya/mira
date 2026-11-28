@@ -1,10 +1,7 @@
-import {
-  BunCryptoLayer,
-  BunSqliteDatabase,
-  makeTelemetryLayer,
-  TelemetryStore
-} from "@gettersethya/mira/bun"
-import { Effect, Layer } from "effect"
+import { BunCryptoLayer, BunSqliteDatabase, makeTelemetryLayer, TelemetryStore } from "@gettersethya/mira/bun"
+import { Effect, Layer, Schema } from "effect"
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const LOG_MESSAGE = "packed-bun-telemetry-log"
 const SPAN_NAME = "packed-bun-telemetry-span"
@@ -14,10 +11,7 @@ const telemetryLayer = makeTelemetryLayer({
     mode: "dedicated",
     database: BunSqliteDatabase({ filename: "packed-telemetry.db" })
   }
-}).pipe(
-  Layer.provide(BunSqliteDatabase({ filename: "packed-app.db" }).layer),
-  Layer.provide(BunCryptoLayer)
-)
+}).pipe(Layer.provide(BunSqliteDatabase({ filename: "packed-app.db" }).layer), Layer.provide(BunCryptoLayer))
 
 const program = Effect.gen(function* () {
   yield* Effect.logInfo(LOG_MESSAGE)
@@ -49,10 +43,8 @@ const program = Effect.gen(function* () {
 })
 
 try {
-  const result = await Effect.runPromise(
-    program.pipe(Effect.provide(telemetryLayer), Effect.scoped)
-  )
-  console.log(JSON.stringify({ ok: true, ...result }))
+  const result = await Effect.runPromise(program.pipe(Effect.provide(telemetryLayer), Effect.scoped))
+  console.log(encodeJson({ ok: true, ...result }))
 } catch (error) {
   console.error(error)
   process.exit(1)

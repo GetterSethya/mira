@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SMTPServer } from "smtp-server"
-import { Context, Effect, Layer, Result, Stream } from "effect"
+import { Context, Effect, Layer, Result, Schema, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import {
   AppConfig,
@@ -40,7 +40,42 @@ type BunImagePipeline = {
 
 type BunImageConstructor = new (input: Uint8Array) => BunImagePipeline
 
-const BunImage = (Bun as unknown as { Image?: BunImageConstructor }).Image
+const isBunImageConstructor = (value: unknown): value is BunImageConstructor => typeof value === "function"
+
+const bunImage = (): BunImageConstructor | undefined => {
+  const bun: unknown = Reflect.get(globalThis, "Bun")
+  if (typeof bun !== "object" || bun === null) return undefined
+  const Image: unknown = Reflect.get(bun, "Image")
+  return isBunImageConstructor(Image) ? Image : undefined
+}
+
+const BunImage = bunImage()
+
+const EmptyCollectionSchema = Schema.fromJsonString(
+  Schema.Struct({ items: Schema.optional(Schema.Array(Schema.Unknown)) })
+)
+const decodeEmptyCollection = Schema.decodeUnknownSync(EmptyCollectionSchema)
+const encodeEmptyCollection = Schema.encodeSync(EmptyCollectionSchema)
+
+const PostListSchema = Schema.fromJsonString(
+  Schema.Struct({
+    items: Schema.optional(Schema.Array(Schema.Struct({ title: Schema.optional(Schema.String) })))
+  })
+)
+const decodePostList = Schema.decodeUnknownSync(PostListSchema)
+const encodePostList = Schema.encodeSync(PostListSchema)
+
+const StorageStateSchema = Schema.fromJsonString(
+  Schema.Struct({
+    key: Schema.String,
+    exists: Schema.Boolean,
+    listedKeys: Schema.Array(Schema.String)
+  })
+)
+const encodeStorageState = Schema.encodeSync(StorageStateSchema)
+
+const CreatePostSchema = Schema.fromJsonString(Schema.Struct({ title: Schema.String }))
+const encodeCreatePost = Schema.encodeSync(CreatePostSchema)
 
 const startedSmtp = await new Promise<{
   readonly port: number
@@ -63,7 +98,11 @@ const startedSmtp = await new Promise<{
   })
   server.on("error", reject)
   server.listen(0, "127.0.0.1", () => {
-    const address = (server as unknown as { server: { address(): { port: number } } }).server.address()
+    const address = server.server.address()
+    if (address === null || typeof address === "string") {
+      reject(new Error("SMTP server did not bind a TCP address"))
+      return
+    }
     resolve({
       port: address.port,
       received,
@@ -123,6 +162,13 @@ const request = (path: string, init?: RequestInit) =>
     try: () => fetch(`http://127.0.0.1:${requestPort}${path}`, init),
     catch: (error) => new Error(`fetch ${path} failed: ${String(error)}`)
   })
+
+const closeEffect = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> => {
+  // The built app layer closes its requirements at runtime, but the plugin
+  // graph widens R to any, so this helper restores the closed run type.
+  // oxlint-disable-next-line typescript/consistent-type-assertions
+  return effect as Effect.Effect<A, E, never>
+}
 
 const program = Effect.gen(function* () {
   const context = yield* Layer.build(app.buildLayer({ port, maxPortAttempts: 5 }))
@@ -262,12 +308,8 @@ const program = Effect.gen(function* () {
   const exists = yield* storage.exists(key)
   const listedKeys = yield* storage.list("smoke/")
   yield* storage.delete(key)
-  if (
-    new TextDecoder().decode(stored) !== "hello storage" ||
-    !exists ||
-    !listedKeys.includes(key)
-  ) {
-    throw new Error(`storage round-trip failed: ${JSON.stringify({ key, exists, listedKeys })}`)
+  if (new TextDecoder().decode(stored) !== "hello storage" || !exists || !listedKeys.includes(key)) {
+    throw new Error(`storage round-trip failed: ${encodeStorageState({ key, exists, listedKeys })}`)
   }
 
   const limiter = Context.get(context, RateLimiter)
@@ -284,17 +326,15 @@ const program = Effect.gen(function* () {
 
   const empty = yield* request("/api/collections/posts")
   if (!empty.ok) throw new Error(`GET /api/collections/posts returned ${empty.status}`)
-  const emptyBody = (yield* Effect.tryPromise(() => empty.json())) as {
-    readonly items?: ReadonlyArray<unknown>
-  }
+  const emptyBody = decodeEmptyCollection(yield* Effect.tryPromise(() => empty.text()))
   if (emptyBody.items?.length !== 0) {
-    throw new Error(`expected an empty collection, got ${JSON.stringify(emptyBody)}`)
+    throw new Error(`expected an empty collection, got ${encodeEmptyCollection(emptyBody)}`)
   }
 
   const created = yield* request("/api/collections/posts", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: "hello bun" })
+    body: encodeCreatePost({ title: "hello bun" })
   })
   if (created.status !== 201) {
     throw new Error(`POST /api/collections/posts returned ${created.status}`)
@@ -302,11 +342,9 @@ const program = Effect.gen(function* () {
 
   const listed = yield* request("/api/collections/posts")
   if (!listed.ok) throw new Error(`GET /api/collections/posts returned ${listed.status}`)
-  const body = (yield* Effect.tryPromise(() => listed.json())) as {
-    readonly items?: ReadonlyArray<{ readonly title?: string }>
-  }
+  const body = decodePostList(yield* Effect.tryPromise(() => listed.text()))
   if (body.items?.length !== 1 || body.items[0]?.title !== "hello bun") {
-    throw new Error(`unexpected list response: ${JSON.stringify(body)}`)
+    throw new Error(`unexpected list response: ${encodePostList(body)}`)
   }
 
   const dashboard = yield* request("/_dashboard/api/bootstrap-status")
@@ -352,42 +390,49 @@ const program = Effect.gen(function* () {
 }).pipe(
   Effect.scoped,
   Effect.ensuring(
-    Effect.sync(() => {
-      blocker.stop(true)
-      rmSync(dir, { recursive: true, force: true })
+    Effect.gen(function* () {
+      yield* Effect.promise(() => blocker.stop(true))
+      yield* Effect.sync(() => rmSync(dir, { recursive: true, force: true }))
     })
   ),
   Effect.ensuring(Effect.promise(() => startedSmtp.close()))
 )
 
-type SmokeResult = {
-  readonly http: { readonly listed: number; readonly created: number; readonly dashboard: number }
-  readonly thumbnailBytes: number
-  readonly native: {
-    readonly password: string
-    readonly uuidVersion: string
-    readonly hmac: string
-    readonly thumbnail: {
-      readonly contain: string
-      readonly fill: string
-      readonly cover: string
-      readonly strictNative: boolean
-      readonly pixelGuard: boolean
-    }
-  }
-  readonly emailReceived: number
-  readonly storage: { readonly key: string; readonly listed: number }
-  readonly sqlite: {
-    readonly mainJournal: string | undefined
-  }
-  readonly telemetry: { readonly logs: number; readonly spans: number }
-  readonly port: number
-  readonly rateLimit: { readonly first: boolean; readonly second: string | undefined }
+const SmokeResultFields = {
+  http: Schema.Struct({ listed: Schema.Finite, created: Schema.Finite, dashboard: Schema.Finite }),
+  thumbnailBytes: Schema.Finite,
+  native: Schema.Struct({
+    password: Schema.String,
+    uuidVersion: Schema.String,
+    hmac: Schema.String,
+    thumbnail: Schema.Struct({
+      contain: Schema.String,
+      fill: Schema.String,
+      cover: Schema.String,
+      strictNative: Schema.Boolean,
+      pixelGuard: Schema.Boolean
+    })
+  }),
+  emailReceived: Schema.Finite,
+  storage: Schema.Struct({ key: Schema.String, listed: Schema.Finite }),
+  sqlite: Schema.Struct({ mainJournal: Schema.UndefinedOr(Schema.String) }),
+  telemetry: Schema.Struct({ logs: Schema.Finite, spans: Schema.Finite }),
+  port: Schema.Finite,
+  rateLimit: Schema.Struct({ first: Schema.Boolean, second: Schema.UndefinedOr(Schema.String) })
 }
 
-await Effect.runPromise(program as Effect.Effect<SmokeResult, unknown, never>).then(
+const encodeSmokeResult = Schema.encodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      ok: Schema.Boolean,
+      ...SmokeResultFields
+    })
+  )
+)
+
+await Effect.runPromise(closeEffect(program)).then(
   (result) => {
-    console.log(JSON.stringify({ ok: true, ...result }, null, 2))
+    console.log(encodeSmokeResult({ ok: true, ...result }))
   },
   (error) => {
     console.error(error)

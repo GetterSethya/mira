@@ -23,7 +23,7 @@
     "build": "node scripts/clean-dist.ts && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/check-exports.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "oxlint -c ../../.oxlintrc.json src tests"
+    "lint": "effect-tsgo oxlint -c ../../.oxlintrc.json src tests"
   },
   "dependencies": {
     "@gettersethya/mira-collection": "workspace:*"

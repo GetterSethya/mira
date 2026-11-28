@@ -149,6 +149,14 @@ published by CI.
 
 ### Changed
 
+- **The workspace linter is type-aware and Effect-aware.** `pnpm lint` now runs
+  `effect-tsgo oxlint` over the whole repository with the `@effect/tsgo`
+  recommended preset, so Effect diagnostics and the type-aware TypeScript rules
+  run in CI. `effecttsgo/unstable-api-usage` is disabled because Mira
+  intentionally builds on Effect's unstable SQL APIs; explicit rule severities
+  keep the existing house rules as errors while the newly surfaced type-aware
+  rules report as warnings. `tsconfig` path mappings no longer use `baseUrl`,
+  which the type-aware checker rejects.
 - **`StoreSqlCapabilities` gained required members.** Custom dialects must now
   supply `keyColumnType`, `textColumnType`, `bucketColumnType`,
   `bucketMaxLength`, `createIndexIfNotExists`, `isIgnorableBootstrapError`,

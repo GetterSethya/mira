@@ -35,10 +35,10 @@
   --success: #15803d;
   --danger: #b91c1c;
 
-  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono',
-    'JetBrains Mono', Menlo, Consolas, monospace;
-  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
-    sans-serif;
+  --font-mono:
+    "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    monospace;
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
   --text-2xs: 11px;
   --text-xs: 12px;
@@ -76,7 +76,7 @@
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
-html[data-theme='dark'] {
+html[data-theme="dark"] {
   color-scheme: dark;
 
   --bg: #08080a;
@@ -121,7 +121,7 @@ html[data-theme='dark'] {
   box-sizing: border-box;
 }
 
-[hidden]:not([hidden='until-found' i]) {
+[hidden]:not([hidden="until-found" i]) {
   display: none !important;
 }
 
@@ -137,7 +137,9 @@ html {
 .benchmarks,
 .footer,
 .notice {
-  font-feature-settings: 'zero' 0, 'ss09' 1;
+  font-feature-settings:
+    "zero" 0,
+    "ss09" 1;
 }
 
 body {
@@ -303,13 +305,13 @@ button {
 
 /* Scroll-aware edge fade, adapted from shadcn scroll-fade. */
 @property --scroll-fade-t {
-  syntax: '<length-percentage>';
+  syntax: "<length-percentage>";
   inherits: false;
   initial-value: 0px;
 }
 
 @property --scroll-fade-b {
-  syntax: '<length-percentage>';
+  syntax: "<length-percentage>";
   inherits: false;
   initial-value: 0px;
 }
@@ -354,9 +356,7 @@ button {
     animation:
       scroll-fade-reveal-t 1ms ease-in-out,
       scroll-fade-reveal-b 1ms ease-in-out;
-    animation-timeline:
-      scroll(self y),
-      scroll(self y);
+    animation-timeline: scroll(self y), scroll(self y);
     animation-range:
       0 var(--scroll-fade-reveal),
       calc(100% - var(--scroll-fade-reveal)) 100%;

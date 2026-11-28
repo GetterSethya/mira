@@ -13,8 +13,8 @@ const PACKAGE_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..")
 const UI_SRC = join(PACKAGE_ROOT, "ui", "src")
 const SOURCE_EXTENSIONS = [".svelte", ".ts", ".tsx", ".js"]
 
-function sourceFiles(dir: string): string[] {
-  const files: string[] = []
+function sourceFiles(dir: string): Array<string> {
+  const files: Array<string> = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name)
     if (entry.isDirectory()) {
@@ -26,7 +26,7 @@ function sourceFiles(dir: string): string[] {
   return files
 }
 
-function filesMatching(pattern: RegExp): string[] {
+function filesMatching(pattern: RegExp): Array<string> {
   return sourceFiles(UI_SRC)
     .filter((file) => pattern.test(readFileSync(file, "utf8")))
     .map((file) => relative(UI_SRC, file))

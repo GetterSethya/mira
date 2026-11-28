@@ -226,7 +226,9 @@ describe("file handling security audit (regression: expects secure behaviour)", 
         const r = yield* get(`/api/files/posts/${rec.id}/${enc}`)
         const body = yield* r.text.pipe(Effect.orElseSucceed(() => "<no-body>"))
         observed.push({ enc, status: r.status, ct: r.headers["content-type"], body })
-        console.log(`[H3][evidence] enc=${enc} status=${r.status} content-type=${r.headers["content-type"]} body=${toJsonText(body.slice(0, 80))}`)
+        console.log(
+          `[H3][evidence] enc=${enc} status=${r.status} content-type=${r.headers["content-type"]} body=${toJsonText(body.slice(0, 80))}`
+        )
       }
 
       const leaked = observed.filter((o) => o.body.includes("SECRET-VICTIM-CONTENT"))
@@ -301,14 +303,10 @@ describe("file handling security audit (regression: expects secure behaviour)", 
       const listedCount = Result.isSuccess(listedResult) ? listedResult.success.length : 0
       console.log(
         "[H5][evidence] direct list('../evil-listed/') =>",
-        Result.isSuccess(listedResult) ? toJsonText(listedResult.success) : `failure: ${listedResult.failure}`
+        Result.isSuccess(listedResult) ? toJsonText(listedResult.success) : `failure: ${String(listedResult.failure)}`
       )
 
-      assert.strictEqual(
-        listedCount,
-        0,
-        `list('../evil-listed/') enumerated ${listedCount} out-of-root file(s)`
-      )
+      assert.strictEqual(listedCount, 0, `list('../evil-listed/') enumerated ${listedCount} out-of-root file(s)`)
 
       // ---- end-to-end: delete path's thumbnail cleanup ----
       yield* fsWrite(`${TMP}/evil-amp/x.txt`, "X")

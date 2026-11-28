@@ -2,12 +2,19 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { Schema } from "effect"
+
+const PackageJsonSchema = Schema.fromJsonString(
+  Schema.Struct({
+    name: Schema.optional(Schema.String),
+    exports: Schema.optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown)))
+  })
+)
+const decodePackageJson = Schema.decodeUnknownSync(PackageJsonSchema)
+
 const here = dirname(fileURLToPath(import.meta.url))
 const pkgDir = resolve(here, "..")
-const pkg: {
-  name?: unknown
-  exports?: Record<string, Record<string, unknown>>
-} = JSON.parse(readFileSync(resolve(pkgDir, "package.json"), "utf8"))
+const pkg = decodePackageJson(readFileSync(resolve(pkgDir, "package.json"), "utf8"))
 
 const missing: Array<string> = []
 for (const [subpath, conditions] of Object.entries(pkg.exports ?? {})) {

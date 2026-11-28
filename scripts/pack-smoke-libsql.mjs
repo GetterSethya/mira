@@ -3,8 +3,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { LibsqlDatabase } from "@gettersethya/mira"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const dir = mkdtempSync(join(tmpdir(), "mira-pack-libsql-"))
 const filename = join(dir, "libsql.db").replaceAll("\\", "/")
@@ -16,7 +18,7 @@ const program = Effect.gen(function* () {
   yield* sql`INSERT INTO smoke (name) VALUES (${"packed"})`
   const rows = yield* sql`SELECT name FROM smoke`
   if (rows.length !== 1 || rows[0]?.name !== "packed") {
-    throw new Error(`unexpected libSQL rows: ${JSON.stringify(rows)}`)
+    throw new Error(`unexpected libSQL rows: ${encodeJson(rows)}`)
   }
 })
 

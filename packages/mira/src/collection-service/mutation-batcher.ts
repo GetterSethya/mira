@@ -1281,7 +1281,7 @@ export function makeMutationBatcherLayer(
           yield* lifecycle.withPermit(closeAndFailQueue(snapshot.consecutiveDefects))
           // End the flusher instead of hot-looping for the life of the
           // process. New submissions already fail fast with Closed.
-          yield* Effect.interrupt
+          return yield* Effect.interrupt
         }).pipe(
           // A failure while degrading must still close the batcher and end the
           // loop; otherwise every later create waits for `submitTimeoutMs`.
@@ -1297,7 +1297,7 @@ export function makeMutationBatcherLayer(
                   )
                 )
                 .pipe(Effect.catchCause(() => Effect.void))
-              yield* Effect.interrupt
+              return yield* Effect.interrupt
             })
           )
         )

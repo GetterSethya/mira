@@ -1,15 +1,15 @@
-import { AuthCollection, BaseCollection, createMiraClient,Field } from "@gettersethya/mira-client"
+import { AuthCollection, BaseCollection, createMiraClient, Field } from "@gettersethya/mira-client"
 import { describe, expect, it } from "vitest"
 
-import type { QueryKey } from "../src/index.js"
-import { ActionKeys, collectionAdapter } from "../src/index.js"
+import type { QueryKey } from "@gettersethya/mira-tanstack-adapter"
+import { ActionKeys, collectionAdapter } from "@gettersethya/mira-tanstack-adapter"
 
 const Todo = BaseCollection.define("todos", {
   title: Field.text(),
-  done: Field.boolean({ default: false }),
+  done: Field.boolean({ default: false })
 })
 const User = AuthCollection.define("users", {
-  name: Field.text(),
+  name: Field.text()
 })
 
 // Type-level: the adapter must be accepted by `withCollections(map, { adapter })`
@@ -56,7 +56,11 @@ describe("withCollections({ adapter })", () => {
 
   it("invalidateAll targets the collection name prefix", () => {
     const calls: Array<{ queryKey: QueryKey }> = []
-    Mira.Todo.invalidateAll({ invalidateQueries: (opts) => { calls.push(opts) } })
+    Mira.Todo.invalidateAll({
+      invalidateQueries: (opts) => {
+        calls.push(opts)
+      }
+    })
     expect(calls[0]).toEqual({ queryKey: ["todos"] })
   })
 

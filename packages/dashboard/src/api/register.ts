@@ -1,8 +1,8 @@
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { CollectionService } from "@gettersethya/mira"
-import { getRegisterToken } from "../superadmin.js"
-import { SuperAdminCollection } from "../superadmin.js"
+import { getRegisterToken } from "@/superadmin.js"
+import { SuperAdminCollection } from "@/superadmin.js"
 
 const RegisterBodySchema = Schema.Struct({
   email: Schema.String,
@@ -24,7 +24,7 @@ export const registerRoute = Effect.gen(function* () {
 
   const bootstrapped = yield* svc
     .list(SuperAdminCollection, null, 1, adminCtx)
-    .pipe(Effect.orElseSucceed(() => ({ items: [] as ReadonlyArray<Record<string, unknown>> })))
+    .pipe(Effect.orElseSucceed(() => ({ items: [], nextCursor: null })))
 
   if (bootstrapped.items.length > 0) {
     return HttpServerResponse.jsonUnsafe({ error: "already_bootstrapped" }, { status: 403 })

@@ -140,8 +140,10 @@ function check(condition: boolean, msg: string): void {
   if (!condition) throw new Error(msg)
 }
 
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+
 function formatError(e: unknown): string {
-  if (e instanceof MiraError) return `MiraError(${e.status}): ${JSON.stringify(e.body)}`
+  if (e instanceof MiraError) return `MiraError(${e.status}): ${encodeJson(e.body)}`
   if (e instanceof Error) return e.message
   return String(e)
 }
@@ -177,7 +179,7 @@ async function waitForServer(): Promise<void> {
         try: () => fetch(`${BASE}/api/collections/posts`).then(() => undefined),
         catch: (e) => new ServerNotReadyError({ cause: e })
       }),
-      Schedule.intersect(Schedule.recurs(49), Schedule.spaced("200 millis"))
+      Schedule.max([Schedule.recurs(49), Schedule.spaced("200 millis")])
     ).pipe(Effect.mapError((e) => new ServerNotReadyError({ cause: e })))
   )
 }
@@ -229,16 +231,18 @@ async function runTests(): Promise<void> {
 
   await test("authWithPassword wrong password → MiraError(403)", async () => {
     const c = createMiraClient(BASE, { type: "server" }).withCollections(collectionMap)
-    await expectMiraError(403, () =>
-      c.users.authWithPassword!().raw({ email: "alice@example.com", password: "wrongpassword" })
-    )
+    await expectMiraError(403, () => {
+      if (c.users.authWithPassword === undefined) throw new Error("expected authWithPassword on an auth collection")
+      return c.users.authWithPassword().raw({ email: "alice@example.com", password: "wrongpassword" })
+    })
   })
 
   await test("authWithPassword unknown user → MiraError(403)", async () => {
     const c = createMiraClient(BASE, { type: "server" }).withCollections(collectionMap)
-    await expectMiraError(403, () =>
-      c.users.authWithPassword!().raw({ email: "nobody@example.com", password: "anything" })
-    )
+    await expectMiraError(403, () => {
+      if (c.users.authWithPassword === undefined) throw new Error("expected authWithPassword on an auth collection")
+      return c.users.authWithPassword().raw({ email: "nobody@example.com", password: "anything" })
+    })
   })
 
   await test("auth.setToken() stores an arbitrary token value", async () => {
@@ -394,26 +398,28 @@ async function runTests(): Promise<void> {
   })
 
   await test("update own post → updated title in response", async () => {
-    if (newPostId === undefined) throw new Error("skipped: create test did not run")
-    const updated = await aliceMira.posts
-      .update()
-      .raw({ id: newPostId!, data: { title: "SDK Integration Test (edited)" } })
+    const postId = newPostId
+    if (postId === undefined) throw new Error("skipped: create test did not run")
+    const updated = await aliceMira.posts.update().raw({ id: postId, data: { title: "SDK Integration Test (edited)" } })
     check(updated.title === "SDK Integration Test (edited)", "expected updated title in response")
   })
 
   await test("update another user's post → MiraError(403)", async () => {
-    if (newPostId === undefined) throw new Error("skipped: create test did not run")
-    await expectMiraError(403, () => bobMira.posts.update().raw({ id: newPostId!, data: { title: "Bob Hacks" } }))
+    const postId = newPostId
+    if (postId === undefined) throw new Error("skipped: create test did not run")
+    await expectMiraError(403, () => bobMira.posts.update().raw({ id: postId, data: { title: "Bob Hacks" } }))
   })
 
   await test("delete another user's post → MiraError(403)", async () => {
-    if (newPostId === undefined) throw new Error("skipped: create test did not run")
-    await expectMiraError(403, () => bobMira.posts.delete().raw(newPostId!))
+    const postId = newPostId
+    if (postId === undefined) throw new Error("skipped: create test did not run")
+    await expectMiraError(403, () => bobMira.posts.delete().raw(postId))
   })
 
   await test("delete own post → resolves with no error", async () => {
-    if (newPostId === undefined) throw new Error("skipped: create test did not run")
-    await aliceMira.posts.delete().raw(newPostId!)
+    const postId = newPostId
+    if (postId === undefined) throw new Error("skipped: create test did not run")
+    await aliceMira.posts.delete().raw(postId)
   })
 
   await test("seeded posts are unchanged (delete was own post only)", async () => {
@@ -461,8 +467,9 @@ async function runTests(): Promise<void> {
   })
 
   await test("update own comment → updated body in response", async () => {
-    if (newCommentId === undefined) throw new Error("skipped: create test did not run")
-    const updated = await aliceMira.comments.update().raw({ id: newCommentId!, data: { body: "Updated body via SDK" } })
+    const commentId = newCommentId
+    if (commentId === undefined) throw new Error("skipped: create test did not run")
+    const updated = await aliceMira.comments.update().raw({ id: commentId, data: { body: "Updated body via SDK" } })
     check(updated.body === "Updated body via SDK", "expected updated body")
   })
 
@@ -477,8 +484,9 @@ async function runTests(): Promise<void> {
   })
 
   await test("delete own comment → resolves with no error", async () => {
-    if (newCommentId === undefined) throw new Error("skipped: create test did not run")
-    await aliceMira.comments.delete().raw(newCommentId!)
+    const commentId = newCommentId
+    if (commentId === undefined) throw new Error("skipped: create test did not run")
+    await aliceMira.comments.delete().raw(commentId)
   })
 
   // ── View collection ───────────────────────────────────────────────────────
@@ -714,7 +722,7 @@ async function runOrchestratorMode(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Entry point
+// Bootstrap
 // ---------------------------------------------------------------------------
 
 if (process.argv.includes("--server")) {

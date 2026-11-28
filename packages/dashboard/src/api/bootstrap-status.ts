@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { HttpServerResponse } from "effect/http"
 import { CollectionService } from "@gettersethya/mira"
-import { SuperAdminCollection } from "../superadmin.js"
+import { SuperAdminCollection } from "@/superadmin.js"
 
 export const bootstrapStatusRoute = Effect.gen(function* () {
   const svc = yield* CollectionService

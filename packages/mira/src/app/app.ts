@@ -476,8 +476,7 @@ export class MiraApp<R = never, Telemetry = never> {
         }
         const hookService = yield* HookService.pipe(Effect.provide(hookServiceLayer))
         const bootstrapLayer = Layer.effectDiscard(hookService.runBootstrap())
-        yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))
-        yield* hookService.runServe()
+        return yield* Layer.launch(bootstrapLayer.pipe(Layer.provideMerge(fullLayer)))
     })
 
     // The app graph closes its requirements and errors before runMain; the

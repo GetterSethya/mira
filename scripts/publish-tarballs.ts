@@ -1,5 +1,6 @@
 import { execFileSync, execSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -31,8 +32,10 @@ type PackageManifest = {
   readonly version: string
 }
 
+const requireFromScript = createRequire(import.meta.url)
+
 /** `npm` is `npm.cmd` on Windows, which must be invoked through a shell. */
-function quoteWindowsArg(arg: string): string {
+function quoteWindowsArg(arg: string) {
   return /[\s"]/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg
 }
 
@@ -54,7 +57,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readManifest(path: string): PackageManifest {
-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
+  const parsed: unknown = requireFromScript(path)
   if (!isRecord(parsed)) fail(`${path} is not a JSON object`)
 
   const name = parsed["name"]

@@ -1,15 +1,7 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync
-} from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -88,8 +80,7 @@ const BODY = "x".repeat(180)
 const titleIndexEnabled = process.env.AUDIT_INDEX_TITLE === "1"
 const cacheEnabled = process.env.BENCH_CACHE !== "off"
 const syncEnv = process.env.BENCH_SYNCHRONOUS
-const synchronous =
-  syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : "default"
+const synchronous = syncEnv === "FULL" || syncEnv === "NORMAL" || syncEnv === "OFF" ? syncEnv : "default"
 
 const MemorySchema = Schema.Struct({
   rss: Schema.Number,
@@ -98,6 +89,18 @@ const MemorySchema = Schema.Struct({
   external: Schema.Number,
   arrayBuffers: Schema.Number
 })
+
+const ListFilterSchema = Schema.Struct({
+  op: Schema.Literals(["neq", "eq"]),
+  field: Schema.String,
+  value: Schema.String
+})
+
+const CreatePostSchema = Schema.Struct({ title: Schema.String, body: Schema.String })
+
+const encodeListFilter = Schema.encodeSync(Schema.fromJsonString(ListFilterSchema))
+const encodeCreatePost = Schema.encodeSync(Schema.fromJsonString(CreatePostSchema))
+const encodeAuditOutput = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown, { space: 2 }))
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -171,10 +174,7 @@ const startServer = (
   const profileArgs = options.profile
     ? ["--cpu-prof", `--cpu-prof-dir=${outDir}`, `--cpu-prof-name=${options.profileName}`]
     : []
-  const args =
-    platform === "node"
-      ? [...profileArgs, "src/server.ts"]
-      : [...profileArgs, "run", "src/server.ts"]
+  const args = platform === "node" ? [...profileArgs, "src/server.ts"] : [...profileArgs, "run", "src/server.ts"]
   const child = spawn(platform === "node" ? process.execPath : "bun", args, {
     cwd: packageRoot,
     env: {
@@ -297,9 +297,7 @@ const prepareDatabase = async (platform: PlatformName, rows: number, dir: string
 }
 
 const listUrl = (baseUrl: string, prefix: string, index: number) => {
-  const filter = encodeURIComponent(
-    JSON.stringify({ op: "neq", field: "title", value: `${prefix}-${index}` })
-  )
+  const filter = encodeURIComponent(encodeListFilter({ op: "neq", field: "title", value: `${prefix}-${index}` }))
   return `${baseUrl}/api/collections/posts?limit=30&filter=${filter}`
 }
 
@@ -307,30 +305,23 @@ const listUrl = (baseUrl: string, prefix: string, index: number) => {
 // read the whole table for every request. `list-selective-fullscan` is the case
 // name that says so; `list-scan` is the older name for the same probe.
 const listHitUrl = (baseUrl: string) => {
-  const filter = encodeURIComponent(
-    JSON.stringify({ op: "neq", field: "title", value: "cache-hit" })
-  )
+  const filter = encodeURIComponent(encodeListFilter({ op: "neq", field: "title", value: "cache-hit" }))
   return `${baseUrl}/api/collections/posts?limit=30&filter=${filter}`
 }
 
 const scanUrl = (baseUrl: string, prefix: string, index: number) => {
-  const filter = encodeURIComponent(
-    JSON.stringify({ op: "eq", field: "title", value: `${prefix}-${index}` })
-  )
+  const filter = encodeURIComponent(encodeListFilter({ op: "eq", field: "title", value: `${prefix}-${index}` }))
   return `${baseUrl}/api/collections/posts?limit=30&filter=${filter}`
 }
 
 // A non-empty `expand` makes the cached service bypass the cache without
 // adding a join, because `__none__` is not a relation field.
 const listNoCacheUrl = (baseUrl: string, prefix: string, index: number) => {
-  const filter = encodeURIComponent(
-    JSON.stringify({ op: "neq", field: "title", value: `${prefix}-${index}` })
-  )
+  const filter = encodeURIComponent(encodeListFilter({ op: "neq", field: "title", value: `${prefix}-${index}` }))
   return `${baseUrl}/api/collections/posts?limit=30&filter=${filter}&expand=__none__`
 }
 
-const listNoFilterNoCacheUrl = (baseUrl: string) =>
-  `${baseUrl}/api/collections/posts?limit=30&expand=__none__`
+const listNoFilterNoCacheUrl = (baseUrl: string) => `${baseUrl}/api/collections/posts?limit=30&expand=__none__`
 
 const repoListUrl = (baseUrl: string, prefix: string, index: number) =>
   `${baseUrl}/__bench/repo-list?value=${encodeURIComponent(`${prefix}-${index}`)}`
@@ -338,12 +329,7 @@ const repoListUrl = (baseUrl: string, prefix: string, index: number) =>
 const repoScanUrl = (baseUrl: string, prefix: string, index: number) =>
   `${baseUrl}/__bench/repo-list?op=eq&value=${encodeURIComponent(`${prefix}-${index}`)}`
 
-const requestFor = (
-  scenario: Scenario,
-  baseUrl: string,
-  prefix: string,
-  index: number
-): Promise<Response> => {
+const requestFor = (scenario: Scenario, baseUrl: string, prefix: string, index: number): Promise<Response> => {
   switch (scenario) {
     case "list":
       return fetch(listUrl(baseUrl, prefix, index))
@@ -368,7 +354,7 @@ const requestFor = (
       return fetch(`${baseUrl}/api/collections/posts`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: `Post ${index}`, body: BODY })
+        body: encodeCreatePost({ title: `Post ${index}`, body: BODY })
       })
   }
 }
@@ -400,9 +386,7 @@ const runCase = async (testCase: AuditCase): Promise<CaseResult> => {
     if (testCase.requests > 0) {
       if (testCase.scenario !== "create") {
         const warmup = testCase.scenario === "ping" ? 1_000 : 100
-        await runLoad(warmup, 10, (index) =>
-          requestFor(testCase.scenario, baseUrl, "warm", index)
-        )
+        await runLoad(warmup, 10, (index) => requestFor(testCase.scenario, baseUrl, "warm", index))
       }
       load = await runLoad(testCase.requests, testCase.concurrency, (index) =>
         requestFor(testCase.scenario, baseUrl, "measured", index)
@@ -439,13 +423,61 @@ const profileCases = (platform: PlatformName): ReadonlyArray<AuditCase> => [
   { name: "startup", platform, scenario: "startup", rows: 0, concurrency: 1, requests: 0, profile: true },
   { name: "ping", platform, scenario: "ping", rows: 0, concurrency: 50, requests: 30_000, profile: true },
   { name: "list-small", platform, scenario: "list", rows: 550, concurrency: 50, requests: 4_000, profile: true },
-  { name: "list-nocache-small", platform, scenario: "list-nocache", rows: 550, concurrency: 50, requests: 4_000, profile: true },
-  { name: "list-nofilter-nocache-small", platform, scenario: "list-nofilter-nocache", rows: 550, concurrency: 50, requests: 4_000, profile: true },
+  {
+    name: "list-nocache-small",
+    platform,
+    scenario: "list-nocache",
+    rows: 550,
+    concurrency: 50,
+    requests: 4_000,
+    profile: true
+  },
+  {
+    name: "list-nofilter-nocache-small",
+    platform,
+    scenario: "list-nofilter-nocache",
+    rows: 550,
+    concurrency: 50,
+    requests: 4_000,
+    profile: true
+  },
   { name: "list-large", platform, scenario: "list", rows: 50_000, concurrency: 50, requests: 4_000, profile: true },
-  { name: "list-scan-large", platform, scenario: "list-scan", rows: 50_000, concurrency: 50, requests: 2_000, profile: true },
-  { name: "list-selective-fullscan-large", platform, scenario: "list-selective-fullscan", rows: 50_000, concurrency: 50, requests: 2_000, profile: true },
-  { name: "repo-list-small", platform, scenario: "repo-list", rows: 550, concurrency: 50, requests: 4_000, profile: true },
-  { name: "repo-list-large", platform, scenario: "repo-list", rows: 50_000, concurrency: 50, requests: 4_000, profile: true },
+  {
+    name: "list-scan-large",
+    platform,
+    scenario: "list-scan",
+    rows: 50_000,
+    concurrency: 50,
+    requests: 2_000,
+    profile: true
+  },
+  {
+    name: "list-selective-fullscan-large",
+    platform,
+    scenario: "list-selective-fullscan",
+    rows: 50_000,
+    concurrency: 50,
+    requests: 2_000,
+    profile: true
+  },
+  {
+    name: "repo-list-small",
+    platform,
+    scenario: "repo-list",
+    rows: 550,
+    concurrency: 50,
+    requests: 4_000,
+    profile: true
+  },
+  {
+    name: "repo-list-large",
+    platform,
+    scenario: "repo-list",
+    rows: 50_000,
+    concurrency: 50,
+    requests: 4_000,
+    profile: true
+  },
   { name: "create", platform, scenario: "create", rows: 0, concurrency: 50, requests: 4_000, profile: true }
 ]
 
@@ -568,19 +600,15 @@ mkdirSync(outDir, { recursive: true })
 const tempPath = `${outputPath}.tmp`
 writeFileSync(
   tempPath,
-  `${JSON.stringify(
-    {
-      mode,
-      method: {
-        titleIndex: titleIndexEnabled,
-        cache: cacheEnabled ? "enabled" : "disabled",
-        synchronous
-      },
-      results
+  `${encodeAuditOutput({
+    mode,
+    method: {
+      titleIndex: titleIndexEnabled,
+      cache: cacheEnabled ? "enabled" : "disabled",
+      synchronous
     },
-    null,
-    2
-  )}\n`
+    results
+  })}\n`
 )
 renameSync(tempPath, outputPath)
 console.log(`Wrote ${outputPath}`)

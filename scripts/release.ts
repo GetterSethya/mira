@@ -1,5 +1,7 @@
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs"
 import { execFileSync } from "node:child_process"
+import { createRequire } from "node:module"
+import { resolve } from "node:path"
 
 /**
  * Release helper for the Mira workspace.
@@ -25,6 +27,8 @@ const MANIFEST_PATHS = [
 const ALPHA_VERSION = /^(\d+)\.(\d+)\.(\d+)-alpha\.(\d+)$/
 const STABLE_VERSION = /^(\d+)\.(\d+)\.(\d+)$/
 
+const requireFromCwd = createRequire(resolve(process.cwd(), "package.json"))
+
 type Channel = "alpha" | "stable"
 
 type Manifest = {
@@ -44,7 +48,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readManifests(): ReadonlyArray<Manifest> {
   return MANIFEST_PATHS.map((path) => {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
+    const parsed: unknown = requireFromCwd(resolve(path))
     if (!isRecord(parsed)) fail(`${path} is not a JSON object`)
 
     const name = parsed["name"]
@@ -61,9 +65,7 @@ function synchronizedVersion(manifests: ReadonlyArray<Manifest>): string {
   const first = manifests.at(0) ?? fail("no package manifests configured")
   for (const manifest of manifests) {
     if (manifest.version !== first.version) {
-      fail(
-        `versions are out of sync: ${first.name}@${first.version} vs ${manifest.name}@${manifest.version}`
-      )
+      fail(`versions are out of sync: ${first.name}@${first.version} vs ${manifest.name}@${manifest.version}`)
     }
   }
   return first.version
@@ -164,16 +166,14 @@ function bumpAndTag(channel: Channel, dryRun: boolean): void {
   assertCleanTree()
 
   if (changelogReleaseNotes(next) === undefined) {
-    fail(
-      `CHANGELOG.md has no non-empty "## [${next}]" section; add release notes before tagging`
-    )
+    fail(`CHANGELOG.md has no non-empty "## [${next}]" section; add release notes before tagging`)
   }
 
   for (const manifest of manifests) {
-    const parsed: unknown = JSON.parse(readFileSync(manifest.path, "utf8"))
-    if (!isRecord(parsed)) fail(`${manifest.path} is not a JSON object`)
-    parsed["version"] = next
-    writeFileSync(manifest.path, `${JSON.stringify(parsed, null, 2)}\n`)
+    const source = readFileSync(manifest.path, "utf8")
+    const updated = source.replace(/"version"\s*:\s*"[^"]*"/, `"version": "${next}"`)
+    if (updated === source) fail(`${manifest.path} has no version field to update`)
+    writeFileSync(manifest.path, updated)
     console.log(`  ${manifest.name} -> ${next}`)
   }
 
