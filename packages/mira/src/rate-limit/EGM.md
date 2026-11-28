@@ -77,4 +77,3 @@ any future Redis/Postgres implementation. Email, HTTP, and auth code depend on
 - `prune` uses one derived-table statement on every dialect because MySQL rejects `LIMIT` directly inside an `IN` subquery.
 - SQLite/PostgreSQL keep the guarded `ON CONFLICT ... WHERE ... RETURNING` path. MySQL uses one transaction with `SELECT ... FOR UPDATE`, an explicit guard, and a write per bucket. A blocked bucket fails the transaction so every earlier write rolls back; the blocked counts are the locked pre-batch values.
 - Duplicate buckets share the in-memory map. A duplicate-key error from a concurrent insert restarts the transaction once; one retry follows the first lock failure.
-

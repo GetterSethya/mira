@@ -96,6 +96,7 @@ describe("mysql dialect", () => {
     expect(isMysqlDuplicateKey({ errno: 1062 })).toBe(true)
     expect(isMysqlDuplicateKey({ errno: 1061 })).toBe(false)
     expect(isMysqlIgnorableBootstrapError({ errno: 1050 })).toBe(true)
+    expect(isMysqlIgnorableBootstrapError({ errno: 1060 })).toBe(true)
     expect(isMysqlIgnorableBootstrapError({ errno: 1061 })).toBe(true)
     expect(isMysqlIgnorableBootstrapError({ errno: 1146 })).toBe(false)
     expect(isMysqlRetryable({ errno: 1205 })).toBe(true)

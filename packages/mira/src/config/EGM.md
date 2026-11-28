@@ -34,7 +34,7 @@ falls back to another port can report the real one.
 ## Side Effects
 
 - Emits `CREATE TABLE IF NOT EXISTS _config (...)` through the shared store bootstrap [config.ts:AppConfigLive]
-- Reads the whole `_config` table with `SqlSchema.findAll`, inserts missing seed rows with the dialect's insert-ignore clause (`ON CONFLICT DO NOTHING` or `INSERT IGNORE`/`ON DUPLICATE KEY UPDATE`), and re-reads after the inserts [config.ts:AppConfigLive]
+- Reads the whole `_config` table with `SqlSchema.findAll`, inserts missing seed rows with the dialect's insert-ignore clause (`ON CONFLICT DO NOTHING` or `ON DUPLICATE KEY UPDATE ... = ...`), and re-reads after the inserts [config.ts:AppConfigLive]
 - Emits `Effect.logInfo` when it generates and persists `jwt_secret` [config.ts:AppConfigLive]
 - Consumes the `CryptoService` dependency to generate the initial `jwt_secret` (OS-backed `node:crypto` behind the Node layer) [config.ts:AppConfigLive]
 - Mutates in-process `boundPort` / `boundUrl` state via `updateBoundPort` after a port fallback [config.ts:updateBoundPort]

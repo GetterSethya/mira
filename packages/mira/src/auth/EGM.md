@@ -45,4 +45,3 @@ there is no dual truth. The exact DDL was proved on MySQL 8.4.13 and MariaDB
   MySQL they run one bound UPDATE through `sql.unsafe(..., params).raw`, read
   the `ResultSetHeader` through `store.mutationResult.read`, and die with
   `AuthChallengeResultUnknownError` when the result is unreadable.
-

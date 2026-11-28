@@ -327,4 +327,3 @@ For hook ordering and cron state see [plugins](../plugins/). For routes and stat
 
 - [Bun runtime](../bun/) for the native platform preset, Bun SQLite, and password hashing.
 - [Email and auth flows](../email/) for SMTP setup, verification, reset, and the email-change flow.
-

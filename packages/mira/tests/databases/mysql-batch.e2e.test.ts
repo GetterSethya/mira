@@ -505,4 +505,3 @@ defineSuite({
   fallbackUrl: "mysql://root:mira@127.0.0.1:53306/mira_test",
   prefix: "e2e_mariadb_batch_"
 })
-

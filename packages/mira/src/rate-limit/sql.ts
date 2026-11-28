@@ -308,5 +308,3 @@ export const RateLimitKeySecretLive = Layer.effect(
   RateLimitKeySecret,
   Effect.map(AppConfig, (config) => config.jwtSecret)
 )
-
-

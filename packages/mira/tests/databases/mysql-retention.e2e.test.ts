@@ -280,4 +280,3 @@ registerSuite({
   envUrl: process.env["MIRA_TEST_MARIADB_URL"],
   fallbackUrl: "mysql://root:mira@127.0.0.1:53306/mira_test"
 })
-

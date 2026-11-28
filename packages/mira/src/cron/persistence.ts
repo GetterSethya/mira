@@ -80,5 +80,3 @@ export function savePersistedCronState(
     Effect.catchCause((cause) => Effect.logWarning(`[cron] failed to persist cron_state: ${String(cause)}`))
   )
 }
-
-

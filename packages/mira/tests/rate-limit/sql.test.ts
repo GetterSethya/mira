@@ -47,6 +47,20 @@ describe("SQLite rate-limit store", () => {
     }).pipe(Effect.provide(storeLayer))
   )
 
+  it.effect("applies duplicate buckets in order and blocks a limit-1 pair", () =>
+    Effect.gen(function* () {
+      const store = yield* RateLimitStore
+      const allowed = yield* store.increment([entry("d", 2), entry("d", 2)])
+      expect(allowed).toEqual({ ok: true, counts: [1, 2] })
+
+      const blocked = yield* store.increment([entry("e", 1), entry("e", 1)])
+      expect(blocked).toEqual({ ok: false, blockedIndices: [1], counts: [0, 0] })
+
+      const after = yield* store.increment([entry("e", 1)])
+      expect(after).toEqual({ ok: true, counts: [1] })
+    }).pipe(Effect.provide(storeLayer))
+  )
+
   it.effect("does not lose concurrent increments", () =>
     Effect.gen(function* () {
       const store = yield* RateLimitStore
