@@ -46,7 +46,7 @@ const app = Mira.builder()
 app.serve()
 ```
 
-For Bun, import `BunPlatform` and `BunSqliteDatabase` from `@gettersethya/mira/bun` and pass them to the same `.platform(...)` and `.database(...)` steps. The Bun entry also exports `PostgresDatabase`, so a Bun PostgreSQL app keeps the same builder. The rest of the builder is unchanged.
+For Bun, import `BunPlatform` and `BunSqliteDatabase` from `@gettersethya/mira/bun` and pass them to the same `.platform(...)` and `.database(...)` steps. The Bun entry also exports `PostgresDatabase` and `MysqlDatabase`, so a Bun PostgreSQL or MySQL app keeps the same builder. The rest of the builder is unchanged.
 
 `serve()` accepts optional `port` and `maxPortAttempts` (default 10). On a busy port it retries upward and reports the bound port to `AppConfig`, keeping `applicationUrl` accurate.
 
@@ -63,8 +63,10 @@ Plugin `onBootstrap` hooks run during that startup, after the socket binds and b
 There is no config-file layer. `AppConfig` seeds a `_config` table on first boot and reads it on every start. Some values, such as S3 credentials, can also be supplied as Effect `Config` values.
 
 ```sql
-SELECT key, value FROM _config;
+SELECT `key`, `value` FROM `_config`;
 ```
+
+The backticks are required on MySQL and MariaDB because `key` is a reserved word.
 
 The seeded defaults are `app_name = "mira"`, `port = "8080"`, `application_url = "http://localhost:8080"`, `use_s3 = "false"`, and `log_retention_days = "30"`. Existing rows win. Seeding only fills missing keys. `jwt_secret` is 48 random bytes as hex, generated on first boot and persisted, so tokens survive restarts. It is a `Redacted<string>`.
 
@@ -186,7 +188,7 @@ PostgreSQL does not scan `pg_catalog` for untracked objects. An untracked view t
 
 ### MySQL and MariaDB
 
-`MysqlDatabase` runs MySQL 8.4 and MariaDB 11.4.6 or newer on Node and Bun through `@effect/sql-mysql2`. 8.4.13 and 11.4.13 are the validated versions and CI targets. MariaDB 11.4.6 is the floor because earlier 11.4 patches lack the `utf8mb4_0900_*` collations or alias them to a PAD-space collation.
+`MysqlDatabase` runs MySQL 8.4+ and MariaDB 11.4.6+ on Node and Bun through `@effect/sql-mysql2`. 8.4.13 and 11.4.13 are the validated versions and CI targets. MariaDB 11.4.6 is the floor because earlier 11.4 patches lack the `utf8mb4_0900_*` collations or alias them to a PAD-space collation.
 
 ```ts
 import { Redacted } from "effect"
@@ -224,9 +226,18 @@ GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, CREATE VIEW, S
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON mira_logs.* TO 'mira_app'@'%';
 ```
 
-The runtime role must keep `CREATE`/`ALTER`/`INDEX` because the internal stores re-run their guarded bootstrap on every boot. Use `mira_migrator` for `Migrator` and `mira_app` for the server when `migrateAtStartup: false`.
+The runtime role must keep `CREATE`/`ALTER`/`INDEX` because the internal stores re-run their guarded bootstrap on every boot. The default `migrateAtStartup: true` also runs collection migrations, so a single-role deployment needs the migration grants too; use `mira_migrator` for `Migrator` and `mira_app` for the server only when `migrateAtStartup: false`.
 
-The dialect does not enable `NO_BACKSLASH_ESCAPES`; user data is always bound. Do not enable that mode on an app connection. Request-path locking reads use `FOR UPDATE` inside a short transaction; the store retries once on `1205`/`1213`. The bootstrap sets a five-second metadata-lock timeout and restores the session values before the connection returns to the pool, so request connections keep the server default. Lower `innodb_lock_wait_timeout` at the server for latency-sensitive deployments.
+### Single-role deployment
+
+If one role runs both the server and `migrateAtStartup: true`, grant the union. This is the simplest deployment and the one the tests exercise:
+
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, CREATE VIEW, SHOW VIEW
+  ON mira.* TO 'mira'@'%';
+```
+
+The dialect does not enable `NO_BACKSLASH_ESCAPES`; user data is always bound. Do not enable that mode on an app connection. Request-path locking reads use `FOR UPDATE` inside a short transaction; the store retries once on `1205`/`1213`. The bootstrap sets a five-second lock-wait timeout (`innodb_lock_wait_timeout` and `lock_wait_timeout`) for its own connection and restores both session values before the connection returns to the pool, logging a warning if a restore statement fails, so request connections keep the server default. Lower `innodb_lock_wait_timeout` at the server for latency-sensitive deployments.
 
 ## Email transport
 

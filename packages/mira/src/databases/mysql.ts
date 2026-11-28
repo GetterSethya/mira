@@ -5,6 +5,7 @@ import { SqlClient } from "effect/sql"
 import type { DatabaseServices, MiraDatabase } from "@/app/types.js"
 import { Dialect } from "@/dialect/dialect.js"
 import { mysqlDialect } from "@/dialect/dialect-mysql.js"
+import { mysqlTextCollation } from "@/dialect/dialect-mysql-text.js"
 
 /** An invalid MySQL preset configuration. */
 export class MysqlConfigError extends Error {
@@ -165,7 +166,7 @@ export const MysqlDatabase = (config: MysqlDatabaseConfig): MiraDatabase => {
         }>`
           SELECT VERSION() AS version, DATABASE() AS db,
             (SELECT COUNT(*) FROM information_schema.collations
-             WHERE collation_name = 'utf8mb4_0900_bin') AS collation_present
+             WHERE collation_name = ${mysqlTextCollation}) AS collation_present
         `
         const version = rows[0]?.version ?? ""
         const support = checkMysqlVersion(version)

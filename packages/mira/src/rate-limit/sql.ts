@@ -93,9 +93,11 @@ export const SqlRateLimitStoreLive = Layer.effect(
         const buckets = entries.map((entry) => entry.bucket)
         const sorted = entries
           .map((entry, index) => ({ entry, index }))
-          .sort((left, right) =>
-            left.entry.bucket.localeCompare(right.entry.bucket) || left.index - right.index
-          )
+          .sort((left, right) => {
+            if (left.entry.bucket < right.entry.bucket) return -1
+            if (left.entry.bucket > right.entry.bucket) return 1
+            return left.index - right.index
+          })
 
         if (store.mutationResult._tag === "returning") {
           const rows = yield* sql<{ bucket: string; used: number }>`
@@ -183,10 +185,11 @@ export const SqlRateLimitStoreLive = Layer.effect(
               SELECT bucket, used FROM ${sql("_rate_limits")}
               WHERE bucket IN ${sql.in(buckets)}
             `
-            const initialUsed = new Map(
+            const reported = new Map(
               existing.map((row) => [row.bucket, Number(row.used)])
             )
-            const usedByBucket = new Map(initialUsed)
+            const usedByBucket = new Map(reported)
+            const seen = new Set<string>()
             const updated = new Map<number, number>()
             const blockedIndices: Array<number> = []
 
@@ -201,12 +204,19 @@ export const SqlRateLimitStoreLive = Layer.effect(
                 const lockedRow = locked[0]
                 if (lockedRow === undefined) {
                   current = undefined
-                  initialUsed.delete(entry.bucket)
                 } else {
                   current = Number(lockedRow.used)
                   usedByBucket.set(entry.bucket, current)
-                  initialUsed.set(entry.bucket, current)
                 }
+              }
+
+              // Report the pre-batch value once per bucket, from the first
+              // locked read, so duplicate buckets cannot overwrite it with the
+              // post-increment count.
+              if (!seen.has(entry.bucket)) {
+                seen.add(entry.bucket)
+                if (current === undefined) reported.delete(entry.bucket)
+                else reported.set(entry.bucket, current)
               }
 
               const used = current ?? 0
@@ -239,7 +249,7 @@ export const SqlRateLimitStoreLive = Layer.effect(
                     ok: false,
                     blockedIndices: blockedIndices.sort((left, right) => left - right),
                     counts: entries.map(
-                      (entry) => initialUsed.get(entry.bucket) ?? 0
+                      (entry) => reported.get(entry.bucket) ?? 0
                     )
                   }
                 })

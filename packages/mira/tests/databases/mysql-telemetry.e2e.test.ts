@@ -216,7 +216,7 @@ for (const engine of engines) {
                 }
               ])
               const deleted = yield* store.deleteOlderThan(recent)
-              expect(deleted.logs).toBeGreaterThanOrEqual(1)
+              expect(deleted.logs).toBe(1)
 
               const afterDelete = yield* read.listLogs({
                 limit: 100,
@@ -235,16 +235,17 @@ for (const engine of engines) {
                 traceId: null
               })
               expect(firstPage.items).toHaveLength(1)
-              if (firstPage.nextCursor !== null) {
-                const secondPage = yield* read.listLogs({
-                  limit: 1,
-                  after: firstPage.nextCursor,
-                  filter: null,
-                  traceId: null
-                })
-                expect(secondPage.items).toHaveLength(1)
-                expect(secondPage.items[0]?.id).not.toBe(firstPage.items[0]?.id)
+              if (firstPage.nextCursor === null) {
+                return yield* Effect.die("expected a telemetry next cursor")
               }
+              const secondPage = yield* read.listLogs({
+                limit: 1,
+                after: firstPage.nextCursor,
+                filter: null,
+                traceId: null
+              })
+              expect(secondPage.items).toHaveLength(1)
+              expect(secondPage.items[0]?.id).not.toBe(firstPage.items[0]?.id)
             }).pipe(Effect.provide(appInstance.buildServiceLayer()))
           })
         ),

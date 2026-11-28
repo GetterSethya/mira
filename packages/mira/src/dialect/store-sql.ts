@@ -32,7 +32,12 @@ export const withStoreBootstrap = <E, R>(
           (statement) =>
             sql.unsafe(statement).pipe(
               Effect.asVoid,
-              Effect.catch(() => Effect.void)
+              Effect.catch((error) =>
+                Effect.logWarning("store.bootstrap_restore_failed", {
+                  statement,
+                  error: String(error)
+                })
+              )
             ),
           { discard: true }
         )

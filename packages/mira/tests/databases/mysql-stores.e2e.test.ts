@@ -1,6 +1,6 @@
 import { MysqlClient } from "@effect/sql-mysql2"
 import { describe, it } from "@effect/vitest"
-import { Effect, Exit, Layer, Redacted, Result, Schedule } from "effect"
+import { Effect, Layer, Predicate, Redacted, Result, Schedule } from "effect"
 import { SqlClient } from "effect/sql"
 import mysql from "mysql2/promise"
 import type { RowDataPacket } from "mysql2/promise"
@@ -215,6 +215,20 @@ for (const engine of engines) {
             ])
             expect(duplicateBuckets).toEqual({ ok: true, counts: [1, 2] })
 
+            const blockedDuplicate = yield* limits.increment([
+              { bucket: "e2e-dup-blocked", limit: 1, cost: 1, expiresAt: now + 60_000 },
+              { bucket: "e2e-dup-blocked", limit: 1, cost: 1, expiresAt: now + 60_000 }
+            ])
+            expect(blockedDuplicate).toEqual({
+              ok: false,
+              blockedIndices: [1],
+              counts: [0, 0]
+            })
+            const afterBlockedDuplicate = yield* limits.increment([
+              { bucket: "e2e-dup-blocked", limit: 1, cost: 1, expiresAt: now + 60_000 }
+            ])
+            expect(afterBlockedDuplicate).toEqual({ ok: true, counts: [1] })
+
             const expired = now - 10 * 60_000
             yield* limits.increment([
               { bucket: "e2e-prune", limit: 1, cost: 1, expiresAt: expired }
@@ -234,6 +248,12 @@ for (const engine of engines) {
               { concurrency: "unbounded" }
             )
             expect(concurrent.filter((result) => result.ok)).toHaveLength(1)
+            const raceLoser = concurrent.find((result) => !result.ok)
+            expect(raceLoser).toEqual({
+              ok: false,
+              blockedIndices: [0],
+              counts: [1]
+            })
 
             const raceChallenge = {
               id: "e2e-challenge-race",
@@ -259,6 +279,15 @@ for (const engine of engines) {
             expect(raceResults.filter((result) => result === null)).toHaveLength(1)
             const raceWinner = raceResults.find((result) => result !== null)
             expect(raceWinner).toEqual({ attempts: 2, consumed: true })
+            const raceRow = yield* sql<{
+              attempts: number
+              consumed_at: number | string | null
+            }>`
+              SELECT attempts, consumed_at FROM ${sql("_auth_challenges")}
+              WHERE id = 'e2e-challenge-race'
+            `
+            expect(Number(raceRow[0]?.attempts)).toBe(2)
+            expect(raceRow[0]?.consumed_at).not.toBeNull()
 
             const supersedeTarget = {
               id: "e2e-challenge-supersede",
@@ -509,21 +538,33 @@ for (const engine of engines) {
               )
 
               const challengeStarted = Date.now()
-              const challengeExit = yield* Effect.exit(
+              const challengeAttempt = yield* Effect.result(
                 challenges.attemptAndConsume("e2e-challenge-held", 2, now + 1)
               )
               const challengeElapsed = Date.now() - challengeStarted
-              expect(Exit.isFailure(challengeExit)).toBe(true)
+              expect(Result.isFailure(challengeAttempt)).toBe(true)
+              if (Result.isFailure(challengeAttempt)) {
+                expect(Predicate.isTagged(challengeAttempt.failure, "SqlError")).toBe(
+                  true
+                )
+              }
+              expect(challengeElapsed).toBeGreaterThanOrEqual(1_500)
               expect(challengeElapsed).toBeLessThan(15_000)
 
               const limitStarted = Date.now()
-              const limitExit = yield* Effect.exit(
+              const limitAttempt = yield* Effect.result(
                 limits.increment([
                   { bucket: "e2e-held", limit: 10, cost: 1, expiresAt: now + 60_000 }
                 ])
               )
               const limitElapsed = Date.now() - limitStarted
-              expect(Exit.isFailure(limitExit)).toBe(true)
+              expect(Result.isFailure(limitAttempt)).toBe(true)
+              if (Result.isFailure(limitAttempt)) {
+                expect(
+                  Predicate.isTagged(limitAttempt.failure, "RateLimitStoreError")
+                ).toBe(true)
+              }
+              expect(limitElapsed).toBeGreaterThanOrEqual(1_500)
               expect(limitElapsed).toBeLessThan(15_000)
 
               yield* Effect.promise(() => holder.rollback())

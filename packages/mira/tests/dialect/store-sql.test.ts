@@ -185,6 +185,34 @@ describe("ensureStoreIndex and ensureStoreColumn", () => {
         "ALTER TABLE _column_probe ADD COLUMN extra TEXT"
       )
       expect(again).toBe(false)
+
+      const lenient: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
+        isIgnorableBootstrapError: () => true
+      }
+      const raced = yield* ensureStoreColumn(
+        sql,
+        lenient,
+        "_column_probe",
+        "raced",
+        "ALTER TABLE _column_probe ADD COLUMN"
+      )
+      expect(raced).toBe(true)
+
+      const strict: StoreSqlCapabilities = {
+        ...sqliteDialect.store,
+        isIgnorableBootstrapError: () => false
+      }
+      const denied = yield* Effect.exit(
+        ensureStoreColumn(
+          sql,
+          strict,
+          "_column_probe",
+          "denied",
+          "ALTER TABLE _column_probe ADD COLUMN"
+        )
+      )
+      expect(Exit.isFailure(denied)).toBe(true)
     }).pipe(Effect.provide(sqliteLayer))
   )
 })

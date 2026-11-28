@@ -169,7 +169,12 @@ jobs:
         run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql-migrator.e2e.test.ts tests/databases/mysql-batch.e2e.test.ts --no-file-parallelism
 
       - name: Run database-isolated MySQL/MariaDB e2e
-        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql.e2e.test.ts tests/databases/mysql-stores.e2e.test.ts tests/databases/mysql-telemetry.e2e.test.ts tests/databases/mysql-retention.e2e.test.ts
+        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql.e2e.test.ts tests/databases/mysql-telemetry.e2e.test.ts tests/databases/mysql-retention.e2e.test.ts
+
+      # The stores suite temporarily sets a server-global lock timeout to prove
+      # the held-lock retry path, so it runs alone in its own step.
+      - name: Run MySQL/MariaDB store e2e (global lock-timeout probe)
+        run: pnpm --filter @gettersethya/mira exec vitest run tests/databases/mysql-stores.e2e.test.ts --no-file-parallelism
 
       - name: Bun MySQL smoke
         run: bun run packages/mira/tests/databases/mysql-bun.e2e.ts
