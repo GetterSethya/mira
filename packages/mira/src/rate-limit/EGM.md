@@ -75,5 +75,6 @@ any future Redis/Postgres implementation. Email, HTTP, and auth code depend on
 
 - `_rate_limits.bucket` uses `bucketColumnType`: `VARCHAR(512)` with `utf8mb4_0900_bin` on MySQL, `TEXT` elsewhere. The store rejects a bucket over `bucketMaxLength` code points; MySQL enforces 512, SQLite and PostgreSQL impose no new cap.
 - `prune` uses one derived-table statement on every dialect because MySQL rejects `LIMIT` directly inside an `IN` subquery.
-- SQLite/PostgreSQL keep the guarded `ON CONFLICT ... WHERE ... RETURNING` path. MySQL uses one transaction with `SELECT ... FOR UPDATE NOWAIT`, an explicit guard, and a write per bucket. A blocked bucket fails the transaction so every earlier write rolls back; the blocked counts are the locked pre-batch values.
+- SQLite/PostgreSQL keep the guarded `ON CONFLICT ... WHERE ... RETURNING` path. MySQL uses one transaction with `SELECT ... FOR UPDATE`, an explicit guard, and a write per bucket. A blocked bucket fails the transaction so every earlier write rolls back; the blocked counts are the locked pre-batch values.
 - Duplicate buckets share the in-memory map. A duplicate-key error from a concurrent insert restarts the transaction once; one retry follows the first lock failure.
+

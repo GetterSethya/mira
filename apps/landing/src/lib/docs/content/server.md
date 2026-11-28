@@ -210,6 +210,22 @@ Migrations use the statement model from `#68` because MySQL commits DDL implicit
 
 `migrateAtStartup: false` skips collection migrations only. The internal config, token, rate-limit, auth-challenge, and cron stores still run idempotent DDL at boot, so the runtime role needs `CREATE`, `ALTER`, and `INDEX` on the app database. The bootstrap sets a five-second metadata-lock timeout on its connection.
 
+The runtime and migration roles have different grants. A minimal deployment separates them:
+
+```sql
+-- Runtime role: app DML plus the idempotent internal-store bootstrap DDL.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON mira.* TO 'mira_app'@'%';
+
+-- Migration role: everything above plus destructive and view DDL.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, CREATE VIEW, SHOW VIEW
+  ON mira.* TO 'mira_migrator'@'%';
+
+-- Dedicated telemetry database, if used.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON mira_logs.* TO 'mira_app'@'%';
+```
+
+The runtime role must keep `CREATE`/`ALTER`/`INDEX` because the internal stores re-run their guarded bootstrap on every boot. Use `mira_migrator` for `Migrator` and `mira_app` for the server when `migrateAtStartup: false`.
+
 The dialect does not enable `NO_BACKSLASH_ESCAPES`; user data is always bound. Do not enable that mode on an app connection. Request-path locking reads use `FOR UPDATE` inside a short transaction; the store retries once on `1205`/`1213`. The bootstrap sets a five-second metadata-lock timeout and restores the session values before the connection returns to the pool, so request connections keep the server default. Lower `innodb_lock_wait_timeout` at the server for latency-sensitive deployments.
 
 ## Email transport
@@ -218,7 +234,7 @@ The dialect does not enable `NO_BACKSLASH_ESCAPES`; user data is always bound. D
 
 ## Rate limits
 
-Rate limits use a `RateLimitStore` service. The app's default store is the SQL-backed store (`_rate_limits`). It runs on SQLite, libSQL, PostgreSQL, MySQL, and MariaDB. PostgreSQL uses a conditional upsert with `RETURNING`; MySQL and MariaDB use a locked transaction with `FOR UPDATE NOWAIT`, an explicit guard, and all-or-nothing rollback. Tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQL store is single-node on SQLite and libSQL; row-locked on PostgreSQL, MySQL, and MariaDB. A multi-instance deployment needs a shared database or a shared store. Request policies fail open on store errors. Send policies fail closed with `503 rate_limit_unavailable`. Buckets longer than 512 code points are rejected on MySQL and MariaDB; SQLite and PostgreSQL impose no new cap.
+Rate limits use a `RateLimitStore` service. The app's default store is the SQL-backed store (`_rate_limits`). It runs on SQLite, libSQL, PostgreSQL, MySQL, and MariaDB. PostgreSQL uses a conditional upsert with `RETURNING`; MySQL and MariaDB use a locked transaction with `FOR UPDATE`, an explicit guard, and all-or-nothing rollback. Tests use an explicit in-memory store. To use another backend, pass `.rateLimits({ store: MyStoreLayer, emailPolicies: {...} })`. The custom store layer must be self-contained. The SQL store is single-node on SQLite and libSQL; row-locked on PostgreSQL, MySQL, and MariaDB. A multi-instance deployment needs a shared database or a shared store. Request policies fail open on store errors. Send policies fail closed with `503 rate_limit_unavailable`. Buckets longer than 512 code points are rejected on MySQL and MariaDB; SQLite and PostgreSQL impose no new cap.
 
 ## Migrations at boot
 
@@ -239,7 +255,7 @@ A `dropColumn` plan with tracked views drops the views that depend on the change
 
 PostgreSQL changes types with `ALTER COLUMN TYPE ... USING` and recreates tracked views around a destructive table change. It does not scan `pg_catalog`, so an untracked dependent view that reads a dropped column fails at the statement and the transaction rolls back. The same is true for a desired view whose name already exists outside Mira: `CREATE VIEW` fails instead of silently skipping the desired query.
 
-Migrations run through `sql.withTransaction`, so the plan statements, validation probes, the `_migrations` row, and the `_collections` upserts commit or roll back together. `plan` and `status` still bootstrap the system tables and therefore need write permission on first use. The abstract step order is global: drop views, drop indexes, table changes, create indexes, create views. Synthesized view drops and creates follow the plan's dependency order, and synthesized validations run after the DDL.
+On SQLite, libSQL, and PostgreSQL, migrations run through `sql.withTransaction`, so the plan statements, validation probes, the `_migrations` row, and the `_collections` upserts commit or roll back together. MySQL and MariaDB use the statement model instead: DDL commits implicitly, the catalog is verified before metadata is written, and a failed plan can leave partial DDL for the next boot to resume. `plan` and `status` still bootstrap the system tables on transaction-model dialects and therefore need write permission on first use; the MySQL statement model checks `information_schema` instead. The abstract step order is global: drop views, drop indexes, table changes, create indexes, create views. Synthesized view drops and creates follow the plan's dependency order, and synthesized validations run after the DDL.
 
 On PostgreSQL, `migrate` takes a transaction-scoped advisory lock, so concurrent replicas serialize instead of racing `CREATE TABLE`. `plan` and `status` take a non-blocking preview lock and fail with `MigrationBusyError` rather than waiting behind a migration. On SQLite and libSQL the write transaction serializes its own DDL; for a remote deployment, run migrations on one instance or as a deploy step.
 
@@ -300,3 +316,4 @@ For hook ordering and cron state see [plugins](../plugins/). For routes and stat
 
 - [Bun runtime](../bun/) for the native platform preset, Bun SQLite, and password hashing.
 - [Email and auth flows](../email/) for SMTP setup, verification, reset, and the email-change flow.
+

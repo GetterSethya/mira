@@ -38,10 +38,11 @@ there is no dual truth. The exact DDL was proved on MySQL 8.4.13 and MariaDB
 - `attemptAndConsume` keeps the single `UPDATE ... RETURNING attempts` on
   SQLite/PostgreSQL.
 - MySQL runs one transaction: `SELECT attempts, consumed_at, expires_at ...
-  FOR UPDATE NOWAIT`, computes the next count, updates, and returns it. It
+  FOR UPDATE`, computes the next count, updates, and returns it. It
   retries once on `store.isRetryable`; a second failure propagates as a SQL
   error.
 - `consumeById` and `consumeToken` keep `RETURNING` on SQLite/PostgreSQL. On
   MySQL they run one bound UPDATE through `sql.unsafe(..., params).raw`, read
   the `ResultSetHeader` through `store.mutationResult.read`, and die with
   `AuthChallengeResultUnknownError` when the result is unreadable.
+

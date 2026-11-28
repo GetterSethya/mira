@@ -150,20 +150,27 @@ export const MysqlDatabase = (config: MysqlDatabaseConfig): MiraDatabase => {
         `
         const version = rows[0]?.version ?? ""
         const parsed = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
-        if (parsed !== null) {
-          const major = Number(parsed[1])
-          const minor = Number(parsed[2])
-          const patch = Number(parsed[3])
-          const supported =
-            (major === 8 && minor >= 4) ||
-            (major === 11 && (minor > 4 || (minor === 4 && patch >= 6)))
-          if (!supported) {
-            return yield* Effect.die(
-              new MysqlConfigError(
-                `unsupported MySQL/MariaDB version ${version}; use MySQL 8.4+ or MariaDB 11.4.6+`
-              )
+        if (parsed === null) {
+          return yield* Effect.die(
+            new MysqlConfigError(
+              `could not parse the MySQL/MariaDB version from "${version}"`
             )
-          }
+          )
+        }
+        const major = Number(parsed[1])
+        const minor = Number(parsed[2])
+        const patch = Number(parsed[3])
+        const isMariaDb = version.toLowerCase().includes("mariadb")
+        const supported = isMariaDb
+          ? major > 11 ||
+            (major === 11 && (minor > 4 || (minor === 4 && patch >= 6)))
+          : major > 8 || (major === 8 && minor >= 4)
+        if (!supported) {
+          return yield* Effect.die(
+            new MysqlConfigError(
+              `unsupported MySQL/MariaDB version ${version}; use MySQL 8.4+ or MariaDB 11.4.6+`
+            )
+          )
         }
         if (Number(rows[0]?.collation_present) === 0) {
           return yield* Effect.die(
